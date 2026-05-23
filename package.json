@@ -1,7 +1,7 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "landing-page-ru",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -59,7 +59,9 @@
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.3",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "framer-motion": "^11.0.0",
+    "gsap": "^3.12.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
@@ -79,10 +81,7 @@
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.44.1",
-    "vite": "npm:rolldown-vite@7.1.13",
+    "vite": "^5.4.0",
     "pp-tagger": "^1.0.1"
-  },
-  "overrides": {
-    "vite": "npm:rolldown-vite@7.1.13"
   }
 }
