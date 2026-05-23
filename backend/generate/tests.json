@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Generate without auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"task_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

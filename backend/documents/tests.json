@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Upload requires auth",
+      "method": "POST",
+      "path": "/upload",
+      "body": {"project_id": 1, "filename": "test.pdf", "file_data": "", "file_type": "pdf"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

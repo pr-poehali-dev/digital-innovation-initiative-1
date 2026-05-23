@@ -1,0 +1,230 @@
+"""
+Управление заданиями ИИ: создание, список, детали, назначение ролей документам.
+"""
+import json
+import os
+import psycopg2
+
+
+def get_db():
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    conn.autocommit = False
+    return conn
+
+
+def get_schema():
+    return os.environ.get("MAIN_DB_SCHEMA", "public")
+
+
+def cors_headers():
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+    }
+
+
+def json_response(data, status=200):
+    return {
+        "statusCode": status,
+        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "body": json.dumps(data, ensure_ascii=False, default=str),
+    }
+
+
+def get_current_user(conn, session_id):
+    if not session_id:
+        return None
+    schema = get_schema()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT u.id, u.email, u.name FROM {schema}.sessions s JOIN {schema}.users u ON u.id = s.user_id WHERE s.id = %s AND s.expires_at > NOW()",
+        (session_id,),
+    )
+    row = cur.fetchone()
+    if row:
+        return {"id": row[0], "email": row[1], "name": row[2]}
+    return None
+
+
+def log_activity(cur, schema, project_id, user_id, action, entity_type=None, entity_id=None, details=None):
+    cur.execute(
+        f"INSERT INTO {schema}.activity_log (project_id, user_id, action, entity_type, entity_id, details) VALUES (%s, %s, %s, %s, %s, %s)",
+        (project_id, user_id, action, entity_type, entity_id, details),
+    )
+
+
+def handler(event: dict, context) -> dict:
+    if event.get("httpMethod") == "OPTIONS":
+        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+
+    method = event.get("httpMethod", "GET")
+    path = event.get("path", "/")
+    body = {}
+    if event.get("body"):
+        try:
+            body = json.loads(event["body"])
+        except Exception:
+            pass
+
+    session_id = event.get("headers", {}).get("X-Session-Id", "")
+    conn = get_db()
+    schema = get_schema()
+    path_parts = path.strip("/").split("/")
+
+    try:
+        user = get_current_user(conn, session_id)
+        if not user:
+            return json_response({"error": "Не авторизован"}, 401)
+
+        cur = conn.cursor()
+
+        # GET /project/{project_id} — задания проекта
+        if method == "GET" and "project" in path_parts:
+            idx = path_parts.index("project")
+            project_id = int(path_parts[idx + 1])
+
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+
+            cur.execute(
+                f"""SELECT t.id, t.title, t.task_type, t.topic, t.status, t.created_at, u.name,
+                    (SELECT COUNT(*) FROM {schema}.generation_runs WHERE task_id = t.id) as versions
+                    FROM {schema}.tasks t JOIN {schema}.users u ON u.id = t.created_by
+                    WHERE t.project_id = %s ORDER BY t.created_at DESC""",
+                (project_id,),
+            )
+            tasks = [
+                {
+                    "id": r[0], "title": r[1], "task_type": r[2], "topic": r[3],
+                    "status": r[4], "created_at": str(r[5]), "created_by": r[6], "versions": r[7],
+                }
+                for r in cur.fetchall()
+            ]
+            return json_response({"tasks": tasks})
+
+        # POST / — создать задание
+        if method == "POST" and (path == "/" or path_parts[-1] == "tasks" or path_parts == [""]):
+            project_id = body.get("project_id")
+            title = body.get("title", "").strip()
+            task_type = body.get("task_type", "")
+            topic = body.get("topic", "")
+
+            if not project_id or not title or not task_type:
+                return json_response({"error": "Обязательные поля: project_id, title, task_type"}, 400)
+
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+
+            cur.execute(
+                f"""INSERT INTO {schema}.tasks
+                    (project_id, created_by, title, task_type, topic, goal, audience, language, style, requested_slide_count, additional_instructions)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (
+                    project_id, user["id"], title, task_type, topic,
+                    body.get("goal"), body.get("audience"),
+                    body.get("language", "ru"), body.get("style"),
+                    body.get("requested_slide_count"), body.get("additional_instructions"),
+                ),
+            )
+            task_id = cur.fetchone()[0]
+
+            # Привязать документы с ролями
+            doc_roles = body.get("document_roles", [])
+            for dr in doc_roles:
+                cur.execute(
+                    f"INSERT INTO {schema}.task_documents (task_id, document_id, role) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                    (task_id, dr["document_id"], dr["role"]),
+                )
+
+            log_activity(cur, schema, project_id, user["id"], "created_task", "task", task_id, title)
+            conn.commit()
+            return json_response({"id": task_id, "title": title, "task_type": task_type})
+
+        # GET /{id} — детали задания
+        if method == "GET" and len(path_parts) >= 1 and path_parts[-1].isdigit():
+            task_id = int(path_parts[-1])
+            cur.execute(
+                f"""SELECT t.id, t.project_id, t.title, t.task_type, t.topic, t.goal, t.audience,
+                    t.language, t.style, t.requested_slide_count, t.additional_instructions,
+                    t.status, t.created_at, u.name
+                    FROM {schema}.tasks t JOIN {schema}.users u ON u.id = t.created_by
+                    WHERE t.id = %s""",
+                (task_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Задание не найдено"}, 404)
+
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (row[1], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+
+            # Документы задания
+            cur.execute(
+                f"""SELECT td.document_id, td.role, d.original_name, d.file_type
+                    FROM {schema}.task_documents td JOIN {schema}.documents d ON d.id = td.document_id
+                    WHERE td.task_id = %s""",
+                (task_id,),
+            )
+            docs = [{"id": r[0], "role": r[1], "name": r[2], "file_type": r[3]} for r in cur.fetchall()]
+
+            # Версии генерации
+            cur.execute(
+                f"""SELECT id, version_number, output_summary, status, created_at
+                    FROM {schema}.generation_runs WHERE task_id = %s ORDER BY version_number DESC""",
+                (task_id,),
+            )
+            runs = [{"id": r[0], "version": r[1], "summary": r[2], "status": r[3], "created_at": str(r[4])} for r in cur.fetchall()]
+
+            return json_response({
+                "id": row[0], "project_id": row[1], "title": row[2],
+                "task_type": row[3], "topic": row[4], "goal": row[5],
+                "audience": row[6], "language": row[7], "style": row[8],
+                "requested_slide_count": row[9], "additional_instructions": row[10],
+                "status": row[11], "created_at": str(row[12]), "created_by": row[13],
+                "documents": docs, "runs": runs,
+            })
+
+        # PUT /{id}/documents — обновить роли документов
+        if method == "PUT" and "documents" in path_parts:
+            task_id = int(path_parts[-2])
+            doc_roles = body.get("document_roles", [])
+
+            cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
+            task_row = cur.fetchone()
+            if not task_row:
+                return json_response({"error": "Задание не найдено"}, 404)
+
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (task_row[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+
+            for dr in doc_roles:
+                cur.execute(
+                    f"""INSERT INTO {schema}.task_documents (task_id, document_id, role)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (task_id, document_id) DO UPDATE SET role = EXCLUDED.role""",
+                    (task_id, dr["document_id"], dr["role"]),
+                )
+            conn.commit()
+            return json_response({"ok": True})
+
+        return json_response({"error": "Not found"}, 404)
+
+    finally:
+        conn.close()

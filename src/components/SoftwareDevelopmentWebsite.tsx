@@ -5,6 +5,7 @@ import { ArrowRight, ChevronRight, Menu, X, Brain, Zap, FileText, Sparkles, Uplo
 import { motion, type Variants } from "framer-motion"
 import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
+import { Link } from "react-router-dom"
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
@@ -201,19 +202,23 @@ const HeroHeader = () => {
                 </ul>
               </div>
               <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
-                <Button variant="outline" size="sm" className={cn(isScrolled && "lg:hidden")}>
-                  <span>Войти</span>
-                </Button>
-                <Button
-                  size="sm"
-                  className={cn(
-                    isScrolled
-                      ? "lg:inline-flex bg-orange-500 hover:bg-orange-600"
-                      : "hidden bg-orange-500 hover:bg-orange-600",
-                  )}
-                >
-                  <span>Начать</span>
-                </Button>
+                <Link to="/login">
+                  <Button variant="outline" size="sm" className={cn(isScrolled && "lg:hidden")}>
+                    <span>Войти</span>
+                  </Button>
+                </Link>
+                <Link to="/cabinet">
+                  <Button
+                    size="sm"
+                    className={cn(
+                      isScrolled
+                        ? "lg:inline-flex bg-orange-500 hover:bg-orange-600"
+                        : "hidden bg-orange-500 hover:bg-orange-600",
+                    )}
+                  >
+                    <span>Открыть кабинет</span>
+                  </Button>
+                </Link>
               </div>
             </div>
           </div>
@@ -343,14 +348,18 @@ export default function SoftwareDevelopmentWebsite() {
                   className="mt-12 flex flex-col items-center justify-center gap-2 md:flex-row"
                 >
                   <div key={1} className="bg-orange-500/10 rounded-[14px] border border-orange-200 p-0.5">
-                    <Button size="lg" className="rounded-xl px-5 text-base bg-orange-500 hover:bg-orange-600">
-                      <Upload className="mr-2 h-4 w-4" />
-                      <span className="text-nowrap">Попробовать бесплатно</span>
-                    </Button>
+                    <Link to="/cabinet">
+                      <Button size="lg" className="rounded-xl px-5 text-base bg-orange-500 hover:bg-orange-600">
+                        <Upload className="mr-2 h-4 w-4" />
+                        <span className="text-nowrap">Открыть кабинет</span>
+                      </Button>
+                    </Link>
                   </div>
-                  <Button key={2} size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-orange-500">
-                    <span className="text-nowrap">Посмотреть демо</span>
-                  </Button>
+                  <Link to="/login" key={2}>
+                    <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-orange-500">
+                      <span className="text-nowrap">Войти</span>
+                    </Button>
+                  </Link>
                 </AnimatedGroup>
               </div>
             </div>
