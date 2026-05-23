@@ -48,31 +48,51 @@ def get_current_user(conn, session_id):
     return None
 
 
-def call_openai(messages: list, model="gpt-4o") -> str:
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    if not api_key:
-        return "[AI недоступен: не задан OPENAI_API_KEY. Добавьте ключ в настройках проекта.]"
+def call_yandex_gpt(messages: list) -> str:
+    api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
+    folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
+    if not api_key or not folder_id:
+        return "[AI недоступен: добавьте YANDEX_GPT_API_KEY и YANDEX_FOLDER_ID в настройках проекта.]"
 
     import urllib.request
+
+    # Конвертируем формат сообщений в YandexGPT
+    yandex_messages = []
+    for m in messages:
+        role = m["role"]
+        if role == "system":
+            role = "system"
+        elif role == "assistant":
+            role = "assistant"
+        else:
+            role = "user"
+        yandex_messages.append({"role": role, "text": m["content"]})
+
     payload = json.dumps({
-        "model": model,
-        "messages": messages,
-        "max_tokens": 4000,
-        "temperature": 0.7,
+        "modelUri": f"gpt://{folder_id}/yandexgpt/latest",
+        "completionOptions": {
+            "stream": False,
+            "temperature": 0.7,
+            "maxTokens": 8000,
+        },
+        "messages": yandex_messages,
     }).encode()
 
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
         data=payload,
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Api-Key {api_key}",
             "Content-Type": "application/json",
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
-            return result["choices"][0]["message"]["content"]
+            return result["result"]["alternatives"][0]["message"]["text"]
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        return f"[Ошибка YandexGPT {e.code}: {body[:300]}]"
     except Exception as e:
         return f"[Ошибка AI: {e}]"
 
@@ -275,7 +295,7 @@ def handler(event: dict, context) -> dict:
             conn.commit()
 
             # Вызов AI
-            ai_result = call_openai(messages)
+            ai_result = call_yandex_gpt(messages)
 
             # Сохранить результат
             result_json = json.dumps({"content": ai_result, "version": version_number}, ensure_ascii=False)
