@@ -157,29 +157,40 @@ export default function ProjectPage() {
     setMenuDocId(null);
     try {
       const d = await documentsApi.getUrl(docId);
-      // Декодируем base64 → blob → object URL (защищённое скачивание через бэкенд)
+      // Декодируем base64 → blob (защищённое скачивание через бэкенд)
       const byteChars = atob(d.file_data);
       const byteArr = new Uint8Array(byteChars.length);
       for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
       const blob = new Blob([byteArr], { type: d.mime || "application/octet-stream" });
       const blobUrl = URL.createObjectURL(blob);
 
-      // PDF/картинки — открываем в новой вкладке. Office (docx/pptx) — скачиваем.
-      const inlineTypes = ["pdf", "jpg", "jpeg", "png", "webp"];
       const ft = (d.file_type || "").toLowerCase();
-      if (inlineTypes.includes(ft)) {
+      const inlineTypes = ["pdf", "jpg", "jpeg", "png", "webp"];
+      const ua = navigator.userAgent;
+      const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as unknown as { MSStream?: unknown }).MSStream;
+      const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+
+      // iOS Safari блокирует window.open(blob:) — на iOS всегда скачиваем
+      // На десктопе и Android — открываем PDF/картинки во вкладке
+      if (inlineTypes.includes(ft) && !isIOS && !isSafari) {
         const w = window.open(blobUrl, "_blank");
         if (!w) {
+          // Попап заблокирован — fallback в скачивание
           const a = document.createElement("a");
           a.href = blobUrl;
           a.download = d.filename;
+          document.body.appendChild(a);
           a.click();
+          document.body.removeChild(a);
         }
       } else {
+        // Скачиваем как файл (iOS/Safari/Office)
         const a = document.createElement("a");
         a.href = blobUrl;
         a.download = d.filename;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
       }
       setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (err: unknown) {
