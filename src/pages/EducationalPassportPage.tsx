@@ -121,12 +121,16 @@ export default function EducationalPassportPage() {
       // Если приложен файл — заливаем + автозапуск AI
       if (createPendingFile) {
         const b64 = await fileToBase64(createPendingFile);
-        await educationApi.uploadFile(
+        const uploadResult = await educationApi.uploadFile(
           newItem.id,
           createPendingFile.name,
           createPendingFile.type || "application/octet-stream",
           b64,
         );
+        // Если бэкенд вернул warning о парсинге — покажем пользователю
+        if (uploadResult.warning) {
+          alert("⚠️ " + uploadResult.warning);
+        }
       }
 
       resetCreate();
@@ -474,10 +478,13 @@ function CreateModal(props: {
           {/* Файл (опционально, запустит AI-анализ) */}
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-3">
             <p className="text-xs font-semibold text-slate-700 mb-2">📎 Прикрепить файл (опционально)</p>
-            <p className="text-xs text-slate-500 mb-2">PDF, DOCX, PPTX, TXT — AI попробует автоматически извлечь метаданные</p>
+            <p className="text-xs text-slate-500 mb-2">
+              PDF, DOCX, PPTX, TXT — извлечение текста.<br />
+              JPG, PNG — для сканов дипломов (OCR через Yandex Vision)
+            </p>
             <input
               type="file"
-              accept=".pdf,.docx,.pptx,.txt"
+              accept=".pdf,.docx,.pptx,.txt,.jpg,.jpeg,.png,.webp"
               onChange={(e) => props.setCreatePendingFile(e.target.files?.[0] || null)}
               className="text-xs"
             />
@@ -601,6 +608,18 @@ function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string,
               </p>
             )}
           </div>
+
+          {/* Debug — сырой ответ AI (для приёмки и отладки) */}
+          {props.item.extracted_data && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-slate-500 hover:text-slate-700 select-none">
+                🔍 Показать сырой JSON от AI (для отладки)
+              </summary>
+              <pre className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded text-[10px] overflow-x-auto">
+{JSON.stringify(props.item.extracted_data, null, 2)}
+              </pre>
+            </details>
+          )}
         </div>
 
         <div className="flex gap-2 pt-5">

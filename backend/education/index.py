@@ -183,9 +183,51 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
             return "\n".join(parts)[:30000]
         if mime.startswith("text/"):
             return file_bytes.decode("utf-8", errors="ignore")[:30000]
+        # JPG / PNG / HEIC — скан документа, используем Yandex Vision OCR
+        if mime.startswith("image/") or any(mime.endswith(ext) for ext in ("/jpeg", "/jpg", "/png", "/webp", "/heic")):
+            return ocr_image_bytes(file_bytes)
         return ""
     except Exception as e:
         return f"[Ошибка извлечения: {e}]"
+
+
+def ocr_image_bytes(image_bytes: bytes) -> str:
+    """OCR через Yandex Vision API для сканов дипломов и сертификатов."""
+    api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
+    folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
+    if not api_key or not folder_id:
+        return "[OCR недоступен: нет ключей Yandex]"
+    import urllib.request, urllib.error
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    payload = json.dumps({
+        "folderId": folder_id,
+        "analyze_specs": [{
+            "content": b64,
+            "features": [{"type": "TEXT_DETECTION", "text_detection_config": {"language_codes": ["ru", "en"]}}],
+        }],
+    }).encode()
+    req = urllib.request.Request(
+        "https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze",
+        data=payload,
+        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read())
+        lines = []
+        for r in result.get("results", []):
+            for sub in r.get("results", []):
+                td = sub.get("textDetection", {})
+                for page in td.get("pages", []):
+                    for block in page.get("blocks", []):
+                        for line in block.get("lines", []):
+                            words = [w.get("text", "") for w in line.get("words", [])]
+                            text = " ".join(words).strip()
+                            if text:
+                                lines.append(text)
+        return "\n".join(lines)[:30000] if lines else "[OCR: текст не найден]"
+    except Exception as e:
+        return f"[Ошибка OCR: {e}]"
 
 
 def ai_extract_formal(text: str) -> dict:
@@ -517,9 +559,19 @@ def handle_upload_file(conn, user, body, request_id, origin):
     except Exception as e:
         return err_response("storage_error", f"Не удалось сохранить файл: {e}", 500, request_id, origin)
 
-    # Извлекаем текст
+    # Извлекаем текст. Чёткая обработка случаев:
+    #  - текст есть и нормальный → done
+    #  - пусто или очень мало (<50 символов) → empty_or_too_short
+    #  - начинается с [Ошибка / [OCR: текст не найден → failed
     parsed_text = extract_text_from_file(file_bytes, mime)
-    parse_status = "done" if parsed_text and not parsed_text.startswith("[Ошибка") else "failed"
+    if not parsed_text:
+        parse_status = "empty"
+    elif parsed_text.startswith("[Ошибка") or parsed_text.startswith("[OCR"):
+        parse_status = "failed"
+    elif len(parsed_text.strip()) < 50:
+        parse_status = "too_short"
+    else:
+        parse_status = "done"
 
     cur.execute(
         f"""INSERT INTO {schema}.education_item_files
@@ -564,11 +616,23 @@ def handle_upload_file(conn, user, body, request_id, origin):
         )
 
     conn.commit()
+
+    # Понятные предупреждения для UI
+    warning = None
+    if parse_status == "failed":
+        warning = "Не удалось извлечь текст из файла (возможно повреждён или зашифрован). Проверьте файл или введите данные вручную."
+    elif parse_status == "empty":
+        warning = "Файл пустой — нет текста для анализа. Введите данные вручную."
+    elif parse_status == "too_short":
+        warning = f"Из файла извлечено мало текста ({len(parsed_text.strip())} символов). AI-извлечение может быть неполным — проверьте результат."
+
     return ok_response({
         "file_id": file_id,
         "parse_status": parse_status,
         "extracted": extracted,
         "text_length": len(parsed_text or ""),
+        "raw_text_preview": (parsed_text or "")[:1000] if parse_status in ("failed", "empty", "too_short") else None,
+        "warning": warning,
     }, request_id, origin)
 
 
