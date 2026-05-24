@@ -76,6 +76,7 @@ export default function TaskPage() {
   const [revision, setRevision] = useState("");
   const [prompt, setPrompt] = useState("");
   const [genError, setGenError] = useState("");
+  const [useWebSearch, setUseWebSearch] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const loadTask = () => {
@@ -104,6 +105,7 @@ export default function TaskPage() {
         tId,
         isRevision ? revision : prompt || undefined,
         isRevision && activeRun ? activeRun.id : undefined,
+        useWebSearch,
       );
       setActiveRun({ ...result, revisions: [] });
       setRevision("");
@@ -130,6 +132,20 @@ export default function TaskPage() {
     try {
       const data = await exportApi.exportPptx(activeRun.id);
       downloadBase64File(data.file_data, data.filename, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    } catch (err: unknown) {
+      setExportError(err instanceof Error ? err.message : "Ошибка экспорта");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportDocx = async () => {
+    if (!activeRun) return;
+    setExporting(true);
+    setExportError("");
+    try {
+      const data = await exportApi.exportDocx(activeRun.id);
+      downloadBase64File(data.file_data, data.filename, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     } catch (err: unknown) {
       setExportError(err instanceof Error ? err.message : "Ошибка экспорта");
     } finally {
@@ -262,6 +278,16 @@ export default function TaskPage() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
+                <label className="flex items-center gap-2 justify-center mb-4 cursor-pointer text-sm">
+                  <input
+                    type="checkbox"
+                    checked={useWebSearch}
+                    onChange={(e) => setUseWebSearch(e.target.checked)}
+                    className="w-4 h-4 rounded accent-slate-800"
+                  />
+                  <Icon name="Globe" size={14} className="text-slate-600" />
+                  <span>Дополнить материалами из интернета</span>
+                </label>
                 {genError && <p className="text-red-500 text-sm mb-3">{genError}</p>}
                 <button
                   onClick={() => handleGenerate(false)}
@@ -300,7 +326,15 @@ export default function TaskPage() {
                       className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
                     >
                       <Icon name="Download" size={13} />
-                      {exporting ? "Создаю..." : "Скачать PPTX"}
+                      PPTX
+                    </button>
+                    <button
+                      onClick={handleExportDocx}
+                      disabled={exporting || loadingRun}
+                      className="flex items-center gap-1.5 text-xs bg-blue-700 hover:bg-blue-800 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      <Icon name="FileText" size={13} />
+                      DOCX
                     </button>
                   </div>
                 </div>

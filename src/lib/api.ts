@@ -5,6 +5,9 @@ const URLS = {
   tasks: "https://functions.poehali.dev/363a1c77-0e9a-41a6-a862-b1cf2a632688",
   generate: "https://functions.poehali.dev/90160450-b2a6-44cd-8e78-089f457c619d",
   export: "https://functions.poehali.dev/9d47e96e-4b93-40c5-9d52-d87273385119",
+  exportDocx: "https://functions.poehali.dev/e4caace1-0466-484f-907e-9e141db67523",
+  webSearch: "https://functions.poehali.dev/d68c20bc-5049-4096-a8bb-ae7a7f5afe57",
+  search: "https://functions.poehali.dev/54999e08-24f7-478d-92d8-8d66785f0a00",
 };
 
 function getSession(): string {
@@ -48,9 +51,11 @@ export const projectsApi = {
 
 export const documentsApi = {
   list: (projectId: number) => request(URLS.documents, `/project/${projectId}`),
-  upload: (projectId: number, filename: string, fileType: string, fileData: string) =>
-    request(URLS.documents, "/upload", "POST", { project_id: projectId, filename, file_type: fileType, file_data: fileData }),
+  upload: (projectId: number, filename: string, fileType: string, fileData: string, category = "other") =>
+    request(URLS.documents, "/upload", "POST", { project_id: projectId, filename, file_type: fileType, file_data: fileData, category }),
   getText: (docId: number) => request(URLS.documents, `/${docId}/text`),
+  setCategory: (docId: number, category: string) =>
+    request(URLS.documents, `/${docId}/category`, "PUT", { category }),
 };
 
 export const tasksApi = {
@@ -74,14 +79,30 @@ export const tasksApi = {
 };
 
 export const generateApi = {
-  run: (taskId: number, prompt?: string, revisionOf?: number) =>
-    request(URLS.generate, "/run", "POST", { task_id: taskId, prompt, revision_of: revisionOf }),
+  run: (taskId: number, prompt?: string, revisionOf?: number, useWebSearch = false) =>
+    request(URLS.generate, "/run", "POST", { task_id: taskId, prompt, revision_of: revisionOf, use_web_search: useWebSearch }),
   getRun: (runId: number) => request(URLS.generate, `/run/${runId}`),
 };
 
 export const exportApi = {
   exportPptx: (runId: number) =>
     request(URLS.export, "/", "POST", { run_id: runId }),
+  exportDocx: (runId: number) =>
+    request(URLS.exportDocx, "/", "POST", { run_id: runId }),
+};
+
+export const webSearchApi = {
+  search: (query: string, taskId?: number) =>
+    request(URLS.webSearch, "/", "POST", { query, task_id: taskId }),
+};
+
+export const searchApi = {
+  searchKnowledge: (projectId: number, query: string) =>
+    request(URLS.search, "/", "POST", { action: "search_knowledge", project_id: projectId, query }),
+  chatWithDocument: (documentId: number, question: string) =>
+    request(URLS.search, "/", "POST", { action: "chat_with_document", document_id: documentId, question }),
+  getChatHistory: (documentId: number) =>
+    request(URLS.search, "/", "POST", { action: "get_chat_history", document_id: documentId }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {

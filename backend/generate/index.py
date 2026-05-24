@@ -97,7 +97,44 @@ def call_yandex_gpt(messages: list) -> str:
         return f"[Ошибка AI: {e}]"
 
 
-def build_system_prompt(task: dict, documents: list) -> str:
+def web_search_simple(query: str, limit: int = 5) -> list:
+    """Дополнение материалами из интернета через DuckDuckGo HTML."""
+    import urllib.request as _r
+    import urllib.parse as _p
+    import re as _re
+    try:
+        encoded = _p.quote(query)
+        url = f"https://html.duckduckgo.com/html/?q={encoded}"
+        req = _r.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        })
+        with _r.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+        results = []
+        pattern = _re.compile(
+            r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+            r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+            _re.DOTALL
+        )
+        for m in pattern.finditer(html):
+            if len(results) >= limit:
+                break
+            link = m.group(1)
+            title = _re.sub(r'<[^>]+>', '', m.group(2)).strip()
+            snippet = _re.sub(r'<[^>]+>', '', m.group(3)).strip()
+            if link.startswith("//duckduckgo.com/l/?uddg="):
+                try:
+                    link = _p.unquote(link.split("uddg=")[1].split("&")[0])
+                except Exception:
+                    pass
+            if title and snippet:
+                results.append({"title": title[:200], "snippet": snippet[:400], "url": link})
+        return results
+    except Exception:
+        return []
+
+
+def build_system_prompt(task: dict, documents: list, web_results: list = None) -> str:
     parts = ["Ты — профессиональный AI-ассистент для подготовки презентаций и учебных работ."]
     parts.append(f"Задание: {task['task_type']}")
     if task.get("topic"):
@@ -131,8 +168,18 @@ def build_system_prompt(task: dict, documents: list) -> str:
                 if s.get("bullets"):
                     for b in s["bullets"][:3]:
                         parts.append(f"    • {b}")
-        text = (doc.get("text") or "")[:8000]
+        # Большие тексты — больше места выделяем для дипломов
+        text = (doc.get("text") or "")[:15000]
         parts.append(text)
+        parts.append("")
+
+    # Веб-результаты
+    if web_results:
+        parts.append("--- ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ ИЗ ИНТЕРНЕТА ---")
+        for i, r in enumerate(web_results, 1):
+            parts.append(f"{i}. {r.get('title', '')}")
+            parts.append(f"   {r.get('snippet', '')}")
+            parts.append(f"   Источник: {r.get('url', '')}")
         parts.append("")
 
     parts.append("""При генерации:
@@ -250,8 +297,21 @@ def handler(event: dict, context) -> dict:
             last_version = cur.fetchone()[0]
             version_number = last_version + 1
 
+            # Веб-поиск (опционально по запросу пользователя)
+            web_results = []
+            use_web = body.get("use_web_search", False)
+            if use_web and task.get("topic"):
+                web_results = web_search_simple(task["topic"], limit=5)
+                # Сохраняем в БД для прозрачности источников
+                if web_results:
+                    cur.execute(
+                        f"INSERT INTO {schema}.web_search_results (task_id, query, results_json) VALUES (%s, %s, %s)",
+                        (task_id, task["topic"], json.dumps(web_results, ensure_ascii=False)),
+                    )
+                    conn.commit()
+
             # Построить промпты
-            system_prompt = build_system_prompt(task, documents)
+            system_prompt = build_system_prompt(task, documents, web_results)
             task_instruction = TASK_TYPE_PROMPTS.get(task["task_type"], "Выполни задание.")
 
             if task.get("additional_instructions"):

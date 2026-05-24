@@ -12,7 +12,20 @@ interface Document {
   status: string;
   created_at: string;
   uploaded_by: string;
+  category?: string;
+  page_count?: number;
+  text_length?: number;
 }
+
+const CATEGORIES = [
+  { value: "lecture", label: "Лекция", icon: "GraduationCap", color: "text-purple-700 bg-purple-50" },
+  { value: "notes", label: "Конспект", icon: "Notebook", color: "text-blue-700 bg-blue-50" },
+  { value: "article", label: "Статья", icon: "Newspaper", color: "text-green-700 bg-green-50" },
+  { value: "handout", label: "Раздатка", icon: "FileText", color: "text-amber-700 bg-amber-50" },
+  { value: "standard", label: "Стандарт", icon: "BookMarked", color: "text-red-700 bg-red-50" },
+  { value: "reference", label: "Образец", icon: "Copy", color: "text-cyan-700 bg-cyan-50" },
+  { value: "other", label: "Другое", icon: "File", color: "text-slate-700 bg-slate-100" },
+];
 
 interface Task {
   id: number;
@@ -74,6 +87,7 @@ export default function ProjectPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
+  const [uploadCategory, setUploadCategory] = useState("notes");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -98,7 +112,7 @@ export default function ProjectPage() {
     setUploadError("");
     try {
       const b64 = await fileToBase64(file);
-      await documentsApi.upload(projectId, file.name, ext, b64);
+      await documentsApi.upload(projectId, file.name, ext, b64, uploadCategory);
       load();
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : "Ошибка загрузки");
@@ -148,20 +162,29 @@ export default function ProjectPage() {
           <span className="text-foreground font-medium">{project.title}</span>
         </div>
 
-        <div className="flex items-start justify-between mb-6">
+        <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold">{project.title}</h1>
             {project.description && (
               <p className="text-muted-foreground text-sm mt-1">{project.description}</p>
             )}
           </div>
-          <Link
-            to={`/cabinet/project/${projectId}/new-task`}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
-            <Icon name="Plus" size={16} />
-            Новое задание
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              to={`/cabinet/project/${projectId}/search`}
+              className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Icon name="Search" size={16} />
+              Поиск
+            </Link>
+            <Link
+              to={`/cabinet/project/${projectId}/new-task`}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Icon name="Plus" size={16} />
+              Новое задание
+            </Link>
+          </div>
         </div>
 
         <div className="flex gap-1 mb-6 border-b">
@@ -171,11 +194,11 @@ export default function ProjectPage() {
               onClick={() => setTab(t)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t
-                  ? "border-orange-500 text-orange-600"
+                  ? "border-slate-800 text-slate-900"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {t === "tasks" ? `Задания (${tasks.length})` : t === "docs" ? `Файлы (${docs.length})` : "Команда"}
+              {t === "tasks" ? `Задания (${tasks.length})` : t === "docs" ? `Материалы (${docs.length})` : "Команда"}
             </button>
           ))}
         </div>
@@ -232,12 +255,26 @@ export default function ProjectPage() {
 
         {tab === "docs" && (
           <div className="space-y-4">
-            <div className="border-2 border-dashed rounded-xl p-6 text-center">
-              <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mx-auto mb-3">
-                <Icon name="Upload" size={22} className="text-muted-foreground" />
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+                <Icon name="Upload" size={22} className="text-slate-600" />
               </div>
-              <p className="font-medium mb-1">Загрузить файл</p>
+              <p className="font-medium mb-1">Загрузить материал</p>
               <p className="text-sm text-muted-foreground mb-4">PDF, DOCX или PPTX — до 20 МБ</p>
+
+              <div className="max-w-xs mx-auto mb-4 text-left">
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Тип материала</label>
+                <select
+                  value={uploadCategory}
+                  onChange={(e) => setUploadCategory(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+
               <input
                 ref={fileRef}
                 type="file"
@@ -257,40 +294,37 @@ export default function ProjectPage() {
             </div>
 
             {docs.length === 0 ? (
-              <p className="text-center text-muted-foreground text-sm py-4">Файлов пока нет</p>
+              <p className="text-center text-muted-foreground text-sm py-4">Материалов пока нет</p>
             ) : (
               <div className="space-y-2">
-                {docs.map((doc) => (
-                  <div key={doc.id} className="flex items-center gap-3 border rounded-xl p-3.5 bg-card">
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      doc.file_type === "pdf" ? "bg-red-100 dark:bg-red-950/30" :
-                      doc.file_type === "pptx" ? "bg-orange-100 dark:bg-orange-950/30" :
-                      "bg-blue-100 dark:bg-blue-950/30"
-                    }`}>
-                      <Icon
-                        name="FileText"
-                        size={16}
-                        className={
-                          doc.file_type === "pdf" ? "text-red-600" :
-                          doc.file_type === "pptx" ? "text-orange-600" : "text-blue-600"
-                        }
-                      />
+                {docs.map((doc) => {
+                  const cat = CATEGORIES.find((c) => c.value === doc.category) || CATEGORIES[CATEGORIES.length - 1];
+                  return (
+                    <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${cat.color}`}>
+                        <Icon name={cat.icon} size={16} fallback="FileText" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{doc.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          <span className="font-medium">{cat.label}</span>
+                          {" · "}{doc.file_type.toUpperCase()}
+                          {" · "}{formatSize(doc.file_size)}
+                          {doc.page_count ? ` · ${doc.page_count} стр.` : ""}
+                          {" · "}{doc.uploaded_by}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/cabinet/project/${projectId}/document/${doc.id}`}
+                        className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
+                        title="Чат с документом"
+                      >
+                        <Icon name="MessageCircle" size={13} />
+                        <span className="hidden sm:inline">Спросить</span>
+                      </Link>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{doc.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {doc.file_type.toUpperCase()} · {formatSize(doc.file_size)} · {doc.uploaded_by}
-                      </p>
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      doc.status === "ready"
-                        ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
-                        : "bg-muted text-muted-foreground"
-                    }`}>
-                      {doc.status === "ready" ? "Готов" : "Обработка"}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

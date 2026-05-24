@@ -1,10 +1,10 @@
 {
   "tests": [
     {
-      "name": "Upload requires auth",
+      "name": "Search requires auth",
       "method": "POST",
       "path": "/",
-      "body": {"project_id": 1, "filename": "test.pdf", "file_data": "", "file_type": "pdf"},
+      "body": {"action": "search_knowledge", "query": "test", "project_id": 1},
       "expectedStatus": 401,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
