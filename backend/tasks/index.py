@@ -117,8 +117,8 @@ def handler(event: dict, context) -> dict:
             ]
             return json_response({"tasks": tasks})
 
-        # POST / — создать задание
-        if method == "POST" and (path == "/" or path_parts[-1] == "tasks" or path_parts == [""]):
+        # POST / — создать задание (только если нет action)
+        if method == "POST" and not action and body.get("title") and body.get("task_type"):
             project_id = body.get("project_id")
             title = body.get("title", "").strip()
             task_type = body.get("task_type", "")

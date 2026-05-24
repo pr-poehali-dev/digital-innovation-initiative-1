@@ -104,8 +104,8 @@ def handler(event: dict, context) -> dict:
             ]
             return json_response({"projects": projects})
 
-        # POST / — создать проект
-        if method == "POST" and (path.endswith("/projects") or path == "/"):
+        # POST / — создать проект (только если нет action)
+        if method == "POST" and not body.get("action") and (path.endswith("/projects") or path == "/" or path == ""):
             title = body.get("title", "").strip()
             description = body.get("description", "")
             if not title:
@@ -146,7 +146,7 @@ def handler(event: dict, context) -> dict:
             if not access:
                 return json_response({"error": "Нет доступа"}, 403)
 
-            if method == "GET":
+            if method == "GET" or body.get("action") == "get_project":
                 cur.execute(
                     f"SELECT id, title, description, owner_id, created_at, updated_at FROM {schema}.projects WHERE id = %s",
                     (project_id,),
@@ -175,7 +175,7 @@ def handler(event: dict, context) -> dict:
                     "members": members, "activity": activity, "my_role": access[0],
                 })
 
-            if method == "PUT":
+            if method == "PUT" or body.get("action") == "update_project":
                 title = body.get("title")
                 description = body.get("description")
                 if title:

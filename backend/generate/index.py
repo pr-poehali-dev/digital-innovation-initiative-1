@@ -234,8 +234,8 @@ def handler(event: dict, context) -> dict:
 
         cur = conn.cursor()
 
-        # POST /run или POST / с task_id — запустить генерацию
-        if method == "POST" and (path_parts[-1] == "run" or body.get("task_id")):
+        # POST /run или POST / с task_id — запустить генерацию (не если это get_run)
+        if method == "POST" and body.get("action") != "get_run" and (path_parts[-1] == "run" or body.get("task_id")):
             task_id = body.get("task_id")
             user_prompt = body.get("prompt", "")
 
