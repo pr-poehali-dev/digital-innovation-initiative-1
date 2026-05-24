@@ -125,10 +125,17 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return json_response({"id": project_id, "title": title, "description": description})
 
-        # GET /{id} — детали проекта
+        # POST с action=get_project — детали проекта (надёжнее чем query/path через прокси)
         path_parts = path.strip("/").split("/")
-        if len(path_parts) >= 1 and path_parts[-1].isdigit():
-            project_id = int(path_parts[-1])
+        project_id_from_query = params.get("id") if params else None
+        project_id_from_body = body.get("project_id") if body.get("action") == "get_project" else None
+        if (len(path_parts) >= 1 and path_parts[-1].isdigit()) or project_id_from_query or project_id_from_body:
+            if project_id_from_body:
+                project_id = int(project_id_from_body)
+            elif project_id_from_query:
+                project_id = int(project_id_from_query)
+            else:
+                project_id = int(path_parts[-1])
 
             # Проверка доступа
             cur.execute(
@@ -180,10 +187,13 @@ def handler(event: dict, context) -> dict:
                     conn.commit()
                 return json_response({"ok": True})
 
-        # POST /invite — пригласить по email
-        if method == "POST" and "invite" in path:
-            path_parts = path.strip("/").split("/")
-            project_id = int(path_parts[-2]) if path_parts[-1] == "invite" else None
+        # POST invite — пригласить по email (action в body)
+        if method == "POST" and (body.get("action") == "invite" or "invite" in path):
+            project_id = body.get("project_id")
+            if not project_id:
+                path_parts = path.strip("/").split("/")
+                if len(path_parts) >= 2 and path_parts[-1] == "invite":
+                    project_id = int(path_parts[-2])
             if not project_id:
                 return json_response({"error": "Неверный запрос"}, 400)
 

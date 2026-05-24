@@ -68,6 +68,7 @@ def handler(event: dict, context) -> dict:
             pass
 
     session_id = event.get("headers", {}).get("X-Session-Id", "")
+    params = event.get("queryStringParameters") or {}
     conn = get_db()
     schema = get_schema()
     path_parts = path.strip("/").split("/")
@@ -79,10 +80,19 @@ def handler(event: dict, context) -> dict:
 
         cur = conn.cursor()
 
-        # GET /project/{project_id} — задания проекта
-        if method == "GET" and "project" in path_parts:
-            idx = path_parts.index("project")
-            project_id = int(path_parts[idx + 1])
+        action = body.get("action")
+
+        # POST action=list_tasks — задания проекта
+        project_id_q = params.get("project_id")
+        body_pid = body.get("project_id") if action == "list_tasks" else None
+        if (method == "GET" and ("project" in path_parts or project_id_q)) or body_pid:
+            if body_pid:
+                project_id = int(body_pid)
+            elif project_id_q:
+                project_id = int(project_id_q)
+            else:
+                idx = path_parts.index("project")
+                project_id = int(path_parts[idx + 1])
 
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
@@ -150,8 +160,15 @@ def handler(event: dict, context) -> dict:
             return json_response({"id": task_id, "title": title, "task_type": task_type})
 
         # GET /{id} — детали задания
-        if method == "GET" and len(path_parts) >= 1 and path_parts[-1].isdigit():
-            task_id = int(path_parts[-1])
+        task_id_q = params.get("task_id")
+        body_tid = body.get("task_id") if action == "get_task" else None
+        if (method == "GET" and ((len(path_parts) >= 1 and path_parts[-1].isdigit()) or task_id_q)) or body_tid:
+            if body_tid:
+                task_id = int(body_tid)
+            elif task_id_q:
+                task_id = int(task_id_q)
+            else:
+                task_id = int(path_parts[-1])
             cur.execute(
                 f"""SELECT t.id, t.project_id, t.title, t.task_type, t.topic, t.goal, t.audience,
                     t.language, t.style, t.requested_slide_count, t.additional_instructions,

@@ -388,9 +388,17 @@ def handler(event: dict, context) -> dict:
                 "content": ai_result,
             })
 
-        # GET /run/{run_id} — получить результат генерации
-        if method == "GET" and len(path_parts) >= 2 and path_parts[-2] == "run":
-            run_id = int(path_parts[-1])
+        # POST action=get_run или GET /run/{N} — получить результат генерации
+        qs = event.get("queryStringParameters") or {}
+        run_id_q = qs.get("run_id")
+        body_rid = body.get("run_id") if body.get("action") == "get_run" else None
+        if (method == "GET" and ((len(path_parts) >= 2 and path_parts[-2] == "run") or run_id_q)) or body_rid:
+            if body_rid:
+                run_id = int(body_rid)
+            elif run_id_q:
+                run_id = int(run_id_q)
+            else:
+                run_id = int(path_parts[-1])
             cur.execute(
                 f"""SELECT gr.id, gr.task_id, gr.version_number, gr.result_json, gr.output_summary, gr.status, gr.created_at, u.name
                     FROM {schema}.generation_runs gr JOIN {schema}.users u ON u.id = gr.created_by

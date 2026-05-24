@@ -203,9 +203,10 @@ def handler(event: dict, context) -> dict:
 
         cur = conn.cursor()
         path_parts = path.strip("/").split("/")
+        params = event.get("queryStringParameters") or {}
 
-        # POST /upload — загрузить файл
-        if method == "POST" and "upload" in path:
+        # POST /upload или POST с file_data — загрузить файл
+        if method == "POST" and ("upload" in path or body.get("file_data")):
             project_id = body.get("project_id")
             filename = body.get("filename", "file")
             file_data_b64 = body.get("file_data", "")
@@ -294,12 +295,19 @@ def handler(event: dict, context) -> dict:
             })
 
         # GET /project/{project_id} — список документов проекта
-        if method == "GET" and "project" in path:
-            for i, part in enumerate(path_parts):
-                if part == "project" and i + 1 < len(path_parts):
-                    project_id = int(path_parts[i + 1])
-                    break
+        body_pid = body.get("project_id") if body.get("action") == "list_documents" else None
+        if (method == "GET" and ("project" in path or params.get("project_id"))) or body_pid:
+            project_id = None
+            if body_pid:
+                project_id = int(body_pid)
+            elif params.get("project_id"):
+                project_id = int(params.get("project_id"))
             else:
+                for i, part in enumerate(path_parts):
+                    if part == "project" and i + 1 < len(path_parts):
+                        project_id = int(path_parts[i + 1])
+                        break
+            if not project_id:
                 return json_response({"error": "Нет project_id"}, 400)
 
             cur.execute(

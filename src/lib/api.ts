@@ -47,24 +47,27 @@ export const projectsApi = {
   list: () => request(URLS.projects, "/"),
   create: (title: string, description?: string) =>
     request(URLS.projects, "/", "POST", { title, description }),
-  get: (id: number) => request(URLS.projects, `/${id}`),
+  get: (id: number) => request(URLS.projects, "/", "POST", { action: "get_project", project_id: id }),
   update: (id: number, title: string, description?: string) =>
-    request(URLS.projects, `/${id}`, "PUT", { title, description }),
+    request(URLS.projects, "/", "POST", { action: "update_project", project_id: id, title, description }),
   invite: (projectId: number, email: string) =>
-    request(URLS.projects, `/${projectId}/invite`, "POST", { email }),
+    request(URLS.projects, "/", "POST", { action: "invite", project_id: projectId, email }),
 };
 
 export const documentsApi = {
-  list: (projectId: number) => request(URLS.documents, `/project/${projectId}`),
+  list: (projectId: number) =>
+    request(URLS.documents, "/", "POST", { action: "list_documents", project_id: projectId }),
   upload: (projectId: number, filename: string, fileType: string, fileData: string, category = "other") =>
-    request(URLS.documents, "/upload", "POST", { project_id: projectId, filename, file_type: fileType, file_data: fileData, category }),
-  getText: (docId: number) => request(URLS.documents, `/${docId}/text`),
+    request(URLS.documents, "/", "POST", { project_id: projectId, filename, file_type: fileType, file_data: fileData, category }),
+  getText: (docId: number) =>
+    request(URLS.documents, "/", "POST", { action: "get_text", document_id: docId }),
   setCategory: (docId: number, category: string) =>
-    request(URLS.documents, `/${docId}/category`, "PUT", { category }),
+    request(URLS.documents, "/", "POST", { action: "set_category", document_id: docId, category }),
 };
 
 export const tasksApi = {
-  list: (projectId: number) => request(URLS.tasks, `/project/${projectId}`),
+  list: (projectId: number) =>
+    request(URLS.tasks, "/", "POST", { action: "list_tasks", project_id: projectId }),
   create: (data: {
     project_id: number;
     title: string;
@@ -78,15 +81,17 @@ export const tasksApi = {
     additional_instructions?: string;
     document_roles?: { document_id: number; role: string }[];
   }) => request(URLS.tasks, "/", "POST", data),
-  get: (id: number) => request(URLS.tasks, `/${id}`),
+  get: (id: number) =>
+    request(URLS.tasks, "/", "POST", { action: "get_task", task_id: id }),
   updateDocuments: (taskId: number, documentRoles: { document_id: number; role: string }[]) =>
-    request(URLS.tasks, `/${taskId}/documents`, "PUT", { document_roles: documentRoles }),
+    request(URLS.tasks, "/", "POST", { action: "update_task_documents", task_id: taskId, document_roles: documentRoles }),
 };
 
 export const generateApi = {
   run: (taskId: number, prompt?: string, revisionOf?: number, useWebSearch = false) =>
-    request(URLS.generate, "/run", "POST", { task_id: taskId, prompt, revision_of: revisionOf, use_web_search: useWebSearch }),
-  getRun: (runId: number) => request(URLS.generate, `/run/${runId}`),
+    request(URLS.generate, "/", "POST", { task_id: taskId, prompt, revision_of: revisionOf, use_web_search: useWebSearch }),
+  getRun: (runId: number) =>
+    request(URLS.generate, "/", "POST", { action: "get_run", run_id: runId }),
 };
 
 export const exportApi = {

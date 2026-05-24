@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { projectsApi, documentsApi, fileToBase64, mediaApi } from "@/lib/api";
+import { projectsApi, documentsApi, fileToBase64, mediaApi, tasksApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
@@ -92,11 +92,9 @@ export default function ProjectPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
-    projectsApi.get(projectId).then((d) => setProject(d));
-    documentsApi.list(projectId).then((d) => setDocs(d.documents));
-    fetch(`https://functions.poehali.dev/363a1c77-0e9a-41a6-a862-b1cf2a632688/project/${projectId}`, {
-      headers: { "X-Session-Id": localStorage.getItem("session_id") || "" },
-    }).then((r) => r.json()).then((d) => setTasks(d.tasks || []));
+    projectsApi.get(projectId).then((d) => setProject(d)).catch(() => {});
+    documentsApi.list(projectId).then((d) => setDocs(d.documents || [])).catch(() => {});
+    tasksApi.list(projectId).then((d) => setTasks(d.tasks || [])).catch(() => {});
   };
 
   useEffect(() => { load(); }, [projectId]);
