@@ -212,8 +212,8 @@ const HeroHeader = () => {
                     size="sm"
                     className={cn(
                       isScrolled
-                        ? "lg:inline-flex bg-orange-500 hover:bg-orange-600"
-                        : "hidden bg-orange-500 hover:bg-orange-600",
+                        ? "lg:inline-flex bg-slate-800 hover:bg-slate-700"
+                        : "hidden bg-slate-800 hover:bg-slate-700",
                     )}
                   >
                     <span>Открыть кабинет</span>
@@ -231,7 +231,7 @@ const HeroHeader = () => {
 const Logo = ({ className }: { className?: string }) => {
   return (
     <div className={cn("flex items-center space-x-2", className)}>
-      <div className="bg-orange-500 rounded-lg p-2">
+      <div className="bg-slate-800 rounded-lg p-2">
         <Brain className="h-6 w-6 text-white" />
       </div>
       <span className="text-xl font-bold">DocMind AI</span>
@@ -245,7 +245,7 @@ const CardDecorator = ({ children }: { children: React.ReactNode }) => (
     className="relative mx-auto size-36 [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]"
   >
     <div className="absolute inset-0 [--border:black] dark:[--border:white] bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:24px_24px] opacity-10" />
-    <div className="bg-background absolute inset-0 m-auto flex size-12 items-center justify-center border-t border-l border-orange-200">
+    <div className="bg-background absolute inset-0 m-auto flex size-12 items-center justify-center border-t border-l border-slate-200">
       {children}
     </div>
   </div>
@@ -289,8 +289,8 @@ export default function SoftwareDevelopmentWebsite() {
           aria-hidden
           className="z-[2] absolute inset-0 pointer-events-none isolate opacity-50 contain-strict hidden lg:block"
         >
-          <div className="w-[35rem] h-[80rem] -translate-y-[350px] absolute left-0 top-0 -rotate-45 rounded-full bg-[radial-gradient(68.54%_68.72%_at_55.02%_31.46%,hsla(25,100%,50%,.08)_0,hsla(25,100%,45%,.02)_50%,hsla(25,100%,40%,0)_80%)]" />
-          <div className="h-[80rem] absolute left-0 top-0 w-56 -rotate-45 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,hsla(25,100%,50%,.06)_0,hsla(25,100%,45%,.02)_80%,transparent_100%)] [translate:5%_-50%]" />
+          <div className="w-[35rem] h-[80rem] -translate-y-[350px] absolute left-0 top-0 -rotate-45 rounded-full bg-[radial-gradient(68.54%_68.72%_at_55.02%_31.46%,hsla(220,13%,18%,.08)_0,hsla(220,13%,18%,.02)_50%,hsla(220,13%,18%,0)_80%)]" />
+          <div className="h-[80rem] absolute left-0 top-0 w-56 -rotate-45 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,hsla(220,13%,18%,.06)_0,hsla(220,13%,18%,.02)_80%,transparent_100%)] [translate:5%_-50%]" />
         </div>
 
         <section>
@@ -306,7 +306,7 @@ export default function SoftwareDevelopmentWebsite() {
                     href="#services"
                     className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
                   >
-                    <span className="text-foreground text-sm">Ваш персональный AI-ассистент для работы с документами</span>
+                    <span className="text-foreground text-sm">Умный учебный кабинет с AI-ассистентом</span>
                     <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                     <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
@@ -322,14 +322,13 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
 
                   <h1 className="mt-8 max-w-4xl mx-auto text-balance text-6xl md:text-7xl lg:mt-16 xl:text-[5.25rem]">
-                    Загрузите документ —{" "}
-                    <span className="inline-block text-orange-500 text-6xl md:text-7xl xl:text-[5.25rem] font-semibold">
-                      получите презентацию
+                    Учись умнее —{" "}
+                    <span className="inline-block text-slate-600 text-6xl md:text-7xl xl:text-[5.25rem] font-semibold">
+                      с AI в кармане
                     </span>
                   </h1>
                   <p className="mx-auto mt-8 max-w-2xl text-balance text-lg text-muted-foreground">
-                    AI-ассистент анализирует ваши PDF, Word и PowerPoint файлы, учитывает стандарты IPMO
-                    и создаёт структурированные презентации и документы точно по заданному шаблону.
+                    Храни конспекты, статьи и раздаточные материалы. Давай AI задание: «Подготовь диплом по теме X, используй стандарт IPMO, возьми структуру из прилагаемой презентации и дополни из интернета» — и получай готовый результат.
                   </p>
                 </AnimatedGroup>
 
@@ -347,16 +346,16 @@ export default function SoftwareDevelopmentWebsite() {
                   }}
                   className="mt-12 flex flex-col items-center justify-center gap-2 md:flex-row"
                 >
-                  <div key={1} className="bg-orange-500/10 rounded-[14px] border border-orange-200 p-0.5">
+                  <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
                     <Link to="/cabinet">
-                      <Button size="lg" className="rounded-xl px-5 text-base bg-orange-500 hover:bg-orange-600">
+                      <Button size="lg" className="rounded-xl px-5 text-base bg-slate-800 hover:bg-slate-700">
                         <Upload className="mr-2 h-4 w-4" />
                         <span className="text-nowrap">Открыть кабинет</span>
                       </Button>
                     </Link>
                   </div>
                   <Link to="/login" key={2}>
-                    <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-orange-500">
+                    <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
                       <span className="text-nowrap">Войти</span>
                     </Button>
                   </Link>
@@ -382,9 +381,9 @@ export default function SoftwareDevelopmentWebsite() {
                   aria-hidden
                   className="bg-gradient-to-b to-background absolute inset-0 z-10 from-transparent from-35%"
                 />
-                <div className="inset-shadow-2xs ring-background dark:inset-shadow-white/20 bg-background relative mx-auto max-w-6xl overflow-hidden rounded-2xl border border-orange-200 p-4 shadow-lg shadow-orange-500/15 ring-1">
-                  <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950 dark:to-orange-900 aspect-[15/8] relative rounded-2xl border border-orange-200 overflow-hidden">
-                    <GridMotion items={gridItems} gradientColor="rgba(249, 115, 22, 0.1)" className="h-full w-full" />
+                <div className="inset-shadow-2xs ring-background dark:inset-shadow-white/20 bg-background relative mx-auto max-w-6xl overflow-hidden rounded-2xl border border-slate-200 p-4 shadow-lg shadow-slate-300/30 ring-1">
+                  <div className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 aspect-[15/8] relative rounded-2xl border border-slate-200 overflow-hidden">
+                    <GridMotion items={gridItems} gradientColor="rgba(30, 41, 59, 0.08)" className="h-full w-full" />
                   </div>
                 </div>
               </div>
@@ -481,25 +480,25 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center">
               <h2 className="text-balance text-4xl font-semibold lg:text-5xl">
-                Почему выбирают <span className="text-orange-500">DocMind AI</span>
+                Всё для учёбы — <span className="text-slate-600">в одном месте</span>
               </h2>
               <p className="mt-4 text-muted-foreground">
-                Загружайте любые документы и получайте готовые презентации и материалы с учётом ваших стандартов и требований.
+                Собирай базу знаний, задавай умные задания AI и получай зачёты, дипломы и презентации — всё с учётом твоих стандартов.
               </p>
             </div>
-            <Card className="mx-auto mt-8 grid max-w-sm divide-y overflow-hidden shadow-zinc-950/5 border-orange-200 *:text-center md:mt-16 md:max-w-full md:grid-cols-3 md:divide-x md:divide-y-0">
+            <Card className="mx-auto mt-8 grid max-w-sm divide-y overflow-hidden shadow-zinc-950/5 border-slate-200 *:text-center md:mt-16 md:max-w-full md:grid-cols-3 md:divide-x md:divide-y-0">
               <div className="group shadow-zinc-950/5">
                 <CardHeader className="pb-3">
                   <CardDecorator>
-                    <Upload className="size-6 text-orange-500" aria-hidden />
+                    <Upload className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
 
-                  <h3 className="mt-6 font-medium">PDF, Word, PowerPoint</h3>
+                  <h3 className="mt-6 font-medium">База знаний студента</h3>
                 </CardHeader>
 
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Загружайте исходные материалы в любом формате — стандарты, шаблоны, исследования. AI проанализирует и извлечёт ключевые данные.
+                    Храни конспекты, лекции, статьи, раздаточные материалы в одном месте. Всё доступно для AI в любой момент.
                   </p>
                 </CardContent>
               </div>
@@ -507,15 +506,15 @@ export default function SoftwareDevelopmentWebsite() {
               <div className="group shadow-zinc-950/5">
                 <CardHeader className="pb-3">
                   <CardDecorator>
-                    <BookOpen className="size-6 text-orange-500" aria-hidden />
+                    <BookOpen className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
 
-                  <h3 className="mt-6 font-medium">Учёт стандартов IPMO</h3>
+                  <h3 className="mt-6 font-medium">Умные задания AI</h3>
                 </CardHeader>
 
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Прикладывайте стандарт IPMO или любой другой регламент — AI автоматически соблюдает требования при генерации документов.
+                    Скажи: «Подготовь диплом по теме X, учти стандарт IPMO, возьми структуру из моей презентации» — AI соберёт всё по твоей формуле.
                   </p>
                 </CardContent>
               </div>
@@ -523,15 +522,15 @@ export default function SoftwareDevelopmentWebsite() {
               <div className="group shadow-zinc-950/5">
                 <CardHeader className="pb-3">
                   <CardDecorator>
-                    <Sparkles className="size-6 text-orange-500" aria-hidden />
+                    <Sparkles className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
 
-                  <h3 className="mt-6 font-medium">Итерационные правки</h3>
+                  <h3 className="mt-6 font-medium">Правки и версии</h3>
                 </CardHeader>
 
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Получили черновик — давайте уточнения. AI корректирует структуру, текст и оформление до тех пор, пока результат вас не устроит.
+                    Получил черновик — дай правки. AI сохраняет историю версий и дорабатывает пока не устроит результат.
                   </p>
                 </CardContent>
               </div>
@@ -540,27 +539,27 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
       </main>
 
-      <footer className="bg-background border-t border-orange-200">
+      <footer className="bg-background border-t border-slate-200">
         <div className="mx-auto max-w-7xl py-16 px-6 lg:px-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
             {/* Company Info */}
             <div className="space-y-4 sm:col-span-2 lg:col-span-1">
               <Logo />
               <p className="text-sm text-muted-foreground max-w-xs">
-                Ваш персональный AI-кабинет для создания презентаций и документов на основе загруженных материалов и стандартов.
+                Умный кабинет студента: база знаний, AI-ассистент и инструменты для подготовки любых учебных работ.
               </p>
               <div className="flex space-x-4">
-                <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                   <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
                   </svg>
                 </a>
-                <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                   <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z"/>
                   </svg>
                 </a>
-                <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                   <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M15.402 21v-6.966h2.333l.349-2.708h-2.682V9.598c0-.784.218-1.319 1.342-1.319h1.434V5.857a19.188 19.188 0 0 0-2.09-.107c-2.067 0-3.482 1.262-3.482 3.58v1.996h-2.338v2.708h2.338V21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-4.598z"/>
                   </svg>
@@ -573,27 +572,27 @@ export default function SoftwareDevelopmentWebsite() {
               <h3 className="text-sm font-semibold text-foreground">Услуги</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Веб-разработка
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Мобильные приложения
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Заказное ПО
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Разработка API
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Облачные решения
                   </a>
                 </li>
@@ -605,27 +604,27 @@ export default function SoftwareDevelopmentWebsite() {
               <h3 className="text-sm font-semibold text-foreground">Компания</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     О нас
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Наша команда
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Карьера
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Кейсы
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Блог
                   </a>
                 </li>
@@ -684,17 +683,17 @@ export default function SoftwareDevelopmentWebsite() {
           </div>
 
           {/* Bottom section */}
-          <div className="mt-12 pt-8 border-t border-orange-200">
+          <div className="mt-12 pt-8 border-t border-slate-200">
             <div className="flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
               <div className="text-sm text-muted-foreground">2026 DocMind AI. Все права защищены.</div>
               <div className="flex flex-wrap justify-center sm:justify-end gap-x-6 gap-y-2 text-sm">
-                <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                   Политика конфиденциальности
                 </a>
-                <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                   Условия использования
                 </a>
-                <a href="#" className="text-muted-foreground hover:text-orange-500 transition-colors">
+                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
                   Политика cookies
                 </a>
               </div>
