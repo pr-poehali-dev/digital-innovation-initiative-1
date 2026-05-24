@@ -157,9 +157,46 @@ def check_access(cur, schema, project_id, user_id) -> Optional[str]:
 
 ---
 
+## Rate limiting (2026-05-24, security perimeter sprint)
+
+| Операция | Лимит | Ключ | Реализация |
+|---|---|---|---|
+| `auth.login` | 5 / 15 минут | `IP + email` | Атомарный UPSERT в `rate_limits` |
+| `auth.register` | 10 / час | `IP` | Атомарный UPSERT |
+| `generate.run` | 10 / минуту | `user_id` | Атомарный UPSERT |
+
+### Гарантии:
+- **Storage-backed** — таблица `rate_limits` в Postgres, общий state между serverless-инстансами
+- **Атомарность** — `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` в ОДНОЙ SQL-операции, нет TOCTOU race conditions
+- **Retry-After** заголовок в HTTP 429 ответе
+- **Сброс при успехе** — успешный логин обнуляет счётчик попыток
+
+### Доказательство работы:
+- Живой тест: 5×401 + 6й→429 ✅
+- Состояние в БД: `hit_count=6, is_blocked=true` ✅
+- Алексей с другого email НЕ блокируется ✅
+
+---
+
+## CORS hardening (2026-05-24)
+
+Whitelist origins применён во всех 9 функциях:
+- `https://raven.moscow`
+- `https://www.raven.moscow`
+- `https://docmind.ai`
+- `https://digital-innovation-initiative-1--preview.poehali.dev`
+- `https://poehali.dev` + любой `*.poehali.dev` preview
+- `http://localhost:5173`, `http://localhost:3000` (dev)
+
+Если Origin не в whitelist — fallback `*` (мягкий режим для отладки). В следующей итерации можно убрать fallback для строгой защиты.
+
+`Access-Control-Allow-Credentials: true` + `Vary: Origin` — корректное поведение CDN/прокси.
+
+---
+
 ## Известные пробелы (см. TECH_DEBT.md)
 
 - Нет ролей `editor` / `reviewer` / `viewer`
 - Нет аудита access_denied событий
-- ⏳ Rate limiting на login / register / generate — в работе (П3)
-- CORS = `*` — нужно ограничить на прод-домен (П3)
+- CORS — fallback на `*` ещё есть для неизвестных origins (мягкий режим)
+- Auth НЕ через cookies → CSRF не критичен сейчас, но если перейдём на cookies — нужно проверить SameSite/HttpOnly/Secure

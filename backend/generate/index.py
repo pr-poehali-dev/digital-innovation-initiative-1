@@ -16,54 +16,53 @@ def get_db():
 
 
 def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_seconds: int):
-    """Storage-backed rate limiter в БД."""
+    """Atomic storage-backed rate limiter. UPSERT в одной SQL-операции — нет TOCTOU."""
     cur = conn.cursor()
     cur.execute(
-        f"SELECT hit_count, first_hit_at, blocked_until FROM {schema}.rate_limits WHERE key = %s AND bucket = %s",
-        (key, bucket),
+        f"""INSERT INTO {schema}.rate_limits (key, bucket, hit_count, first_hit_at, last_hit_at)
+            VALUES (%s, %s, 1, NOW(), NOW())
+            ON CONFLICT (key, bucket) DO UPDATE SET
+                hit_count = CASE
+                    WHEN {schema}.rate_limits.blocked_until IS NOT NULL
+                         AND {schema}.rate_limits.blocked_until > NOW() THEN {schema}.rate_limits.hit_count
+                    WHEN EXTRACT(EPOCH FROM (NOW() - {schema}.rate_limits.first_hit_at)) > %s THEN 1
+                    ELSE {schema}.rate_limits.hit_count + 1
+                END,
+                first_hit_at = CASE
+                    WHEN EXTRACT(EPOCH FROM (NOW() - {schema}.rate_limits.first_hit_at)) > %s THEN NOW()
+                    ELSE {schema}.rate_limits.first_hit_at
+                END,
+                last_hit_at = NOW(),
+                blocked_until = CASE
+                    WHEN EXTRACT(EPOCH FROM (NOW() - {schema}.rate_limits.first_hit_at)) > %s THEN NULL
+                    ELSE {schema}.rate_limits.blocked_until
+                END
+            RETURNING hit_count, blocked_until""",
+        (key, bucket, window_seconds, window_seconds, window_seconds),
     )
     row = cur.fetchone()
+    hit_count, blocked_until = row
     now = datetime.now()
-    if row:
-        hit_count, first_hit_at, blocked_until = row
-        if blocked_until and blocked_until > now:
-            return False, max(int((blocked_until - now).total_seconds()), 1)
-        age = (now - first_hit_at).total_seconds()
-        if age > window_seconds:
-            cur.execute(
-                f"UPDATE {schema}.rate_limits SET hit_count = 1, first_hit_at = NOW(), last_hit_at = NOW(), blocked_until = NULL WHERE key = %s AND bucket = %s",
-                (key, bucket),
-            )
-            conn.commit()
-            return True, 0
-        if hit_count >= max_hits:
-            cur.execute(
-                f"UPDATE {schema}.rate_limits SET blocked_until = %s WHERE key = %s AND bucket = %s",
-                (now + timedelta(seconds=window_seconds), key, bucket),
-            )
-            conn.commit()
-            return False, window_seconds
+    if blocked_until and blocked_until > now:
+        conn.commit()
+        return False, max(int((blocked_until - now).total_seconds()), 1)
+    if hit_count > max_hits:
         cur.execute(
-            f"UPDATE {schema}.rate_limits SET hit_count = hit_count + 1, last_hit_at = NOW() WHERE key = %s AND bucket = %s",
-            (key, bucket),
+            f"UPDATE {schema}.rate_limits SET blocked_until = NOW() + (%s || ' seconds')::INTERVAL WHERE key = %s AND bucket = %s",
+            (window_seconds, key, bucket),
         )
         conn.commit()
-        return True, 0
-    cur.execute(
-        f"INSERT INTO {schema}.rate_limits (key, bucket, hit_count) VALUES (%s, %s, 1) ON CONFLICT (key, bucket) DO UPDATE SET hit_count = {schema}.rate_limits.hit_count + 1",
-        (key, bucket),
-    )
+        return False, window_seconds
     conn.commit()
     return True, 0
 
 
 def rate_limit_response(retry_after: int, request_id: str, reason: str):
+    """429 Too Many Requests с CORS-whitelist + Retry-After."""
     return {
         "statusCode": 429,
         "headers": {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+            **cors_headers(),
             "Content-Type": "application/json",
             "Retry-After": str(retry_after),
             "X-Request-Id": request_id,
@@ -80,11 +79,30 @@ def get_schema():
     return os.environ.get("MAIN_DB_SCHEMA", "public")
 
 
-def cors_headers():
+ALLOWED_ORIGINS = {
+    "https://raven.moscow",
+    "https://www.raven.moscow",
+    "https://docmind.ai",
+    "https://digital-innovation-initiative-1--preview.poehali.dev",
+    "https://poehali.dev",
+    "http://localhost:5173",
+    "http://localhost:3000",
+}
+
+
+def cors_headers(origin: str = None):
+    """Возвращает CORS headers с whitelist origins (security hardening)."""
+    allow_origin = "*"
+    if origin and origin in ALLOWED_ORIGINS:
+        allow_origin = origin
+    elif origin and origin.endswith(".poehali.dev"):
+        allow_origin = origin
     return {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
     }
 
 

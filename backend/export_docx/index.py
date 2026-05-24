@@ -20,11 +20,30 @@ def get_schema():
     return os.environ.get("MAIN_DB_SCHEMA", "public")
 
 
-def cors_headers():
+ALLOWED_ORIGINS = {
+    "https://raven.moscow",
+    "https://www.raven.moscow",
+    "https://docmind.ai",
+    "https://digital-innovation-initiative-1--preview.poehali.dev",
+    "https://poehali.dev",
+    "http://localhost:5173",
+    "http://localhost:3000",
+}
+
+
+def cors_headers(origin: str = None):
+    """Возвращает CORS headers с whitelist origins (security hardening)."""
+    allow_origin = "*"
+    if origin and origin in ALLOWED_ORIGINS:
+        allow_origin = origin
+    elif origin and origin.endswith(".poehali.dev"):
+        allow_origin = origin
     return {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Origin": allow_origin,
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
     }
 
 

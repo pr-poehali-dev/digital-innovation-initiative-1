@@ -134,71 +134,62 @@ def get_current_user(conn, session_id):
 
 
 def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_seconds: int):
-    """Storage-backed rate limiter в БД.
+    """Storage-backed atomic rate limiter в БД.
+
+    Защита от race conditions через INSERT ... ON CONFLICT DO UPDATE с условным сбросом
+    счётчика внутри одной SQL-операции. Не подвержен TOCTOU между несколькими запросами.
+
     Возвращает (allowed: bool, retry_after_seconds: int, hits: int).
     """
     cur = conn.cursor()
-    # Очистка старых окон + проверка текущего
+    # Один атомарный UPSERT: создаёт запись если её нет,
+    # сбрасывает счётчик если окно истекло, иначе инкрементирует.
+    # Всё это в ОДНОЙ SQL-операции — гонок быть не может.
     cur.execute(
-        f"""SELECT hit_count, first_hit_at, blocked_until
-            FROM {schema}.rate_limits
-            WHERE key = %s AND bucket = %s""",
-        (key, bucket),
+        f"""INSERT INTO {schema}.rate_limits (key, bucket, hit_count, first_hit_at, last_hit_at)
+            VALUES (%s, %s, 1, NOW(), NOW())
+            ON CONFLICT (key, bucket) DO UPDATE SET
+                hit_count = CASE
+                    WHEN {schema}.rate_limits.blocked_until IS NOT NULL
+                         AND {schema}.rate_limits.blocked_until > NOW() THEN {schema}.rate_limits.hit_count
+                    WHEN EXTRACT(EPOCH FROM (NOW() - {schema}.rate_limits.first_hit_at)) > %s THEN 1
+                    ELSE {schema}.rate_limits.hit_count + 1
+                END,
+                first_hit_at = CASE
+                    WHEN EXTRACT(EPOCH FROM (NOW() - {schema}.rate_limits.first_hit_at)) > %s THEN NOW()
+                    ELSE {schema}.rate_limits.first_hit_at
+                END,
+                last_hit_at = NOW(),
+                blocked_until = CASE
+                    WHEN EXTRACT(EPOCH FROM (NOW() - {schema}.rate_limits.first_hit_at)) > %s THEN NULL
+                    ELSE {schema}.rate_limits.blocked_until
+                END
+            RETURNING hit_count, blocked_until""",
+        (key, bucket, window_seconds, window_seconds, window_seconds),
     )
     row = cur.fetchone()
+    hit_count, blocked_until = row
+
     now = datetime.now()
+    # Если уже заблокирован — отказ
+    if blocked_until and blocked_until > now:
+        seconds_left = int((blocked_until - now).total_seconds())
+        conn.commit()
+        return False, max(seconds_left, 1), hit_count
 
-    if row:
-        hit_count, first_hit_at, blocked_until = row
-        # Проверка явной блокировки
-        if blocked_until and blocked_until > now:
-            seconds_left = int((blocked_until - now).total_seconds())
-            return False, max(seconds_left, 1), hit_count
-
-        # Окно истекло — сбрасываем
-        age = (now - first_hit_at).total_seconds()
-        if age > window_seconds:
-            cur.execute(
-                f"""UPDATE {schema}.rate_limits
-                    SET hit_count = 1, first_hit_at = NOW(), last_hit_at = NOW(), blocked_until = NULL
-                    WHERE key = %s AND bucket = %s""",
-                (key, bucket),
-            )
-            conn.commit()
-            return True, 0, 1
-
-        # В пределах окна — проверяем лимит
-        if hit_count >= max_hits:
-            block_until = now + timedelta(seconds=window_seconds)
-            cur.execute(
-                f"""UPDATE {schema}.rate_limits
-                    SET blocked_until = %s, last_hit_at = NOW()
-                    WHERE key = %s AND bucket = %s""",
-                (block_until, key, bucket),
-            )
-            conn.commit()
-            return False, window_seconds, hit_count
-
-        # Инкремент
+    # Превысили лимит — блокируем на окно
+    if hit_count > max_hits:
         cur.execute(
             f"""UPDATE {schema}.rate_limits
-                SET hit_count = hit_count + 1, last_hit_at = NOW()
+                SET blocked_until = NOW() + (%s || ' seconds')::INTERVAL
                 WHERE key = %s AND bucket = %s""",
-            (key, bucket),
+            (window_seconds, key, bucket),
         )
         conn.commit()
-        return True, 0, hit_count + 1
-    else:
-        # Первый запрос
-        cur.execute(
-            f"""INSERT INTO {schema}.rate_limits (key, bucket, hit_count, first_hit_at, last_hit_at)
-                VALUES (%s, %s, 1, NOW(), NOW())
-                ON CONFLICT (key, bucket) DO UPDATE
-                    SET hit_count = {schema}.rate_limits.hit_count + 1, last_hit_at = NOW()""",
-            (key, bucket),
-        )
-        conn.commit()
-        return True, 0, 1
+        return False, window_seconds, hit_count
+
+    conn.commit()
+    return True, 0, hit_count
 
 
 def rate_limit_response(retry_after: int, request_id: str, reason: str):
