@@ -281,6 +281,22 @@ def handler(event: dict, context) -> dict:
             if not doc_id:
                 return json_response({"error": "Нужен document_id"}, 400)
             cur = conn.cursor()
+
+            # 🔒 ИЗОЛЯЦИЯ: проверяем что user имеет доступ к проекту документа
+            cur.execute(
+                f"SELECT project_id FROM {schema}.documents WHERE id = %s",
+                (int(doc_id),),
+            )
+            doc_row = cur.fetchone()
+            if not doc_row:
+                return json_response({"error": "Документ не найден"}, 404)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (doc_row[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+
             cur.execute(
                 f"""SELECT c.id, c.question, c.answer, c.sources_json, c.created_at, u.name
                     FROM {schema}.document_chats c

@@ -1,5 +1,7 @@
 """
 Аутентификация пользователей: регистрация, вход, выход, проверка сессии.
+Пароли — Argon2id (OWASP recommended).
+SHA-256 хеши автоматически мигрируются в Argon2 при следующем успешном входе.
 """
 import json
 import os
@@ -7,6 +9,14 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 import psycopg2
+
+try:
+    from argon2 import PasswordHasher
+    from argon2.exceptions import VerifyMismatchError, InvalidHash
+    _argon = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
+    ARGON2_AVAILABLE = True
+except ImportError:
+    ARGON2_AVAILABLE = False
 
 
 def get_db():
@@ -20,7 +30,33 @@ def get_schema():
 
 
 def hash_password(password: str) -> str:
+    """Хеширует новый пароль через Argon2id."""
+    if ARGON2_AVAILABLE:
+        return _argon.hash(password)
+    # Fallback (не должно случиться в проде)
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_password(password: str, stored_hash: str) -> tuple:
+    """Проверяет пароль. Возвращает (valid: bool, needs_rehash: bool).
+    Поддерживает оба формата: Argon2 и legacy SHA-256.
+    """
+    if not stored_hash:
+        return False, False
+    # Argon2 хеш начинается с $argon2
+    if stored_hash.startswith("$argon2"):
+        if not ARGON2_AVAILABLE:
+            return False, False
+        try:
+            _argon.verify(stored_hash, password)
+            return True, False
+        except (VerifyMismatchError, InvalidHash):
+            return False, False
+    # Legacy SHA-256 (64 hex символа)
+    legacy = hashlib.sha256(password.encode()).hexdigest()
+    if legacy == stored_hash:
+        return True, True  # нужна миграция в Argon2
+    return False, False
 
 
 import uuid
@@ -141,18 +177,32 @@ def handler(event: dict, context) -> dict:
         if method == "POST" and action == "login":
             email = body.get("email", "").strip().lower()
             password = body.get("password", "")
-            pw_hash = hash_password(password)
 
             cur = conn.cursor()
+            # Загружаем user и хеш — НЕ сравниваем в SQL (это позволяет timing-attack
+            # и не работает с Argon2 где хеш содержит соль и параметры)
             cur.execute(
-                f"SELECT id, name FROM {schema}.users WHERE email = %s AND password_hash = %s",
-                (email, pw_hash),
+                f"SELECT id, name, password_hash FROM {schema}.users WHERE email = %s",
+                (email,),
             )
             row = cur.fetchone()
             if not row:
+                # Не раскрываем что email не существует
                 return json_response({"error": "Неверный email или пароль"}, 401)
 
-            user_id, name = row
+            user_id, name, stored_hash = row
+            valid, needs_rehash = verify_password(password, stored_hash)
+            if not valid:
+                return json_response({"error": "Неверный email или пароль"}, 401)
+
+            # Автоматическая миграция legacy SHA-256 → Argon2id
+            if needs_rehash:
+                new_hash = hash_password(password)
+                cur.execute(
+                    f"UPDATE {schema}.users SET password_hash = %s WHERE id = %s",
+                    (new_hash, user_id),
+                )
+
             sid = secrets.token_hex(32)
             expires = datetime.now() + timedelta(days=30)
             cur.execute(
@@ -223,7 +273,8 @@ def handler(event: dict, context) -> dict:
                 (user["id"],),
             )
             current_hash = cur.fetchone()[0]
-            if hash_password(old_password) != current_hash:
+            valid, _ = verify_password(old_password, current_hash)
+            if not valid:
                 return json_response({"error": "Старый пароль неверный"}, 400)
 
             cur.execute(

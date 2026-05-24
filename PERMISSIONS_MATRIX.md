@@ -108,21 +108,52 @@ def check_access(cur, schema, project_id, user_id) -> Optional[str]:
 
 ---
 
-## Доказательства изоляции
+## Доказательства изоляции — все опасные операции проверены живым тестом от User B (id=2) на проект id=1 Алексея (2026-05-24, спринт стабилизации П1/П2)
 
-### ✅ Проверено живым тестом (2026-05-24)
+### ✅ Уже было защищено (проверено)
 
-1. **`project.get`** — User B (id=2) с валидной сессией пытается открыть проект Алексея (id=1) → HTTP 403 `access_denied`
-2. **`project.list`** — User B видит пустой массив, хотя в БД у Алексея 2 проекта
+| Endpoint | Метод проверки | Результат |
+|---|---|---|
+| `project.get` | check_access | 403 ✅ |
+| `project.list` | JOIN project_members | пустой массив ✅ |
+| `documents.list` | check_access | 403 ✅ |
+| `documents.get_url` | check_access | 403 ✅ |
+| `documents.delete` (soft archive) | check_access | 403 ✅ |
+| `documents.rename` | check_access | 403 ✅ |
+| `tasks.get_task` | check_access | 403 ✅ |
+| `tasks.list_tasks` | check_access | 403 ✅ |
+| `export.pptx` | check_access | 403 ✅ |
+| `export.docx` | check_access | 403 ✅ |
+| `search.search_knowledge` | check_access | 403 ✅ |
+| `search.chat_with_document` | check_access | 403 ✅ |
 
-### ⚠️ Требует проверки автотестами в следующем спринте
+### 🔴 Найдено и закрыто (КРИТИЧНО — была утечка данных)
 
-- `document.get_url` (presigned URL) — User B не должен получить ссылку на чужой файл
-- `document.delete` — User B не должен архивировать чужой файл
-- `document.rename` — User B не должен переименовать чужой файл
-- `get_run` — User B не должен видеть чужой результат генерации
-- `chat_with_document` — User B не должен спрашивать чужой документ
-- Export PPTX/DOCX — User B не должен скачать чужую работу
+| Endpoint | Что было | Что стало |
+|---|---|---|
+| `generate.get_run` | User B видел ПОЛНЫЙ диплом Алексея | Добавлен JOIN с tasks → проверка project_id → 403 ✅ |
+| `search.get_chat_history` | User B видел чужую историю чата | Добавлена проверка project_id через document → 403 ✅ |
+
+### Контрольная проверка (positive path)
+- Алексей сам получает свои данные → 200 OK для всех операций (проверено отдельно)
+
+---
+
+## Безопасность паролей (2026-05-24)
+
+### ✅ Argon2id для новых паролей
+- Параметры: `time_cost=2, memory_cost=19456, parallelism=1` (OWASP recommended)
+- Используется библиотека `argon2-cffi`
+
+### ✅ Автомиграция SHA-256 → Argon2
+- Старые пароли в БД остаются как SHA-256
+- При следующем успешном входе пароль автоматически пересчитывается в Argon2
+- Без перебоя в работе, без принудительного сброса паролей
+- Подтверждено: пароль Алексея уже мигрирован в `$argon2id$v=19$m=19456,t=2,p=1...`
+
+### ✅ Timing-safe сравнение
+- Логика `verify_password` не сравнивает хеши в SQL (защита от timing attack)
+- Хеш загружается, потом сравнивается через `argon2.verify()`
 
 ---
 
@@ -130,6 +161,5 @@ def check_access(cur, schema, project_id, user_id) -> Optional[str]:
 
 - Нет ролей `editor` / `reviewer` / `viewer`
 - Нет аудита access_denied событий
-- Нет rate limiting
-- `change_password` не проверяет старый пароль с защитой от brute-force
-- Файлы в S3 — публичные по CDN URL (нет проверки прав при прямом скачивании по CDN, только через presigned)
+- ⏳ Rate limiting на login / register / generate — в работе (П3)
+- CORS = `*` — нужно ограничить на прод-домен (П3)

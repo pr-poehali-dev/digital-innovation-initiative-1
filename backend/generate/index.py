@@ -400,14 +400,25 @@ def handler(event: dict, context) -> dict:
             else:
                 run_id = int(path_parts[-1])
             cur.execute(
-                f"""SELECT gr.id, gr.task_id, gr.version_number, gr.result_json, gr.output_summary, gr.status, gr.created_at, u.name
-                    FROM {schema}.generation_runs gr JOIN {schema}.users u ON u.id = gr.created_by
+                f"""SELECT gr.id, gr.task_id, gr.version_number, gr.result_json, gr.output_summary, gr.status, gr.created_at, u.name, t.project_id
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.users u ON u.id = gr.created_by
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
                     WHERE gr.id = %s""",
                 (run_id,),
             )
             row = cur.fetchone()
             if not row:
                 return json_response({"error": "Не найдено"}, 404)
+
+            # 🔒 ИЗОЛЯЦИЯ: проверяем доступ к проекту, к которому относится task
+            project_id_of_run = row[8]
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id_of_run, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
 
             result_content = None
             if row[3]:
