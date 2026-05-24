@@ -21,12 +21,76 @@ const TASK_TYPES = [
   { value: "revise", label: "Доработать результат", icon: "Pencil", desc: "Скорректировать уже созданный материал" },
 ];
 
+// P0: новые роли документов с явной семантикой
 const DOC_ROLES = [
-  { value: "standard", label: "Стандарт / нормативный", color: "text-purple-600 bg-purple-50 dark:bg-purple-950/30" },
-  { value: "reference_presentation", label: "Образец презентации", color: "text-blue-600 bg-blue-50 dark:bg-blue-950/30" },
-  { value: "content_source", label: "Содержательный материал", color: "text-green-600 bg-green-50 dark:bg-green-950/30" },
-  { value: "draft", label: "Черновик", color: "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30" },
-  { value: "excluded", label: "Не использовать", color: "text-muted-foreground bg-muted" },
+  {
+    value: "standard",
+    label: "📜 Стандарт / норматив",
+    desc: "Высший приоритет. AI возьмёт отсюда СТРУКТУРУ и требования.",
+    color: "text-purple-700 bg-purple-50",
+  },
+  {
+    value: "content",
+    label: "📚 Содержательный материал",
+    desc: "Факты, тезисы, формулировки. Это «мясо» результата.",
+    color: "text-green-700 bg-green-50",
+  },
+  {
+    value: "methodology",
+    label: "🧭 Методика",
+    desc: "Логика, подход, методы аргументации.",
+    color: "text-cyan-700 bg-cyan-50",
+  },
+  {
+    value: "template",
+    label: "🎨 Образец формата",
+    desc: "ТОЛЬКО формат и стиль. Содержание НЕ копируется.",
+    color: "text-blue-700 bg-blue-50",
+  },
+  {
+    value: "background",
+    label: "📎 Фоновый контекст",
+    desc: "Использовать осторожно, только при необходимости.",
+    color: "text-slate-700 bg-slate-100",
+  },
+  {
+    value: "excluded",
+    label: "⛔ Не использовать",
+    desc: "Документ есть в проекте, но в этом задании не участвует.",
+    color: "text-muted-foreground bg-muted",
+  },
+];
+
+const USAGE_MODES: Record<string, { value: string; label: string }[]> = {
+  standard: [
+    { value: "structure_source", label: "Брать структуру" },
+    { value: "requirements", label: "Брать требования к оформлению" },
+    { value: "both", label: "Структура + требования" },
+  ],
+  content: [
+    { value: "facts_only", label: "Только факты и тезисы" },
+    { value: "full_content", label: "Полное содержание" },
+    { value: "selected_topics", label: "Отдельные темы (указать в инструкции)" },
+  ],
+  methodology: [
+    { value: "methodology_only", label: "Только логика и метод" },
+    { value: "guidelines", label: "Рекомендации по оформлению" },
+  ],
+  template: [
+    { value: "format_only", label: "ТОЛЬКО формат, НЕ содержание" },
+    { value: "format_and_tone", label: "Формат + тон подачи" },
+    { value: "structure_only", label: "Только список слайдов" },
+  ],
+  background: [
+    { value: "context_only", label: "Только как контекст" },
+  ],
+  excluded: [],
+};
+
+const PRIORITIES = [
+  { value: "high", label: "Высокий" },
+  { value: "medium", label: "Средний" },
+  { value: "low", label: "Низкий" },
 ];
 
 const STYLES = ["академический", "деловой", "формальный", "краткий"];
@@ -45,7 +109,28 @@ export default function NewTaskPage() {
   const [style, setStyle] = useState("");
   const [slideCount, setSlideCount] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [docRoles, setDocRoles] = useState<Record<number, string>>({});
+  // P0: orchestration по каждому документу
+  type DocConfig = {
+    role: string;
+    usage_mode: string;
+    priority: string;
+    must_use: boolean;
+    instruction: string;
+  };
+  const [docConfigs, setDocConfigs] = useState<Record<number, DocConfig>>({});
+
+  const updateDocConfig = (docId: number, patch: Partial<DocConfig>) => {
+    setDocConfigs((prev) => {
+      const existing = prev[docId] || {
+        role: "",
+        usage_mode: "",
+        priority: "medium",
+        must_use: false,
+        instruction: "",
+      };
+      return { ...prev, [docId]: { ...existing, ...patch } };
+    });
+  };
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
@@ -69,10 +154,17 @@ export default function NewTaskPage() {
     setCreating(true);
     setError("");
     try {
-      const documentRoles = Object.entries(docRoles).map(([docId, role]) => ({
-        document_id: Number(docId),
-        role,
-      }));
+      // P0: отправляем полную orchestration по каждому документу
+      const documentRoles = Object.entries(docConfigs)
+        .filter(([, cfg]) => cfg.role && cfg.role !== "")
+        .map(([docId, cfg]) => ({
+          document_id: Number(docId),
+          role: cfg.role,
+          usage_mode: cfg.usage_mode || undefined,
+          priority: cfg.priority || "medium",
+          must_use: cfg.must_use,
+          instruction: cfg.instruction || undefined,
+        }));
       const task = await tasksApi.create({
         project_id: projectId,
         title: title.trim(),
@@ -213,36 +305,131 @@ export default function NewTaskPage() {
 
           {docs.length > 0 && (
             <div>
-              <p className="text-sm font-semibold mb-1">Документы и их роли</p>
-              <p className="text-xs text-muted-foreground mb-3">Назначьте каждому файлу роль в этом задании</p>
-              <div className="space-y-2">
-                {docs.map((doc) => (
-                  <div key={doc.id} className="flex items-center gap-3 border rounded-xl p-3">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                      doc.file_type === "pdf" ? "bg-red-100" :
-                      doc.file_type === "pptx" ? "bg-orange-100" : "bg-blue-100"
-                    }`}>
-                      <Icon name="FileText" size={14} className={
-                        doc.file_type === "pdf" ? "text-red-600" :
-                        doc.file_type === "pptx" ? "text-orange-600" : "text-blue-600"
-                      } />
+              <div className="mb-3">
+                <p className="text-sm font-semibold mb-1">Документы и их роли в задании</p>
+                <p className="text-xs text-muted-foreground">
+                  Каждому документу укажи <strong>роль</strong> и <strong>как его использовать</strong>.
+                  AI применит иерархию: <span className="font-semibold">Стандарт → Содержание → Методика → Образец формата → Фон</span>.
+                </p>
+              </div>
+              <div className="space-y-3">
+                {docs.map((doc) => {
+                  const cfg = docConfigs[doc.id] || { role: "", usage_mode: "", priority: "medium", must_use: false, instruction: "" };
+                  const roleInfo = DOC_ROLES.find((r) => r.value === cfg.role);
+                  const usageOptions = USAGE_MODES[cfg.role] || [];
+                  return (
+                    <div key={doc.id} className="border border-slate-200 rounded-xl p-4 space-y-3">
+                      {/* Шапка документа */}
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          doc.file_type === "pdf" ? "bg-red-100" :
+                          doc.file_type === "pptx" ? "bg-orange-100" : "bg-blue-100"
+                        }`}>
+                          <Icon name="FileText" size={15} className={
+                            doc.file_type === "pdf" ? "text-red-600" :
+                            doc.file_type === "pptx" ? "text-orange-600" : "text-blue-600"
+                          } />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{doc.name}</p>
+                          <p className="text-xs text-muted-foreground">{doc.file_type.toUpperCase()}</p>
+                        </div>
+                        {roleInfo && (
+                          <span className={`text-xs px-2 py-1 rounded-full ${roleInfo.color}`}>
+                            {roleInfo.label}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* 1. Роль */}
+                      <div>
+                        <label className="text-xs font-semibold text-slate-700 block mb-1.5">Роль в задании</label>
+                        <select
+                          value={cfg.role}
+                          onChange={(e) => updateDocConfig(doc.id, { role: e.target.value, usage_mode: "" })}
+                          className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
+                        >
+                          <option value="">— не выбрана —</option>
+                          {DOC_ROLES.map((r) => (
+                            <option key={r.value} value={r.value}>{r.label}</option>
+                          ))}
+                        </select>
+                        {roleInfo && (
+                          <p className="text-xs text-slate-500 mt-1">{roleInfo.desc}</p>
+                        )}
+                      </div>
+
+                      {/* 2. Дополнительные настройки — только если выбрана нормальная роль */}
+                      {cfg.role && cfg.role !== "excluded" && (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Режим использования */}
+                            {usageOptions.length > 0 && (
+                              <div>
+                                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Как использовать</label>
+                                <select
+                                  value={cfg.usage_mode}
+                                  onChange={(e) => updateDocConfig(doc.id, { usage_mode: e.target.value })}
+                                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
+                                >
+                                  <option value="">по умолчанию</option>
+                                  {usageOptions.map((m) => (
+                                    <option key={m.value} value={m.value}>{m.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {/* Приоритет */}
+                            <div>
+                              <label className="text-xs font-semibold text-slate-700 block mb-1.5">Приоритет</label>
+                              <select
+                                value={cfg.priority}
+                                onChange={(e) => updateDocConfig(doc.id, { priority: e.target.value })}
+                                className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
+                              >
+                                {PRIORITIES.map((p) => (
+                                  <option key={p.value} value={p.value}>{p.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Чекбокс «обязательный» */}
+                          <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={cfg.must_use}
+                              onChange={(e) => updateDocConfig(doc.id, { must_use: e.target.checked })}
+                              className="w-4 h-4 accent-slate-800"
+                            />
+                            <span>Обязательно использовать этот документ</span>
+                          </label>
+
+                          {/* Инструкция */}
+                          <div>
+                            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
+                              Инструкция AI <span className="text-slate-400 font-normal">(что брать / что не брать)</span>
+                            </label>
+                            <textarea
+                              value={cfg.instruction}
+                              onChange={(e) => updateDocConfig(doc.id, { instruction: e.target.value })}
+                              placeholder={
+                                cfg.role === "template"
+                                  ? "Например: возьми только формат слайдов и стиль заголовков. Не копируй темы и вехи."
+                                  : cfg.role === "standard"
+                                  ? "Например: используй структуру из главы 2 — введение / 3 главы / заключение."
+                                  : "Например: бери только разделы про управление рисками и финансы."
+                              }
+                              rows={2}
+                              className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{doc.name}</p>
-                      <p className="text-xs text-muted-foreground">{doc.file_type.toUpperCase()}</p>
-                    </div>
-                    <select
-                      value={docRoles[doc.id] || ""}
-                      onChange={(e) => setDocRoles((prev) => ({ ...prev, [doc.id]: e.target.value }))}
-                      className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
-                    >
-                      <option value="">— не выбрана —</option>
-                      {DOC_ROLES.map((r) => (
-                        <option key={r.value} value={r.value}>{r.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

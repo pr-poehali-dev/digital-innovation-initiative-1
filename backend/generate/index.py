@@ -249,43 +249,135 @@ def build_system_prompt(task: dict, documents: list, web_results: list = None) -
     parts.append(f"Язык ответа: {task.get('language', 'ru')}")
     parts.append("")
 
+    # P0 (этап 0.5): structured orchestration по ролям документов.
+    # Принцип: AI получает документы НЕ единым мешком, а с явной иерархией:
+    #   1. STANDARD       — высший приоритет, обязательно соблюдать
+    #   2. CONTENT        — источник фактов, тезисов и формулировок
+    #   3. METHODOLOGY    — логика и подход (как делать)
+    #   4. TEMPLATE       — ТОЛЬКО формат / композиция / стиль (НЕ содержание)
+    #   5. BACKGROUND     — фоновый контекст, использовать осторожно
+
+    # Группируем документы по ролям
+    by_role = {
+        "standard": [],
+        "content": [],
+        "methodology": [],
+        "template": [],
+        "background": [],
+    }
+    legacy_role_map = {
+        # Совместимость со старыми именами ролей
+        "reference_presentation": "template",
+        "content_source": "content",
+        "draft": "content",
+    }
     for doc in documents:
-        if doc["role"] == "excluded":
+        role = doc.get("role", "")
+        if role == "excluded":
             continue
-        role_names = {
-            "standard": "НОРМАТИВНЫЙ ДОКУМЕНТ / СТАНДАРТ",
-            "reference_presentation": "РЕФЕРЕНСНАЯ ПРЕЗЕНТАЦИЯ (образец формы)",
-            "content_source": "СОДЕРЖАТЕЛЬНЫЙ МАТЕРИАЛ",
-            "draft": "ЧЕРНОВИК / ТЕКУЩАЯ ВЕРСИЯ",
-        }
-        role_label = role_names.get(doc["role"], doc["role"].upper())
-        parts.append(f"--- {role_label}: {doc['name']} ---")
-        if doc.get("structure") and doc["role"] == "reference_presentation":
-            parts.append("Структура слайдов:")
-            for s in doc["structure"][:20]:
-                parts.append(f"  Слайд {s['index']}: {s['title']}")
-                if s.get("bullets"):
-                    for b in s["bullets"][:3]:
-                        parts.append(f"    • {b}")
-        # Большие тексты — больше места выделяем для дипломов
-        text = (doc.get("text") or "")[:15000]
-        parts.append(text)
-        parts.append("")
+        role = legacy_role_map.get(role, role)
+        if role not in by_role:
+            role = "background"
+        by_role[role].append(doc)
+
+    # Чёткая инструкция AI о ролях и приоритетах
+    parts.append("=" * 60)
+    parts.append("ВАЖНО: ИЕРАРХИЯ ИСПОЛЬЗОВАНИЯ ДОКУМЕНТОВ")
+    parts.append("=" * 60)
+    parts.append("""Документы имеют РОЛИ. Используй их строго по назначению:
+
+1️⃣ STANDARD (стандарты, нормативы) — ВЫСШИЙ ПРИОРИТЕТ.
+   Из них берётся СТРУКТУРА результата, обязательные разделы, требования к оформлению.
+   При конфликте с любым другим документом — побеждает STANDARD.
+
+2️⃣ CONTENT (содержательные материалы пользователя) — ВЫСОКИЙ ПРИОРИТЕТ.
+   Из них берутся ФАКТЫ, тезисы, формулировки, аргументы.
+   Это «мясо» результата.
+
+3️⃣ METHODOLOGY (методики, guideline) — СРЕДНИЙ ПРИОРИТЕТ.
+   Из них берётся ЛОГИКА построения, методы аргументации.
+
+4️⃣ TEMPLATE (шаблоны, образцы формата) — НИЗКИЙ ПРИОРИТЕТ для содержания.
+   ⚠️ ИЗ TEMPLATE БЕРИ ТОЛЬКО: формат, композицию, стиль подачи, длину блоков, уровень детализации.
+   ⛔ НЕ КОПИРУЙ из TEMPLATE: содержательные тезисы, факты, вехи, выводы — они относятся к ЧУЖОЙ работе.
+
+5️⃣ BACKGROUND (фоновый контекст) — низший приоритет, использовать только при необходимости.
+
+ПРАВИЛО КОНФЛИКТА: STANDARD > CONTENT > METHODOLOGY > TEMPLATE > BACKGROUND.
+""")
+    parts.append("")
+
+    # Выкладываем документы по ролям с явными метками
+    role_blocks = [
+        ("standard", "📜 STANDARD — НОРМАТИВНЫЕ ДОКУМЕНТЫ (структура и требования)"),
+        ("content", "📚 CONTENT — СОДЕРЖАТЕЛЬНЫЕ МАТЕРИАЛЫ (факты, тезисы, формулировки)"),
+        ("methodology", "🧭 METHODOLOGY — МЕТОДИКИ (логика, подход)"),
+        ("template", "🎨 TEMPLATE — ОБРАЗЦЫ ФОРМАТА (ТОЛЬКО формат, НЕ содержание!)"),
+        ("background", "📎 BACKGROUND — ФОНОВЫЙ КОНТЕКСТ"),
+    ]
+    for role_key, role_header in role_blocks:
+        docs_in_role = by_role[role_key]
+        if not docs_in_role:
+            continue
+        parts.append("=" * 60)
+        parts.append(role_header)
+        parts.append("=" * 60)
+        for doc in docs_in_role:
+            priority = doc.get("priority", "medium")
+            must_use = doc.get("must_use", False)
+            usage_mode = doc.get("usage_mode", "")
+            user_instruction = doc.get("instruction", "")
+            mark_must = "🔴 ОБЯЗАТЕЛЬНЫЙ" if must_use else ""
+            mark_priority = f"приоритет: {priority}"
+            parts.append(f"--- {doc['name']} ({mark_priority}) {mark_must} ---")
+            if usage_mode:
+                parts.append(f"Режим использования: {usage_mode}")
+            if user_instruction:
+                parts.append(f"📝 Инструкция пользователя: {user_instruction}")
+
+            if role_key == "template" and doc.get("structure"):
+                # Для шаблонов — показываем только структуру, без полного контента
+                parts.append("Структура (бери только её, НЕ содержание!):")
+                for s in doc["structure"][:25]:
+                    parts.append(f"  • Слайд {s['index']}: {s['title']}")
+                # Из шаблонов берём только КОРОТКИЙ фрагмент текста — чтобы видеть стиль, но не вехи
+                text_preview = (doc.get("text") or "")[:2000]
+                if text_preview:
+                    parts.append(f"\nКраткий пример стиля (для тона, НЕ для копирования содержания):\n{text_preview}")
+            else:
+                # Для standard / content / methodology / background — больше текста
+                text = (doc.get("text") or "")[:15000]
+                parts.append(text)
+            parts.append("")
 
     # Веб-результаты
     if web_results:
-        parts.append("--- ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ ИЗ ИНТЕРНЕТА ---")
+        parts.append("=" * 60)
+        parts.append("🌐 ДОПОЛНЕНИЯ ИЗ ИНТЕРНЕТА (вспомогательно)")
+        parts.append("=" * 60)
         for i, r in enumerate(web_results, 1):
             parts.append(f"{i}. {r.get('title', '')}")
             parts.append(f"   {r.get('snippet', '')}")
             parts.append(f"   Источник: {r.get('url', '')}")
         parts.append("")
 
-    parts.append("""При генерации:
-1. Явно указывай источник каждого утверждения: [из стандарта], [из образца], [из материалов], [предложено AI]
-2. Структурируй ответ чётко: заголовки слайдов, буллеты, заметки спикера
-3. Соблюдай требования нормативного документа если он задан
-4. Повторяй логику и стиль референсной презентации если она задана""")
+    parts.append("""ПРИ ГЕНЕРАЦИИ:
+1. Сначала возьми СТРУКТУРУ из документов с ролью STANDARD (если есть).
+2. Затем НАПОЛНИ её содержанием из документов с ролью CONTENT.
+3. Применяй ЛОГИКУ из METHODOLOGY.
+4. Перенеси ФОРМАТ / стиль / композицию из TEMPLATE — но НЕ содержательные тезисы из них.
+5. Каждый раздел/слайд/абзац помечай источником в квадратных скобках:
+   [из стандарта: <название>]
+   [из материалов: <название>]
+   [по методике: <название>]
+   [формат по образцу: <название>]
+   [предложено AI]
+6. В КОНЦЕ результата добавь блок «🗺 КАРТА ВЛИЯНИЯ ДОКУМЕНТОВ» в формате:
+   - Структура → из <названия standard-документа>
+   - Контент → из <названий content-документов>
+   - Формат → из <названия template-документа>
+   - Дополнения AI → перечисли
+""")
 
     return "\n".join(parts)
 
@@ -565,13 +657,14 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
-            # Загрузить документы задания с текстами
+            # Загрузить документы задания с метаданными orchestration (P0)
             cur.execute(
                 f"""SELECT td.document_id, td.role, d.original_name, d.file_type,
-                    d.extracted_text, d.structure_json
+                    d.extracted_text, d.structure_json,
+                    td.usage_mode, td.priority, td.must_use, td.instruction
                     FROM {schema}.task_documents td
                     JOIN {schema}.documents d ON d.id = td.document_id
-                    WHERE td.task_id = %s AND td.role != 'excluded'""",
+                    WHERE td.task_id = %s AND td.role != 'excluded' AND d.archived_at IS NULL""",
                 (task_id,),
             )
             documents = []
@@ -585,6 +678,8 @@ def handler(event: dict, context) -> dict:
                 documents.append({
                     "id": r[0], "role": r[1], "name": r[2],
                     "file_type": r[3], "text": r[4], "structure": structure,
+                    "usage_mode": r[6], "priority": r[7] or "medium",
+                    "must_use": bool(r[8]), "instruction": r[9] or "",
                 })
 
             # Определить номер версии

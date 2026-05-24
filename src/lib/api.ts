@@ -113,7 +113,14 @@ export const tasksApi = {
     style?: string;
     requested_slide_count?: number;
     additional_instructions?: string;
-    document_roles?: { document_id: number; role: string }[];
+    document_roles?: {
+      document_id: number;
+      role: string;
+      usage_mode?: string;
+      priority?: string;
+      must_use?: boolean;
+      instruction?: string;
+    }[];
   }) => request(URLS.tasks, "/", "POST", data),
   get: (id: number) =>
     request(URLS.tasks, "/", "POST", { action: "get_task", task_id: id }),

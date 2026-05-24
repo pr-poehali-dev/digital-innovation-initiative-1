@@ -186,12 +186,24 @@ def handler(event: dict, context) -> dict:
             )
             task_id = cur.fetchone()[0]
 
-            # Привязать документы с ролями
+            # Привязать документы с ролями + метаданными orchestration (P0)
             doc_roles = body.get("document_roles", [])
             for dr in doc_roles:
                 cur.execute(
-                    f"INSERT INTO {schema}.task_documents (task_id, document_id, role) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                    (task_id, dr["document_id"], dr["role"]),
+                    f"""INSERT INTO {schema}.task_documents
+                        (task_id, document_id, role, usage_mode, priority, must_use, instruction)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (task_id, document_id) DO UPDATE SET
+                            role = EXCLUDED.role,
+                            usage_mode = EXCLUDED.usage_mode,
+                            priority = EXCLUDED.priority,
+                            must_use = EXCLUDED.must_use,
+                            instruction = EXCLUDED.instruction""",
+                    (
+                        task_id, dr["document_id"], dr["role"],
+                        dr.get("usage_mode"), dr.get("priority", "medium"),
+                        bool(dr.get("must_use", False)), dr.get("instruction", ""),
+                    ),
                 )
 
             log_activity(cur, schema, project_id, user["id"], "created_task", "task", task_id, title)
@@ -227,14 +239,22 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
-            # Документы задания
+            # Документы задания с метаданными orchestration (P0)
             cur.execute(
-                f"""SELECT td.document_id, td.role, d.original_name, d.file_type
+                f"""SELECT td.document_id, td.role, d.original_name, d.file_type,
+                    td.usage_mode, td.priority, td.must_use, td.instruction
                     FROM {schema}.task_documents td JOIN {schema}.documents d ON d.id = td.document_id
                     WHERE td.task_id = %s""",
                 (task_id,),
             )
-            docs = [{"id": r[0], "role": r[1], "name": r[2], "file_type": r[3]} for r in cur.fetchall()]
+            docs = [
+                {
+                    "id": r[0], "role": r[1], "name": r[2], "file_type": r[3],
+                    "usage_mode": r[4], "priority": r[5] or "medium",
+                    "must_use": bool(r[6]), "instruction": r[7] or "",
+                }
+                for r in cur.fetchall()
+            ]
 
             # Версии генерации
             cur.execute(
@@ -272,10 +292,20 @@ def handler(event: dict, context) -> dict:
 
             for dr in doc_roles:
                 cur.execute(
-                    f"""INSERT INTO {schema}.task_documents (task_id, document_id, role)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (task_id, document_id) DO UPDATE SET role = EXCLUDED.role""",
-                    (task_id, dr["document_id"], dr["role"]),
+                    f"""INSERT INTO {schema}.task_documents
+                        (task_id, document_id, role, usage_mode, priority, must_use, instruction)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (task_id, document_id) DO UPDATE SET
+                            role = EXCLUDED.role,
+                            usage_mode = EXCLUDED.usage_mode,
+                            priority = EXCLUDED.priority,
+                            must_use = EXCLUDED.must_use,
+                            instruction = EXCLUDED.instruction""",
+                    (
+                        task_id, dr["document_id"], dr["role"],
+                        dr.get("usage_mode"), dr.get("priority", "medium"),
+                        bool(dr.get("must_use", False)), dr.get("instruction", ""),
+                    ),
                 )
             conn.commit()
             return json_response({"ok": True}, origin=origin)
