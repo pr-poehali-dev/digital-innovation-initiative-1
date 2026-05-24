@@ -151,12 +151,12 @@ const HeroHeader = () => {
       <nav data-state={menuState && "active"} className="fixed z-20 w-full px-2 group">
         <div
           className={cn(
-            "mx-auto mt-1 max-w-4xl px-4 transition-all duration-300 lg:px-8",
-            isScrolled && "bg-background/50 max-w-3xl rounded-2xl border backdrop-blur-lg lg:px-4",
+            "mx-auto mt-1 max-w-5xl px-4 transition-all duration-300 lg:px-8",
+            isScrolled && "bg-background/50 max-w-4xl rounded-2xl border backdrop-blur-lg lg:px-4",
           )}
         >
-          <div className="relative flex flex-wrap items-center justify-between gap-6 py-3 lg:gap-0 lg:py-0">
-            <div className="flex w-full justify-between lg:w-auto">
+          <div className="relative flex flex-wrap items-center justify-between gap-4 py-3 lg:gap-6 lg:py-0">
+            <div className="flex w-full justify-between lg:w-auto lg:flex-shrink-0">
               <a href="/" aria-label="home" className="flex items-center space-x-2">
                 <Logo />
               </a>
@@ -171,13 +171,13 @@ const HeroHeader = () => {
               </button>
             </div>
 
-            <div className="absolute inset-0 m-auto hidden size-fit lg:block">
-              <ul className="flex gap-8 text-sm">
+            <div className="hidden lg:flex lg:flex-1 lg:justify-center">
+              <ul className="flex gap-6 text-sm">
                 {menuItems.map((item, index) => (
                   <li key={index}>
                     <a
                       href={item.href}
-                      className="text-muted-foreground hover:text-accent-foreground block duration-150"
+                      className="text-muted-foreground hover:text-accent-foreground block duration-150 whitespace-nowrap"
                     >
                       <span>{item.name}</span>
                     </a>
@@ -252,34 +252,16 @@ const CardDecorator = ({ children }: { children: React.ReactNode }) => (
 )
 
 export default function SoftwareDevelopmentWebsite() {
-  const gridItems = [
-    "https://cdn.poehali.dev/templates/landing-page/fluid-gradient.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/vr-experience.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/ai-whiteboard.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/human-ai.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/digital-eye.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/robot.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/purple-flow.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/data-beam.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/ai-keyboard.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/fiber-optic.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/fluid-gradient.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/vr-experience.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/ai-whiteboard.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/human-ai.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/digital-eye.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/robot.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/purple-flow.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/data-beam.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/ai-keyboard.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/fiber-optic.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/fluid-gradient.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/vr-experience.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/ai-whiteboard.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/human-ai.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/digital-eye.jpg",
-    "https://cdn.poehali.dev/templates/landing-page/robot.jpg",
+  const studyImages = [
+    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/ba4b75b8-8d2b-4603-b9ab-07f5a660cef0.jpg",
+    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/6281ccd8-f392-4b34-88fd-170ccc1992e2.jpg",
+    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/805e5e62-be27-487c-8548-5db747b6ac1b.jpg",
+    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/591f1da1-c305-46ac-bf31-4b8a6e75c400.jpg",
+    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/940fc694-e228-423f-b6ea-e89b5ce9b80a.jpg",
+    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/7c3a1d4f-87c8-4660-a9d3-2cfdc414c421.jpg",
   ]
+  // Заполняем сетку 28 элементов (повтор картинок про учёбу)
+  const gridItems = Array.from({ length: 28 }, (_, i) => studyImages[i % studyImages.length])
 
   return (
     <>
@@ -388,90 +370,6 @@ export default function SoftwareDevelopmentWebsite() {
                 </div>
               </div>
 
-              <section className="bg-background pb-16 pt-16 md:pb-32">
-                <div className="group relative m-auto max-w-5xl px-6">
-                  <div className="absolute inset-0 z-10 flex scale-95 items-center justify-center opacity-0 duration-500 group-hover:scale-100 group-hover:opacity-100">
-                    <a href="#contact" className="block text-sm duration-150 hover:opacity-75 text-orange-500">
-                      <span>Попробуйте прямо сейчас</span>
-                      <ChevronRight className="ml-1 inline-block size-3" />
-                    </a>
-                  </div>
-                  <div className="group-hover:blur-xs mx-auto mt-12 grid max-w-2xl grid-cols-4 gap-x-12 gap-y-8 transition-all duration-500 group-hover:opacity-50 sm:gap-x-16 sm:gap-y-14">
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-5 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/nvidia.svg"
-                        alt="Логотип клиента"
-                        height="20"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-4 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/column.svg"
-                        alt="Логотип клиента"
-                        height="16"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-4 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/github.svg"
-                        alt="Логотип клиента"
-                        height="16"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-5 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/nike.svg"
-                        alt="Логотип клиента"
-                        height="20"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-5 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/lemonsqueezy.svg"
-                        alt="Логотип клиента"
-                        height="20"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-4 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/laravel.svg"
-                        alt="Логотип клиента"
-                        height="16"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-7 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/lilly.svg"
-                        alt="Логотип клиента"
-                        height="28"
-                        width="auto"
-                      />
-                    </div>
-                    <div className="flex">
-                      <img
-                        className="mx-auto h-6 w-fit dark:invert opacity-60"
-                        src="https://html.tailus.io/blocks/customers/openai.svg"
-                        alt="Логотип клиента"
-                        height="24"
-                        width="auto"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </section>
             </AnimatedGroup>
           </div>
         </section>
@@ -652,7 +550,7 @@ export default function SoftwareDevelopmentWebsite() {
 
       <footer className="bg-background border-t border-slate-200">
         <div className="mx-auto max-w-7xl py-16 px-6 lg:px-8">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-12">
             {/* Company Info */}
             <div className="space-y-4 sm:col-span-2 lg:col-span-1">
               <Logo />
@@ -678,71 +576,39 @@ export default function SoftwareDevelopmentWebsite() {
               </div>
             </div>
 
-            {/* Services */}
+            {/* Навигация */}
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-foreground">Услуги</h3>
+              <h3 className="text-sm font-semibold text-foreground">Навигация</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Веб-разработка
+                  <a href="#services" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Возможности
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Мобильные приложения
+                  <a href="#solutions" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Как это работает
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Заказное ПО
+                  <a href="#about" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Для кого
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Разработка API
-                  </a>
+                  <Link to="/login" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Войти
+                  </Link>
                 </li>
                 <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Облачные решения
-                  </a>
+                  <Link to="/cabinet" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Открыть кабинет
+                  </Link>
                 </li>
               </ul>
             </div>
 
-            {/* Company */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-foreground">Компания</h3>
-              <ul className="space-y-2 text-sm">
-                <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    О нас
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Наша команда
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Карьера
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Кейсы
-                  </a>
-                </li>
-                <li>
-                  <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Блог
-                  </a>
-                </li>
-              </ul>
-            </div>
-
-            {/* Contact */}
+            {/* Контакты */}
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Контакты</h3>
               <ul className="space-y-3 text-sm text-muted-foreground">
@@ -755,41 +621,14 @@ export default function SoftwareDevelopmentWebsite() {
                       d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                     />
                   </svg>
-                  <span className="break-all">hello@docmind.ai</span>
-                </li>
-                <li className="flex items-center space-x-2">
-                  <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                    />
-                  </svg>
-                  <span>+7 (495) 123-45-67</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                  <span>
-                    ул. Технопарковая, 15
-                    <br />
-                    Москва, 123456
-                  </span>
+                  <a href="mailto:kuzmenkoav1982@yandex.ru" className="break-all hover:text-slate-900 transition-colors">
+                    kuzmenkoav1982@yandex.ru
+                  </a>
                 </li>
               </ul>
+              <p className="text-xs text-muted-foreground pt-2">
+                Связь: напишите на email — отвечу в течение дня.
+              </p>
             </div>
           </div>
 
