@@ -37,6 +37,10 @@ export const authApi = {
     request(URLS.auth, "/", "POST", { action: "login", email, password }),
   logout: () => request(URLS.auth, "/", "POST", { action: "logout" }),
   me: () => request(URLS.auth, "/", "GET"),
+  resetPassword: (email: string) =>
+    request(URLS.auth, "/", "POST", { action: "reset_password", email }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    request(URLS.auth, "/", "POST", { action: "change_password", old_password: oldPassword, new_password: newPassword }),
 };
 
 export const projectsApi = {

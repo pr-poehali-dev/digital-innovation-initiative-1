@@ -155,6 +155,62 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
             return json_response({"ok": True})
 
+        # POST reset_password — сбросить пароль на временный
+        if method == "POST" and action == "reset_password":
+            email = body.get("email", "").strip().lower()
+            if not email:
+                return json_response({"error": "Введите email"}, 400)
+
+            cur = conn.cursor()
+            cur.execute(f"SELECT id, name FROM {schema}.users WHERE email = %s", (email,))
+            row = cur.fetchone()
+            if not row:
+                # Не раскрываем что пользователя нет
+                return json_response({"ok": True, "message": "Если email зарегистрирован, временный пароль отправлен"})
+
+            # Генерируем временный пароль
+            temp_password = secrets.token_urlsafe(9)
+            pw_hash = hash_password(temp_password)
+            cur.execute(
+                f"UPDATE {schema}.users SET password_hash = %s WHERE id = %s",
+                (pw_hash, row[0]),
+            )
+            conn.commit()
+
+            # MVP: возвращаем временный пароль на клиент (для личного использования)
+            return json_response({
+                "ok": True,
+                "temp_password": temp_password,
+                "message": "Временный пароль создан. Войдите с ним и сразу смените на постоянный.",
+            })
+
+        # POST change_password — сменить пароль (требует сессию)
+        if method == "POST" and action == "change_password":
+            user = get_current_user(conn, session_id)
+            if not user:
+                return json_response({"error": "Не авторизован"}, 401)
+
+            old_password = body.get("old_password", "")
+            new_password = body.get("new_password", "")
+            if not new_password or len(new_password) < 6:
+                return json_response({"error": "Новый пароль минимум 6 символов"}, 400)
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT password_hash FROM {schema}.users WHERE id = %s",
+                (user["id"],),
+            )
+            current_hash = cur.fetchone()[0]
+            if hash_password(old_password) != current_hash:
+                return json_response({"error": "Старый пароль неверный"}, 400)
+
+            cur.execute(
+                f"UPDATE {schema}.users SET password_hash = %s WHERE id = %s",
+                (hash_password(new_password), user["id"]),
+            )
+            conn.commit()
+            return json_response({"ok": True})
+
         return json_response({"error": "Not found"}, 404)
 
     finally:
