@@ -15,7 +15,7 @@
 | 0 | MVP: проекты / документы / AI-задания | ✅ Готово |
 | 0.1 | Security perimeter (изоляция, rate limit, CORS) | ✅ Готово |
 | **0.5 (P0)** | **Orchestration ролей документов в AI-задачах** | ✅ Готово |
-| 1 | Educational Passport + Goal Builder + Базовый Dashboard | ⏳ После P0 |
+| 1 | Educational Passport + Goal Builder + Базовый Dashboard | 🔄 Passport MVP готов, дальше Goal Builder |
 | 2 | Knowledge Graph + Recommendations + AI-наставник | ⏳ Запланировано |
 | 3 | Cognitive layer + Growth Portfolio + Career mode | ⏳ Дальше |
 
@@ -128,17 +128,26 @@
 
 **Цель:** превратить кабинет из «менеджера задач» в **«операционную систему развития»**.
 
-### 1.1 Educational Passport — Паспорт образования
-- [ ] БД: `education_records`, `education_record_files`, `institutions`
-- [ ] Отдельная страница `/cabinet/passport`
-- [ ] Загрузка дипломов / сертификатов / удостоверений
-- [ ] AI-анализ документа: извлечение учреждения, направления, дисциплин, дат
-- [ ] Ручное подтверждение пользователем
-- [ ] Три статуса:
-  - `verified` — подтверждено документом
-  - `inferred_by_ai` — выведено AI
-  - `user_confirmed` — пользователь подтвердил вручную
-- [ ] Список загруженных учебных материалов (книги / лекции / конспекты)
+### 1.1 Educational Passport — Паспорт образования ✅ MVP готов
+- [x] БД: `education_items` + `education_item_files` (одна основная сущность вместо 3 — по рекомендации ПО)
+- [x] Отдельная страница `/cabinet/passport`
+- [x] Загрузка дипломов / сертификатов / курсов / программ
+- [x] Загрузка учебных материалов (книги / лекции / конспекты / методички / статьи)
+- [x] AI-анализ документа: извлечение названия, учреждения, направления, тем, предполагаемых компетенций
+- [x] Отдельные AI-промпты для formal (с компетенциями) и для materials (только покрытие тем — не утверждаем освоение)
+- [x] Статусы: `draft / processing / needs_review / confirmed / archived`
+- [x] study_status для материалов: uploaded_only / started / partial / studied / applied
+- [x] source_type: `manual / uploaded_file / ai_extracted` — явно видим что откуда
+- [x] Модалка подтверждения с возможностью править AI-извлечение
+- [x] Фильтры: все / документы / материалы / нуждаются в проверке / подтверждены
+- [x] Виджет «Мой образовательный профиль» на главной кабинета (счётчики + области знаний)
+- [x] Backend education функция с action namespace v1
+- [x] 3 теста (auth required + unknown action + чужая сессия пустой массив)
+
+### 1.1.1 Sprint 2 — что осталось из ПО
+- [ ] Тесты изоляции на upload_file / confirm / archive (для других юзеров)
+- [ ] Поиск по паспорту
+- [ ] Реальный acceptance test пользователем
 
 ### 1.2 Goal Builder — Конструктор целей
 - [ ] БД: `goals`, `learning_paths`, `milestones`

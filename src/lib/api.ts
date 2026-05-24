@@ -9,6 +9,7 @@ const URLS = {
   webSearch: "https://functions.poehali.dev/d68c20bc-5049-4096-a8bb-ae7a7f5afe57",
   search: "https://functions.poehali.dev/54999e08-24f7-478d-92d8-8d66785f0a00",
   mediaUpload: "https://functions.poehali.dev/c3f6a32b-87f2-4ebb-8954-ccbae46e81a3",
+  education: "https://functions.poehali.dev/54faac64-7c7d-43d5-8590-e64e08067d56",
 };
 
 function getSession(): string {
@@ -165,6 +166,32 @@ export const mediaApi = {
     request(URLS.mediaUpload, "/", "POST", {
       project_id: projectId, filename, file_data: fileData, media_type: mediaType, category,
     }),
+};
+
+export const educationApi = {
+  list: (kindFilter?: string, statusFilter?: string) =>
+    request(URLS.education, "/", "POST", {
+      action: "education.list",
+      kind_filter: kindFilter, status_filter: statusFilter,
+    }),
+  get: (id: number) =>
+    request(URLS.education, "/", "POST", { action: "education.get", id }),
+  create: (data: Record<string, unknown>) =>
+    request(URLS.education, "/", "POST", { action: "education.create", ...data }),
+  update: (id: number, fields: Record<string, unknown>) =>
+    request(URLS.education, "/", "POST", { action: "education.update", id, ...fields }),
+  archive: (id: number) =>
+    request(URLS.education, "/", "POST", { action: "education.archive", id }),
+  uploadFile: (id: number, filename: string, mime: string, fileData: string) =>
+    request(URLS.education, "/", "POST", {
+      action: "education.upload_file", id, filename, mime, file_data: fileData,
+    }),
+  analyze: (id: number) =>
+    request(URLS.education, "/", "POST", { action: "education.analyze", id }),
+  confirm: (id: number, overrides?: Record<string, unknown>) =>
+    request(URLS.education, "/", "POST", { action: "education.confirm", id, overrides }),
+  profileSummary: () =>
+    request(URLS.education, "/", "POST", { action: "education.profile_summary" }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {

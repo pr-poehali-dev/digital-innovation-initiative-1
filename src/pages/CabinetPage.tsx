@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { projectsApi } from "@/lib/api";
+import { projectsApi, educationApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+
+interface EduSummary {
+  degree: number;
+  certificate: number;
+  course: number;
+  program: number;
+  material_total: number;
+  formal_total: number;
+  confirmed_total: number;
+  needs_review_total: number;
+  top_topics: { name: string; count: number }[];
+}
 
 interface Project {
   id: number;
@@ -32,6 +44,13 @@ export default function CabinetPage() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   const [confirmArchive, setConfirmArchive] = useState<Project | null>(null);
+  const [eduSummary, setEduSummary] = useState<EduSummary | null>(null);
+
+  useEffect(() => {
+    educationApi.profileSummary()
+      .then((d) => setEduSummary(d))
+      .catch(() => {});
+  }, []);
 
   const load = () => {
     setLoading(true);
@@ -94,6 +113,54 @@ export default function CabinetPage() {
   return (
     <Layout>
       <div className="max-w-5xl mx-auto px-4 py-8">
+        {/* Виджет: Образовательный профиль */}
+        <Link
+          to="/cabinet/passport"
+          className="block mb-6 border border-slate-200 rounded-2xl p-5 bg-gradient-to-br from-slate-50 to-white hover:border-slate-400 transition-colors"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">📜</span>
+                <h2 className="font-semibold">Мой образовательный профиль</h2>
+                {eduSummary?.needs_review_total && eduSummary.needs_review_total > 0 ? (
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                    {eduSummary.needs_review_total} ждут проверки
+                  </span>
+                ) : null}
+              </div>
+              {!eduSummary || (eduSummary.formal_total === 0 && eduSummary.material_total === 0) ? (
+                <p className="text-sm text-muted-foreground">
+                  Добавьте дипломы, сертификаты и материалы — система будет учитывать это при построении ваших целей.
+                </p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-4 text-sm mt-2">
+                    {eduSummary.degree > 0 && <span>🎓 Дипломы: <strong>{eduSummary.degree}</strong></span>}
+                    {eduSummary.certificate > 0 && <span>📜 Сертификаты: <strong>{eduSummary.certificate}</strong></span>}
+                    {eduSummary.course > 0 && <span>🎯 Курсы: <strong>{eduSummary.course}</strong></span>}
+                    {eduSummary.material_total > 0 && <span>📚 Материалы: <strong>{eduSummary.material_total}</strong></span>}
+                    <span className="text-green-700">✅ Подтверждено: <strong>{eduSummary.confirmed_total}</strong></span>
+                  </div>
+                  {eduSummary.top_topics && eduSummary.top_topics.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs text-slate-500 mb-1.5">Области знаний:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {eduSummary.top_topics.slice(0, 8).map((t) => (
+                          <span key={t.name} className="text-xs bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
+                            {t.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <Icon name="ChevronRight" size={20} className="text-slate-400 flex-shrink-0" />
+          </div>
+        </Link>
+
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold">Мои проекты</h1>

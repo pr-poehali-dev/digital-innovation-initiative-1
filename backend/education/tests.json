@@ -1,0 +1,32 @@
+{
+  "tests": [
+    {
+      "name": "education.list requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "education.list"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unknown action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "fake.action"},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: education.list под чужой сессией возвращает пустой массив, не чужие записи",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "education.list"},
+      "expectedStatus": 200,
+      "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -1,0 +1,617 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { educationApi, fileToBase64 } from "@/lib/api";
+import Layout from "@/components/Layout";
+import Icon from "@/components/ui/icon";
+
+interface EduItem {
+  id: number;
+  kind: string;
+  title: string;
+  issuer_name?: string;
+  institution_name?: string;
+  field_of_study?: string;
+  level?: string;
+  issued_at?: string;
+  status: string;
+  study_status?: string;
+  source_type: string;
+  is_confirmed: boolean;
+  topics: string[];
+  competencies: string[];
+  created_at: string;
+}
+
+const KIND_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+  degree: { label: "Диплом", emoji: "🎓", color: "bg-purple-100 text-purple-700" },
+  certificate: { label: "Сертификат", emoji: "📜", color: "bg-amber-100 text-amber-700" },
+  course: { label: "Курс", emoji: "🎯", color: "bg-blue-100 text-blue-700" },
+  program: { label: "Программа", emoji: "📚", color: "bg-indigo-100 text-indigo-700" },
+  book: { label: "Книга", emoji: "📖", color: "bg-green-100 text-green-700" },
+  lecture: { label: "Лекция", emoji: "🎤", color: "bg-rose-100 text-rose-700" },
+  presentation: { label: "Презентация", emoji: "🖥", color: "bg-cyan-100 text-cyan-700" },
+  methodology: { label: "Методичка", emoji: "📋", color: "bg-teal-100 text-teal-700" },
+  notes: { label: "Конспект", emoji: "✍️", color: "bg-yellow-100 text-yellow-700" },
+  article: { label: "Статья", emoji: "📰", color: "bg-orange-100 text-orange-700" },
+  material: { label: "Материал", emoji: "📄", color: "bg-slate-100 text-slate-700" },
+};
+
+const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  draft: { label: "Черновик", color: "bg-slate-100 text-slate-600" },
+  processing: { label: "Обработка...", color: "bg-blue-100 text-blue-700" },
+  needs_review: { label: "Требует проверки", color: "bg-amber-100 text-amber-700" },
+  confirmed: { label: "Подтверждено", color: "bg-green-100 text-green-700" },
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Вручную",
+  uploaded_file: "Из файла",
+  ai_extracted: "AI извлёк",
+};
+
+const FORMAL_KINDS = ["degree", "certificate", "course", "program"];
+const MATERIAL_KINDS = ["book", "lecture", "presentation", "methodology", "notes", "article", "material"];
+
+export default function EducationalPassportPage() {
+  const [items, setItems] = useState<EduItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [kindFilter, setKindFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const [showCreate, setShowCreate] = useState<null | "formal" | "material">(null);
+  const [createKind, setCreateKind] = useState("");
+  const [createTitle, setCreateTitle] = useState("");
+  const [createIssuer, setCreateIssuer] = useState("");
+  const [createField, setCreateField] = useState("");
+  const [createIssuedAt, setCreateIssuedAt] = useState("");
+  const [createHours, setCreateHours] = useState("");
+  const [createDesc, setCreateDesc] = useState("");
+  const [createStudyStatus, setCreateStudyStatus] = useState("uploaded_only");
+  const [creating, setCreating] = useState(false);
+  const [createPendingFile, setCreatePendingFile] = useState<File | null>(null);
+
+  const [confirmItem, setConfirmItem] = useState<EduItem | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    educationApi.list(kindFilter, statusFilter)
+      .then((d) => setItems(d.items))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load();   }, [kindFilter, statusFilter]);
+
+  const resetCreate = () => {
+    setShowCreate(null);
+    setCreateKind("");
+    setCreateTitle("");
+    setCreateIssuer("");
+    setCreateField("");
+    setCreateIssuedAt("");
+    setCreateHours("");
+    setCreateDesc("");
+    setCreateStudyStatus("uploaded_only");
+    setCreatePendingFile(null);
+  };
+
+  const handleCreate = async () => {
+    if (!createKind || !createTitle.trim()) {
+      alert("Заполните тип и название");
+      return;
+    }
+    setCreating(true);
+    try {
+      const isFormal = FORMAL_KINDS.includes(createKind);
+      const payload: Record<string, unknown> = {
+        kind: createKind,
+        title: createTitle.trim(),
+        issuer_name: createIssuer.trim() || undefined,
+        institution_name: createIssuer.trim() || undefined,
+        field_of_study: createField.trim() || undefined,
+        issued_at: createIssuedAt || undefined,
+        hours: createHours ? Number(createHours) : undefined,
+        description: createDesc.trim() || undefined,
+      };
+      if (!isFormal) {
+        payload.study_status = createStudyStatus;
+      }
+      const newItem = await educationApi.create(payload);
+
+      // Если приложен файл — заливаем + автозапуск AI
+      if (createPendingFile) {
+        const b64 = await fileToBase64(createPendingFile);
+        await educationApi.uploadFile(
+          newItem.id,
+          createPendingFile.name,
+          createPendingFile.type || "application/octet-stream",
+          b64,
+        );
+      }
+
+      resetCreate();
+      load();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleArchive = async (id: number) => {
+    if (!confirm("Удалить запись из паспорта? Восстановить можно через поддержку.")) return;
+    try {
+      await educationApi.archive(id);
+      load();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    }
+  };
+
+  const openConfirmModal = async (item: EduItem) => {
+    // Загружаем полные данные с extracted_data
+    try {
+      const full = await educationApi.get(item.id);
+      setConfirmItem(full);
+    } catch {
+      setConfirmItem(item);
+    }
+  };
+
+  return (
+    <Layout>
+      <div className="max-w-5xl mx-auto px-4 py-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+          <Link to="/cabinet" className="hover:text-foreground">Кабинет</Link>
+          <Icon name="ChevronRight" size={14} />
+          <span className="text-foreground font-medium">Паспорт образования</span>
+        </div>
+
+        <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold">📜 Паспорт образования</h1>
+            <p className="text-muted-foreground text-sm mt-1 max-w-2xl">
+              Добавьте дипломы, сертификаты и материалы, которые вы изучали. Система будет учитывать это
+              в образовательном профиле и при построении целей.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowCreate("formal")}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              <Icon name="GraduationCap" size={16} />
+              Добавить документ
+            </button>
+            <button
+              onClick={() => setShowCreate("material")}
+              className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              <Icon name="BookOpen" size={16} />
+              Добавить материал
+            </button>
+          </div>
+        </div>
+
+        {/* Фильтры */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {[
+            { v: "all", l: "Все" },
+            { v: "formal", l: "📜 Документы" },
+            { v: "material", l: "📚 Материалы" },
+          ].map((f) => (
+            <button
+              key={f.v}
+              onClick={() => setKindFilter(f.v)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                kindFilter === f.v ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              {f.l}
+            </button>
+          ))}
+          <div className="w-px bg-slate-200 mx-1" />
+          {[
+            { v: "all", l: "Любой статус" },
+            { v: "confirmed", l: "✅ Подтверждено" },
+            { v: "needs_review", l: "⚠️ Требует проверки" },
+          ].map((f) => (
+            <button
+              key={f.v}
+              onClick={() => setStatusFilter(f.v)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                statusFilter === f.v ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              {f.l}
+            </button>
+          ))}
+        </div>
+
+        {/* Список */}
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-24 bg-slate-100 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="text-center py-20">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+              <Icon name="GraduationCap" size={28} className="text-slate-500" />
+            </div>
+            <p className="font-medium text-foreground mb-1">Паспорт пока пустой</p>
+            <p className="text-sm text-muted-foreground mb-4">Добавьте свои дипломы, сертификаты или учебные материалы</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {items.map((item) => {
+              const kind = KIND_LABELS[item.kind] || KIND_LABELS.material;
+              const status = STATUS_LABELS[item.status] || STATUS_LABELS.draft;
+              return (
+                <div key={item.id} className="border border-slate-200 rounded-xl p-4 bg-card hover:shadow-sm transition-shadow">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${kind.color}`}>
+                      {kind.emoji}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${kind.color}`}>{kind.label}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.color}`}>{status.label}</span>
+                        <span className="text-xs text-slate-400">{SOURCE_LABELS[item.source_type] || item.source_type}</span>
+                      </div>
+                      <p className="text-sm font-semibold mb-0.5">{item.title}</p>
+                      {(item.institution_name || item.issuer_name) && (
+                        <p className="text-xs text-muted-foreground">{item.institution_name || item.issuer_name}</p>
+                      )}
+                      {item.field_of_study && (
+                        <p className="text-xs text-muted-foreground">Направление: {item.field_of_study}</p>
+                      )}
+                      {item.issued_at && (
+                        <p className="text-xs text-muted-foreground">Выдан: {new Date(item.issued_at).toLocaleDateString("ru-RU")}</p>
+                      )}
+                      {item.topics && item.topics.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {item.topics.slice(0, 5).map((t, i) => (
+                            <span key={i} className="text-xs bg-slate-50 border border-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                              {t}
+                            </span>
+                          ))}
+                          {item.topics.length > 5 && (
+                            <span className="text-xs text-slate-400">+{item.topics.length - 5}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                      {item.status === "needs_review" && (
+                        <button
+                          onClick={() => openConfirmModal(item)}
+                          className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-medium"
+                        >
+                          Проверить
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleArchive(item.id)}
+                        className="text-xs text-slate-400 hover:text-red-600 p-1"
+                        title="Удалить"
+                      >
+                        <Icon name="Trash2" size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Модалка создания */}
+      {showCreate && (
+        <CreateModal
+          mode={showCreate}
+          createKind={createKind}
+          setCreateKind={setCreateKind}
+          createTitle={createTitle}
+          setCreateTitle={setCreateTitle}
+          createIssuer={createIssuer}
+          setCreateIssuer={setCreateIssuer}
+          createField={createField}
+          setCreateField={setCreateField}
+          createIssuedAt={createIssuedAt}
+          setCreateIssuedAt={setCreateIssuedAt}
+          createHours={createHours}
+          setCreateHours={setCreateHours}
+          createDesc={createDesc}
+          setCreateDesc={setCreateDesc}
+          createStudyStatus={createStudyStatus}
+          setCreateStudyStatus={setCreateStudyStatus}
+          createPendingFile={createPendingFile}
+          setCreatePendingFile={setCreatePendingFile}
+          creating={creating}
+          onSubmit={handleCreate}
+          onClose={resetCreate}
+        />
+      )}
+
+      {/* Модалка подтверждения AI-извлечения */}
+      {confirmItem && (
+        <ConfirmModal
+          item={confirmItem}
+          onClose={() => setConfirmItem(null)}
+          onConfirmed={() => { setConfirmItem(null); load(); }}
+        />
+      )}
+    </Layout>
+  );
+}
+
+
+function CreateModal(props: {
+  mode: "formal" | "material";
+  createKind: string; setCreateKind: (v: string) => void;
+  createTitle: string; setCreateTitle: (v: string) => void;
+  createIssuer: string; setCreateIssuer: (v: string) => void;
+  createField: string; setCreateField: (v: string) => void;
+  createIssuedAt: string; setCreateIssuedAt: (v: string) => void;
+  createHours: string; setCreateHours: (v: string) => void;
+  createDesc: string; setCreateDesc: (v: string) => void;
+  createStudyStatus: string; setCreateStudyStatus: (v: string) => void;
+  createPendingFile: File | null; setCreatePendingFile: (f: File | null) => void;
+  creating: boolean;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  const kinds = props.mode === "formal" ? FORMAL_KINDS : MATERIAL_KINDS;
+  const title = props.mode === "formal" ? "Добавить документ об образовании" : "Добавить учебный материал";
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 py-8 overflow-y-auto">
+      <div className="bg-white border rounded-2xl p-6 w-full max-w-lg shadow-xl my-auto">
+        <h2 className="text-lg font-semibold mb-4">{title}</h2>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Тип *</label>
+            <select
+              value={props.createKind}
+              onChange={(e) => props.setCreateKind(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+            >
+              <option value="">— выберите —</option>
+              {kinds.map((k) => (
+                <option key={k} value={k}>{KIND_LABELS[k]?.emoji} {KIND_LABELS[k]?.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Название *</label>
+            <input
+              value={props.createTitle}
+              onChange={(e) => props.setCreateTitle(e.target.value)}
+              placeholder={props.mode === "formal" ? "Например: Магистр менеджмента" : "Например: Книга «Управление проектами»"}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
+              {props.mode === "formal" ? "Учреждение / платформа" : "Автор / источник"}
+            </label>
+            <input
+              value={props.createIssuer}
+              onChange={(e) => props.setCreateIssuer(e.target.value)}
+              placeholder={props.mode === "formal" ? "Например: МГУ / Coursera / Stepik" : "Например: Том ДеМарко"}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+            />
+          </div>
+
+          {props.mode === "formal" && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">Направление</label>
+                  <input
+                    value={props.createField}
+                    onChange={(e) => props.setCreateField(e.target.value)}
+                    placeholder="Менеджмент"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">Дата выдачи</label>
+                  <input
+                    type="date"
+                    value={props.createIssuedAt}
+                    onChange={(e) => props.setCreateIssuedAt(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Часы (необязательно)</label>
+                <input
+                  type="number"
+                  value={props.createHours}
+                  onChange={(e) => props.setCreateHours(e.target.value)}
+                  placeholder="72"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+                />
+              </div>
+            </>
+          )}
+
+          {props.mode === "material" && (
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1.5">Статус изучения</label>
+              <select
+                value={props.createStudyStatus}
+                onChange={(e) => props.setCreateStudyStatus(e.target.value)}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="uploaded_only">Только загрузил</option>
+                <option value="started">Начал изучать</option>
+                <option value="partial">Изучено частично</option>
+                <option value="studied">Изучено</option>
+                <option value="applied">Использовал в работе</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Описание / что изучал</label>
+            <textarea
+              value={props.createDesc}
+              onChange={(e) => props.setCreateDesc(e.target.value)}
+              rows={2}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white resize-none"
+            />
+          </div>
+
+          {/* Файл (опционально, запустит AI-анализ) */}
+          <div className="border-2 border-dashed border-slate-300 rounded-lg p-3">
+            <p className="text-xs font-semibold text-slate-700 mb-2">📎 Прикрепить файл (опционально)</p>
+            <p className="text-xs text-slate-500 mb-2">PDF, DOCX, PPTX, TXT — AI попробует автоматически извлечь метаданные</p>
+            <input
+              type="file"
+              accept=".pdf,.docx,.pptx,.txt"
+              onChange={(e) => props.setCreatePendingFile(e.target.files?.[0] || null)}
+              className="text-xs"
+            />
+            {props.createPendingFile && (
+              <p className="text-xs text-slate-700 mt-2">Выбран: <strong>{props.createPendingFile.name}</strong></p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-5 mt-2">
+          <button onClick={props.onClose} className="flex-1 border border-slate-300 rounded-lg py-2 text-sm font-medium hover:bg-slate-50">
+            Отмена
+          </button>
+          <button
+            onClick={props.onSubmit}
+            disabled={props.creating || !props.createKind || !props.createTitle.trim()}
+            className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+          >
+            {props.creating ? "Создаю..." : (props.createPendingFile ? "Создать и проанализировать" : "Создать")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string, unknown> }; onClose: () => void; onConfirmed: () => void }) {
+  const [title, setTitle] = useState(props.item.title || "");
+  const [institution, setInstitution] = useState(props.item.institution_name || "");
+  const [field, setField] = useState(props.item.field_of_study || "");
+  const [level, setLevel] = useState(props.item.level || "");
+  const [topics, setTopics] = useState<string[]>(props.item.topics || []);
+  const [competencies, setCompetencies] = useState<string[]>(props.item.competencies || []);
+  const [studyStatus, setStudyStatus] = useState(props.item.study_status || "");
+  const [saving, setSaving] = useState(false);
+  const isMaterial = MATERIAL_KINDS.includes(props.item.kind);
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    try {
+      await educationApi.confirm(props.item.id, {
+        title, institution_name: institution, field_of_study: field, level,
+        topics, competencies,
+        study_status: isMaterial ? studyStatus : undefined,
+      });
+      props.onConfirmed();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4 py-8 overflow-y-auto">
+      <div className="bg-white border rounded-2xl p-6 w-full max-w-xl shadow-xl my-auto">
+        <h2 className="text-lg font-semibold mb-1">🤖 Проверка AI-извлечения</h2>
+        <p className="text-xs text-slate-500 mb-4">
+          AI распознал данные из файла. Проверьте и при необходимости поправьте — мы храним и то что извлёк AI, и что подтвердили вы.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Название</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">Учреждение / источник</label>
+            <input value={institution} onChange={(e) => setInstitution(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1.5">Направление</label>
+              <input value={field} onChange={(e) => setField(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1.5">Уровень</label>
+              <input value={level} onChange={(e) => setLevel(e.target.value)} placeholder="bachelor / online / ..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+            </div>
+          </div>
+
+          {isMaterial && (
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1.5">Статус изучения</label>
+              <select value={studyStatus} onChange={(e) => setStudyStatus(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="uploaded_only">Только загрузил</option>
+                <option value="started">Начал изучать</option>
+                <option value="partial">Изучено частично</option>
+                <option value="studied">Изучено</option>
+                <option value="applied">Использовал в работе</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
+              Темы (AI извлёк) — отредактируйте если что-то лишнее
+            </label>
+            <textarea
+              value={topics.join(", ")}
+              onChange={(e) => setTopics(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+              rows={2}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-slate-700 block mb-1.5">
+              {isMaterial ? "Компетенции которые материал ПОКРЫВАЕТ" : "Компетенции (предположение AI)"}
+            </label>
+            <textarea
+              value={competencies.join(", ")}
+              onChange={(e) => setCompetencies(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
+              rows={2}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white resize-none"
+            />
+            {isMaterial && (
+              <p className="text-xs text-slate-500 mt-1">
+                ⚠️ AI указал темы, которые материал затрагивает. Это НЕ значит, что вы их освоили.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-5">
+          <button onClick={props.onClose} className="flex-1 border border-slate-300 rounded-lg py-2 text-sm font-medium hover:bg-slate-50">
+            Отмена
+          </button>
+          <button onClick={handleSubmit} disabled={saving} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50">
+            {saving ? "Сохраняю..." : "Подтвердить"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
