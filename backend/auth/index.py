@@ -23,19 +23,41 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+import uuid
+
 def cors_headers():
     return {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+        "X-Api-Version": "v1",
     }
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, request_id=None):
+    """Возвращает ответ. Если в data есть 'error' — заворачиваем в формат v1.
+    Иначе сохраняем обратную совместимость: поля корня + добавляем ok/request_id."""
+    rid = request_id or str(uuid.uuid4())
+    headers = {**cors_headers(), "Content-Type": "application/json", "X-Request-Id": rid}
+
+    # Ошибка — единый формат
+    if isinstance(data, dict) and "error" in data and status >= 400:
+        return {
+            "statusCode": status,
+            "headers": headers,
+            "body": json.dumps({
+                "ok": False,
+                "request_id": rid,
+                "error": {"code": "auth_error", "message": data["error"]},
+            }, ensure_ascii=False),
+        }
+
+    # Успех — добавляем ok/request_id, но сохраняем поля для обратной совместимости
+    out = {"ok": True, "request_id": rid, **(data if isinstance(data, dict) else {"data": data})}
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
-        "body": json.dumps(data, ensure_ascii=False, default=str),
+        "headers": headers,
+        "body": json.dumps(out, ensure_ascii=False, default=str),
     }
 
 

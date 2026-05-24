@@ -30,10 +30,15 @@ async function request(base: string, path: string, method = "GET", body?: unknow
     const msg = data?.error?.message || data?.error || "Ошибка запроса";
     throw new Error(msg);
   }
-  // Новый формат v1: {ok, data, error, request_id}
+  // Новый формат v1: {ok, data?, error?, request_id, ...}
   if (data && typeof data === "object" && "ok" in data) {
     if (!data.ok) throw new Error(data.error?.message || "Ошибка");
-    return data.data;
+    // Если есть поле data — возвращаем его (полный v1 контракт, как projects)
+    if ("data" in data) return data.data;
+    // Иначе — обратная совместимость: возвращаем весь объект без служебных полей
+    const { ok, request_id, ...rest } = data;
+    void ok; void request_id;
+    return rest;
   }
   return data;
 }

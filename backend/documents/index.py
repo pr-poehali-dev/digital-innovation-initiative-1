@@ -321,7 +321,7 @@ def handler(event: dict, context) -> dict:
                 f"""SELECT d.id, d.original_name, d.file_type, d.file_size, d.status, d.created_at, u.name,
                     d.category, d.page_count, d.extracted_length, d.media_type
                     FROM {schema}.documents d JOIN {schema}.users u ON u.id = d.uploaded_by
-                    WHERE d.project_id = %s ORDER BY d.created_at DESC""",
+                    WHERE d.project_id = %s AND d.archived_at IS NULL ORDER BY d.created_at DESC""",
                 (project_id,),
             )
             docs = [
@@ -419,39 +419,65 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": f"Ошибка ссылки: {e}"}, 500)
             return json_response({"url": url, "filename": orig_name, "file_type": ftype})
 
-        # document.delete — удалить документ
+        # document.delete — SOFT ARCHIVE (не уничтожает данные)
+        # Файл в S3 сохраняется, связи с заданиями НЕ рвутся,
+        # старые версии генерации продолжают ссылаться корректно.
+        # Только archived_at = NOW() — документ скрывается из активного UI.
         if action == "document.delete":
             doc_id = body.get("document_id")
             if not doc_id:
                 return json_response({"error": "Нужен document_id"}, 400)
             doc_id = int(doc_id)
             cur.execute(
-                f"SELECT s3_key, project_id, original_name FROM {schema}.documents WHERE id = %s",
+                f"SELECT project_id, original_name, archived_at FROM {schema}.documents WHERE id = %s",
                 (doc_id,),
             )
             row = cur.fetchone()
             if not row:
                 return json_response({"error": "Не найдено"}, 404)
-            s3_key, pid, orig_name = row
+            pid, orig_name, already_archived = row
+            if already_archived:
+                return json_response({"error": "Документ уже архивирован"}, 400)
+            # Изоляция: только member проекта может архивировать
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (pid, user["id"]),
             )
-            access = cur.fetchone()
-            if not access:
+            if not cur.fetchone():
                 return json_response({"error": "Нет доступа"}, 403)
-            # Удаляем связи и сам документ
-            cur.execute(f"DELETE FROM {schema}.document_chunks WHERE document_id = %s", (doc_id,))
-            cur.execute(f"DELETE FROM {schema}.task_documents WHERE document_id = %s", (doc_id,))
-            cur.execute(f"DELETE FROM {schema}.document_chats WHERE document_id = %s", (doc_id,))
-            cur.execute(f"DELETE FROM {schema}.documents WHERE id = %s", (doc_id,))
-            # Удаляем из S3 (best effort)
-            try:
-                s3 = get_s3()
-                s3.delete_object(Bucket="files", Key=s3_key)
-            except Exception:
-                pass
-            log_activity(cur, schema, pid, user["id"], "deleted_document", "document", doc_id, orig_name)
+            cur.execute(
+                f"UPDATE {schema}.documents SET archived_at = NOW() WHERE id = %s",
+                (doc_id,),
+            )
+            log_activity(cur, schema, pid, user["id"], "archived_document", "document", doc_id, orig_name)
+            conn.commit()
+            return json_response({"ok": True, "archived": True, "can_restore": True})
+
+        # document.restore — восстановить из архива
+        if action == "document.restore":
+            doc_id = body.get("document_id")
+            if not doc_id:
+                return json_response({"error": "Нужен document_id"}, 400)
+            doc_id = int(doc_id)
+            cur.execute(
+                f"SELECT project_id, original_name FROM {schema}.documents WHERE id = %s",
+                (doc_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Не найдено"}, 404)
+            pid, orig_name = row
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (pid, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+            cur.execute(
+                f"UPDATE {schema}.documents SET archived_at = NULL WHERE id = %s",
+                (doc_id,),
+            )
+            log_activity(cur, schema, pid, user["id"], "restored_document", "document", doc_id, orig_name)
             conn.commit()
             return json_response({"ok": True})
 

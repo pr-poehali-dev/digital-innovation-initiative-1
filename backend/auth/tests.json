@@ -1,12 +1,20 @@
 {
   "tests": [
     {
-      "name": "Login wrong credentials returns 401",
+      "name": "Login wrong credentials returns 401 with v1 format",
       "method": "POST",
       "path": "/",
       "body": {"action": "login", "email": "nobody@test.com", "password": "wrongpass"},
       "expectedStatus": 401,
-      "expectedBody": {"error": "string"},
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Me without session returns 401",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
     }
   ]
