@@ -26,6 +26,26 @@
       "expectedStatus": 400,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: project.get чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "project.get", "project_id": 1},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: project.invite чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "project.invite", "project_id": 1, "email": "hacker@test.com"},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

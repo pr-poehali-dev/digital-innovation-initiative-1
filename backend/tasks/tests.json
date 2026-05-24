@@ -1,11 +1,31 @@
 {
   "tests": [
     {
-      "name": "Get tasks without auth",
+      "name": "Create task without auth",
       "method": "POST",
       "path": "/",
       "body": {"project_id": 1, "title": "test", "task_type": "analyze"},
       "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: list_tasks чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "list_tasks", "project_id": 1},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: get_task чужое задание → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "get_task", "task_id": 1},
+      "expectedStatus": 403,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
     }

@@ -1,9 +1,11 @@
 """
 AI-генерация: анализ документов, структура презентации, текст слайдов, итерации.
-Использует OpenAI GPT-4o для обработки загруженных материалов.
+Использует YandexGPT.
 """
 import json
 import os
+import secrets
+from datetime import datetime, timedelta
 import psycopg2
 
 
@@ -11,6 +13,67 @@ def get_db():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = False
     return conn
+
+
+def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_seconds: int):
+    """Storage-backed rate limiter в БД."""
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT hit_count, first_hit_at, blocked_until FROM {schema}.rate_limits WHERE key = %s AND bucket = %s",
+        (key, bucket),
+    )
+    row = cur.fetchone()
+    now = datetime.now()
+    if row:
+        hit_count, first_hit_at, blocked_until = row
+        if blocked_until and blocked_until > now:
+            return False, max(int((blocked_until - now).total_seconds()), 1)
+        age = (now - first_hit_at).total_seconds()
+        if age > window_seconds:
+            cur.execute(
+                f"UPDATE {schema}.rate_limits SET hit_count = 1, first_hit_at = NOW(), last_hit_at = NOW(), blocked_until = NULL WHERE key = %s AND bucket = %s",
+                (key, bucket),
+            )
+            conn.commit()
+            return True, 0
+        if hit_count >= max_hits:
+            cur.execute(
+                f"UPDATE {schema}.rate_limits SET blocked_until = %s WHERE key = %s AND bucket = %s",
+                (now + timedelta(seconds=window_seconds), key, bucket),
+            )
+            conn.commit()
+            return False, window_seconds
+        cur.execute(
+            f"UPDATE {schema}.rate_limits SET hit_count = hit_count + 1, last_hit_at = NOW() WHERE key = %s AND bucket = %s",
+            (key, bucket),
+        )
+        conn.commit()
+        return True, 0
+    cur.execute(
+        f"INSERT INTO {schema}.rate_limits (key, bucket, hit_count) VALUES (%s, %s, 1) ON CONFLICT (key, bucket) DO UPDATE SET hit_count = {schema}.rate_limits.hit_count + 1",
+        (key, bucket),
+    )
+    conn.commit()
+    return True, 0
+
+
+def rate_limit_response(retry_after: int, request_id: str, reason: str):
+    return {
+        "statusCode": 429,
+        "headers": {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+            "Content-Type": "application/json",
+            "Retry-After": str(retry_after),
+            "X-Request-Id": request_id,
+        },
+        "body": json.dumps({
+            "ok": False,
+            "request_id": request_id,
+            "error": {"code": "rate_limit_exceeded", "message": f"{reason} Повторите через {retry_after} сек.", "retry_after": retry_after},
+        }, ensure_ascii=False),
+    }
 
 
 def get_schema():
@@ -241,6 +304,16 @@ def handler(event: dict, context) -> dict:
 
             if not task_id:
                 return json_response({"error": "Нужен task_id"}, 400)
+
+            # Rate limit: 10 генераций / минуту на пользователя
+            # Генерации дорогие (yandex GPT) и долгие — защита от спама/абьюза
+            request_id_rl = secrets.token_hex(8)
+            allowed, retry_after = check_rate_limit(
+                conn, schema, key=f"generate:{user['id']}", bucket="generate_user",
+                max_hits=10, window_seconds=60,
+            )
+            if not allowed:
+                return rate_limit_response(retry_after, request_id_rl, "Слишком много запросов на генерацию.")
 
             # Загрузить задание
             cur.execute(

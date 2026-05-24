@@ -61,11 +61,32 @@ def verify_password(password: str, stored_hash: str) -> tuple:
 
 import uuid
 
-def cors_headers():
+ALLOWED_ORIGINS = {
+    "https://raven.moscow",
+    "https://www.raven.moscow",
+    "https://docmind.ai",
+    "https://digital-innovation-initiative-1--preview.poehali.dev",
+    "https://poehali.dev",
+    "http://localhost:5173",
+    "http://localhost:3000",
+}
+
+
+def cors_headers(origin: str = None):
+    """Возвращает CORS headers — origin reflection с whitelist."""
+    allow_origin = "*"
+    if origin and origin in ALLOWED_ORIGINS:
+        allow_origin = origin
+    elif origin:
+        # Для preview-сабдоменов poehali.dev
+        if origin.endswith(".poehali.dev"):
+            allow_origin = origin
     return {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
         "X-Api-Version": "v1",
     }
 
@@ -112,6 +133,104 @@ def get_current_user(conn, session_id):
     return None
 
 
+def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_seconds: int):
+    """Storage-backed rate limiter в БД.
+    Возвращает (allowed: bool, retry_after_seconds: int, hits: int).
+    """
+    cur = conn.cursor()
+    # Очистка старых окон + проверка текущего
+    cur.execute(
+        f"""SELECT hit_count, first_hit_at, blocked_until
+            FROM {schema}.rate_limits
+            WHERE key = %s AND bucket = %s""",
+        (key, bucket),
+    )
+    row = cur.fetchone()
+    now = datetime.now()
+
+    if row:
+        hit_count, first_hit_at, blocked_until = row
+        # Проверка явной блокировки
+        if blocked_until and blocked_until > now:
+            seconds_left = int((blocked_until - now).total_seconds())
+            return False, max(seconds_left, 1), hit_count
+
+        # Окно истекло — сбрасываем
+        age = (now - first_hit_at).total_seconds()
+        if age > window_seconds:
+            cur.execute(
+                f"""UPDATE {schema}.rate_limits
+                    SET hit_count = 1, first_hit_at = NOW(), last_hit_at = NOW(), blocked_until = NULL
+                    WHERE key = %s AND bucket = %s""",
+                (key, bucket),
+            )
+            conn.commit()
+            return True, 0, 1
+
+        # В пределах окна — проверяем лимит
+        if hit_count >= max_hits:
+            block_until = now + timedelta(seconds=window_seconds)
+            cur.execute(
+                f"""UPDATE {schema}.rate_limits
+                    SET blocked_until = %s, last_hit_at = NOW()
+                    WHERE key = %s AND bucket = %s""",
+                (block_until, key, bucket),
+            )
+            conn.commit()
+            return False, window_seconds, hit_count
+
+        # Инкремент
+        cur.execute(
+            f"""UPDATE {schema}.rate_limits
+                SET hit_count = hit_count + 1, last_hit_at = NOW()
+                WHERE key = %s AND bucket = %s""",
+            (key, bucket),
+        )
+        conn.commit()
+        return True, 0, hit_count + 1
+    else:
+        # Первый запрос
+        cur.execute(
+            f"""INSERT INTO {schema}.rate_limits (key, bucket, hit_count, first_hit_at, last_hit_at)
+                VALUES (%s, %s, 1, NOW(), NOW())
+                ON CONFLICT (key, bucket) DO UPDATE
+                    SET hit_count = {schema}.rate_limits.hit_count + 1, last_hit_at = NOW()""",
+            (key, bucket),
+        )
+        conn.commit()
+        return True, 0, 1
+
+
+def rate_limit_response(retry_after: int, request_id: str, reason: str):
+    """Возвращает 429 Too Many Requests с Retry-After заголовком."""
+    return {
+        "statusCode": 429,
+        "headers": {
+            **cors_headers(),
+            "Content-Type": "application/json",
+            "Retry-After": str(retry_after),
+            "X-Request-Id": request_id,
+        },
+        "body": json.dumps({
+            "ok": False,
+            "request_id": request_id,
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": f"Слишком много запросов. {reason} Повторите через {retry_after} сек.",
+                "retry_after": retry_after,
+            },
+        }, ensure_ascii=False),
+    }
+
+
+def get_client_ip(event):
+    """Извлекает IP клиента из event."""
+    try:
+        return event.get("requestContext", {}).get("identity", {}).get("sourceIp", "unknown")
+    except Exception:
+        return "unknown"
+
+
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors_headers(), "body": ""}
@@ -126,6 +245,8 @@ def handler(event: dict, context) -> dict:
             pass
 
     session_id = event.get("headers", {}).get("X-Session-Id", "")
+    request_id = getattr(context, "request_id", None) or secrets.token_hex(8)
+    client_ip = get_client_ip(event)
     conn = get_db()
     schema = get_schema()
 
@@ -151,6 +272,14 @@ def handler(event: dict, context) -> dict:
 
             if not email or not password or not name:
                 return json_response({"error": "Заполните все поля"}, 400)
+
+            # Rate limit: max 10 регистраций / час с одного IP
+            allowed, retry_after, _ = check_rate_limit(
+                conn, schema, key=f"register:{client_ip}", bucket="register_ip",
+                max_hits=10, window_seconds=3600,
+            )
+            if not allowed:
+                return rate_limit_response(retry_after, request_id, "Слишком много регистраций с этого IP.")
 
             cur = conn.cursor()
             cur.execute(f"SELECT id FROM {schema}.users WHERE email = %s", (email,))
@@ -178,6 +307,16 @@ def handler(event: dict, context) -> dict:
             email = body.get("email", "").strip().lower()
             password = body.get("password", "")
 
+            # Rate limit: 5 попыток / 15 минут на пару IP+email
+            # Защита от brute-force подбора паролей
+            rl_key = f"login:{client_ip}:{email}"
+            allowed, retry_after, hits = check_rate_limit(
+                conn, schema, key=rl_key, bucket="login_attempts",
+                max_hits=5, window_seconds=900,
+            )
+            if not allowed:
+                return rate_limit_response(retry_after, request_id, "Слишком много неудачных попыток входа.")
+
             cur = conn.cursor()
             # Загружаем user и хеш — НЕ сравниваем в SQL (это позволяет timing-attack
             # и не работает с Argon2 где хеш содержит соль и параметры)
@@ -202,6 +341,12 @@ def handler(event: dict, context) -> dict:
                     f"UPDATE {schema}.users SET password_hash = %s WHERE id = %s",
                     (new_hash, user_id),
                 )
+
+            # Успешный вход — сбрасываем счётчик rate limit для этой пары IP+email
+            cur.execute(
+                f"UPDATE {schema}.rate_limits SET hit_count = 0, blocked_until = NULL WHERE key = %s AND bucket = %s",
+                (rl_key, "login_attempts"),
+            )
 
             sid = secrets.token_hex(32)
             expires = datetime.now() + timedelta(days=30)
