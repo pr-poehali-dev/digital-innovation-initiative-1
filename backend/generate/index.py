@@ -90,19 +90,37 @@ ALLOWED_ORIGINS = {
 }
 
 
+def _is_allowed_origin(origin: str) -> bool:
+    """Безопасная проверка origin через urlparse — не raw endswith.
+    Защита от попыток типа https://attacker.com/.poehali.dev"""
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        # Только https + допустимый hostname
+        if parsed.scheme not in ("https", "http"):
+            return False
+        hostname = (parsed.hostname or "").lower()
+        # Точное совпадение с poehali.dev или его поддоменом
+        if hostname == "poehali.dev" or hostname.endswith(".poehali.dev"):
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def cors_headers(origin: str = None):
-    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
-    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    """Strict CORS: deny-by-default. Без Allow-Credentials — auth через header, не cookies."""
     headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
-        "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
-    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+    if _is_allowed_origin(origin):
         headers["Access-Control-Allow-Origin"] = origin
-    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
-    # браузер заблокирует кросс-доменный запрос (что и требуется)
     return headers
 
 
@@ -317,8 +335,195 @@ def handler(event: dict, context) -> dict:
 
         cur = conn.cursor()
 
-        # POST /run или POST / с task_id — запустить генерацию (не если это get_run)
-        if method == "POST" and body.get("action") != "get_run" and (path_parts[-1] == "run" or body.get("task_id")):
+        # === Explainable AI endpoints ===
+
+        # POST action=explain_block — AI объясняет откуда и почему этот блок
+        if method == "POST" and body.get("action") == "explain_block":
+            run_id = body.get("run_id")
+            block_text = body.get("block_text", "").strip()
+            if not run_id or not block_text:
+                return json_response({"error": "Нужны run_id и block_text"}, 400, origin=origin)
+
+            # Изоляция: достаём run и проверяем доступ к проекту
+            cur.execute(
+                f"""SELECT gr.task_id, t.project_id, t.topic, t.title
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
+                    WHERE gr.id = %s""",
+                (int(run_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
+            task_id, project_id, topic, task_title = row
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            # Собираем источники: документы задания с ролями + их фрагменты
+            cur.execute(
+                f"""SELECT td.role, d.original_name, d.extracted_text, d.id
+                    FROM {schema}.task_documents td
+                    JOIN {schema}.documents d ON d.id = td.document_id
+                    WHERE td.task_id = %s AND d.archived_at IS NULL""",
+                (task_id,),
+            )
+            docs = cur.fetchall()
+
+            sources_context = []
+            for role, name, text, doc_id in docs:
+                role_label = {
+                    "standard": "СТАНДАРТ",
+                    "reference_presentation": "ОБРАЗЕЦ",
+                    "content_source": "МАТЕРИАЛ",
+                    "draft": "ЧЕРНОВИК",
+                }.get(role, role.upper())
+                sources_context.append(f"--- {role_label}: {name} (id={doc_id}) ---\n{(text or '')[:4000]}")
+
+            sources_text = "\n\n".join(sources_context) if sources_context else "(нет приложенных документов)"
+
+            explain_prompt = f"""Тебя просят объяснить происхождение конкретного фрагмента сгенерированной презентации/работы.
+
+ТЕМА ЗАДАНИЯ: {topic or task_title}
+
+ИСТОЧНИКИ (документы пользователя):
+{sources_text}
+
+ФРАГМЕНТ КОТОРЫЙ НУЖНО ОБЪЯСНИТЬ:
+\"\"\"
+{block_text[:3000]}
+\"\"\"
+
+Объясни ЧЁТКО и КРАТКО (3-7 предложений):
+1. Откуда взяты конкретные факты/формулировки (укажи название документа из источников выше или скажи что это твоя интерпретация/общеизвестные знания)
+2. Почему именно так сформулировано (логика, требование стандарта, копирование структуры образца)
+3. Что можно проверить/уточнить у пользователя
+
+Формат: обычный текст без markdown. Если есть прямые цитаты из документов — указывай их в кавычках с пометкой [из {{name}}].
+"""
+
+            answer = call_yandex_gpt([
+                {"role": "system", "content": "Ты — explainable AI. Отвечаешь короткими прозрачными обоснованиями откуда что взято."},
+                {"role": "user", "content": explain_prompt},
+            ])
+
+            return json_response({"explanation": answer, "block_text": block_text[:500]}, origin=origin)
+
+        # POST action=refine_block — AI перерабатывает только указанный фрагмент с правкой
+        if method == "POST" and body.get("action") == "refine_block":
+            run_id = body.get("run_id")
+            block_text = body.get("block_text", "").strip()
+            instruction = body.get("instruction", "").strip()
+            if not run_id or not block_text or not instruction:
+                return json_response({"error": "Нужны run_id, block_text и instruction"}, 400, origin=origin)
+
+            cur.execute(
+                f"""SELECT gr.task_id, gr.result_json, t.project_id, t.topic
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
+                    WHERE gr.id = %s""",
+                (int(run_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
+            task_id, result_json, project_id, topic = row
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            # Получаем источники для контекста
+            cur.execute(
+                f"""SELECT td.role, d.original_name, d.extracted_text
+                    FROM {schema}.task_documents td
+                    JOIN {schema}.documents d ON d.id = td.document_id
+                    WHERE td.task_id = %s AND td.role != 'excluded' AND d.archived_at IS NULL""",
+                (task_id,),
+            )
+            docs = cur.fetchall()
+            sources_text = "\n\n".join(
+                f"[{role.upper()}: {name}]\n{(text or '')[:3000]}"
+                for role, name, text in docs
+            ) or "(нет документов)"
+
+            refine_prompt = f"""Тебя просят переработать ТОЛЬКО ОДИН ФРАГМЕНТ работы по указанию пользователя.
+Не трогай остальную работу. Верни ТОЛЬКО переработанный фрагмент — без пояснений, без префиксов.
+
+ТЕМА: {topic or ''}
+
+ИСТОЧНИКИ:
+{sources_text}
+
+ИСХОДНЫЙ ФРАГМЕНТ:
+\"\"\"
+{block_text[:3000]}
+\"\"\"
+
+УКАЗАНИЕ ПОЛЬЗОВАТЕЛЯ:
+{instruction[:1000]}
+
+Переработанный фрагмент (сохрани формат, стиль, метки [из материалов]/[из образца]/[предложено AI] если они были):"""
+
+            new_block = call_yandex_gpt([
+                {"role": "system", "content": "Ты редактируешь ТОЛЬКО указанный фрагмент. Возвращаешь только новый текст этого фрагмента, ничего другого."},
+                {"role": "user", "content": refine_prompt},
+            ])
+
+            # Подставляем новый фрагмент в полный результат
+            try:
+                full_result = json.loads(result_json) if result_json else {}
+                full_content = full_result.get("content", "")
+                new_full_content = full_content.replace(block_text, new_block, 1)
+
+                # Создаём новую версию
+                cur.execute(
+                    f"SELECT COALESCE(MAX(version_number), 0) FROM {schema}.generation_runs WHERE task_id = %s",
+                    (task_id,),
+                )
+                new_version = cur.fetchone()[0] + 1
+
+                new_result_json = json.dumps({"content": new_full_content, "version": new_version, "refined_from": int(run_id)}, ensure_ascii=False)
+                summary = f"Локальная правка фрагмента (v{new_version}): {instruction[:120]}"
+
+                cur.execute(
+                    f"""INSERT INTO {schema}.generation_runs
+                        (task_id, created_by, version_number, input_prompt, result_json, output_summary, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'done') RETURNING id""",
+                    (task_id, user["id"], new_version, f"REFINE_BLOCK: {instruction}", new_result_json, summary),
+                )
+                new_run_id = cur.fetchone()[0]
+
+                # Сохраняем как revision
+                cur.execute(
+                    f"INSERT INTO {schema}.revisions (generation_run_id, user_id, instruction_text, scope) VALUES (%s, %s, %s, 'block')",
+                    (new_run_id, user["id"], instruction),
+                )
+
+                # Лог активности
+                cur.execute(
+                    f"INSERT INTO {schema}.activity_log (project_id, user_id, action, entity_type, entity_id, details) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (project_id, user["id"], "refined_block", "generation_run", new_run_id, instruction[:200]),
+                )
+                conn.commit()
+
+                return json_response({
+                    "new_run_id": new_run_id,
+                    "new_version": new_version,
+                    "new_block": new_block,
+                    "full_content": new_full_content,
+                }, origin=origin)
+            except Exception as e:
+                return json_response({"error": f"Не удалось применить правку: {e}"}, 500, origin=origin)
+
+        # POST /run или POST / с task_id — запустить генерацию (не если это get_run/explain/refine)
+        special_actions = {"get_run", "explain_block", "refine_block"}
+        if method == "POST" and body.get("action") not in special_actions and (path_parts[-1] == "run" or body.get("task_id")):
             task_id = body.get("task_id")
             user_prompt = body.get("prompt", "")
 

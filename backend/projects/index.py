@@ -55,19 +55,37 @@ ALLOWED_ORIGINS = {
 }
 
 
+def _is_allowed_origin(origin: str) -> bool:
+    """Безопасная проверка origin через urlparse — не raw endswith.
+    Защита от попыток типа https://attacker.com/.poehali.dev"""
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        # Только https + допустимый hostname
+        if parsed.scheme not in ("https", "http"):
+            return False
+        hostname = (parsed.hostname or "").lower()
+        # Точное совпадение с poehali.dev или его поддоменом
+        if hostname == "poehali.dev" or hostname.endswith(".poehali.dev"):
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def cors_headers(origin: str = None):
-    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
-    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    """Strict CORS: deny-by-default. Без Allow-Credentials — auth через header, не cookies."""
     headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
-        "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
-    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+    if _is_allowed_origin(origin):
         headers["Access-Control-Allow-Origin"] = origin
-    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
-    # браузер заблокирует кросс-доменный запрос (что и требуется)
     return headers
 
 

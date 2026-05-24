@@ -72,20 +72,38 @@ ALLOWED_ORIGINS = {
 }
 
 
+def _is_allowed_origin(origin: str) -> bool:
+    """Безопасная проверка origin через urlparse — не raw endswith.
+    Защита от попыток типа https://attacker.com/.poehali.dev"""
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        # Только https + допустимый hostname
+        if parsed.scheme not in ("https", "http"):
+            return False
+        hostname = (parsed.hostname or "").lower()
+        # Точное совпадение с poehali.dev или его поддоменом
+        if hostname == "poehali.dev" or hostname.endswith(".poehali.dev"):
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def cors_headers(origin: str = None):
-    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
-    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    """Strict CORS: deny-by-default. Без Allow-Credentials — auth через header, не cookies."""
     headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
-        "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
         "X-Api-Version": "v1",
     }
-    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+    if _is_allowed_origin(origin):
         headers["Access-Control-Allow-Origin"] = origin
-    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
-    # браузер заблокирует кросс-доменный запрос (что и требуется)
     return headers
 
 
@@ -251,16 +269,28 @@ def get_client_ip(event):
 
 
 def normalize_email(email: str) -> str:
-    """Нормализация email для rate limit ключа: lower + trim + убираем точки в gmail-части.
+    """Нормализация email: только trim + lowercase.
 
-    Защита от обхода лимита через User@Mail.com / user @ mail.com / user.name vs username (gmail).
+    Если внутри есть whitespace (например 'us er@x.com') — возвращаем пустую строку.
+    Не делаем silent fix невалидного ввода: пусть вызывающий код сам решает что с этим делать.
     """
     if not email:
         return ""
     e = email.strip().lower()
-    # Убираем все пробелы
-    e = "".join(e.split())
+    # Если внутри есть пробелы — это невалидный email, не пытаемся "починить"
+    if any(ch.isspace() for ch in e):
+        return ""
     return e
+
+
+def is_valid_email_format(email: str) -> bool:
+    """Базовая проверка формата email — наличие @ и точки в домене."""
+    if not email or "@" not in email:
+        return False
+    local, _, domain = email.rpartition("@")
+    if not local or not domain or "." not in domain:
+        return False
+    return True
 
 
 def handler(event: dict, context) -> dict:
@@ -306,6 +336,8 @@ def handler(event: dict, context) -> dict:
 
             if not email or not password or not name:
                 return json_response({"error": "Заполните все поля"}, 400)
+            if not is_valid_email_format(email):
+                return json_response({"error": "Некорректный формат email"}, 400)
 
             # Rate limit: max 10 регистраций / час с одного IP
             allowed, retry_after, _ = check_rate_limit(

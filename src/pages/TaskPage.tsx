@@ -79,6 +79,13 @@ export default function TaskPage() {
   const [useWebSearch, setUseWebSearch] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
+  // Explainable AI: панель рассуждения и правки фрагмента
+  const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
+  const [explanation, setExplanation] = useState<string>("");
+  const [loadingExplain, setLoadingExplain] = useState(false);
+  const [refineInstruction, setRefineInstruction] = useState("");
+  const [refining, setRefining] = useState(false);
+
   const loadTask = () => {
     tasksApi.get(tId).then((d) => {
       setTask(d);
@@ -151,6 +158,55 @@ export default function TaskPage() {
     } finally {
       setExporting(false);
     }
+  };
+
+  // Кликаем на блок → получаем рассуждение AI откуда и почему он его написал
+  const handleSelectBlock = async (blockText: string) => {
+    if (!activeRun) return;
+    setSelectedBlock(blockText);
+    setExplanation("");
+    setRefineInstruction("");
+    setLoadingExplain(true);
+    try {
+      const d = await generateApi.explainBlock(activeRun.id, blockText);
+      setExplanation(d.explanation);
+    } catch (err: unknown) {
+      setExplanation("Ошибка: " + (err instanceof Error ? err.message : "не удалось получить обоснование"));
+    } finally {
+      setLoadingExplain(false);
+    }
+  };
+
+  // Просим AI переработать выбранный фрагмент с учётом наших пожеланий
+  const handleRefineBlock = async () => {
+    if (!activeRun || !selectedBlock || !refineInstruction.trim()) return;
+    setRefining(true);
+    try {
+      const d = await generateApi.refineBlock(activeRun.id, selectedBlock, refineInstruction.trim());
+      setSelectedBlock(null);
+      setExplanation("");
+      setRefineInstruction("");
+      // Загружаем новую версию
+      loadRun(d.new_run_id);
+      loadTask();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  // Разбиваем контент на смысловые блоки для кликабельности
+  const splitContentIntoBlocks = (content: string): string[] => {
+    if (!content) return [];
+    // Делим по двойному переносу строки или по слайдам ### Слайд N:
+    const blocks: string[] = [];
+    const parts = content.split(/\n\n+/);
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed) blocks.push(trimmed);
+    }
+    return blocks;
   };
 
   if (!task) {
@@ -347,7 +403,25 @@ export default function TaskPage() {
                   </div>
                 ) : activeRun?.content ? (
                   <div className="p-5">
-                    <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">{activeRun.content}</pre>
+                    <p className="text-xs text-slate-500 mb-3 flex items-center gap-1.5">
+                      <Icon name="MousePointerClick" size={12} />
+                      Кликни на любой блок — AI объяснит откуда взято и даст переписать
+                    </p>
+                    <div className="space-y-2.5">
+                      {splitContentIntoBlocks(activeRun.content).map((block, i) => (
+                        <div
+                          key={i}
+                          onClick={() => handleSelectBlock(block)}
+                          className={`whitespace-pre-wrap text-sm leading-relaxed font-sans cursor-pointer p-2.5 rounded-lg border transition-colors ${
+                            selectedBlock === block
+                              ? "border-slate-800 bg-slate-50"
+                              : "border-transparent hover:border-slate-200 hover:bg-slate-50/50"
+                          }`}
+                        >
+                          {block}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -396,6 +470,75 @@ export default function TaskPage() {
           </div>
         </div>
       </div>
+
+      {/* Боковая панель «Рассуждение AI» — открывается при клике на блок */}
+      {selectedBlock && (
+        <div className="fixed inset-y-0 right-0 w-full sm:w-[420px] bg-white border-l border-slate-200 shadow-2xl z-40 flex flex-col">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Icon name="Lightbulb" size={18} className="text-amber-500" />
+              <h3 className="font-semibold text-slate-800">Рассуждение AI</h3>
+            </div>
+            <button
+              onClick={() => { setSelectedBlock(null); setExplanation(""); setRefineInstruction(""); }}
+              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+            >
+              <Icon name="X" size={18} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Выбранный фрагмент</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm text-slate-700 max-h-32 overflow-y-auto whitespace-pre-wrap">
+                {selectedBlock}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Откуда и почему</p>
+              {loadingExplain ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-3 bg-slate-100 rounded animate-pulse" />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{explanation}</div>
+              )}
+            </div>
+
+            <div className="border-t border-slate-100 pt-4">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Точечная правка</p>
+              <p className="text-xs text-slate-500 mb-2">AI переработает ТОЛЬКО этот фрагмент, остальная работа не изменится</p>
+              <textarea
+                value={refineInstruction}
+                onChange={(e) => setRefineInstruction(e.target.value)}
+                placeholder="Например: сделай конкретнее с примерами из банковской практики"
+                rows={3}
+                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
+              />
+            </div>
+          </div>
+
+          <div className="px-5 py-4 border-t border-slate-200 flex gap-2">
+            <button
+              onClick={() => { setSelectedBlock(null); setExplanation(""); setRefineInstruction(""); }}
+              className="flex-1 border border-slate-300 rounded-lg py-2 text-sm font-medium hover:bg-slate-50"
+            >
+              Закрыть
+            </button>
+            <button
+              onClick={handleRefineBlock}
+              disabled={refining || !refineInstruction.trim()}
+              className="flex-[2] flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+            >
+              <Icon name="Sparkles" size={14} />
+              {refining ? "Переписываю..." : "Переписать фрагмент"}
+            </button>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
