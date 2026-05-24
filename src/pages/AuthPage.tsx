@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { Brain } from "lucide-react";
+
+const LOGO_URL = "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/0a6d2e9d-2156-49ee-a4b8-7baaa8811800.jpg";
 
 export default function AuthPage() {
   const { login, register } = useAuth();
@@ -32,11 +33,14 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="bg-orange-500 rounded-xl p-2.5">
-            <Brain className="h-6 w-6 text-white" />
-          </div>
+        <div className="flex flex-col items-center mb-8">
+          <img
+            src={LOGO_URL}
+            alt="DocMind AI"
+            className="w-24 h-24 rounded-2xl shadow-lg object-cover mb-3"
+          />
           <span className="text-2xl font-bold text-slate-800">DocMind AI</span>
+          <span className="text-sm text-slate-500 mt-0.5">AI-кабинет для презентаций</span>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">

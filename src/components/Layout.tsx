@@ -1,7 +1,9 @@
 import { useAuth } from "@/lib/auth-context";
-import { Brain, FolderOpen, LogOut, User } from "lucide-react";
+import { LogOut, User } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import Icon from "@/components/ui/icon";
+
+const LOGO_URL = "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/0a6d2e9d-2156-49ee-a4b8-7baaa8811800.jpg";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -12,9 +14,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <header className="border-b bg-card sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/cabinet" className="flex items-center gap-2">
-            <div className="bg-orange-500 rounded-lg p-1.5">
-              <Brain className="h-5 w-5 text-white" />
-            </div>
+            <img src={LOGO_URL} alt="DocMind AI" className="w-8 h-8 rounded-lg object-cover" />
             <span className="font-bold text-lg">DocMind AI</span>
           </Link>
 
@@ -23,7 +23,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               to="/cabinet"
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 location.pathname === "/cabinet"
-                  ? "bg-orange-50 text-orange-600 dark:bg-orange-950/30 dark:text-orange-400"
+                  ? "bg-slate-100 text-slate-800"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
             >
@@ -34,8 +34,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <div className="w-7 h-7 rounded-full bg-orange-100 dark:bg-orange-950/50 flex items-center justify-center">
-                <User className="h-4 w-4 text-orange-600" />
+              <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center">
+                <User className="h-4 w-4 text-slate-600" />
               </div>
               <span className="hidden sm:block font-medium text-foreground">{user?.name}</span>
             </div>
