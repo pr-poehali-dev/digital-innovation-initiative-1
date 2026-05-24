@@ -31,14 +31,23 @@ async function request(base: string, path: string, method = "GET", body?: unknow
     throw new Error(msg);
   }
   // Новый формат v1: {ok, data?, error?, request_id, ...}
-  if (data && typeof data === "object" && "ok" in data) {
-    if (!data.ok) throw new Error(data.error?.message || "Ошибка");
+  if (data && typeof data === "object" && data !== null && Object.prototype.hasOwnProperty.call(data, "ok")) {
+    if (data.ok === false) {
+      const errMsg = (data.error && data.error.message) || "Ошибка";
+      throw new Error(errMsg);
+    }
     // Если есть поле data — возвращаем его (полный v1 контракт, как projects)
-    if ("data" in data) return data.data;
-    // Иначе — обратная совместимость: возвращаем весь объект без служебных полей
-    const { ok, request_id, ...rest } = data;
-    void ok; void request_id;
-    return rest;
+    if (Object.prototype.hasOwnProperty.call(data, "data")) {
+      return data.data;
+    }
+    // Иначе — обратная совместимость: копируем всё кроме служебных полей
+    const result: Record<string, unknown> = {};
+    for (const key in data) {
+      if (key !== "ok" && key !== "request_id" && Object.prototype.hasOwnProperty.call(data, key)) {
+        result[key] = data[key];
+      }
+    }
+    return result;
   }
   return data;
 }
