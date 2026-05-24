@@ -32,25 +32,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -190,8 +190,10 @@ def log_activity(cur, schema, project_id, user_id, action, entity_type, entity_i
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     body = {}
@@ -208,10 +210,10 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         if method != "POST":
-            return json_response({"error": "Method not allowed"}, 405)
+            return json_response({"error": "Method not allowed"}, 405, origin=origin)
 
         project_id = body.get("project_id")
         filename = body.get("filename", "media")
@@ -220,7 +222,7 @@ def handler(event: dict, context) -> dict:
         category = body.get("category", "notes")
 
         if not project_id or not file_data_b64:
-            return json_response({"error": "Не хватает данных"}, 400)
+            return json_response({"error": "Не хватает данных"}, 400, origin=origin)
 
         cur = conn.cursor()
         cur.execute(
@@ -228,7 +230,7 @@ def handler(event: dict, context) -> dict:
             (project_id, user["id"]),
         )
         if not cur.fetchone():
-            return json_response({"error": "Нет доступа"}, 403)
+            return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
         file_bytes = base64.b64decode(file_data_b64)
         file_size = len(file_bytes)
@@ -256,7 +258,7 @@ def handler(event: dict, context) -> dict:
         elif media_type == "audio":
             result = transcribe_audio(file_bytes)
         else:
-            return json_response({"error": "Неподдерживаемый тип медиа"}, 400)
+            return json_response({"error": "Неподдерживаемый тип медиа"}, 400, origin=origin)
 
         extracted_text = result["text"]
 
@@ -294,7 +296,7 @@ def handler(event: dict, context) -> dict:
             "chunks_count": len(chunks),
             "extracted_preview": extracted_text[:500],
             "status": "ready",
-        })
+        }, origin=origin)
 
     finally:
         conn.close()

@@ -31,25 +31,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -118,8 +118,10 @@ def extract_keywords(query: str) -> list:
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     path = event.get("path", "/")
@@ -138,10 +140,10 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         if method != "POST":
-            return json_response({"error": "Method not allowed"}, 405)
+            return json_response({"error": "Method not allowed"}, 405, origin=origin)
 
         action = body.get("action", "")
 
@@ -150,7 +152,7 @@ def handler(event: dict, context) -> dict:
             project_id = body.get("project_id")
             query = (body.get("query") or "").strip()
             if not project_id or not query:
-                return json_response({"error": "Нужны project_id и query"}, 400)
+                return json_response({"error": "Нужны project_id и query"}, 400, origin=origin)
 
             cur = conn.cursor()
             cur.execute(
@@ -158,7 +160,7 @@ def handler(event: dict, context) -> dict:
                 (project_id, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             # Загружаем все чанки проекта
             cur.execute(
@@ -205,14 +207,14 @@ def handler(event: dict, context) -> dict:
             )
             conn.commit()
 
-            return json_response({"query": query, "results": results, "total": len(results)})
+            return json_response({"query": query, "results": results, "total": len(results)}, origin=origin)
 
         # ACTION: чат с документом — задать вопрос по конкретному файлу
         if action == "chat_with_document":
             doc_id = body.get("document_id")
             question = (body.get("question") or "").strip()
             if not doc_id or not question:
-                return json_response({"error": "Нужны document_id и question"}, 400)
+                return json_response({"error": "Нужны document_id и question"}, 400, origin=origin)
 
             cur = conn.cursor()
             cur.execute(
@@ -221,7 +223,7 @@ def handler(event: dict, context) -> dict:
             )
             doc_row = cur.fetchone()
             if not doc_row:
-                return json_response({"error": "Документ не найден"}, 404)
+                return json_response({"error": "Документ не найден"}, 404, origin=origin)
 
             project_id, doc_name, full_text = doc_row
             cur.execute(
@@ -229,7 +231,7 @@ def handler(event: dict, context) -> dict:
                 (project_id, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             # Находим релевантные чанки в документе
             cur.execute(
@@ -292,13 +294,13 @@ def handler(event: dict, context) -> dict:
                 "question": question,
                 "answer": answer,
                 "sources": sources,
-            })
+            }, origin=origin)
 
         # ACTION: история чата с документом
         if action == "get_chat_history":
             doc_id = body.get("document_id")
             if not doc_id:
-                return json_response({"error": "Нужен document_id"}, 400)
+                return json_response({"error": "Нужен document_id"}, 400, origin=origin)
             cur = conn.cursor()
 
             # 🔒 ИЗОЛЯЦИЯ: проверяем что user имеет доступ к проекту документа
@@ -308,13 +310,13 @@ def handler(event: dict, context) -> dict:
             )
             doc_row = cur.fetchone()
             if not doc_row:
-                return json_response({"error": "Документ не найден"}, 404)
+                return json_response({"error": "Документ не найден"}, 404, origin=origin)
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (doc_row[0], user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             cur.execute(
                 f"""SELECT c.id, c.question, c.answer, c.sources_json, c.created_at, u.name
@@ -336,9 +338,9 @@ def handler(event: dict, context) -> dict:
                     "id": r[0], "question": r[1], "answer": r[2],
                     "sources": sources, "created_at": str(r[4]), "user_name": r[5],
                 })
-            return json_response({"history": history})
+            return json_response({"history": history}, origin=origin)
 
-        return json_response({"error": "Неизвестное действие"}, 400)
+        return json_response({"error": "Неизвестное действие"}, 400, origin=origin)
 
     finally:
         conn.close()

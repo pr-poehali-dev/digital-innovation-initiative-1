@@ -28,25 +28,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -74,8 +74,10 @@ def log_activity(cur, schema, project_id, user_id, action, entity_type=None, ent
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     path = event.get("path", "/")
@@ -95,7 +97,7 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         cur = conn.cursor()
 
@@ -118,7 +120,7 @@ def handler(event: dict, context) -> dict:
                 (project_id, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             cur.execute(
                 f"""SELECT t.id, t.title, t.task_type, t.topic, t.status, t.created_at, u.name,
@@ -134,7 +136,7 @@ def handler(event: dict, context) -> dict:
                 }
                 for r in cur.fetchall()
             ]
-            return json_response({"tasks": tasks})
+            return json_response({"tasks": tasks}, origin=origin)
 
         # POST / — создать задание (только если нет action)
         if method == "POST" and not action and body.get("title") and body.get("task_type"):
@@ -144,14 +146,14 @@ def handler(event: dict, context) -> dict:
             topic = body.get("topic", "")
 
             if not project_id or not title or not task_type:
-                return json_response({"error": "Обязательные поля: project_id, title, task_type"}, 400)
+                return json_response({"error": "Обязательные поля: project_id, title, task_type"}, 400, origin=origin)
 
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (project_id, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             cur.execute(
                 f"""INSERT INTO {schema}.tasks
@@ -176,7 +178,7 @@ def handler(event: dict, context) -> dict:
 
             log_activity(cur, schema, project_id, user["id"], "created_task", "task", task_id, title)
             conn.commit()
-            return json_response({"id": task_id, "title": title, "task_type": task_type})
+            return json_response({"id": task_id, "title": title, "task_type": task_type}, origin=origin)
 
         # GET /{id} — детали задания
         task_id_q = params.get("task_id")
@@ -198,14 +200,14 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Задание не найдено"}, 404)
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
 
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (row[1], user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             # Документы задания
             cur.execute(
@@ -231,7 +233,7 @@ def handler(event: dict, context) -> dict:
                 "requested_slide_count": row[9], "additional_instructions": row[10],
                 "status": row[11], "created_at": str(row[12]), "created_by": row[13],
                 "documents": docs, "runs": runs,
-            })
+            }, origin=origin)
 
         # PUT /{id}/documents — обновить роли документов
         if method == "PUT" and "documents" in path_parts:
@@ -241,14 +243,14 @@ def handler(event: dict, context) -> dict:
             cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
             task_row = cur.fetchone()
             if not task_row:
-                return json_response({"error": "Задание не найдено"}, 404)
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
 
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (task_row[0], user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             for dr in doc_roles:
                 cur.execute(
@@ -258,9 +260,9 @@ def handler(event: dict, context) -> dict:
                     (task_id, dr["document_id"], dr["role"]),
                 )
             conn.commit()
-            return json_response({"ok": True})
+            return json_response({"ok": True}, origin=origin)
 
-        return json_response({"error": "Not found"}, 404)
+        return json_response({"error": "Not found"}, 404, origin=origin)
 
     finally:
         conn.close()

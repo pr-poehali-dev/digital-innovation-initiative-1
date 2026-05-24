@@ -32,25 +32,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -163,8 +163,10 @@ def build_docx(content: str, title: str, author: str) -> bytes:
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     body = {}
@@ -181,14 +183,14 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         if method != "POST":
-            return json_response({"error": "Method not allowed"}, 405)
+            return json_response({"error": "Method not allowed"}, 405, origin=origin)
 
         run_id = body.get("run_id")
         if not run_id:
-            return json_response({"error": "Нужен run_id"}, 400)
+            return json_response({"error": "Нужен run_id"}, 400, origin=origin)
 
         cur = conn.cursor()
         cur.execute(
@@ -197,7 +199,7 @@ def handler(event: dict, context) -> dict:
         )
         row = cur.fetchone()
         if not row:
-            return json_response({"error": "Результат не найден"}, 404)
+            return json_response({"error": "Результат не найден"}, 404, origin=origin)
 
         result_json, task_id = row
         cur.execute(
@@ -206,7 +208,7 @@ def handler(event: dict, context) -> dict:
         )
         task_row = cur.fetchone()
         if not task_row:
-            return json_response({"error": "Задание не найдено"}, 404)
+            return json_response({"error": "Задание не найдено"}, 404, origin=origin)
 
         task_title, task_topic, project_id = task_row
         cur.execute(
@@ -214,7 +216,7 @@ def handler(event: dict, context) -> dict:
             (project_id, user["id"]),
         )
         if not cur.fetchone():
-            return json_response({"error": "Нет доступа"}, 403)
+            return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
         content = ""
         if result_json:
@@ -224,7 +226,7 @@ def handler(event: dict, context) -> dict:
                 content = result_json
 
         if not content:
-            return json_response({"error": "Нет контента для экспорта"}, 400)
+            return json_response({"error": "Нет контента для экспорта"}, 400, origin=origin)
 
         doc_title = task_topic or task_title or "Работа"
         docx_bytes = build_docx(content, doc_title, user.get("name", ""))
@@ -234,7 +236,7 @@ def handler(event: dict, context) -> dict:
         return json_response({
             "filename": f"{safe_name}.docx",
             "file_data": b64,
-        })
+        }, origin=origin)
 
     finally:
         conn.close()

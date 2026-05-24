@@ -32,25 +32,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -111,8 +111,10 @@ def search_duckduckgo(query: str, limit: int = 5) -> list:
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     body = {}
@@ -129,14 +131,14 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         if method != "POST":
-            return json_response({"error": "Method not allowed"}, 405)
+            return json_response({"error": "Method not allowed"}, 405, origin=origin)
 
         query = (body.get("query") or "").strip()
         if not query:
-            return json_response({"error": "Нужен query"}, 400)
+            return json_response({"error": "Нужен query"}, 400, origin=origin)
 
         limit = min(int(body.get("limit", 5)), 10)
         results = search_duckduckgo(query, limit)
@@ -152,7 +154,7 @@ def handler(event: dict, context) -> dict:
             )
             conn.commit()
 
-        return json_response({"query": query, "results": results})
+        return json_response({"query": query, "results": results}, origin=origin)
 
     finally:
         conn.close()

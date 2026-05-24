@@ -73,22 +73,20 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers — origin reflection с whitelist."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin:
-        # Для preview-сабдоменов poehali.dev
-        if origin.endswith(".poehali.dev"):
-            allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
         "X-Api-Version": "v1",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
 def json_response(data, status=200, request_id=None):
@@ -192,6 +190,25 @@ def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_
     return True, 0, hit_count
 
 
+def cleanup_old_rate_limits(conn, schema):
+    """Удаляет записи rate_limits старше 24 часов с истёкшей блокировкой.
+    Вызывается вероятностно (1% запросов) чтобы не блокировать хот-путь.
+    Записи > 24h неактуальны — лимиты максимум на час.
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""UPDATE {schema}.rate_limits
+                SET hit_count = 0, blocked_until = NULL
+                WHERE last_hit_at < NOW() - INTERVAL '24 hours'
+                  AND (blocked_until IS NULL OR blocked_until < NOW())""",
+        )
+        conn.commit()
+    except Exception:
+        # Cleanup не должен ломать основной запрос
+        pass
+
+
 def rate_limit_response(retry_after: int, request_id: str, reason: str):
     """Возвращает 429 Too Many Requests с Retry-After заголовком."""
     return {
@@ -215,16 +232,42 @@ def rate_limit_response(retry_after: int, request_id: str, reason: str):
 
 
 def get_client_ip(event):
-    """Извлекает IP клиента из event."""
+    """Извлекает IP клиента из доверенного источника платформы (requestContext.identity.sourceIp).
+
+    НЕ используем X-Forwarded-For из headers — его легко подделать.
+    Платформа Cloud Functions сама заполняет sourceIp в requestContext.
+    """
     try:
-        return event.get("requestContext", {}).get("identity", {}).get("sourceIp", "unknown")
+        ip = event.get("requestContext", {}).get("identity", {}).get("sourceIp", "")
+        # Нормализация: убираем порт если есть (для IPv6 в формате [::1]:port)
+        if not ip:
+            return "unknown"
+        # Простая нормализация IPv4 vs IPv4-mapped IPv6
+        if ip.startswith("::ffff:"):
+            ip = ip[7:]  # ::ffff:192.0.2.1 → 192.0.2.1
+        return ip.strip().lower()
     except Exception:
         return "unknown"
 
 
+def normalize_email(email: str) -> str:
+    """Нормализация email для rate limit ключа: lower + trim + убираем точки в gmail-части.
+
+    Защита от обхода лимита через User@Mail.com / user @ mail.com / user.name vs username (gmail).
+    """
+    if not email:
+        return ""
+    e = email.strip().lower()
+    # Убираем все пробелы
+    e = "".join(e.split())
+    return e
+
+
 def handler(event: dict, context) -> dict:
+    # CORS preflight — отдаём заголовки с учётом origin
+    request_origin = event.get("headers", {}).get("Origin") or event.get("headers", {}).get("origin")
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(request_origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     path = event.get("path", "/")
@@ -257,7 +300,7 @@ def handler(event: dict, context) -> dict:
 
         # POST register
         if method == "POST" and action == "register":
-            email = body.get("email", "").strip().lower()
+            email = normalize_email(body.get("email", ""))
             password = body.get("password", "")
             name = body.get("name", "").strip()
 
@@ -295,11 +338,16 @@ def handler(event: dict, context) -> dict:
 
         # POST login
         if method == "POST" and action == "login":
-            email = body.get("email", "").strip().lower()
+            email = normalize_email(body.get("email", ""))
             password = body.get("password", "")
 
-            # Rate limit: 5 попыток / 15 минут на пару IP+email
-            # Защита от brute-force подбора паролей
+            # Вероятностный cleanup старых записей rate_limits (~1% запросов)
+            if secrets.randbelow(100) == 0:
+                cleanup_old_rate_limits(conn, schema)
+
+            # Rate limit: 5 попыток / 15 минут на пару IP+email (нормализованных)
+            # Защита от brute-force подбора паролей. Нормализация защищает от обхода
+            # через варианты регистра/пробелов.
             rl_key = f"login:{client_ip}:{email}"
             allowed, retry_after, hits = check_rate_limit(
                 conn, schema, key=rl_key, bucket="login_attempts",

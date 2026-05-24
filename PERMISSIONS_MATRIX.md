@@ -178,19 +178,42 @@ def check_access(cur, schema, project_id, user_id) -> Optional[str]:
 
 ---
 
-## CORS hardening (2026-05-24)
+## CORS hardening — STRICT mode (2026-05-24)
 
-Whitelist origins применён во всех 9 функциях:
-- `https://raven.moscow`
-- `https://www.raven.moscow`
+**Whitelist origins** во всех 10 функциях, deny-by-default:
+- `https://raven.moscow` / `www.raven.moscow`
 - `https://docmind.ai`
-- `https://digital-innovation-initiative-1--preview.poehali.dev`
 - `https://poehali.dev` + любой `*.poehali.dev` preview
 - `http://localhost:5173`, `http://localhost:3000` (dev)
 
-Если Origin не в whitelist — fallback `*` (мягкий режим для отладки). В следующей итерации можно убрать fallback для строгой защиты.
+### ✅ Deny-by-default (strict)
+Для неизвестных origin **НЕ возвращаем** `Access-Control-Allow-Origin`. Браузер блокирует кросс-доменный запрос. Корректное поведение для credentialed CORS (`Allow-Credentials: true` + `*` несовместимы по спецификации).
 
-`Access-Control-Allow-Credentials: true` + `Vary: Origin` — корректное поведение CDN/прокси.
+```python
+if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+    headers["Access-Control-Allow-Origin"] = origin
+# else: ACAO не устанавливается — браузер блокирует запрос
+```
+
+### CSRF — не критичен
+- Auth использует header `X-Session-Id` (НЕ cookies)
+- CSRF атаки работают только на cookie-based auth
+- Проверено grep'ом: `document.cookie`, `Set-Cookie` нигде не используются
+
+---
+
+## Concurrency-тест rate limiter (2026-05-24)
+
+12 быстрых последовательных login-запросов от одного источника на один email:
+
+| # | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|---|---|---|---|---|---|---|---|---|---|----|----|----|
+| Status | 401 | 401 | 401 | 401 | 401 | **429** | 429 | 429 | 429 | 429 | 429 | 429 |
+
+✅ **Ровно 5 попыток** прошли (max_hits=5)
+✅ **6-я уже 429** — ни одной утечки через лимит
+✅ В БД: `hit_count=6, blocked_until > NOW()` (после блокировки счётчик не растёт)
+✅ Атомарный UPSERT не подвержен TOCTOU
 
 ---
 
@@ -198,5 +221,5 @@ Whitelist origins применён во всех 9 функциях:
 
 - Нет ролей `editor` / `reviewer` / `viewer`
 - Нет аудита access_denied событий
-- CORS — fallback на `*` ещё есть для неизвестных origins (мягкий режим)
-- Auth НЕ через cookies → CSRF не критичен сейчас, но если перейдём на cookies — нужно проверить SameSite/HttpOnly/Secure
+- Не подключён `*.docmind.ai` preview wildcard (если появятся)
+- Auth НЕ через cookies → CSRF не критичен. Если перейдём на cookies — проверить SameSite/HttpOnly/Secure

@@ -54,33 +54,33 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def ok_response(data, request_id):
+def ok_response(data, request_id, origin=None):
     return {
         "statusCode": 200,
-        "headers": {**cors_headers(), "Content-Type": "application/json", "X-Request-Id": request_id, "X-Api-Version": "v1"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json", "X-Request-Id": request_id, "X-Api-Version": "v1"},
         "body": json.dumps({"ok": True, "request_id": request_id, "data": data}, ensure_ascii=False, default=str),
     }
 
 
-def err_response(code, message, status, request_id):
+def err_response(code, message, status, request_id, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json", "X-Request-Id": request_id, "X-Api-Version": "v1"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json", "X-Request-Id": request_id, "X-Api-Version": "v1"},
         "body": json.dumps({"ok": False, "request_id": request_id, "error": {"code": code, "message": message}}, ensure_ascii=False),
     }
 
@@ -115,7 +115,7 @@ def check_access(cur, schema, project_id, user_id):
     return row[0] if row else None
 
 
-def handle_list(conn, user, request_id):
+def handle_list(conn, user, request_id, origin=None):
     schema = get_schema()
     cur = conn.cursor()
     cur.execute(
@@ -138,23 +138,23 @@ def handle_list(conn, user, request_id):
         }
         for r in cur.fetchall()
     ]
-    return ok_response({"projects": projects}, request_id)
+    return ok_response({"projects": projects}, request_id, origin=origin)
 
 
-def handle_get(conn, user, body, request_id):
+def handle_get(conn, user, body, request_id, origin=None):
     schema = get_schema()
     project_id = body.get("project_id")
     if not project_id:
-        return err_response("validation_error", "Поле project_id обязательно", 400, request_id)
+        return err_response("validation_error", "Поле project_id обязательно", 400, request_id, origin=origin)
     try:
         project_id = int(project_id)
     except (TypeError, ValueError):
-        return err_response("validation_error", "project_id должен быть числом", 400, request_id)
+        return err_response("validation_error", "project_id должен быть числом", 400, request_id, origin=origin)
 
     cur = conn.cursor()
     role = check_access(cur, schema, project_id, user["id"])
     if not role:
-        return err_response("access_denied", "Нет доступа к проекту", 403, request_id)
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
 
     cur.execute(
         f"SELECT id, title, description, owner_id, created_at, updated_at FROM {schema}.projects WHERE id = %s",
@@ -162,7 +162,7 @@ def handle_get(conn, user, body, request_id):
     )
     p = cur.fetchone()
     if not p:
-        return err_response("not_found", "Проект не найден", 404, request_id)
+        return err_response("not_found", "Проект не найден", 404, request_id, origin=origin)
 
     cur.execute(
         f"SELECT u.id, u.name, u.email, pm.role, pm.joined_at FROM {schema}.project_members pm JOIN {schema}.users u ON u.id = pm.user_id WHERE pm.project_id = %s",
@@ -180,15 +180,15 @@ def handle_get(conn, user, body, request_id):
         "id": p[0], "title": p[1], "description": p[2],
         "owner_id": p[3], "created_at": str(p[4]), "updated_at": str(p[5]),
         "members": members, "activity": activity, "my_role": role,
-    }, request_id)
+    }, request_id, origin=origin)
 
 
-def handle_create(conn, user, body, request_id):
+def handle_create(conn, user, body, request_id, origin=None):
     schema = get_schema()
     title = (body.get("title") or "").strip()
     description = body.get("description") or ""
     if not title:
-        return err_response("validation_error", "Поле title обязательно", 400, request_id)
+        return err_response("validation_error", "Поле title обязательно", 400, request_id, origin=origin)
 
     cur = conn.cursor()
     cur.execute(
@@ -202,24 +202,24 @@ def handle_create(conn, user, body, request_id):
     )
     log_activity(cur, schema, project_id, user["id"], "created_project", "project", project_id, title)
     conn.commit()
-    return ok_response({"id": project_id, "title": title, "description": description}, request_id)
+    return ok_response({"id": project_id, "title": title, "description": description}, request_id, origin=origin)
 
 
-def handle_update(conn, user, body, request_id):
+def handle_update(conn, user, body, request_id, origin=None):
     schema = get_schema()
     project_id = body.get("project_id")
     title = (body.get("title") or "").strip()
     description = body.get("description") or ""
     if not project_id or not title:
-        return err_response("validation_error", "Поля project_id и title обязательны", 400, request_id)
+        return err_response("validation_error", "Поля project_id и title обязательны", 400, request_id, origin=origin)
     project_id = int(project_id)
 
     cur = conn.cursor()
     role = check_access(cur, schema, project_id, user["id"])
     if not role:
-        return err_response("access_denied", "Нет доступа к проекту", 403, request_id)
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
     if role not in ("owner", "admin"):
-        return err_response("access_denied", "Только владелец может редактировать", 403, request_id)
+        return err_response("access_denied", "Только владелец может редактировать", 403, request_id, origin=origin)
 
     cur.execute(
         f"UPDATE {schema}.projects SET title = %s, description = %s, updated_at = NOW() WHERE id = %s",
@@ -227,28 +227,28 @@ def handle_update(conn, user, body, request_id):
     )
     log_activity(cur, schema, project_id, user["id"], "updated_project", "project", project_id)
     conn.commit()
-    return ok_response({"ok": True}, request_id)
+    return ok_response({"ok": True}, request_id, origin=origin)
 
 
-def handle_invite(conn, user, body, request_id):
+def handle_invite(conn, user, body, request_id, origin=None):
     schema = get_schema()
     project_id = body.get("project_id")
     email = (body.get("email") or "").strip().lower()
     if not project_id or not email:
-        return err_response("validation_error", "Поля project_id и email обязательны", 400, request_id)
+        return err_response("validation_error", "Поля project_id и email обязательны", 400, request_id, origin=origin)
     project_id = int(project_id)
 
     cur = conn.cursor()
     role = check_access(cur, schema, project_id, user["id"])
     if not role:
-        return err_response("access_denied", "Нет доступа к проекту", 403, request_id)
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
     if role not in ("owner", "admin"):
-        return err_response("access_denied", "Только владелец может приглашать", 403, request_id)
+        return err_response("access_denied", "Только владелец может приглашать", 403, request_id, origin=origin)
 
     cur.execute(f"SELECT id, name FROM {schema}.users WHERE email = %s", (email,))
     invite_user = cur.fetchone()
     if not invite_user:
-        return err_response("not_found", "Пользователь с таким email не найден", 404, request_id)
+        return err_response("not_found", "Пользователь с таким email не найден", 404, request_id, origin=origin)
 
     cur.execute(
         f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'member') ON CONFLICT DO NOTHING",
@@ -256,25 +256,26 @@ def handle_invite(conn, user, body, request_id):
     )
     log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
     conn.commit()
-    return ok_response({"name": invite_user[1]}, request_id)
+    return ok_response({"name": invite_user[1]}, request_id, origin=origin)
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
     request_id = getattr(context, "request_id", None) or str(uuid.uuid4())
 
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     if method != "POST":
-        return err_response("method_not_allowed", "Используйте POST", 405, request_id)
+        return err_response("method_not_allowed", "Используйте POST", 405, request_id, origin=origin)
 
     body = {}
     if event.get("body"):
         try:
             body = json.loads(event["body"])
         except Exception:
-            return err_response("invalid_json", "Тело запроса не является JSON", 400, request_id)
+            return err_response("invalid_json", "Тело запроса не является JSON", 400, request_id, origin=origin)
 
     action = body.get("action", "")
     log.info("request_id=%s action=%s", request_id, action)
@@ -285,6 +286,7 @@ def handler(event: dict, context) -> dict:
             f"Неизвестное action. Допустимые: {sorted(ALLOWED_ACTIONS)}",
             400,
             request_id,
+            origin=origin,
         )
 
     session_id = event.get("headers", {}).get("X-Session-Id", "")
@@ -292,23 +294,23 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return err_response("auth_required", "Требуется авторизация", 401, request_id)
+            return err_response("auth_required", "Требуется авторизация", 401, request_id, origin=origin)
 
         if action == "project.list":
-            return handle_list(conn, user, request_id)
+            return handle_list(conn, user, request_id, origin=origin)
         if action == "project.get":
-            return handle_get(conn, user, body, request_id)
+            return handle_get(conn, user, body, request_id, origin=origin)
         if action == "project.create":
-            return handle_create(conn, user, body, request_id)
+            return handle_create(conn, user, body, request_id, origin=origin)
         if action == "project.update":
-            return handle_update(conn, user, body, request_id)
+            return handle_update(conn, user, body, request_id, origin=origin)
         if action == "project.invite":
-            return handle_invite(conn, user, body, request_id)
+            return handle_invite(conn, user, body, request_id, origin=origin)
 
-        return err_response("not_implemented", "Не реализовано", 501, request_id)
+        return err_response("not_implemented", "Не реализовано", 501, request_id, origin=origin)
 
     except Exception as e:
         log.exception("Unhandled error request_id=%s", request_id)
-        return err_response("internal_error", f"Ошибка сервера: {str(e)[:200]}", 500, request_id)
+        return err_response("internal_error", f"Ошибка сервера: {str(e)[:200]}", 500, request_id, origin=origin)
     finally:
         conn.close()

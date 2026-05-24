@@ -32,25 +32,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -199,8 +199,10 @@ def log_activity(cur, schema, project_id, user_id, action, entity_type=None, ent
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     path = event.get("path", "/")
@@ -218,7 +220,7 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         cur = conn.cursor()
         path_parts = path.strip("/").split("/")
@@ -232,7 +234,7 @@ def handler(event: dict, context) -> dict:
             file_type = body.get("file_type", "").lower()
 
             if not project_id or not file_data_b64:
-                return json_response({"error": "Не хватает данных"}, 400)
+                return json_response({"error": "Не хватает данных"}, 400, origin=origin)
 
             # Проверка доступа к проекту
             cur.execute(
@@ -240,7 +242,7 @@ def handler(event: dict, context) -> dict:
                 (project_id, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             file_bytes = base64.b64decode(file_data_b64)
             file_size = len(file_bytes)
@@ -311,7 +313,7 @@ def handler(event: dict, context) -> dict:
                 "chunks_count": len(chunks),
                 "text_length": len(extracted_text),
                 "has_structure": structure_json is not None,
-            })
+            }, origin=origin)
 
         # GET /project/{project_id} — список документов проекта
         body_pid = body.get("project_id") if body.get("action") == "list_documents" else None
@@ -327,14 +329,14 @@ def handler(event: dict, context) -> dict:
                         project_id = int(path_parts[i + 1])
                         break
             if not project_id:
-                return json_response({"error": "Нет project_id"}, 400)
+                return json_response({"error": "Нет project_id"}, 400, origin=origin)
 
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (project_id, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             cur.execute(
                 f"""SELECT d.id, d.original_name, d.file_type, d.file_size, d.status, d.created_at, u.name,
@@ -354,7 +356,7 @@ def handler(event: dict, context) -> dict:
                 }
                 for r in cur.fetchall()
             ]
-            return json_response({"documents": docs})
+            return json_response({"documents": docs}, origin=origin)
 
         # PUT /{id}/category — изменить категорию
         if method == "PUT" and "category" in path_parts:
@@ -366,19 +368,19 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (row[0], user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
             cur.execute(
                 f"UPDATE {schema}.documents SET category = %s WHERE id = %s",
                 (new_cat, doc_id),
             )
             conn.commit()
-            return json_response({"ok": True, "category": new_cat})
+            return json_response({"ok": True, "category": new_cat}, origin=origin)
 
         # GET /{id}/text — получить извлечённый текст документа
         if method == "GET" and path_parts[-1] == "text":
@@ -389,20 +391,20 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (row[2], user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
             structure = None
             if row[1]:
                 try:
                     structure = json.loads(row[1])
                 except Exception:
                     pass
-            return json_response({"text": row[0], "structure": structure})
+            return json_response({"text": row[0], "structure": structure}, origin=origin)
 
         # === Action-based endpoints (новый формат v1) ===
         action = body.get("action")
@@ -411,28 +413,28 @@ def handler(event: dict, context) -> dict:
         if action == "document.get_url":
             doc_id = body.get("document_id")
             if not doc_id:
-                return json_response({"error": "Нужен document_id"}, 400)
+                return json_response({"error": "Нужен document_id"}, 400, origin=origin)
             cur.execute(
                 f"SELECT s3_key, original_name, file_type, project_id FROM {schema}.documents WHERE id = %s",
                 (int(doc_id),),
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
             s3_key, orig_name, ftype, pid = row
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (pid, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
             # Скачиваем файл из S3 и возвращаем как base64
             s3 = get_s3()
             try:
                 obj = s3.get_object(Bucket="files", Key=s3_key)
                 file_bytes = obj["Body"].read()
             except Exception as e:
-                return json_response({"error": f"Не удалось получить файл: {e}"}, 500)
+                return json_response({"error": f"Не удалось получить файл: {e}"}, 500, origin=origin)
             file_b64 = base64.b64encode(file_bytes).decode("ascii")
             content_types = {
                 "pdf": "application/pdf",
@@ -447,7 +449,7 @@ def handler(event: dict, context) -> dict:
                 "file_type": ftype,
                 "mime": content_types.get(ftype.lower(), "application/octet-stream"),
                 "size": len(file_bytes),
-            })
+            }, origin=origin)
 
         # document.delete — SOFT ARCHIVE (не уничтожает данные)
         # Файл в S3 сохраняется, связи с заданиями НЕ рвутся,
@@ -456,7 +458,7 @@ def handler(event: dict, context) -> dict:
         if action == "document.delete":
             doc_id = body.get("document_id")
             if not doc_id:
-                return json_response({"error": "Нужен document_id"}, 400)
+                return json_response({"error": "Нужен document_id"}, 400, origin=origin)
             doc_id = int(doc_id)
             cur.execute(
                 f"SELECT project_id, original_name, archived_at FROM {schema}.documents WHERE id = %s",
@@ -464,30 +466,30 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
             pid, orig_name, already_archived = row
             if already_archived:
-                return json_response({"error": "Документ уже архивирован"}, 400)
+                return json_response({"error": "Документ уже архивирован"}, 400, origin=origin)
             # Изоляция: только member проекта может архивировать
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (pid, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
             cur.execute(
                 f"UPDATE {schema}.documents SET archived_at = NOW() WHERE id = %s",
                 (doc_id,),
             )
             log_activity(cur, schema, pid, user["id"], "archived_document", "document", doc_id, orig_name)
             conn.commit()
-            return json_response({"ok": True, "archived": True, "can_restore": True})
+            return json_response({"ok": True, "archived": True, "can_restore": True}, origin=origin)
 
         # document.restore — восстановить из архива
         if action == "document.restore":
             doc_id = body.get("document_id")
             if not doc_id:
-                return json_response({"error": "Нужен document_id"}, 400)
+                return json_response({"error": "Нужен document_id"}, 400, origin=origin)
             doc_id = int(doc_id)
             cur.execute(
                 f"SELECT project_id, original_name FROM {schema}.documents WHERE id = %s",
@@ -495,28 +497,28 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
             pid, orig_name = row
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (pid, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
             cur.execute(
                 f"UPDATE {schema}.documents SET archived_at = NULL WHERE id = %s",
                 (doc_id,),
             )
             log_activity(cur, schema, pid, user["id"], "restored_document", "document", doc_id, orig_name)
             conn.commit()
-            return json_response({"ok": True})
+            return json_response({"ok": True}, origin=origin)
 
         # document.rename — переименовать
         if action == "document.rename":
             doc_id = body.get("document_id")
             new_name = (body.get("new_name") or "").strip()
             if not doc_id or not new_name:
-                return json_response({"error": "Нужны document_id и new_name"}, 400)
+                return json_response({"error": "Нужны document_id и new_name"}, 400, origin=origin)
             doc_id = int(doc_id)
             cur.execute(
                 f"SELECT project_id, original_name FROM {schema}.documents WHERE id = %s",
@@ -524,23 +526,23 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
             pid, old_name = row
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
                 (pid, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
             cur.execute(
                 f"UPDATE {schema}.documents SET original_name = %s WHERE id = %s",
                 (new_name[:255], doc_id),
             )
             log_activity(cur, schema, pid, user["id"], "renamed_document", "document", doc_id, f"{old_name} → {new_name}")
             conn.commit()
-            return json_response({"ok": True, "name": new_name[:255]})
+            return json_response({"ok": True, "name": new_name[:255]}, origin=origin)
 
-        return json_response({"error": "Not found"}, 404)
+        return json_response({"error": "Not found"}, 404, origin=origin)
 
     finally:
         conn.close()

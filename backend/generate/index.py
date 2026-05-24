@@ -57,12 +57,12 @@ def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_
     return True, 0
 
 
-def rate_limit_response(retry_after: int, request_id: str, reason: str):
+def rate_limit_response(retry_after: int, request_id: str, reason: str, origin=None):
     """429 Too Many Requests с CORS-whitelist + Retry-After."""
     return {
         "statusCode": 429,
         "headers": {
-            **cors_headers(),
+            **cors_headers(origin),
             "Content-Type": "application/json",
             "Retry-After": str(retry_after),
             "X-Request-Id": request_id,
@@ -91,25 +91,25 @@ ALLOWED_ORIGINS = {
 
 
 def cors_headers(origin: str = None):
-    """Возвращает CORS headers с whitelist origins (security hardening)."""
-    allow_origin = "*"
-    if origin and origin in ALLOWED_ORIGINS:
-        allow_origin = origin
-    elif origin and origin.endswith(".poehali.dev"):
-        allow_origin = origin
-    return {
-        "Access-Control-Allow-Origin": allow_origin,
+    """Strict CORS: deny-by-default. Если origin не в whitelist — НЕ возвращаем Access-Control-Allow-Origin.
+    Это корректное поведение для credentialed CORS и предотвращает несанкционированный кросс-доменный доступ."""
+    headers = {
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+    if origin and (origin in ALLOWED_ORIGINS or origin.endswith(".poehali.dev")):
+        headers["Access-Control-Allow-Origin"] = origin
+    # Если origin неизвестен — Access-Control-Allow-Origin НЕ устанавливается,
+    # браузер заблокирует кросс-доменный запрос (что и требуется)
+    return headers
 
 
-def json_response(data, status=200):
+def json_response(data, status=200, origin=None):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
+        "headers": {**cors_headers(origin), "Content-Type": "application/json"},
         "body": json.dumps(data, ensure_ascii=False, default=str),
     }
 
@@ -291,8 +291,10 @@ def log_activity(cur, schema, project_id, user_id, action, entity_type=None, ent
 
 
 def handler(event: dict, context) -> dict:
+    origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
+
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": cors_headers(), "body": ""}
+        return {"statusCode": 200, "headers": cors_headers(origin), "body": ""}
 
     method = event.get("httpMethod", "GET")
     path = event.get("path", "/")
@@ -311,7 +313,7 @@ def handler(event: dict, context) -> dict:
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return json_response({"error": "Не авторизован"}, 401, origin=origin)
 
         cur = conn.cursor()
 
@@ -321,7 +323,7 @@ def handler(event: dict, context) -> dict:
             user_prompt = body.get("prompt", "")
 
             if not task_id:
-                return json_response({"error": "Нужен task_id"}, 400)
+                return json_response({"error": "Нужен task_id"}, 400, origin=origin)
 
             # Rate limit: 10 генераций / минуту на пользователя
             # Генерации дорогие (yandex GPT) и долгие — защита от спама/абьюза
@@ -331,7 +333,7 @@ def handler(event: dict, context) -> dict:
                 max_hits=10, window_seconds=60,
             )
             if not allowed:
-                return rate_limit_response(retry_after, request_id_rl, "Слишком много запросов на генерацию.")
+                return rate_limit_response(retry_after, request_id_rl, "Слишком много запросов на генерацию.", origin=origin)
 
             # Загрузить задание
             cur.execute(
@@ -342,7 +344,7 @@ def handler(event: dict, context) -> dict:
             )
             task_row = cur.fetchone()
             if not task_row:
-                return json_response({"error": "Задание не найдено"}, 404)
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
 
             task = {
                 "id": task_row[0], "project_id": task_row[1], "title": task_row[2],
@@ -356,7 +358,7 @@ def handler(event: dict, context) -> dict:
                 (task["project_id"], user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             # Загрузить документы задания с текстами
             cur.execute(
@@ -477,7 +479,7 @@ def handler(event: dict, context) -> dict:
                 "run_id": run_id,
                 "version": version_number,
                 "content": ai_result,
-            })
+            }, origin=origin)
 
         # POST action=get_run или GET /run/{N} — получить результат генерации
         qs = event.get("queryStringParameters") or {}
@@ -500,7 +502,7 @@ def handler(event: dict, context) -> dict:
             )
             row = cur.fetchone()
             if not row:
-                return json_response({"error": "Не найдено"}, 404)
+                return json_response({"error": "Не найдено"}, 404, origin=origin)
 
             # 🔒 ИЗОЛЯЦИЯ: проверяем доступ к проекту, к которому относится task
             project_id_of_run = row[8]
@@ -509,7 +511,7 @@ def handler(event: dict, context) -> dict:
                 (project_id_of_run, user["id"]),
             )
             if not cur.fetchone():
-                return json_response({"error": "Нет доступа"}, 403)
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             result_content = None
             if row[3]:
@@ -530,9 +532,9 @@ def handler(event: dict, context) -> dict:
                 "content": result_content, "summary": row[4],
                 "status": row[5], "created_at": str(row[6]),
                 "created_by": row[7], "revisions": revisions,
-            })
+            }, origin=origin)
 
-        return json_response({"error": "Not found"}, 404)
+        return json_response({"error": "Not found"}, 404, origin=origin)
 
     finally:
         conn.close()
