@@ -26,7 +26,15 @@ async function request(base: string, path: string, method = "GET", body?: unknow
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Ошибка запроса");
+  if (!res.ok) {
+    const msg = data?.error?.message || data?.error || "Ошибка запроса";
+    throw new Error(msg);
+  }
+  // Новый формат v1: {ok, data, error, request_id}
+  if (data && typeof data === "object" && "ok" in data) {
+    if (!data.ok) throw new Error(data.error?.message || "Ошибка");
+    return data.data;
+  }
   return data;
 }
 
@@ -44,14 +52,16 @@ export const authApi = {
 };
 
 export const projectsApi = {
-  list: () => request(URLS.projects, "/"),
+  // v1 API: единый action namespace
+  list: () => request(URLS.projects, "/", "POST", { action: "project.list" }),
   create: (title: string, description?: string) =>
-    request(URLS.projects, "/", "POST", { title, description }),
-  get: (id: number) => request(URLS.projects, "/", "POST", { action: "get_project", project_id: id }),
+    request(URLS.projects, "/", "POST", { action: "project.create", title, description }),
+  get: (id: number) =>
+    request(URLS.projects, "/", "POST", { action: "project.get", project_id: id }),
   update: (id: number, title: string, description?: string) =>
-    request(URLS.projects, "/", "POST", { action: "update_project", project_id: id, title, description }),
+    request(URLS.projects, "/", "POST", { action: "project.update", project_id: id, title, description }),
   invite: (projectId: number, email: string) =>
-    request(URLS.projects, "/", "POST", { action: "invite", project_id: projectId, email }),
+    request(URLS.projects, "/", "POST", { action: "project.invite", project_id: projectId, email }),
 };
 
 export const documentsApi = {

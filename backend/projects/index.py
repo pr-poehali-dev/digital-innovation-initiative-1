@@ -1,9 +1,35 @@
 """
-Управление проектами: создание, список, детали, добавление участников.
+Управление проектами. Единый API-контракт v1.
+
+ВСЕ запросы: POST / с обязательным полем action.
+Поддерживаемые action:
+  - project.list      — список своих проектов
+  - project.get       — детали проекта (требует project_id)
+  - project.create    — создать проект (требует title)
+  - project.update    — обновить проект (требует project_id, title)
+  - project.invite    — пригласить в проект (требует project_id, email)
+
+Формат ответа:
+  Success: {"ok": true, "data": {...}}
+  Error:   {"ok": false, "error": {"code": "...", "message": "..."}}
 """
 import json
 import os
+import uuid
+import logging
 import psycopg2
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("projects")
+
+
+ALLOWED_ACTIONS = {
+    "project.list",
+    "project.get",
+    "project.create",
+    "project.update",
+    "project.invite",
+}
 
 
 def get_db():
@@ -19,16 +45,25 @@ def get_schema():
 def cors_headers():
     return {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+        "X-Api-Version": "v1",
     }
 
 
-def json_response(data, status=200):
+def ok_response(data, request_id):
+    return {
+        "statusCode": 200,
+        "headers": {**cors_headers(), "Content-Type": "application/json", "X-Request-Id": request_id},
+        "body": json.dumps({"ok": True, "request_id": request_id, "data": data}, ensure_ascii=False, default=str),
+    }
+
+
+def err_response(code, message, status, request_id):
     return {
         "statusCode": status,
-        "headers": {**cors_headers(), "Content-Type": "application/json"},
-        "body": json.dumps(data, ensure_ascii=False, default=str),
+        "headers": {**cors_headers(), "Content-Type": "application/json", "X-Request-Id": request_id},
+        "body": json.dumps({"ok": False, "request_id": request_id, "error": {"code": code, "message": message}}, ensure_ascii=False),
     }
 
 
@@ -42,9 +77,7 @@ def get_current_user(conn, session_id):
         (session_id,),
     )
     row = cur.fetchone()
-    if row:
-        return {"id": row[0], "email": row[1], "name": row[2]}
-    return None
+    return {"id": row[0], "email": row[1], "name": row[2]} if row else None
 
 
 def log_activity(cur, schema, project_id, user_id, action, entity_type=None, entity_id=None, details=None):
@@ -54,172 +87,210 @@ def log_activity(cur, schema, project_id, user_id, action, entity_type=None, ent
     )
 
 
+def check_access(cur, schema, project_id, user_id):
+    """Возвращает роль или None если нет доступа."""
+    cur.execute(
+        f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+        (project_id, user_id),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def handle_list(conn, user, request_id):
+    schema = get_schema()
+    cur = conn.cursor()
+    cur.execute(
+        f"""SELECT p.id, p.title, p.description, p.owner_id, p.created_at, p.updated_at,
+            u.name as owner_name,
+            (SELECT COUNT(*) FROM {schema}.documents WHERE project_id = p.id) as doc_count,
+            (SELECT COUNT(*) FROM {schema}.tasks WHERE project_id = p.id) as task_count,
+            pm.role
+        FROM {schema}.projects p
+        JOIN {schema}.project_members pm ON pm.project_id = p.id AND pm.user_id = %s
+        JOIN {schema}.users u ON u.id = p.owner_id
+        ORDER BY p.updated_at DESC""",
+        (user["id"],),
+    )
+    projects = [
+        {
+            "id": r[0], "title": r[1], "description": r[2],
+            "owner_id": r[3], "created_at": str(r[4]), "updated_at": str(r[5]),
+            "owner_name": r[6], "doc_count": r[7], "task_count": r[8], "my_role": r[9],
+        }
+        for r in cur.fetchall()
+    ]
+    return ok_response({"projects": projects}, request_id)
+
+
+def handle_get(conn, user, body, request_id):
+    schema = get_schema()
+    project_id = body.get("project_id")
+    if not project_id:
+        return err_response("validation_error", "Поле project_id обязательно", 400, request_id)
+    try:
+        project_id = int(project_id)
+    except (TypeError, ValueError):
+        return err_response("validation_error", "project_id должен быть числом", 400, request_id)
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id)
+
+    cur.execute(
+        f"SELECT id, title, description, owner_id, created_at, updated_at FROM {schema}.projects WHERE id = %s",
+        (project_id,),
+    )
+    p = cur.fetchone()
+    if not p:
+        return err_response("not_found", "Проект не найден", 404, request_id)
+
+    cur.execute(
+        f"SELECT u.id, u.name, u.email, pm.role, pm.joined_at FROM {schema}.project_members pm JOIN {schema}.users u ON u.id = pm.user_id WHERE pm.project_id = %s",
+        (project_id,),
+    )
+    members = [{"id": r[0], "name": r[1], "email": r[2], "role": r[3], "joined_at": str(r[4])} for r in cur.fetchall()]
+
+    cur.execute(
+        f"SELECT a.action, a.entity_type, a.entity_id, a.details, a.created_at, u.name FROM {schema}.activity_log a JOIN {schema}.users u ON u.id = a.user_id WHERE a.project_id = %s ORDER BY a.created_at DESC LIMIT 20",
+        (project_id,),
+    )
+    activity = [{"action": r[0], "entity_type": r[1], "entity_id": r[2], "details": r[3], "created_at": str(r[4]), "user_name": r[5]} for r in cur.fetchall()]
+
+    return ok_response({
+        "id": p[0], "title": p[1], "description": p[2],
+        "owner_id": p[3], "created_at": str(p[4]), "updated_at": str(p[5]),
+        "members": members, "activity": activity, "my_role": role,
+    }, request_id)
+
+
+def handle_create(conn, user, body, request_id):
+    schema = get_schema()
+    title = (body.get("title") or "").strip()
+    description = body.get("description") or ""
+    if not title:
+        return err_response("validation_error", "Поле title обязательно", 400, request_id)
+
+    cur = conn.cursor()
+    cur.execute(
+        f"INSERT INTO {schema}.projects (title, description, owner_id) VALUES (%s, %s, %s) RETURNING id",
+        (title, description, user["id"]),
+    )
+    project_id = cur.fetchone()[0]
+    cur.execute(
+        f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'owner')",
+        (project_id, user["id"]),
+    )
+    log_activity(cur, schema, project_id, user["id"], "created_project", "project", project_id, title)
+    conn.commit()
+    return ok_response({"id": project_id, "title": title, "description": description}, request_id)
+
+
+def handle_update(conn, user, body, request_id):
+    schema = get_schema()
+    project_id = body.get("project_id")
+    title = (body.get("title") or "").strip()
+    description = body.get("description") or ""
+    if not project_id or not title:
+        return err_response("validation_error", "Поля project_id и title обязательны", 400, request_id)
+    project_id = int(project_id)
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id)
+    if role not in ("owner", "admin"):
+        return err_response("access_denied", "Только владелец может редактировать", 403, request_id)
+
+    cur.execute(
+        f"UPDATE {schema}.projects SET title = %s, description = %s, updated_at = NOW() WHERE id = %s",
+        (title, description, project_id),
+    )
+    log_activity(cur, schema, project_id, user["id"], "updated_project", "project", project_id)
+    conn.commit()
+    return ok_response({"ok": True}, request_id)
+
+
+def handle_invite(conn, user, body, request_id):
+    schema = get_schema()
+    project_id = body.get("project_id")
+    email = (body.get("email") or "").strip().lower()
+    if not project_id or not email:
+        return err_response("validation_error", "Поля project_id и email обязательны", 400, request_id)
+    project_id = int(project_id)
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id)
+    if role not in ("owner", "admin"):
+        return err_response("access_denied", "Только владелец может приглашать", 403, request_id)
+
+    cur.execute(f"SELECT id, name FROM {schema}.users WHERE email = %s", (email,))
+    invite_user = cur.fetchone()
+    if not invite_user:
+        return err_response("not_found", "Пользователь с таким email не найден", 404, request_id)
+
+    cur.execute(
+        f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'member') ON CONFLICT DO NOTHING",
+        (project_id, invite_user[0]),
+    )
+    log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
+    conn.commit()
+    return ok_response({"name": invite_user[1]}, request_id)
+
+
 def handler(event: dict, context) -> dict:
+    request_id = getattr(context, "request_id", None) or str(uuid.uuid4())
+
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": cors_headers(), "body": ""}
 
     method = event.get("httpMethod", "GET")
-    path = event.get("path", "/")
+    if method != "POST":
+        return err_response("method_not_allowed", "Используйте POST", 405, request_id)
+
     body = {}
     if event.get("body"):
         try:
             body = json.loads(event["body"])
         except Exception:
-            pass
+            return err_response("invalid_json", "Тело запроса не является JSON", 400, request_id)
 
-    params = event.get("queryStringParameters") or {}
+    action = body.get("action", "")
+    log.info("request_id=%s action=%s", request_id, action)
+
+    if action not in ALLOWED_ACTIONS:
+        return err_response(
+            "unknown_action",
+            f"Неизвестное action. Допустимые: {sorted(ALLOWED_ACTIONS)}",
+            400,
+            request_id,
+        )
+
     session_id = event.get("headers", {}).get("X-Session-Id", "")
     conn = get_db()
-    schema = get_schema()
-
     try:
         user = get_current_user(conn, session_id)
         if not user:
-            return json_response({"error": "Не авторизован"}, 401)
+            return err_response("auth_required", "Требуется авторизация", 401, request_id)
 
-        cur = conn.cursor()
+        if action == "project.list":
+            return handle_list(conn, user, request_id)
+        if action == "project.get":
+            return handle_get(conn, user, body, request_id)
+        if action == "project.create":
+            return handle_create(conn, user, body, request_id)
+        if action == "project.update":
+            return handle_update(conn, user, body, request_id)
+        if action == "project.invite":
+            return handle_invite(conn, user, body, request_id)
 
-        # GET / — список проектов пользователя
-        if method == "GET" and (path.endswith("/projects") or path == "/"):
-            cur.execute(
-                f"""SELECT p.id, p.title, p.description, p.owner_id, p.created_at, p.updated_at,
-                    u.name as owner_name,
-                    (SELECT COUNT(*) FROM {schema}.documents WHERE project_id = p.id) as doc_count,
-                    (SELECT COUNT(*) FROM {schema}.tasks WHERE project_id = p.id) as task_count,
-                    pm.role
-                FROM {schema}.projects p
-                JOIN {schema}.project_members pm ON pm.project_id = p.id AND pm.user_id = %s
-                JOIN {schema}.users u ON u.id = p.owner_id
-                ORDER BY p.updated_at DESC""",
-                (user["id"],),
-            )
-            rows = cur.fetchall()
-            projects = [
-                {
-                    "id": r[0], "title": r[1], "description": r[2],
-                    "owner_id": r[3], "created_at": str(r[4]), "updated_at": str(r[5]),
-                    "owner_name": r[6], "doc_count": r[7], "task_count": r[8], "my_role": r[9],
-                }
-                for r in rows
-            ]
-            return json_response({"projects": projects})
+        return err_response("not_implemented", "Не реализовано", 501, request_id)
 
-        # POST / — создать проект (только если нет action)
-        if method == "POST" and not body.get("action") and (path.endswith("/projects") or path == "/" or path == ""):
-            title = body.get("title", "").strip()
-            description = body.get("description", "")
-            if not title:
-                return json_response({"error": "Название обязательно"}, 400)
-
-            cur.execute(
-                f"INSERT INTO {schema}.projects (title, description, owner_id) VALUES (%s, %s, %s) RETURNING id",
-                (title, description, user["id"]),
-            )
-            project_id = cur.fetchone()[0]
-            # Добавить создателя как owner
-            cur.execute(
-                f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'owner')",
-                (project_id, user["id"]),
-            )
-            log_activity(cur, schema, project_id, user["id"], "created_project", "project", project_id, title)
-            conn.commit()
-            return json_response({"id": project_id, "title": title, "description": description})
-
-        # POST с action=get_project — детали проекта (надёжнее чем query/path через прокси)
-        path_parts = path.strip("/").split("/")
-        project_id_from_query = params.get("id") if params else None
-        project_id_from_body = body.get("project_id") if body.get("action") == "get_project" else None
-        if (len(path_parts) >= 1 and path_parts[-1].isdigit()) or project_id_from_query or project_id_from_body:
-            if project_id_from_body:
-                project_id = int(project_id_from_body)
-            elif project_id_from_query:
-                project_id = int(project_id_from_query)
-            else:
-                project_id = int(path_parts[-1])
-
-            # Проверка доступа
-            cur.execute(
-                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
-                (project_id, user["id"]),
-            )
-            access = cur.fetchone()
-            if not access:
-                return json_response({"error": "Нет доступа"}, 403)
-
-            if method == "GET" or body.get("action") == "get_project":
-                cur.execute(
-                    f"SELECT id, title, description, owner_id, created_at, updated_at FROM {schema}.projects WHERE id = %s",
-                    (project_id,),
-                )
-                p = cur.fetchone()
-                if not p:
-                    return json_response({"error": "Проект не найден"}, 404)
-
-                # Участники
-                cur.execute(
-                    f"SELECT u.id, u.name, u.email, pm.role, pm.joined_at FROM {schema}.project_members pm JOIN {schema}.users u ON u.id = pm.user_id WHERE pm.project_id = %s",
-                    (project_id,),
-                )
-                members = [{"id": r[0], "name": r[1], "email": r[2], "role": r[3], "joined_at": str(r[4])} for r in cur.fetchall()]
-
-                # Последняя активность
-                cur.execute(
-                    f"SELECT a.action, a.entity_type, a.entity_id, a.details, a.created_at, u.name FROM {schema}.activity_log a JOIN {schema}.users u ON u.id = a.user_id WHERE a.project_id = %s ORDER BY a.created_at DESC LIMIT 20",
-                    (project_id,),
-                )
-                activity = [{"action": r[0], "entity_type": r[1], "entity_id": r[2], "details": r[3], "created_at": str(r[4]), "user_name": r[5]} for r in cur.fetchall()]
-
-                return json_response({
-                    "id": p[0], "title": p[1], "description": p[2],
-                    "owner_id": p[3], "created_at": str(p[4]), "updated_at": str(p[5]),
-                    "members": members, "activity": activity, "my_role": access[0],
-                })
-
-            if method == "PUT" or body.get("action") == "update_project":
-                title = body.get("title")
-                description = body.get("description")
-                if title:
-                    cur.execute(
-                        f"UPDATE {schema}.projects SET title = %s, description = %s, updated_at = NOW() WHERE id = %s",
-                        (title, description, project_id),
-                    )
-                    log_activity(cur, schema, project_id, user["id"], "updated_project", "project", project_id)
-                    conn.commit()
-                return json_response({"ok": True})
-
-        # POST invite — пригласить по email (action в body)
-        if method == "POST" and (body.get("action") == "invite" or "invite" in path):
-            project_id = body.get("project_id")
-            if not project_id:
-                path_parts = path.strip("/").split("/")
-                if len(path_parts) >= 2 and path_parts[-1] == "invite":
-                    project_id = int(path_parts[-2])
-            if not project_id:
-                return json_response({"error": "Неверный запрос"}, 400)
-
-            cur.execute(
-                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
-                (project_id, user["id"]),
-            )
-            access = cur.fetchone()
-            if not access or access[0] not in ("owner", "admin"):
-                return json_response({"error": "Нет прав"}, 403)
-
-            email = body.get("email", "").strip().lower()
-            cur.execute(f"SELECT id, name FROM {schema}.users WHERE email = %s", (email,))
-            invite_user = cur.fetchone()
-            if not invite_user:
-                return json_response({"error": "Пользователь не найден"}, 404)
-
-            cur.execute(
-                f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'member') ON CONFLICT DO NOTHING",
-                (project_id, invite_user[0]),
-            )
-            log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
-            conn.commit()
-            return json_response({"ok": True, "name": invite_user[1]})
-
-        return json_response({"error": "Not found"}, 404)
-
+    except Exception as e:
+        log.exception("Unhandled error request_id=%s", request_id)
+        return err_response("internal_error", f"Ошибка сервера: {str(e)[:200]}", 500, request_id)
     finally:
         conn.close()
