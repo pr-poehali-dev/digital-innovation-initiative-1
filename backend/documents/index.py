@@ -388,7 +388,7 @@ def handler(event: dict, context) -> dict:
         # === Action-based endpoints (новый формат v1) ===
         action = body.get("action")
 
-        # document.get_url — получить ссылку для скачивания/просмотра
+        # document.get_url — отдаём файл через бэкенд (base64) с проверкой доступа
         if action == "document.get_url":
             doc_id = body.get("document_id")
             if not doc_id:
@@ -407,17 +407,28 @@ def handler(event: dict, context) -> dict:
             )
             if not cur.fetchone():
                 return json_response({"error": "Нет доступа"}, 403)
-            # Генерируем presigned URL на 1 час
+            # Скачиваем файл из S3 и возвращаем как base64
             s3 = get_s3()
             try:
-                url = s3.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": "files", "Key": s3_key},
-                    ExpiresIn=3600,
-                )
+                obj = s3.get_object(Bucket="files", Key=s3_key)
+                file_bytes = obj["Body"].read()
             except Exception as e:
-                return json_response({"error": f"Ошибка ссылки: {e}"}, 500)
-            return json_response({"url": url, "filename": orig_name, "file_type": ftype})
+                return json_response({"error": f"Не удалось получить файл: {e}"}, 500)
+            file_b64 = base64.b64encode(file_bytes).decode("ascii")
+            content_types = {
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                "ogg": "audio/ogg", "mp3": "audio/mpeg",
+            }
+            return json_response({
+                "file_data": file_b64,
+                "filename": orig_name,
+                "file_type": ftype,
+                "mime": content_types.get(ftype.lower(), "application/octet-stream"),
+                "size": len(file_bytes),
+            })
 
         # document.delete — SOFT ARCHIVE (не уничтожает данные)
         # Файл в S3 сохраняется, связи с заданиями НЕ рвутся,

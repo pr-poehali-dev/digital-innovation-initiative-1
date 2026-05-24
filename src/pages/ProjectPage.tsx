@@ -157,7 +157,31 @@ export default function ProjectPage() {
     setMenuDocId(null);
     try {
       const d = await documentsApi.getUrl(docId);
-      window.open(d.url, "_blank", "noopener");
+      // Декодируем base64 → blob → object URL (защищённое скачивание через бэкенд)
+      const byteChars = atob(d.file_data);
+      const byteArr = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([byteArr], { type: d.mime || "application/octet-stream" });
+      const blobUrl = URL.createObjectURL(blob);
+
+      // PDF/картинки — открываем в новой вкладке. Office (docx/pptx) — скачиваем.
+      const inlineTypes = ["pdf", "jpg", "jpeg", "png", "webp"];
+      const ft = (d.file_type || "").toLowerCase();
+      if (inlineTypes.includes(ft)) {
+        const w = window.open(blobUrl, "_blank");
+        if (!w) {
+          const a = document.createElement("a");
+          a.href = blobUrl;
+          a.download = d.filename;
+          a.click();
+        }
+      } else {
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = d.filename;
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Не удалось открыть");
     }
