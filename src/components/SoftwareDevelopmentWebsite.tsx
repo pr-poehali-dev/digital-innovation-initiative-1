@@ -537,6 +537,117 @@ export default function SoftwareDevelopmentWebsite() {
             </Card>
           </div>
         </section>
+
+        {/* Секция: пример промпта */}
+        <section className="py-16 md:py-24 bg-background">
+          <div className="mx-auto max-w-5xl px-6">
+            <div className="text-center mb-12">
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Как это работает</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-semibold">
+                Задавай задание AI как <span className="text-slate-600">формулу из своих материалов</span>
+              </h2>
+              <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
+                Загрузи стандарты, презентации-образцы и материалы по теме — AI соберёт всё в один результат по твоим правилам.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-5 gap-6 items-stretch">
+              {/* Левая часть: документы */}
+              <div className="md:col-span-2 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">📁 В кабинете загружено</p>
+                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-950/30 flex items-center justify-center flex-shrink-0">
+                    <BookOpen className="h-4 w-4 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Стандарт IPMO.pdf</p>
+                    <p className="text-xs text-slate-500">Роль: нормативный документ</p>
+                  </div>
+                </div>
+                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/30 flex items-center justify-center flex-shrink-0">
+                    <Layers className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Прошлая презентация.pptx</p>
+                    <p className="text-xs text-slate-500">Роль: образец структуры и стиля</p>
+                  </div>
+                </div>
+                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-950/30 flex items-center justify-center flex-shrink-0">
+                    <FileText className="h-4 w-4 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Конспект лекций.docx</p>
+                    <p className="text-xs text-slate-500">Роль: содержательный материал</p>
+                  </div>
+                </div>
+                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-950/30 flex items-center justify-center flex-shrink-0">
+                    <FileText className="h-4 w-4 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Статьи по теме.pdf</p>
+                    <p className="text-xs text-slate-500">Роль: содержательный материал</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Правая часть: промпт */}
+              <div className="md:col-span-3 space-y-4">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">✨ Промпт для AI</p>
+                <div className="border-2 border-slate-800 rounded-2xl bg-slate-900 text-white p-6 shadow-xl">
+                  <p className="text-sm leading-relaxed font-mono">
+                    Подготовь <span className="bg-slate-700 px-1.5 py-0.5 rounded text-yellow-300 font-semibold">дипломную работу</span> на тему{" "}
+                    <span className="bg-slate-700 px-1.5 py-0.5 rounded text-blue-300 font-semibold">«Цифровая трансформация управления проектами»</span>.
+                    <br /><br />
+                    Учти стандарт <span className="bg-slate-700 px-1.5 py-0.5 rounded text-purple-300 font-semibold">IPMO</span>,
+                    возьми структуру и стиль оформления из <span className="bg-slate-700 px-1.5 py-0.5 rounded text-cyan-300 font-semibold">прилагаемой презентации</span>.
+                    <br /><br />
+                    Используй <span className="bg-slate-700 px-1.5 py-0.5 rounded text-green-300 font-semibold">мои материалы</span> как содержательную базу и
+                    <span className="bg-slate-700 px-1.5 py-0.5 rounded text-orange-300 font-semibold"> дополни актуальными источниками из интернета</span>.
+                    <br /><br />
+                    Объём — 60 страниц, академический стиль, добавь введение, 3 главы, заключение и список литературы.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
+                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
+                  </div>
+                  <span>AI анализирует все 4 документа + ищет дополнения в сети</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
+                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
+                  </div>
+                  <span>Предлагает 1-3 варианта структуры на выбор</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
+                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
+                  </div>
+                  <span>Генерирует диплом + презентацию защиты по стилю образца</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
+                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
+                  </div>
+                  <span>Принимает правки и сохраняет историю версий</span>
+                </div>
+
+                <div className="pt-4">
+                  <Link to="/cabinet">
+                    <Button size="lg" className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-6">
+                      Открыть кабинет
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
       <footer className="bg-background border-t border-slate-200">
