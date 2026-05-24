@@ -74,6 +74,10 @@ export const projectsApi = {
     request(URLS.projects, "/", "POST", { action: "project.get", project_id: id }),
   update: (id: number, title: string, description?: string) =>
     request(URLS.projects, "/", "POST", { action: "project.update", project_id: id, title, description }),
+  archive: (id: number) =>
+    request(URLS.projects, "/", "POST", { action: "project.archive", project_id: id }),
+  restore: (id: number) =>
+    request(URLS.projects, "/", "POST", { action: "project.restore", project_id: id }),
   invite: (projectId: number, email: string) =>
     request(URLS.projects, "/", "POST", { action: "project.invite", project_id: projectId, email }),
 };

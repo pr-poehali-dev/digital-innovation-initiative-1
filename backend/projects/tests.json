@@ -46,6 +46,26 @@
       "expectedStatus": 403,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: project.archive чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "project.archive", "project_id": 1},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: project.restore чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "project.restore", "project_id": 1},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

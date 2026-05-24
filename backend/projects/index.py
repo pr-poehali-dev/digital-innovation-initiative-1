@@ -28,6 +28,8 @@ ALLOWED_ACTIONS = {
     "project.get",
     "project.create",
     "project.update",
+    "project.archive",
+    "project.restore",
     "project.invite",
 }
 
@@ -118,15 +120,17 @@ def check_access(cur, schema, project_id, user_id):
 def handle_list(conn, user, request_id, origin=None):
     schema = get_schema()
     cur = conn.cursor()
+    # Фильтр archived_at IS NULL — архивные проекты не показываем
     cur.execute(
         f"""SELECT p.id, p.title, p.description, p.owner_id, p.created_at, p.updated_at,
             u.name as owner_name,
-            (SELECT COUNT(*) FROM {schema}.documents WHERE project_id = p.id) as doc_count,
-            (SELECT COUNT(*) FROM {schema}.tasks WHERE project_id = p.id) as task_count,
+            (SELECT COUNT(*) FROM {schema}.documents WHERE project_id = p.id AND archived_at IS NULL) as doc_count,
+            (SELECT COUNT(*) FROM {schema}.tasks WHERE project_id = p.id AND archived_at IS NULL) as task_count,
             pm.role
         FROM {schema}.projects p
         JOIN {schema}.project_members pm ON pm.project_id = p.id AND pm.user_id = %s
         JOIN {schema}.users u ON u.id = p.owner_id
+        WHERE p.archived_at IS NULL
         ORDER BY p.updated_at DESC""",
         (user["id"],),
     )
@@ -157,12 +161,14 @@ def handle_get(conn, user, body, request_id, origin=None):
         return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
 
     cur.execute(
-        f"SELECT id, title, description, owner_id, created_at, updated_at FROM {schema}.projects WHERE id = %s",
+        f"SELECT id, title, description, owner_id, created_at, updated_at, archived_at FROM {schema}.projects WHERE id = %s",
         (project_id,),
     )
     p = cur.fetchone()
     if not p:
         return err_response("not_found", "Проект не найден", 404, request_id, origin=origin)
+    if p[6] is not None:
+        return err_response("not_found", "Проект архивирован", 404, request_id, origin=origin)
 
     cur.execute(
         f"SELECT u.id, u.name, u.email, pm.role, pm.joined_at FROM {schema}.project_members pm JOIN {schema}.users u ON u.id = pm.user_id WHERE pm.project_id = %s",
@@ -226,6 +232,67 @@ def handle_update(conn, user, body, request_id, origin=None):
         (title, description, project_id),
     )
     log_activity(cur, schema, project_id, user["id"], "updated_project", "project", project_id)
+    conn.commit()
+    return ok_response({"ok": True}, request_id, origin=origin)
+
+
+def handle_archive(conn, user, body, request_id, origin=None):
+    """Soft delete проекта. Файлы/задания/история сохраняются — только скрытие из UI."""
+    schema = get_schema()
+    project_id = body.get("project_id")
+    if not project_id:
+        return err_response("validation_error", "Поле project_id обязательно", 400, request_id, origin=origin)
+    project_id = int(project_id)
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
+    if role != "owner":
+        return err_response("access_denied", "Только владелец может архивировать", 403, request_id, origin=origin)
+
+    cur.execute(
+        f"SELECT title, archived_at FROM {schema}.projects WHERE id = %s",
+        (project_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Проект не найден", 404, request_id, origin=origin)
+    if row[1] is not None:
+        return err_response("validation_error", "Проект уже архивирован", 400, request_id, origin=origin)
+
+    cur.execute(
+        f"UPDATE {schema}.projects SET archived_at = NOW() WHERE id = %s",
+        (project_id,),
+    )
+    log_activity(cur, schema, project_id, user["id"], "archived_project", "project", project_id, row[0])
+    conn.commit()
+    return ok_response({"ok": True, "archived": True, "can_restore": True}, request_id, origin=origin)
+
+
+def handle_restore(conn, user, body, request_id, origin=None):
+    """Восстановить проект из архива (только owner)."""
+    schema = get_schema()
+    project_id = body.get("project_id")
+    if not project_id:
+        return err_response("validation_error", "Поле project_id обязательно", 400, request_id, origin=origin)
+    project_id = int(project_id)
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin=origin)
+    if role != "owner":
+        return err_response("access_denied", "Только владелец", 403, request_id, origin=origin)
+
+    cur.execute(
+        f"UPDATE {schema}.projects SET archived_at = NULL WHERE id = %s RETURNING title",
+        (project_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Проект не найден", 404, request_id, origin=origin)
+    log_activity(cur, schema, project_id, user["id"], "restored_project", "project", project_id, row[0])
     conn.commit()
     return ok_response({"ok": True}, request_id, origin=origin)
 
@@ -304,6 +371,10 @@ def handler(event: dict, context) -> dict:
             return handle_create(conn, user, body, request_id, origin=origin)
         if action == "project.update":
             return handle_update(conn, user, body, request_id, origin=origin)
+        if action == "project.archive":
+            return handle_archive(conn, user, body, request_id, origin=origin)
+        if action == "project.restore":
+            return handle_restore(conn, user, body, request_id, origin=origin)
         if action == "project.invite":
             return handle_invite(conn, user, body, request_id, origin=origin)
 
