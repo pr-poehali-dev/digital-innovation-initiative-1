@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Export requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"run_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

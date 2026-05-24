@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { tasksApi, generateApi } from "@/lib/api";
+import { tasksApi, generateApi, exportApi, downloadBase64File } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
@@ -69,6 +69,8 @@ export default function TaskPage() {
 
   const [task, setTask] = useState<Task | null>(null);
   const [activeRun, setActiveRun] = useState<RunResult | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [loadingRun, setLoadingRun] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [revision, setRevision] = useState("");
@@ -118,6 +120,20 @@ export default function TaskPage() {
   const copyToClipboard = () => {
     if (activeRun?.content) {
       navigator.clipboard.writeText(activeRun.content);
+    }
+  };
+
+  const handleExportPptx = async () => {
+    if (!activeRun) return;
+    setExporting(true);
+    setExportError("");
+    try {
+      const data = await exportApi.exportPptx(activeRun.id);
+      downloadBase64File(data.file_data, data.filename, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    } catch (err: unknown) {
+      setExportError(err instanceof Error ? err.message : "Ошибка экспорта");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -270,13 +286,23 @@ export default function TaskPage() {
                       <span className="text-xs bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 px-2 py-0.5 rounded-full">Готово</span>
                     )}
                   </div>
-                  <button
-                    onClick={copyToClipboard}
-                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Icon name="Copy" size={13} />
-                    Скопировать
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={copyToClipboard}
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Icon name="Copy" size={13} />
+                      Скопировать
+                    </button>
+                    <button
+                      onClick={handleExportPptx}
+                      disabled={exporting || loadingRun}
+                      className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      <Icon name="Download" size={13} />
+                      {exporting ? "Создаю..." : "Скачать PPTX"}
+                    </button>
+                  </div>
                 </div>
 
                 {loadingRun ? (
@@ -290,6 +316,12 @@ export default function TaskPage() {
                     <pre className="whitespace-pre-wrap text-sm leading-relaxed font-sans">{activeRun.content}</pre>
                   </div>
                 ) : null}
+              </div>
+            )}
+
+            {exportError && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                {exportError}
               </div>
             )}
 

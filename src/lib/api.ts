@@ -4,6 +4,7 @@ const URLS = {
   documents: "https://functions.poehali.dev/94029017-e75a-4ce2-a3b7-17adc33fa8a1",
   tasks: "https://functions.poehali.dev/363a1c77-0e9a-41a6-a862-b1cf2a632688",
   generate: "https://functions.poehali.dev/90160450-b2a6-44cd-8e78-089f457c619d",
+  export: "https://functions.poehali.dev/9d47e96e-4b93-40c5-9d52-d87273385119",
 };
 
 function getSession(): string {
@@ -77,6 +78,24 @@ export const generateApi = {
     request(URLS.generate, "/run", "POST", { task_id: taskId, prompt, revision_of: revisionOf }),
   getRun: (runId: number) => request(URLS.generate, `/run/${runId}`),
 };
+
+export const exportApi = {
+  exportPptx: (runId: number) =>
+    request(URLS.export, "/", "POST", { run_id: runId }),
+};
+
+export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {
+  const byteChars = atob(base64Data);
+  const byteArr = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArr], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
