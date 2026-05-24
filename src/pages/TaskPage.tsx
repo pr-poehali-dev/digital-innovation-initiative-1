@@ -114,7 +114,15 @@ export default function TaskPage() {
         isRevision && activeRun ? activeRun.id : undefined,
         useWebSearch,
       );
-      setActiveRun({ ...result, revisions: [] });
+      // Бэкенд возвращает {run_id, version, content} — нормализуем в RunResult с полем `id`
+      setActiveRun({
+        id: result.run_id || result.id,
+        version: result.version,
+        content: result.content,
+        status: "done",
+        created_by: "",
+        revisions: [],
+      });
       setRevision("");
       setPrompt("");
       loadTask();
@@ -166,9 +174,20 @@ export default function TaskPage() {
     setSelectedBlock(blockText);
     setExplanation("");
     setRefineInstruction("");
+
+    // Если у activeRun нет id (только что после генерации) — перезагружаем версию
+    let runId = activeRun.id;
+    if (!runId && task?.runs && task.runs.length > 0) {
+      runId = task.runs[0].id;
+    }
+    if (!runId) {
+      setExplanation("Ошибка: не удалось определить версию. Обновите страницу.");
+      return;
+    }
+
     setLoadingExplain(true);
     try {
-      const d = await generateApi.explainBlock(activeRun.id, blockText);
+      const d = await generateApi.explainBlock(runId, blockText);
       setExplanation(d.explanation);
     } catch (err: unknown) {
       setExplanation("Ошибка: " + (err instanceof Error ? err.message : "не удалось получить обоснование"));
@@ -180,9 +199,17 @@ export default function TaskPage() {
   // Просим AI переработать выбранный фрагмент с учётом наших пожеланий
   const handleRefineBlock = async () => {
     if (!activeRun || !selectedBlock || !refineInstruction.trim()) return;
+    let runId = activeRun.id;
+    if (!runId && task?.runs && task.runs.length > 0) {
+      runId = task.runs[0].id;
+    }
+    if (!runId) {
+      alert("Не удалось определить версию. Обновите страницу.");
+      return;
+    }
     setRefining(true);
     try {
-      const d = await generateApi.refineBlock(activeRun.id, selectedBlock, refineInstruction.trim());
+      const d = await generateApi.refineBlock(runId, selectedBlock, refineInstruction.trim());
       setSelectedBlock(null);
       setExplanation("");
       setRefineInstruction("");
