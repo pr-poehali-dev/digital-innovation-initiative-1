@@ -73,6 +73,12 @@ export const documentsApi = {
     request(URLS.documents, "/", "POST", { action: "get_text", document_id: docId }),
   setCategory: (docId: number, category: string) =>
     request(URLS.documents, "/", "POST", { action: "set_category", document_id: docId, category }),
+  getUrl: (docId: number) =>
+    request(URLS.documents, "/", "POST", { action: "document.get_url", document_id: docId }),
+  delete: (docId: number) =>
+    request(URLS.documents, "/", "POST", { action: "document.delete", document_id: docId }),
+  rename: (docId: number, newName: string) =>
+    request(URLS.documents, "/", "POST", { action: "document.rename", document_id: docId, new_name: newName }),
 };
 
 export const tasksApi = {

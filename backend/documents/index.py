@@ -385,6 +385,105 @@ def handler(event: dict, context) -> dict:
                     pass
             return json_response({"text": row[0], "structure": structure})
 
+        # === Action-based endpoints (новый формат v1) ===
+        action = body.get("action")
+
+        # document.get_url — получить ссылку для скачивания/просмотра
+        if action == "document.get_url":
+            doc_id = body.get("document_id")
+            if not doc_id:
+                return json_response({"error": "Нужен document_id"}, 400)
+            cur.execute(
+                f"SELECT s3_key, original_name, file_type, project_id FROM {schema}.documents WHERE id = %s",
+                (int(doc_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Не найдено"}, 404)
+            s3_key, orig_name, ftype, pid = row
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (pid, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+            # Генерируем presigned URL на 1 час
+            s3 = get_s3()
+            try:
+                url = s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": "files", "Key": s3_key},
+                    ExpiresIn=3600,
+                )
+            except Exception as e:
+                return json_response({"error": f"Ошибка ссылки: {e}"}, 500)
+            return json_response({"url": url, "filename": orig_name, "file_type": ftype})
+
+        # document.delete — удалить документ
+        if action == "document.delete":
+            doc_id = body.get("document_id")
+            if not doc_id:
+                return json_response({"error": "Нужен document_id"}, 400)
+            doc_id = int(doc_id)
+            cur.execute(
+                f"SELECT s3_key, project_id, original_name FROM {schema}.documents WHERE id = %s",
+                (doc_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Не найдено"}, 404)
+            s3_key, pid, orig_name = row
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (pid, user["id"]),
+            )
+            access = cur.fetchone()
+            if not access:
+                return json_response({"error": "Нет доступа"}, 403)
+            # Удаляем связи и сам документ
+            cur.execute(f"DELETE FROM {schema}.document_chunks WHERE document_id = %s", (doc_id,))
+            cur.execute(f"DELETE FROM {schema}.task_documents WHERE document_id = %s", (doc_id,))
+            cur.execute(f"DELETE FROM {schema}.document_chats WHERE document_id = %s", (doc_id,))
+            cur.execute(f"DELETE FROM {schema}.documents WHERE id = %s", (doc_id,))
+            # Удаляем из S3 (best effort)
+            try:
+                s3 = get_s3()
+                s3.delete_object(Bucket="files", Key=s3_key)
+            except Exception:
+                pass
+            log_activity(cur, schema, pid, user["id"], "deleted_document", "document", doc_id, orig_name)
+            conn.commit()
+            return json_response({"ok": True})
+
+        # document.rename — переименовать
+        if action == "document.rename":
+            doc_id = body.get("document_id")
+            new_name = (body.get("new_name") or "").strip()
+            if not doc_id or not new_name:
+                return json_response({"error": "Нужны document_id и new_name"}, 400)
+            doc_id = int(doc_id)
+            cur.execute(
+                f"SELECT project_id, original_name FROM {schema}.documents WHERE id = %s",
+                (doc_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Не найдено"}, 404)
+            pid, old_name = row
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (pid, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403)
+            cur.execute(
+                f"UPDATE {schema}.documents SET original_name = %s WHERE id = %s",
+                (new_name[:255], doc_id),
+            )
+            log_activity(cur, schema, pid, user["id"], "renamed_document", "document", doc_id, f"{old_name} → {new_name}")
+            conn.commit()
+            return json_response({"ok": True, "name": new_name[:255]})
+
         return json_response({"error": "Not found"}, 404)
 
     finally:

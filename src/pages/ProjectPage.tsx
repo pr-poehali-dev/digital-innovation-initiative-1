@@ -89,6 +89,10 @@ export default function ProjectPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
   const [uploadCategory, setUploadCategory] = useState("notes");
+  const [menuDocId, setMenuDocId] = useState<number | null>(null);
+  const [renamingDoc, setRenamingDoc] = useState<{ id: number; name: string } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -146,6 +150,39 @@ export default function ProjectPage() {
     } finally {
       setUploading(false);
       e.target.value = "";
+    }
+  };
+
+  const handleOpenDoc = async (docId: number) => {
+    setMenuDocId(null);
+    try {
+      const d = await documentsApi.getUrl(docId);
+      window.open(d.url, "_blank", "noopener");
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Не удалось открыть");
+    }
+  };
+
+  const handleRename = async () => {
+    if (!renamingDoc || !renameValue.trim()) return;
+    try {
+      await documentsApi.rename(renamingDoc.id, renameValue.trim());
+      setRenamingDoc(null);
+      setRenameValue("");
+      load();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    try {
+      await documentsApi.delete(confirmDelete.id);
+      setConfirmDelete(null);
+      load();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
     }
   };
 
@@ -363,7 +400,7 @@ export default function ProjectPage() {
                   const mediaIcon = doc.media_type === "image" ? "Camera" : doc.media_type === "audio" ? "Mic" : cat.icon;
                   const mediaLabel = doc.media_type === "image" ? "Фото" : doc.media_type === "audio" ? "Аудио" : cat.label;
                   return (
-                    <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
+                    <div key={doc.id} className="relative flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
                       <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${cat.color}`}>
                         <Icon name={mediaIcon} size={16} fallback="FileText" />
                       </div>
@@ -377,6 +414,14 @@ export default function ProjectPage() {
                           {" · "}{doc.uploaded_by}
                         </p>
                       </div>
+                      <button
+                        onClick={() => handleOpenDoc(doc.id)}
+                        title="Открыть"
+                        className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
+                      >
+                        <Icon name="Eye" size={13} />
+                        <span className="hidden sm:inline">Открыть</span>
+                      </button>
                       <Link
                         to={`/cabinet/project/${projectId}/document/${doc.id}`}
                         className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
@@ -385,6 +430,42 @@ export default function ProjectPage() {
                         <Icon name="MessageCircle" size={13} />
                         <span className="hidden sm:inline">Спросить</span>
                       </Link>
+                      <button
+                        onClick={() => setMenuDocId(menuDocId === doc.id ? null : doc.id)}
+                        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+                        title="Действия"
+                      >
+                        <Icon name="MoreVertical" size={16} />
+                      </button>
+                      {menuDocId === doc.id && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setMenuDocId(null)} />
+                          <div className="absolute right-2 top-full mt-1 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-48">
+                            <button
+                              onClick={() => { setMenuDocId(null); setRenamingDoc({ id: doc.id, name: doc.name }); setRenameValue(doc.name); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                            >
+                              <Icon name="Pencil" size={14} />
+                              Переименовать
+                            </button>
+                            <button
+                              onClick={() => { setMenuDocId(null); handleOpenDoc(doc.id); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                            >
+                              <Icon name="Download" size={14} />
+                              Скачать оригинал
+                            </button>
+                            <div className="border-t border-slate-100 my-1" />
+                            <button
+                              onClick={() => { setMenuDocId(null); setConfirmDelete({ id: doc.id, name: doc.name }); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left"
+                            >
+                              <Icon name="Trash2" size={14} />
+                              Удалить
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -479,6 +560,52 @@ export default function ProjectPage() {
           </div>
         )}
       </div>
+
+      {/* Модалка переименования */}
+      {renamingDoc && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white border rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <h2 className="text-lg font-semibold mb-4 text-slate-800">Переименовать материал</h2>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleRename(); }}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500 mb-4"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => { setRenamingDoc(null); setRenameValue(""); }} className="flex-1 border border-slate-300 rounded-lg py-2.5 text-sm font-medium hover:bg-slate-50">
+                Отмена
+              </button>
+              <button onClick={handleRename} disabled={!renameValue.trim()} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка удаления */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white border rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center mx-auto mb-3">
+              <Icon name="AlertTriangle" size={24} className="text-red-600" />
+            </div>
+            <h2 className="text-lg font-semibold mb-2 text-center text-slate-800">Удалить материал?</h2>
+            <p className="text-sm text-slate-600 mb-1 text-center">«{confirmDelete.name}»</p>
+            <p className="text-xs text-slate-500 mb-5 text-center">Будут удалены: файл, извлечённый текст, фрагменты для поиска и история чата по нему. Это действие необратимо.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDelete(null)} className="flex-1 border border-slate-300 rounded-lg py-2.5 text-sm font-medium hover:bg-slate-50">
+                Отмена
+              </button>
+              <button onClick={handleDelete} className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-lg py-2.5 text-sm font-medium">
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
