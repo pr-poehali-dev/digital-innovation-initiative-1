@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { authApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
@@ -8,7 +9,8 @@ const LOGO_URL = "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b
 type Mode = "login" | "register" | "reset";
 
 export default function AuthPage() {
-  const { login, register } = useAuth();
+  const { login, register, user } = useAuth();
+  const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,6 +20,10 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [resetMsg, setResetMsg] = useState("");
   const [tempPassword, setTempPassword] = useState("");
+
+  useEffect(() => {
+    if (user) navigate("/cabinet", { replace: true });
+  }, [user, navigate]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
