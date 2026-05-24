@@ -157,7 +157,7 @@ export default function ProjectPage() {
           </div>
           <Link
             to={`/cabinet/project/${projectId}/new-task`}
-            className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             <Icon name="Plus" size={16} />
             Новое задание
@@ -191,7 +191,7 @@ export default function ProjectPage() {
                 <p className="text-sm mb-4">Создайте задание чтобы начать работу с AI</p>
                 <Link
                   to={`/cabinet/project/${projectId}/new-task`}
-                  className="inline-flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 transition-colors"
+                  className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors"
                 >
                   <Icon name="Plus" size={14} />
                   Создать задание
@@ -248,7 +248,7 @@ export default function ProjectPage() {
               />
               <label
                 htmlFor="file-upload"
-                className={`inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                className={`inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <Icon name="Upload" size={14} />
                 {uploading ? "Загружаю..." : "Выбрать файл"}
@@ -337,7 +337,7 @@ export default function ProjectPage() {
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       placeholder="email@example.com"
-                      className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
                     />
                     {inviteMsg && (
                       <p className={`text-sm ${inviteMsg.startsWith("✓") ? "text-green-600" : "text-red-500"}`}>
@@ -350,7 +350,7 @@ export default function ProjectPage() {
                         Отмена
                       </button>
                       <button type="submit"
-                        className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg py-2 text-sm font-medium transition-colors">
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2 text-sm font-medium transition-colors">
                         Пригласить
                       </button>
                     </div>

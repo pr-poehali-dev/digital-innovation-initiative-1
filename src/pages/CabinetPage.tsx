@@ -59,7 +59,7 @@ export default function CabinetPage() {
           </div>
           <button
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             <Icon name="Plus" size={16} />
             Новый проект
@@ -78,7 +78,7 @@ export default function CabinetPage() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Например: IPMO Модуль 3"
-                    className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
                   />
                 </div>
                 <div>
@@ -88,7 +88,7 @@ export default function CabinetPage() {
                     onChange={(e) => setDesc(e.target.value)}
                     placeholder="О чём этот проект?"
                     rows={3}
-                    className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
                 {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -103,7 +103,7 @@ export default function CabinetPage() {
                   <button
                     type="submit"
                     disabled={creating || !title.trim()}
-                    className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg py-2.5 text-sm font-medium transition-colors disabled:opacity-50"
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2.5 text-sm font-medium transition-colors disabled:opacity-50"
                   >
                     {creating ? "Создание..." : "Создать"}
                   </button>

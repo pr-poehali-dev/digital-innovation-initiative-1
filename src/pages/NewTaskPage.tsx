@@ -142,7 +142,7 @@ export default function NewTaskPage() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Например: Презентация по управлению проектами"
-                className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
               />
             </div>
             <div>
@@ -151,7 +151,7 @@ export default function NewTaskPage() {
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
                 placeholder="О чём должен быть результат?"
-                className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
               />
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
@@ -161,7 +161,7 @@ export default function NewTaskPage() {
                   value={goal}
                   onChange={(e) => setGoal(e.target.value)}
                   placeholder="Что должно получиться?"
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
                 />
               </div>
               <div>
@@ -170,7 +170,7 @@ export default function NewTaskPage() {
                   value={audience}
                   onChange={(e) => setAudience(e.target.value)}
                   placeholder="Для кого?"
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
                 />
               </div>
             </div>
@@ -180,7 +180,7 @@ export default function NewTaskPage() {
                 <select
                   value={style}
                   onChange={(e) => setStyle(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
                 >
                   <option value="">Не указан</option>
                   {STYLES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -195,7 +195,7 @@ export default function NewTaskPage() {
                   placeholder="Например: 12"
                   min={1}
                   max={50}
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
                 />
               </div>
             </div>
@@ -206,7 +206,7 @@ export default function NewTaskPage() {
                 onChange={(e) => setInstructions(e.target.value)}
                 placeholder="Любые дополнительные требования к результату..."
                 rows={3}
-                className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
               />
             </div>
           </div>
@@ -234,7 +234,7 @@ export default function NewTaskPage() {
                     <select
                       value={docRoles[doc.id] || ""}
                       onChange={(e) => setDocRoles((prev) => ({ ...prev, [doc.id]: e.target.value }))}
-                      className="border rounded-lg px-2 py-1.5 text-xs bg-background focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
                     >
                       <option value="">— не выбрана —</option>
                       {DOC_ROLES.map((r) => (
@@ -265,7 +265,7 @@ export default function NewTaskPage() {
             <button
               type="submit"
               disabled={creating}
-              className="flex-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg py-3 text-sm font-medium transition-colors disabled:opacity-50"
+              className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-3 text-sm font-medium transition-colors disabled:opacity-50"
             >
               {creating ? "Создание..." : "Создать задание"}
             </button>

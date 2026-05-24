@@ -82,6 +82,8 @@ def handler(event: dict, context) -> dict:
                 action = "logout"
             elif path.endswith("/me"):
                 action = "me"
+            elif method == "GET":
+                action = "me"
 
         # POST register
         if method == "POST" and action == "register":

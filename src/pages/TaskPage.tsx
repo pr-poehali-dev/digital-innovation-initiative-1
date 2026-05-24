@@ -243,14 +243,14 @@ export default function TaskPage() {
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder="Дополнительное указание AI (необязательно)..."
                     rows={2}
-                    className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
                 {genError && <p className="text-red-500 text-sm mb-3">{genError}</p>}
                 <button
                   onClick={() => handleGenerate(false)}
                   disabled={generating}
-                  className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 mx-auto"
+                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 mx-auto"
                 >
                   <Icon name="Sparkles" size={16} />
                   {generating ? "Генерирую..." : "Запустить AI"}
@@ -304,7 +304,7 @@ export default function TaskPage() {
                   onChange={(e) => setRevision(e.target.value)}
                   placeholder="Например: сократи до 8 слайдов, усили деловой стиль, добавь акцент на риски..."
                   rows={3}
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none mb-3"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none mb-3"
                 />
                 {genError && <p className="text-red-500 text-sm mb-3">{genError}</p>}
                 <div className="flex gap-2">
@@ -319,7 +319,7 @@ export default function TaskPage() {
                   <button
                     onClick={() => handleGenerate(true)}
                     disabled={generating || !revision.trim()}
-                    className="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg py-2 text-sm font-medium transition-colors disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2 text-sm font-medium transition-colors disabled:opacity-50"
                   >
                     <Icon name="Sparkles" size={14} />
                     {generating ? "Генерирую..." : "Доработать"}
