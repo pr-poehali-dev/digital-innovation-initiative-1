@@ -9,6 +9,21 @@ interface TaskDoc {
   name: string;
   file_type: string;
   role: string;
+  usage_mode?: string;
+  priority?: string;
+  must_use?: boolean;
+  instruction?: string;
+}
+
+interface InfluenceMap {
+  structure_from?: string[];
+  content_from?: string[];
+  methodology_from?: string[];
+  format_from?: string[];
+  background_from?: string[];
+  ignored?: string[];
+  ai_additions?: string[];
+  conflicts_resolved?: string[];
 }
 
 interface Run {
@@ -43,13 +58,20 @@ interface RunResult {
   status: string;
   created_by: string;
   revisions: { instruction: string; created_at: string }[];
+  influence_map?: InfluenceMap | null;
 }
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
-  standard: { label: "Стандарт", color: "text-purple-600 bg-purple-50 dark:bg-purple-950/30" },
-  reference_presentation: { label: "Образец", color: "text-blue-600 bg-blue-50 dark:bg-blue-950/30" },
-  content_source: { label: "Материал", color: "text-green-600 bg-green-50 dark:bg-green-950/30" },
-  draft: { label: "Черновик", color: "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/30" },
+  // P0: новая модель
+  standard: { label: "📜 Стандарт", color: "text-purple-700 bg-purple-50" },
+  content: { label: "📚 Материал", color: "text-green-700 bg-green-50" },
+  methodology: { label: "🧭 Методика", color: "text-cyan-700 bg-cyan-50" },
+  template: { label: "🎨 Образец формата", color: "text-blue-700 bg-blue-50" },
+  background: { label: "📎 Фон", color: "text-slate-700 bg-slate-100" },
+  // Legacy совместимость
+  reference_presentation: { label: "🎨 Образец", color: "text-blue-700 bg-blue-50" },
+  content_source: { label: "📚 Материал", color: "text-green-700 bg-green-50" },
+  draft: { label: "Черновик", color: "text-yellow-700 bg-yellow-50" },
 };
 
 const TASK_TYPE_LABELS: Record<string, string> = {
@@ -302,13 +324,23 @@ export default function TaskPage() {
                 <p className="text-sm font-medium mb-3">Документы задания</p>
                 <div className="space-y-2">
                   {task.documents.map((doc) => (
-                    <div key={doc.id} className="flex items-center gap-2">
-                      <Icon name="FileText" size={14} className="text-muted-foreground flex-shrink-0" />
-                      <span className="text-xs flex-1 truncate">{doc.name}</span>
-                      {ROLE_LABELS[doc.role] && (
-                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${ROLE_LABELS[doc.role].color}`}>
-                          {ROLE_LABELS[doc.role].label}
-                        </span>
+                    <div key={doc.id} className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Icon name="FileText" size={14} className="text-muted-foreground flex-shrink-0" />
+                        <span className="text-xs flex-1 truncate">{doc.name}</span>
+                        {doc.must_use && (
+                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full" title="Обязательный документ">
+                            🔴
+                          </span>
+                        )}
+                        {ROLE_LABELS[doc.role] && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${ROLE_LABELS[doc.role].color}`}>
+                            {ROLE_LABELS[doc.role].label}
+                          </span>
+                        )}
+                      </div>
+                      {doc.instruction && (
+                        <p className="text-xs text-slate-500 pl-6 italic">📝 {doc.instruction}</p>
                       )}
                     </div>
                   ))}
@@ -430,6 +462,60 @@ export default function TaskPage() {
                   </div>
                 ) : activeRun?.content ? (
                   <div className="p-5">
+                    {/* P0: Карта влияния документов */}
+                    {activeRun.influence_map && (
+                      <div className="mb-4 border border-slate-200 rounded-xl bg-slate-50 p-4">
+                        <p className="text-xs font-semibold text-slate-700 mb-3 flex items-center gap-1.5">
+                          <Icon name="Map" size={14} />
+                          Карта влияния документов
+                        </p>
+                        <div className="space-y-1.5 text-xs">
+                          {activeRun.influence_map.structure_from && activeRun.influence_map.structure_from.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-purple-700 min-w-[100px]">📜 Структура:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.structure_from.join(", ")}</span>
+                            </div>
+                          )}
+                          {activeRun.influence_map.content_from && activeRun.influence_map.content_from.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-green-700 min-w-[100px]">📚 Контент:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.content_from.join(", ")}</span>
+                            </div>
+                          )}
+                          {activeRun.influence_map.format_from && activeRun.influence_map.format_from.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-blue-700 min-w-[100px]">🎨 Формат:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.format_from.join(", ")}</span>
+                            </div>
+                          )}
+                          {activeRun.influence_map.methodology_from && activeRun.influence_map.methodology_from.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-cyan-700 min-w-[100px]">🧭 Методика:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.methodology_from.join(", ")}</span>
+                            </div>
+                          )}
+                          {activeRun.influence_map.ai_additions && activeRun.influence_map.ai_additions.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-slate-600 min-w-[100px]">🤖 От AI:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.ai_additions.join("; ")}</span>
+                            </div>
+                          )}
+                          {activeRun.influence_map.ignored && activeRun.influence_map.ignored.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-amber-700 min-w-[100px]">⚠️ Пропущено:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.ignored.join(", ")}</span>
+                            </div>
+                          )}
+                          {activeRun.influence_map.conflicts_resolved && activeRun.influence_map.conflicts_resolved.length > 0 && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-red-700 min-w-[100px]">⚖️ Конфликты:</span>
+                              <span className="text-slate-700">{activeRun.influence_map.conflicts_resolved.join("; ")}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <p className="text-xs text-slate-500 mb-3 flex items-center gap-1.5">
                       <Icon name="MousePointerClick" size={12} />
                       Кликни на любой блок — AI объяснит откуда взято и даст переписать

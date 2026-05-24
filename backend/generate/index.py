@@ -377,6 +377,23 @@ def build_system_prompt(task: dict, documents: list, web_results: list = None) -
    - Контент → из <названий content-документов>
    - Формат → из <названия template-документа>
    - Дополнения AI → перечисли
+
+7. В САМОМ КОНЦЕ ОТВЕТА (после всего!) добавь блок JSON в следующем формате — это машинная карта влияния для UI:
+
+```json INFLUENCE_MAP
+{
+  "structure_from": ["название документа из STANDARD"],
+  "content_from": ["названия документов из CONTENT"],
+  "methodology_from": ["названия методичек"],
+  "format_from": ["название образца"],
+  "background_from": ["фоновые документы"],
+  "ignored": ["документы которые не использовал — с причиной"],
+  "ai_additions": ["краткое описание что добавлено самим AI"],
+  "conflicts_resolved": ["описание конфликтов и как решено по иерархии"]
+}
+```
+
+ВАЖНО: JSON-блок должен быть валидным, без комментариев. Если документа какой-то роли нет — пустой массив [].
 """)
 
     return "\n".join(parts)
@@ -682,6 +699,20 @@ def handler(event: dict, context) -> dict:
                     "must_use": bool(r[8]), "instruction": r[9] or "",
                 })
 
+            # P0: валидация must_use — если обязательный документ пуст/не распарсился,
+            # возвращаем ошибку, не запускаем генерацию (это потеря источника правды)
+            missing_must_use = []
+            for d in documents:
+                if d["must_use"]:
+                    text = (d.get("text") or "").strip()
+                    if not text or text.startswith("[Ошибка"):
+                        missing_must_use.append(d["name"])
+            if missing_must_use:
+                return json_response({
+                    "error": "Не удалось использовать обязательные документы: " + ", ".join(missing_must_use)
+                            + ". Проверьте файлы (пустые / не распарсились) или снимите флаг «Обязательный»."
+                }, 400, origin=origin)
+
             # Определить номер версии
             cur.execute(
                 f"SELECT COALESCE(MAX(version_number), 0) FROM {schema}.generation_runs WHERE task_id = %s",
@@ -750,8 +781,23 @@ def handler(event: dict, context) -> dict:
             # Вызов AI
             ai_result = call_yandex_gpt(messages)
 
+            # P0: извлекаем INFLUENCE_MAP JSON если AI его добавил
+            influence_map = None
+            import re as _re
+            map_match = _re.search(r"```json\s*INFLUENCE_MAP\s*(\{.*?\})\s*```", ai_result, _re.DOTALL)
+            if map_match:
+                try:
+                    influence_map = json.loads(map_match.group(1))
+                    # Убираем технический блок из видимого ответа
+                    ai_result = ai_result[:map_match.start()].rstrip() + "\n" + ai_result[map_match.end():].lstrip()
+                except Exception:
+                    pass
+
             # Сохранить результат
-            result_json = json.dumps({"content": ai_result, "version": version_number}, ensure_ascii=False)
+            result_payload = {"content": ai_result, "version": version_number}
+            if influence_map:
+                result_payload["influence_map"] = influence_map
+            result_json = json.dumps(result_payload, ensure_ascii=False)
             summary = ai_result[:300] + "..." if len(ai_result) > 300 else ai_result
 
             cur.execute(
@@ -814,9 +860,12 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             result_content = None
+            influence_map = None
             if row[3]:
                 try:
-                    result_content = json.loads(row[3]).get("content")
+                    parsed = json.loads(row[3])
+                    result_content = parsed.get("content")
+                    influence_map = parsed.get("influence_map")
                 except Exception:
                     pass
 
@@ -832,6 +881,7 @@ def handler(event: dict, context) -> dict:
                 "content": result_content, "summary": row[4],
                 "status": row[5], "created_at": str(row[6]),
                 "created_by": row[7], "revisions": revisions,
+                "influence_map": influence_map,
             }, origin=origin)
 
         return json_response({"error": "Not found"}, 404, origin=origin)
