@@ -8,6 +8,7 @@ const URLS = {
   exportDocx: "https://functions.poehali.dev/e4caace1-0466-484f-907e-9e141db67523",
   webSearch: "https://functions.poehali.dev/d68c20bc-5049-4096-a8bb-ae7a7f5afe57",
   search: "https://functions.poehali.dev/54999e08-24f7-478d-92d8-8d66785f0a00",
+  mediaUpload: "https://functions.poehali.dev/c3f6a32b-87f2-4ebb-8954-ccbae46e81a3",
 };
 
 function getSession(): string {
@@ -103,6 +104,13 @@ export const searchApi = {
     request(URLS.search, "/", "POST", { action: "chat_with_document", document_id: documentId, question }),
   getChatHistory: (documentId: number) =>
     request(URLS.search, "/", "POST", { action: "get_chat_history", document_id: documentId }),
+};
+
+export const mediaApi = {
+  upload: (projectId: number, filename: string, fileData: string, mediaType: "image" | "audio", category = "notes") =>
+    request(URLS.mediaUpload, "/", "POST", {
+      project_id: projectId, filename, file_data: fileData, media_type: mediaType, category,
+    }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {

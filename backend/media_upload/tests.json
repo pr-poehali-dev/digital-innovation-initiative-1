@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Media upload requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"project_id": 1, "filename": "test.jpg", "file_data": "", "media_type": "image"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

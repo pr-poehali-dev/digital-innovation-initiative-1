@@ -311,7 +311,7 @@ def handler(event: dict, context) -> dict:
 
             cur.execute(
                 f"""SELECT d.id, d.original_name, d.file_type, d.file_size, d.status, d.created_at, u.name,
-                    d.category, d.page_count, d.extracted_length
+                    d.category, d.page_count, d.extracted_length, d.media_type
                     FROM {schema}.documents d JOIN {schema}.users u ON u.id = d.uploaded_by
                     WHERE d.project_id = %s ORDER BY d.created_at DESC""",
                 (project_id,),
@@ -323,6 +323,7 @@ def handler(event: dict, context) -> dict:
                     "created_at": str(r[5]), "uploaded_by": r[6],
                     "category": r[7] or "other",
                     "page_count": r[8], "text_length": r[9],
+                    "media_type": r[10] or "document",
                 }
                 for r in cur.fetchall()
             ]

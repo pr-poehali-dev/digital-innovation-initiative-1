@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { projectsApi, documentsApi, fileToBase64 } from "@/lib/api";
+import { projectsApi, documentsApi, fileToBase64, mediaApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
@@ -15,6 +15,7 @@ interface Document {
   category?: string;
   page_count?: number;
   text_length?: number;
+  media_type?: string;
 }
 
 const CATEGORIES = [
@@ -119,6 +120,34 @@ export default function ProjectPage() {
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>, mediaType: "image" | "audio") => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const imageExts = ["jpg", "jpeg", "png", "webp", "heic"];
+    const audioExts = ["ogg", "oga", "opus", "mp3", "wav", "m4a"];
+    if (mediaType === "image" && !imageExts.includes(ext)) {
+      setUploadError("Поддерживаются: JPG, PNG, WEBP, HEIC");
+      return;
+    }
+    if (mediaType === "audio" && !audioExts.includes(ext)) {
+      setUploadError("Поддерживаются: OGG, OPUS, MP3, WAV, M4A (для лучшего качества — OGG, до 1 МБ)");
+      return;
+    }
+    setUploading(true);
+    setUploadError("");
+    try {
+      const b64 = await fileToBase64(file);
+      await mediaApi.upload(projectId, file.name, b64, mediaType, uploadCategory);
+      load();
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : "Ошибка загрузки медиа");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
     }
   };
 
@@ -275,21 +304,55 @@ export default function ProjectPage() {
                 </select>
               </div>
 
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf,.docx,.pptx"
-                onChange={handleUpload}
-                className="hidden"
-                id="file-upload"
-              />
-              <label
-                htmlFor="file-upload"
-                className={`inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
-              >
-                <Icon name="Upload" size={14} />
-                {uploading ? "Загружаю..." : "Выбрать файл"}
-              </label>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.docx,.pptx"
+                  onChange={handleUpload}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <label
+                  htmlFor="file-upload"
+                  className={`inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                >
+                  <Icon name="Upload" size={14} />
+                  {uploading ? "Загружаю..." : "Документ"}
+                </label>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handleMediaUpload(e, "image")}
+                  className="hidden"
+                  id="photo-upload"
+                />
+                <label
+                  htmlFor="photo-upload"
+                  className={`inline-flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                >
+                  <Icon name="Camera" size={14} />
+                  Фото (OCR)
+                </label>
+
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={(e) => handleMediaUpload(e, "audio")}
+                  className="hidden"
+                  id="audio-upload"
+                />
+                <label
+                  htmlFor="audio-upload"
+                  className={`inline-flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                >
+                  <Icon name="Mic" size={14} />
+                  Аудио
+                </label>
+              </div>
+              <p className="text-xs text-slate-500 mt-3">Фото — распознаётся текст с доски / тетради. Аудио (OGG до 1 МБ) — расшифровывается лекция.</p>
               {uploadError && <p className="text-red-500 text-sm mt-2">{uploadError}</p>}
             </div>
 
@@ -299,15 +362,17 @@ export default function ProjectPage() {
               <div className="space-y-2">
                 {docs.map((doc) => {
                   const cat = CATEGORIES.find((c) => c.value === doc.category) || CATEGORIES[CATEGORIES.length - 1];
+                  const mediaIcon = doc.media_type === "image" ? "Camera" : doc.media_type === "audio" ? "Mic" : cat.icon;
+                  const mediaLabel = doc.media_type === "image" ? "Фото" : doc.media_type === "audio" ? "Аудио" : cat.label;
                   return (
                     <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
                       <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${cat.color}`}>
-                        <Icon name={cat.icon} size={16} fallback="FileText" />
+                        <Icon name={mediaIcon} size={16} fallback="FileText" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{doc.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          <span className="font-medium">{cat.label}</span>
+                          <span className="font-medium">{mediaLabel}</span>
                           {" · "}{doc.file_type.toUpperCase()}
                           {" · "}{formatSize(doc.file_size)}
                           {doc.page_count ? ` · ${doc.page_count} стр.` : ""}
