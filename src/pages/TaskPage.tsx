@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { tasksApi, generateApi, exportApi, downloadBase64File } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import TaskSettingsModal from "@/components/TaskSettingsModal";
 
 interface TaskDoc {
   id: number;
@@ -45,6 +46,7 @@ interface Task {
   style?: string;
   requested_slide_count?: number;
   additional_instructions?: string;
+  style_preset?: string;
   status: string;
   created_by: string;
   documents: TaskDoc[];
@@ -107,6 +109,8 @@ export default function TaskPage() {
   const [loadingExplain, setLoadingExplain] = useState(false);
   const [refineInstruction, setRefineInstruction] = useState("");
   const [refining, setRefining] = useState(false);
+
+  const [showSettings, setShowSettings] = useState(false);
 
   const loadTask = () => {
     tasksApi.get(tId).then((d) => {
@@ -285,7 +289,17 @@ export default function TaskPage() {
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1 space-y-4">
             <div className="border rounded-2xl p-4 bg-card">
-              <h2 className="font-semibold mb-1">{task.title}</h2>
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <h2 className="font-semibold flex-1">{task.title}</h2>
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-400 rounded-md px-2 py-1 flex-shrink-0"
+                  title="Изменить настройки задания"
+                >
+                  <Icon name="Settings" size={12} />
+                  Изменить
+                </button>
+              </div>
               <p className="text-xs text-muted-foreground mb-3">{TASK_TYPE_LABELS[task.task_type]}</p>
               {task.topic && (
                 <div className="mb-2">
@@ -651,6 +665,15 @@ export default function TaskPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Модалка настроек задания */}
+      {showSettings && task && (
+        <TaskSettingsModal
+          task={task}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => { loadTask(); }}
+        />
       )}
     </Layout>
   );

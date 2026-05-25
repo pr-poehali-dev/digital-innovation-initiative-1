@@ -175,13 +175,14 @@ def handler(event: dict, context) -> dict:
 
             cur.execute(
                 f"""INSERT INTO {schema}.tasks
-                    (project_id, created_by, title, task_type, topic, goal, audience, language, style, requested_slide_count, additional_instructions)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (project_id, created_by, title, task_type, topic, goal, audience, language, style, requested_slide_count, additional_instructions, style_preset)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                 (
                     project_id, user["id"], title, task_type, topic,
                     body.get("goal"), body.get("audience"),
                     body.get("language", "ru"), body.get("style"),
                     body.get("requested_slide_count"), body.get("additional_instructions"),
+                    body.get("style_preset"),
                 ),
             )
             task_id = cur.fetchone()[0]
@@ -223,7 +224,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(
                 f"""SELECT t.id, t.project_id, t.title, t.task_type, t.topic, t.goal, t.audience,
                     t.language, t.style, t.requested_slide_count, t.additional_instructions,
-                    t.status, t.created_at, u.name
+                    t.status, t.created_at, u.name, t.style_preset
                     FROM {schema}.tasks t JOIN {schema}.users u ON u.id = t.created_by
                     WHERE t.id = %s""",
                 (task_id,),
@@ -270,6 +271,7 @@ def handler(event: dict, context) -> dict:
                 "audience": row[6], "language": row[7], "style": row[8],
                 "requested_slide_count": row[9], "additional_instructions": row[10],
                 "status": row[11], "created_at": str(row[12]), "created_by": row[13],
+                "style_preset": row[14],
                 "documents": docs, "runs": runs,
             }, origin=origin)
 
@@ -309,6 +311,167 @@ def handler(event: dict, context) -> dict:
                 )
             conn.commit()
             return json_response({"ok": True}, origin=origin)
+
+        # ============================================================
+        # NEW ACTIONS: редактирование настроек существующего задания
+        # ============================================================
+
+        # action=update_task_settings — обновить параметры задания (тема, стиль, слайды, ...)
+        if action == "update_task_settings":
+            task_id = int(body.get("task_id"))
+            cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
+            tr = cur.fetchone()
+            if not tr:
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (tr[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            allowed = ("title", "topic", "goal", "audience", "style",
+                       "requested_slide_count", "additional_instructions", "style_preset")
+            sets = []
+            params_sql = []
+            for f in allowed:
+                if f in body:
+                    sets.append(f"{f} = %s")
+                    params_sql.append(body[f] if body[f] != "" else None)
+            if sets:
+                sets.append("updated_at = NOW()")
+                params_sql.append(task_id)
+                cur.execute(
+                    f"UPDATE {schema}.tasks SET {', '.join(sets)} WHERE id = %s",
+                    tuple(params_sql),
+                )
+                log_activity(cur, schema, tr[0], user["id"], "updated_task_settings", "task", task_id, None)
+                conn.commit()
+            return json_response({"ok": True, "updated_fields": [f for f in allowed if f in body]}, origin=origin)
+
+        # action=set_doc_role — изменить роль/инструкцию одного документа в задании
+        if action == "set_doc_role":
+            task_id = int(body.get("task_id"))
+            document_id = int(body.get("document_id"))
+            cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
+            tr = cur.fetchone()
+            if not tr:
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (tr[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            cur.execute(
+                f"""INSERT INTO {schema}.task_documents
+                    (task_id, document_id, role, usage_mode, priority, must_use, instruction)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (task_id, document_id) DO UPDATE SET
+                        role = EXCLUDED.role,
+                        usage_mode = COALESCE(EXCLUDED.usage_mode, task_documents.usage_mode),
+                        priority = COALESCE(EXCLUDED.priority, task_documents.priority),
+                        must_use = EXCLUDED.must_use,
+                        instruction = EXCLUDED.instruction""",
+                (
+                    task_id, document_id, body.get("role", "content"),
+                    body.get("usage_mode"), body.get("priority", "medium"),
+                    bool(body.get("must_use", False)), body.get("instruction", "") or "",
+                ),
+            )
+            conn.commit()
+            return json_response({"ok": True}, origin=origin)
+
+        # action=attach_document — добавить документ к существующему заданию
+        if action == "attach_document":
+            task_id = int(body.get("task_id"))
+            document_id = int(body.get("document_id"))
+            role = body.get("role", "content")
+
+            cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
+            tr = cur.fetchone()
+            if not tr:
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (tr[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            # Документ должен принадлежать тому же проекту
+            cur.execute(
+                f"SELECT id FROM {schema}.documents WHERE id = %s AND project_id = %s",
+                (document_id, tr[0]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Документ не из этого проекта"}, 400, origin=origin)
+
+            cur.execute(
+                f"""INSERT INTO {schema}.task_documents
+                    (task_id, document_id, role, usage_mode, priority, must_use, instruction)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (task_id, document_id) DO NOTHING""",
+                (
+                    task_id, document_id, role,
+                    body.get("usage_mode"), body.get("priority", "medium"),
+                    bool(body.get("must_use", False)), body.get("instruction", "") or "",
+                ),
+            )
+            conn.commit()
+            return json_response({"ok": True, "attached": True}, origin=origin)
+
+        # action=detach_document — отвязать документ от задания
+        if action == "detach_document":
+            task_id = int(body.get("task_id"))
+            document_id = int(body.get("document_id"))
+
+            cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
+            tr = cur.fetchone()
+            if not tr:
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (tr[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            cur.execute(
+                f"DELETE FROM {schema}.task_documents WHERE task_id = %s AND document_id = %s",
+                (task_id, document_id),
+            )
+            conn.commit()
+            return json_response({"ok": True, "detached": True}, origin=origin)
+
+        # action=list_project_documents — все документы проекта (для модалки прикрепления)
+        if action == "list_project_documents":
+            task_id = int(body.get("task_id"))
+            cur.execute(f"SELECT project_id FROM {schema}.tasks WHERE id = %s", (task_id,))
+            tr = cur.fetchone()
+            if not tr:
+                return json_response({"error": "Задание не найдено"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (tr[0], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            cur.execute(
+                f"""SELECT d.id, d.original_name, d.file_type,
+                    (SELECT td.role FROM {schema}.task_documents td WHERE td.task_id = %s AND td.document_id = d.id) as attached_role
+                    FROM {schema}.documents d
+                    WHERE d.project_id = %s AND d.archived_at IS NULL
+                    ORDER BY d.created_at DESC""",
+                (task_id, tr[0]),
+            )
+            docs = [
+                {"id": r[0], "name": r[1], "file_type": r[2], "attached_role": r[3]}
+                for r in cur.fetchall()
+            ]
+            return json_response({"documents": docs}, origin=origin)
 
         return json_response({"error": "Not found"}, 404, origin=origin)
 

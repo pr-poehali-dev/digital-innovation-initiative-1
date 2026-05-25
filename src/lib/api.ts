@@ -127,6 +127,21 @@ export const tasksApi = {
     request(URLS.tasks, "/", "POST", { action: "get_task", task_id: id }),
   updateDocuments: (taskId: number, documentRoles: { document_id: number; role: string }[]) =>
     request(URLS.tasks, "/", "POST", { action: "update_task_documents", task_id: taskId, document_roles: documentRoles }),
+  updateSettings: (taskId: number, fields: {
+    title?: string; topic?: string; goal?: string; audience?: string;
+    style?: string; requested_slide_count?: number;
+    additional_instructions?: string; style_preset?: string;
+  }) => request(URLS.tasks, "/", "POST", { action: "update_task_settings", task_id: taskId, ...fields }),
+  setDocRole: (taskId: number, documentId: number, fields: {
+    role: string; usage_mode?: string; priority?: string;
+    must_use?: boolean; instruction?: string;
+  }) => request(URLS.tasks, "/", "POST", { action: "set_doc_role", task_id: taskId, document_id: documentId, ...fields }),
+  attachDocument: (taskId: number, documentId: number, role: string, instruction?: string) =>
+    request(URLS.tasks, "/", "POST", { action: "attach_document", task_id: taskId, document_id: documentId, role, instruction }),
+  detachDocument: (taskId: number, documentId: number) =>
+    request(URLS.tasks, "/", "POST", { action: "detach_document", task_id: taskId, document_id: documentId }),
+  listProjectDocuments: (taskId: number) =>
+    request(URLS.tasks, "/", "POST", { action: "list_project_documents", task_id: taskId }),
 };
 
 export const generateApi = {
