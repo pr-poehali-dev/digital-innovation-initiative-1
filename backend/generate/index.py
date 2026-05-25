@@ -788,15 +788,110 @@ def handler(event: dict, context) -> dict:
             if map_match:
                 try:
                     influence_map = json.loads(map_match.group(1))
-                    # Убираем технический блок из видимого ответа
                     ai_result = ai_result[:map_match.start()].rstrip() + "\n" + ai_result[map_match.end():].lstrip()
                 except Exception:
                     pass
+
+            # ================================================================
+            # VISUAL PIPELINE: собираем visual_plan из документов + инструкций
+            # ================================================================
+            use_visuals = body.get("use_visuals", True)
+            allow_ai_images = body.get("allow_ai_images", True)
+            visual_plan = []
+            visual_warnings = []
+
+            if use_visuals:
+                try:
+                    from visual_parser import (
+                        collect_visual_prompts_from_documents,
+                        collect_visual_prompts_from_task,
+                        build_visual_plan_entry,
+                    )
+
+                    # Собираем все промпты
+                    raw_prompts = collect_visual_prompts_from_task(task)
+                    raw_prompts += collect_visual_prompts_from_documents(documents)
+
+                    if raw_prompts:
+                        # Привязываем к слайдам через AI
+                        # Передаём AI outline + промпты → получаем slide_index для каждого
+                        slide_outline = ai_result[:3000]
+                        prompts_txt = "\n".join(
+                            f"{i+1}. [{p['visual_type'].upper()}] {p['source_prompt'][:120]}"
+                            for i, p in enumerate(raw_prompts)
+                        )
+                        mapping_prompt = (
+                            f"Вот план презентации (начало):\n{slide_outline}\n\n"
+                            f"Вот список визуальных промптов:\n{prompts_txt}\n\n"
+                            "Для каждого промпта укажи, на каком слайде (slide_index, начиная с 1) "
+                            "он лучше всего подходит. Ответь ТОЛЬКО JSON массивом, без пояснений: "
+                            '[{"prompt_index":1,"slide_index":2,"slide_title":"Название слайда"},...]\n'
+                            "Если промпт не подходит ни к одному слайду — slide_index=0."
+                        )
+                        mapping_json_str = call_yandex_gpt([
+                            {"role": "system", "content": "Ты — помощник по привязке визуальных элементов к слайдам."},
+                            {"role": "user", "content": mapping_prompt},
+                        ])
+                        # Парсим JSON из ответа AI
+                        mapping = []
+                        try:
+                            json_match = _re.search(r'\[.*?\]', mapping_json_str, _re.DOTALL)
+                            if json_match:
+                                mapping = json.loads(json_match.group(0))
+                        except Exception:
+                            pass
+
+                        # Строим visual_plan
+                        for entry in mapping:
+                            pi = int(entry.get("prompt_index", 1)) - 1
+                            si = int(entry.get("slide_index", 0))
+                            if si > 0 and 0 <= pi < len(raw_prompts):
+                                p = raw_prompts[pi]
+                                # Пропускаем ai_image если не разрешено
+                                if p["render_mode"] == "ai_image" and not allow_ai_images:
+                                    visual_warnings.append(f"Пропущено изображение (отключено): {p['source_prompt'][:60]}")
+                                    continue
+                                visual_plan.append(build_visual_plan_entry(
+                                    slide_index=si,
+                                    slide_title=entry.get("slide_title", f"Слайд {si}"),
+                                    prompt_obj=p,
+                                ))
+
+                        # Рендерим картинки (ai_image) немедленно
+                        if allow_ai_images:
+                            try:
+                                from visual_renderer import render_image
+                                for vp in visual_plan:
+                                    if vp["render_mode"] == "ai_image" and vp["generation_status"] == "pending":
+                                        s3_key = f"visuals/{user['id']}/{run_id}_slide{vp['slide_index']}.png"
+                                        result_img = render_image(vp["source_prompt"], s3_key)
+                                        if result_img.get("ok"):
+                                            vp["generation_status"] = "done"
+                                            vp["asset_s3_key"] = result_img["s3_key"]
+                                            vp["asset_url"] = result_img["asset_url"]
+                                        else:
+                                            vp["generation_status"] = "failed"
+                                            vp["warnings"].append(result_img.get("warning", "Ошибка генерации"))
+                                            visual_warnings.append(f"Слайд {vp['slide_index']}: {result_img.get('warning','')}")
+                            except Exception as e:
+                                visual_warnings.append(f"Image render error: {str(e)[:100]}")
+
+                        # Схемы помечаем как pending_render (рендерятся при экспорте)
+                        for vp in visual_plan:
+                            if vp["render_mode"] == "pptx_shapes" and vp["generation_status"] == "pending":
+                                vp["generation_status"] = "pending_render"
+
+                except Exception as e:
+                    visual_warnings.append(f"Visual pipeline error: {str(e)[:100]}")
 
             # Сохранить результат
             result_payload = {"content": ai_result, "version": version_number}
             if influence_map:
                 result_payload["influence_map"] = influence_map
+            if visual_plan:
+                result_payload["visual_plan"] = visual_plan
+            if visual_warnings:
+                result_payload["visual_warnings"] = visual_warnings
             result_json = json.dumps(result_payload, ensure_ascii=False)
             summary = ai_result[:300] + "..." if len(ai_result) > 300 else ai_result
 
@@ -861,11 +956,15 @@ def handler(event: dict, context) -> dict:
 
             result_content = None
             influence_map = None
+            visual_plan_out = None
+            visual_warnings_out = None
             if row[3]:
                 try:
                     parsed = json.loads(row[3])
                     result_content = parsed.get("content")
                     influence_map = parsed.get("influence_map")
+                    visual_plan_out = parsed.get("visual_plan")
+                    visual_warnings_out = parsed.get("visual_warnings")
                 except Exception:
                     pass
 
@@ -882,7 +981,86 @@ def handler(event: dict, context) -> dict:
                 "status": row[5], "created_at": str(row[6]),
                 "created_by": row[7], "revisions": revisions,
                 "influence_map": influence_map,
+                "visual_plan": visual_plan_out,
+                "visual_warnings": visual_warnings_out,
             }, origin=origin)
+
+        # action=render_visual — перегенерировать один визуал
+        if body.get("action") == "render_visual":
+            run_id = int(body.get("run_id"))
+            slide_index = int(body.get("slide_index", 0))
+            new_prompt = body.get("prompt", "").strip()
+
+            cur.execute(
+                f"""SELECT gr.result_json, t.project_id
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
+                    WHERE gr.id = %s""",
+                (run_id,),
+            )
+            rrow = cur.fetchone()
+            if not rrow:
+                return json_response({"error": "Run не найден"}, 404, origin=origin)
+
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (rrow[1], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            rj = {}
+            try:
+                rj = json.loads(rrow[0]) if rrow[0] else {}
+            except Exception:
+                pass
+
+            vplan = rj.get("visual_plan") or []
+            target = None
+            for vp in vplan:
+                if int(vp.get("slide_index", -1)) == slide_index:
+                    target = vp
+                    break
+
+            if not target:
+                return json_response({"error": "Визуал не найден"}, 404, origin=origin)
+
+            if new_prompt:
+                target["source_prompt"] = new_prompt
+                target["normalized_prompt"] = new_prompt
+
+            render_mode = target.get("render_mode", "ai_image")
+            visual_type = target.get("visual_type", "image")
+            prompt = target.get("source_prompt", "")
+
+            if render_mode == "ai_image":
+                try:
+                    from visual_renderer import render_image
+                    s3_key = f"visuals/{user['id']}/{run_id}_slide{slide_index}_rerend.png"
+                    res = render_image(prompt, s3_key)
+                    if res.get("ok"):
+                        target["generation_status"] = "done"
+                        target["asset_s3_key"] = res["s3_key"]
+                        target["asset_url"] = res["asset_url"]
+                        target["warnings"] = []
+                    else:
+                        target["generation_status"] = "failed"
+                        target["warnings"] = [res.get("warning", "Ошибка")]
+                except Exception as e:
+                    target["generation_status"] = "failed"
+                    target["warnings"] = [str(e)[:100]]
+            else:
+                # pptx_shapes — при экспорте отрисуется, ставим ready
+                target["generation_status"] = "pending_render"
+                target["warnings"] = []
+
+            rj["visual_plan"] = vplan
+            cur.execute(
+                f"UPDATE {schema}.generation_runs SET result_json = %s WHERE id = %s",
+                (json.dumps(rj, ensure_ascii=False), run_id),
+            )
+            conn.commit()
+            return json_response({"ok": True, "visual": target}, origin=origin)
 
         return json_response({"error": "Not found"}, 404, origin=origin)
 

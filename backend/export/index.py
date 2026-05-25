@@ -478,6 +478,127 @@ def build_pptx(slides: list, title: str, style: dict = None) -> bytes:
     return buf.getvalue()
 
 
+def apply_visual_plan(prs, visual_plan: list, style: dict):
+    """
+    Вставляет визуалы из visual_plan в слайды презентации.
+
+    - visual_type=image + asset_url → add_picture
+    - render_mode=pptx_shapes → вызываем visual_renderer
+    - fallback → текстовый placeholder на слайде
+    """
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    if not visual_plan:
+        return
+
+    # Индекс слайдов: slide_index в visual_plan 1-based, в prs.slides — 0-based
+    # Но мы ещё не знаем порядок после перестановки титульного.
+    # Слайд 1 → prs.slides[1] (т.к. slides[0] = title)
+    slide_list = list(prs.slides)
+
+    try:
+        from visual_renderer import render_diagram
+    except ImportError:
+        render_diagram = None
+
+    for vp in visual_plan:
+        si = int(vp.get("slide_index", 0))
+        # si=1 → слайд контента № 1 → в prs это slides[1] (slides[0] = title)
+        prs_idx = si  # title занял [0], первый контент = [1]
+
+        if prs_idx >= len(slide_list):
+            continue
+
+        slide = slide_list[prs_idx]
+        visual_type = vp.get("visual_type", "image")
+        render_mode = vp.get("render_mode", "fallback_text")
+        prompt = vp.get("source_prompt", "")
+
+        # Дефолтная зона визуала: правая половина, ниже заголовка
+        vis_x = 7.0
+        vis_y = 1.8
+        vis_w = 6.0
+        vis_h = 5.0
+
+        if render_mode == "ai_image":
+            # Картинка уже в S3 — скачиваем и вставляем
+            s3_key = vp.get("asset_s3_key")
+            if s3_key:
+                try:
+                    s3 = boto3.client(
+                        "s3",
+                        endpoint_url="https://bucket.poehali.dev",
+                        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+                    )
+                    obj = s3.get_object(Bucket="files", Key=s3_key)
+                    img_bytes = obj["Body"].read()
+                    img_buf = io.BytesIO(img_bytes)
+                    slide.shapes.add_picture(
+                        img_buf,
+                        Inches(vis_x), Inches(vis_y),
+                        Inches(vis_w), Inches(vis_h),
+                    )
+                except Exception:
+                    _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
+                                         visual_type, prompt, style)
+            else:
+                _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
+                                     visual_type, prompt, style)
+
+        elif render_mode == "pptx_shapes" and render_diagram:
+            try:
+                # Сжимаем контентную зону для схемы: на всю ширину, нижняя область
+                vis_x2 = 0.55
+                vis_y2 = 1.85
+                # Изменяем позиции существующих буллетов — сдвигаем влево
+                # (схема займёт нижнюю область)
+                ok = render_diagram(visual_type, prompt, slide, style, 13.33, 7.5)
+                if not ok:
+                    _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
+                                         visual_type, prompt, style)
+            except Exception:
+                _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
+                                     visual_type, prompt, style)
+
+        else:
+            _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
+                                 visual_type, prompt, style)
+
+
+def _add_visual_fallback(slide, x, y, w, h, visual_type, prompt, style):
+    """Аккуратный fallback — рамка с подписью типа и промптом."""
+    from pptx.util import Inches, Pt, Emu
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    accent = style.get("accent", (0x60, 0x8B, 0xC4))
+    title_rgb = style.get("title", (0xFF, 0xFF, 0xFF))
+
+    # Рамка-placeholder
+    box = slide.shapes.add_shape(
+        1,  # RECTANGLE
+        Inches(x), Inches(y), Inches(w), Inches(h),
+    )
+    box.fill.solid()
+    box.fill.fore_color.rgb = RGBColor(*accent)
+    box.fill.fore_color.rgb = RGBColor(accent[0] // 4, accent[1] // 4 + 20, accent[2] // 4 + 30)
+    box.line.color.rgb = RGBColor(*accent)
+    box.line.width = Emu(18000)
+
+    tf = box.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    run = p.add_run()
+    run.text = f"[{visual_type.upper()}]\n{prompt[:80]}"
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor(*title_rgb)
+    run.font.italic = True
+
+
 def handler(event: dict, context) -> dict:
     origin = (event.get("headers") or {}).get("Origin") or (event.get("headers") or {}).get("origin")
 
@@ -590,7 +711,29 @@ def handler(event: dict, context) -> dict:
                 effective_preset = "dark_corporate"
 
         style = resolve_style(effective_preset, template_bytes)
+
+        # visual_plan из result_json
+        visual_plan = []
+        if result_json:
+            try:
+                rj = json.loads(result_json)
+                visual_plan = rj.get("visual_plan") or []
+            except Exception:
+                pass
+
         pptx_bytes = build_pptx(slides, pptx_title, style=style)
+
+        # Вставка визуалов если есть план
+        if visual_plan:
+            try:
+                from pptx import Presentation as PptxPrs
+                prs2 = PptxPrs(io.BytesIO(pptx_bytes))
+                apply_visual_plan(prs2, visual_plan, style)
+                buf2 = io.BytesIO()
+                prs2.save(buf2)
+                pptx_bytes = buf2.getvalue()
+            except Exception:
+                pass  # не ломаем экспорт если визуал не удался
 
         # Возвращаем base64
         pptx_b64 = base64.b64encode(pptx_bytes).decode("utf-8")

@@ -145,14 +145,22 @@ export const tasksApi = {
 };
 
 export const generateApi = {
-  run: (taskId: number, prompt?: string, revisionOf?: number, useWebSearch = false) =>
-    request(URLS.generate, "/", "POST", { task_id: taskId, prompt, revision_of: revisionOf, use_web_search: useWebSearch }),
+  run: (taskId: number, prompt?: string, revisionOf?: number, useWebSearch = false,
+        useVisuals = true, allowAiImages = true) =>
+    request(URLS.generate, "/", "POST", {
+      task_id: taskId, prompt, revision_of: revisionOf,
+      use_web_search: useWebSearch,
+      use_visuals: useVisuals,
+      allow_ai_images: allowAiImages,
+    }),
   getRun: (runId: number) =>
     request(URLS.generate, "/", "POST", { action: "get_run", run_id: runId }),
   explainBlock: (runId: number, blockText: string) =>
     request(URLS.generate, "/", "POST", { action: "explain_block", run_id: runId, block_text: blockText }),
   refineBlock: (runId: number, blockText: string, instruction: string) =>
     request(URLS.generate, "/", "POST", { action: "refine_block", run_id: runId, block_text: blockText, instruction }),
+  renderVisual: (runId: number, slideIndex: number, prompt?: string) =>
+    request(URLS.generate, "/", "POST", { action: "render_visual", run_id: runId, slide_index: slideIndex, prompt }),
 };
 
 export const exportApi = {

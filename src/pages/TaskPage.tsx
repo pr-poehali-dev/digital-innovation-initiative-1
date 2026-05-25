@@ -53,6 +53,19 @@ interface Task {
   runs: Run[];
 }
 
+interface VisualPlanItem {
+  slide_index: number;
+  slide_title: string;
+  visual_type: string;
+  render_mode: string;
+  source_prompt: string;
+  source_doc_name?: string;
+  source_type?: string;
+  generation_status: string;
+  asset_url?: string;
+  warnings?: string[];
+}
+
 interface RunResult {
   id: number;
   version: number;
@@ -61,6 +74,8 @@ interface RunResult {
   created_by: string;
   revisions: { instruction: string; created_at: string }[];
   influence_map?: InfluenceMap | null;
+  visual_plan?: VisualPlanItem[];
+  visual_warnings?: string[];
 }
 
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
@@ -101,6 +116,10 @@ export default function TaskPage() {
   const [prompt, setPrompt] = useState("");
   const [genError, setGenError] = useState("");
   const [useWebSearch, setUseWebSearch] = useState(false);
+  const [useVisuals, setUseVisuals] = useState(true);
+  const [allowAiImages, setAllowAiImages] = useState(true);
+  const [reRenderingVisual, setReRenderingVisual] = useState<number | null>(null);
+  const [editingVisualPrompt, setEditingVisualPrompt] = useState<Record<number, string>>({});
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Explainable AI: панель рассуждения и правки фрагмента
@@ -139,6 +158,8 @@ export default function TaskPage() {
         isRevision ? revision : prompt || undefined,
         isRevision && activeRun ? activeRun.id : undefined,
         useWebSearch,
+        useVisuals,
+        allowAiImages,
       );
       // Бэкенд возвращает {run_id, version, content} — нормализуем в RunResult с полем `id`
       setActiveRun({
@@ -163,6 +184,29 @@ export default function TaskPage() {
   const copyToClipboard = () => {
     if (activeRun?.content) {
       navigator.clipboard.writeText(activeRun.content);
+    }
+  };
+
+  const handleRenderVisual = async (slideIndex: number) => {
+    if (!activeRun) return;
+    setReRenderingVisual(slideIndex);
+    try {
+      const newPrompt = editingVisualPrompt[slideIndex];
+      const result = await generateApi.renderVisual(activeRun.id, slideIndex, newPrompt);
+      if (result?.visual) {
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          const updatedPlan = (prev.visual_plan || []).map((vp) =>
+            vp.slide_index === slideIndex ? { ...vp, ...result.visual } : vp
+          );
+          return { ...prev, visual_plan: updatedPlan };
+        });
+        setEditingVisualPrompt((prev) => { const n = { ...prev }; delete n[slideIndex]; return n; });
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setReRenderingVisual(null);
     }
   };
 
@@ -428,16 +472,31 @@ export default function TaskPage() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
-                <label className="flex items-center gap-2 justify-center mb-4 cursor-pointer text-sm">
-                  <input
-                    type="checkbox"
-                    checked={useWebSearch}
-                    onChange={(e) => setUseWebSearch(e.target.checked)}
-                    className="w-4 h-4 rounded accent-slate-800"
-                  />
-                  <Icon name="Globe" size={14} className="text-slate-600" />
-                  <span>Дополнить материалами из интернета</span>
-                </label>
+                <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={useWebSearch}
+                      onChange={(e) => setUseWebSearch(e.target.checked)}
+                      className="w-4 h-4 rounded accent-slate-800" />
+                    <Icon name="Globe" size={14} className="text-slate-600" />
+                    <span>Интернет</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={useVisuals}
+                      onChange={(e) => setUseVisuals(e.target.checked)}
+                      className="w-4 h-4 rounded accent-slate-800" />
+                    <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
+                    <span>Генерировать визуалы</span>
+                  </label>
+                  {useVisuals && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={allowAiImages}
+                        onChange={(e) => setAllowAiImages(e.target.checked)}
+                        className="w-4 h-4 rounded accent-slate-800" />
+                      <Icon name="Image" size={14} className="text-slate-600" />
+                      <span>Картинки AI</span>
+                    </label>
+                  )}
+                </div>
                 {genError && <p className="text-red-500 text-sm mb-3">{genError}</p>}
                 <button
                   onClick={() => handleGenerate(false)}
@@ -570,6 +629,130 @@ export default function TaskPage() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Блок ВИЗУАЛЫ */}
+                    {activeRun.visual_plan && activeRun.visual_plan.length > 0 && (
+                      <div className="mt-6 border border-slate-200 rounded-xl overflow-hidden">
+                        <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center gap-2">
+                          <Icon name="LayoutTemplate" size={15} className="text-slate-600" />
+                          <span className="text-sm font-semibold text-slate-800">
+                            Визуалы ({activeRun.visual_plan.length})
+                          </span>
+                          <span className="text-xs text-slate-500 ml-1">— вставятся в PPTX при экспорте</span>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {activeRun.visual_plan.map((vp) => {
+                            const statusColor: Record<string, string> = {
+                              done: "bg-green-100 text-green-700",
+                              pending_render: "bg-blue-100 text-blue-700",
+                              failed: "bg-red-100 text-red-700",
+                              pending: "bg-slate-100 text-slate-600",
+                            };
+                            const statusLabel: Record<string, string> = {
+                              done: "✅ Готово",
+                              pending_render: "⚙️ При экспорте",
+                              failed: "❌ Ошибка",
+                              pending: "⏳ Ожидает",
+                            };
+                            const typeIcon: Record<string, string> = {
+                              image: "🖼", diagram: "📊", timeline: "📅",
+                              process: "🔄", comparison: "⚖️", matrix: "🔲",
+                              orgchart: "🏢", cycle: "♻️",
+                            };
+                            const sourceLabel: Record<string, string> = {
+                              task_instruction: "Инструкция задания",
+                              doc_instruction: "Инструкция к документу",
+                              pptx_text: "Текст PPTX",
+                              pptx_notes: "Notes PPTX",
+                              docx: "DOCX",
+                              pdf: "PDF",
+                              text: "Документ",
+                            };
+                            const isEditing = vp.slide_index in editingVisualPrompt;
+                            return (
+                              <div key={vp.slide_index} className="px-4 py-3 space-y-2">
+                                <div className="flex items-start gap-2 flex-wrap">
+                                  <span className="text-base">{typeIcon[vp.visual_type] || "🎨"}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                      <span className="text-xs font-semibold text-slate-700">
+                                        Слайд {vp.slide_index}
+                                      </span>
+                                      <span className="text-xs text-slate-500 truncate max-w-[200px]">
+                                        {vp.slide_title}
+                                      </span>
+                                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[vp.generation_status] || statusColor.pending}`}>
+                                        {statusLabel[vp.generation_status] || vp.generation_status}
+                                      </span>
+                                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full capitalize">
+                                        {vp.visual_type}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mb-0.5">
+                                      📌 Источник: {sourceLabel[vp.source_type || ""] || vp.source_type}
+                                      {vp.source_doc_name ? ` · ${vp.source_doc_name}` : ""}
+                                    </p>
+                                    {!isEditing ? (
+                                      <p className="text-xs text-slate-700 italic">
+                                        «{vp.source_prompt}»
+                                      </p>
+                                    ) : (
+                                      <textarea
+                                        value={editingVisualPrompt[vp.slide_index]}
+                                        onChange={(e) => setEditingVisualPrompt((p) => ({ ...p, [vp.slide_index]: e.target.value }))}
+                                        rows={2}
+                                        className="w-full border border-slate-300 rounded-md px-2 py-1.5 text-xs bg-white resize-none mt-1"
+                                      />
+                                    )}
+                                    {vp.warnings && vp.warnings.length > 0 && (
+                                      <p className="text-xs text-red-500 mt-1">⚠️ {vp.warnings[0]}</p>
+                                    )}
+                                    {vp.asset_url && (
+                                      <a href={vp.asset_url} target="_blank" rel="noopener noreferrer"
+                                        className="text-xs text-blue-600 hover:text-blue-800 underline mt-1 inline-block">
+                                        Открыть картинку ↗
+                                      </a>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-col gap-1 flex-shrink-0">
+                                    {!isEditing ? (
+                                      <button
+                                        onClick={() => setEditingVisualPrompt((p) => ({ ...p, [vp.slide_index]: vp.source_prompt }))}
+                                        className="text-xs border border-slate-200 hover:border-slate-400 text-slate-600 px-2 py-1 rounded-md"
+                                      >
+                                        Изменить
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => setEditingVisualPrompt((p) => { const n = { ...p }; delete n[vp.slide_index]; return n; })}
+                                        className="text-xs border border-slate-200 text-slate-500 px-2 py-1 rounded-md"
+                                      >
+                                        Отмена
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleRenderVisual(vp.slide_index)}
+                                      disabled={reRenderingVisual === vp.slide_index}
+                                      className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded-md disabled:opacity-50"
+                                    >
+                                      {reRenderingVisual === vp.slide_index ? "..." : "↺ Перегенерировать"}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {activeRun.visual_warnings && activeRun.visual_warnings.length > 0 && (
+                          <div className="bg-amber-50 border-t border-amber-200 px-4 py-2">
+                            <p className="text-xs text-amber-700 font-medium mb-1">⚠️ Предупреждения визуалов:</p>
+                            {activeRun.visual_warnings.map((w, i) => (
+                              <p key={i} className="text-xs text-amber-600">• {w}</p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
