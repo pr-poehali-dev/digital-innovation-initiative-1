@@ -333,34 +333,55 @@ export default function TaskPage() {
               )}
             </div>
 
-            {task.documents.length > 0 && (
-              <div className="border rounded-2xl p-4 bg-card">
-                <p className="text-sm font-medium mb-3">Документы задания</p>
+            <div className="border rounded-2xl p-4 bg-card">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-medium">Документы задания</p>
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800"
+                >
+                  <Icon name="Settings" size={12} />
+                  Настроить
+                </button>
+              </div>
+              {task.documents.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-2">Нет прикреплённых документов</p>
+              ) : (
                 <div className="space-y-2">
                   {task.documents.map((doc) => (
-                    <div key={doc.id} className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Icon name="FileText" size={14} className="text-muted-foreground flex-shrink-0" />
-                        <span className="text-xs flex-1 truncate">{doc.name}</span>
-                        {doc.must_use && (
-                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full" title="Обязательный документ">
-                            🔴
-                          </span>
-                        )}
-                        {ROLE_LABELS[doc.role] && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${ROLE_LABELS[doc.role].color}`}>
-                            {ROLE_LABELS[doc.role].label}
-                          </span>
-                        )}
+                    <div key={doc.id} className="border border-slate-100 rounded-lg p-2 space-y-1.5">
+                      <div className="flex items-start gap-2">
+                        <Icon name="FileText" size={14} className="text-muted-foreground flex-shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{doc.name}</p>
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {ROLE_LABELS[doc.role] && (
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${ROLE_LABELS[doc.role].color}`}>
+                                {ROLE_LABELS[doc.role].label}
+                              </span>
+                            )}
+                            {doc.must_use && (
+                              <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full">🔴 обязательный</span>
+                            )}
+                            {doc.priority && doc.priority !== "medium" && (
+                              <span className="text-xs text-slate-500">
+                                {doc.priority === "high" ? "↑ высокий приоритет" : "↓ низкий приоритет"}
+                              </span>
+                            )}
+                            {doc.usage_mode && (
+                              <span className="text-xs text-slate-400 italic">{doc.usage_mode.replace(/_/g, " ")}</span>
+                            )}
+                          </div>
+                          {doc.instruction && (
+                            <p className="text-xs text-slate-500 mt-1 italic">📝 {doc.instruction}</p>
+                          )}
+                        </div>
                       </div>
-                      {doc.instruction && (
-                        <p className="text-xs text-slate-500 pl-6 italic">📝 {doc.instruction}</p>
-                      )}
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {task.runs.length > 0 && (
               <div className="border rounded-2xl p-4 bg-card">

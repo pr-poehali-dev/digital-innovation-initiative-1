@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { educationApi, fileToBase64 } from "@/lib/api";
+import { educationApi, uploadFileViaPresigned } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+
+interface EduFile {
+  id: number;
+  name: string;
+  mime: string;
+  size: number;
+  parse_status: string;
+  created_at: string;
+}
 
 interface EduItem {
   id: number;
@@ -13,12 +22,16 @@ interface EduItem {
   field_of_study?: string;
   level?: string;
   issued_at?: string;
+  hours?: number;
+  description?: string;
   status: string;
   study_status?: string;
   source_type: string;
   is_confirmed: boolean;
   topics: string[];
   competencies: string[];
+  extracted_data?: Record<string, unknown>;
+  files?: EduFile[];
   created_at: string;
 }
 
@@ -71,6 +84,9 @@ export default function EducationalPassportPage() {
   const [createPendingFile, setCreatePendingFile] = useState<File | null>(null);
 
   const [confirmItem, setConfirmItem] = useState<EduItem | null>(null);
+  const [detailItem, setDetailItem] = useState<EduItem | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [fileUrlLoading, setFileUrlLoading] = useState<number | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -118,16 +134,19 @@ export default function EducationalPassportPage() {
       }
       const newItem = await educationApi.create(payload);
 
-      // Если приложен файл — заливаем + автозапуск AI
+      // Если приложен файл — presigned upload напрямую в S3, затем уведомляем бэкенд
       if (createPendingFile) {
-        const b64 = await fileToBase64(createPendingFile);
-        const uploadResult = await educationApi.uploadFile(
+        const { s3_key, file_size } = await uploadFileViaPresigned(
+          createPendingFile,
+          (filename, mime) => educationApi.getUploadUrl(newItem.id, filename, mime),
+        );
+        const uploadResult = await educationApi.fileReady(
           newItem.id,
           createPendingFile.name,
           createPendingFile.type || "application/octet-stream",
-          b64,
+          s3_key,
+          file_size,
         );
-        // Если бэкенд вернул warning о парсинге — покажем пользователю
         if (uploadResult.warning) {
           alert("⚠️ " + uploadResult.warning);
         }
@@ -152,13 +171,37 @@ export default function EducationalPassportPage() {
     }
   };
 
+  const openDetail = async (item: EduItem) => {
+    setDetailItem(item);
+    setDetailLoading(true);
+    try {
+      const full = await educationApi.get(item.id);
+      setDetailItem(full);
+    } catch {
+      // оставляем базовые данные
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const openConfirmModal = async (item: EduItem) => {
-    // Загружаем полные данные с extracted_data
     try {
       const full = await educationApi.get(item.id);
       setConfirmItem(full);
     } catch {
       setConfirmItem(item);
+    }
+  };
+
+  const openFile = async (file: EduFile) => {
+    setFileUrlLoading(file.id);
+    try {
+      const res = await educationApi.getFileUrl(file.id);
+      window.open(res.url, "_blank", "noopener");
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Не удалось получить ссылку на файл");
+    } finally {
+      setFileUrlLoading(null);
     }
   };
 
@@ -253,7 +296,11 @@ export default function EducationalPassportPage() {
               const kind = KIND_LABELS[item.kind] || KIND_LABELS.material;
               const status = STATUS_LABELS[item.status] || STATUS_LABELS.draft;
               return (
-                <div key={item.id} className="border border-slate-200 rounded-xl p-4 bg-card hover:shadow-sm transition-shadow">
+                <div
+                  key={item.id}
+                  className="border border-slate-200 rounded-xl p-4 bg-card hover:shadow-sm hover:border-slate-300 transition-all cursor-pointer"
+                  onClick={() => openDetail(item)}
+                >
                   <div className="flex items-start gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0 ${kind.color}`}>
                       {kind.emoji}
@@ -263,6 +310,7 @@ export default function EducationalPassportPage() {
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${kind.color}`}>{kind.label}</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.color}`}>{status.label}</span>
                         <span className="text-xs text-slate-400">{SOURCE_LABELS[item.source_type] || item.source_type}</span>
+                        {item.is_confirmed && <span className="text-xs text-green-600">✓ подтверждено</span>}
                       </div>
                       <p className="text-sm font-semibold mb-0.5">{item.title}</p>
                       {(item.institution_name || item.issuer_name) && (
@@ -287,15 +335,21 @@ export default function EducationalPassportPage() {
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                    <div className="flex flex-col items-end gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                       {item.status === "needs_review" && (
                         <button
                           onClick={() => openConfirmModal(item)}
                           className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-medium"
                         >
-                          Проверить
+                          ⚠️ Проверить
                         </button>
                       )}
+                      <button
+                        onClick={() => openDetail(item)}
+                        className="text-xs text-slate-500 hover:text-slate-900 border border-slate-200 hover:border-slate-400 px-2 py-1 rounded-lg"
+                      >
+                        Открыть
+                      </button>
                       <button
                         onClick={() => handleArchive(item.id)}
                         className="text-xs text-slate-400 hover:text-red-600 p-1"
@@ -311,6 +365,160 @@ export default function EducationalPassportPage() {
           </div>
         )}
       </div>
+
+      {/* Детальная карточка записи — боковая панель */}
+      {detailItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-start justify-end z-50" onClick={() => setDetailItem(null)}>
+          <div
+            className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{(KIND_LABELS[detailItem.kind] || KIND_LABELS.material).emoji}</span>
+                <span className="font-semibold">{detailItem.title}</span>
+              </div>
+              <button onClick={() => setDetailItem(null)} className="text-slate-400 hover:text-slate-700">
+                <Icon name="X" size={20} />
+              </button>
+            </div>
+
+            {detailLoading && (
+              <div className="p-5 space-y-3">
+                {[1,2,3].map(i => <div key={i} className="h-8 bg-slate-100 rounded animate-pulse" />)}
+              </div>
+            )}
+
+            {!detailLoading && (
+              <div className="p-5 space-y-5">
+                {/* Статус и тип */}
+                <div className="flex flex-wrap gap-2">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${(KIND_LABELS[detailItem.kind] || KIND_LABELS.material).color}`}>
+                    {(KIND_LABELS[detailItem.kind] || KIND_LABELS.material).label}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${(STATUS_LABELS[detailItem.status] || STATUS_LABELS.draft).color}`}>
+                    {(STATUS_LABELS[detailItem.status] || STATUS_LABELS.draft).label}
+                  </span>
+                  {detailItem.is_confirmed && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">✓ Подтверждено</span>
+                  )}
+                </div>
+
+                {/* Основные поля */}
+                <div className="space-y-2">
+                  {(detailItem.institution_name || detailItem.issuer_name) && (
+                    <div>
+                      <p className="text-xs text-slate-500">Учреждение / организация</p>
+                      <p className="text-sm font-medium">{detailItem.institution_name || detailItem.issuer_name}</p>
+                    </div>
+                  )}
+                  {detailItem.field_of_study && (
+                    <div>
+                      <p className="text-xs text-slate-500">Направление / специальность</p>
+                      <p className="text-sm">{detailItem.field_of_study}</p>
+                    </div>
+                  )}
+                  {detailItem.level && (
+                    <div>
+                      <p className="text-xs text-slate-500">Уровень</p>
+                      <p className="text-sm">{detailItem.level}</p>
+                    </div>
+                  )}
+                  {detailItem.issued_at && (
+                    <div>
+                      <p className="text-xs text-slate-500">Дата выдачи</p>
+                      <p className="text-sm">{new Date(detailItem.issued_at).toLocaleDateString("ru-RU")}</p>
+                    </div>
+                  )}
+                  {detailItem.hours && (
+                    <div>
+                      <p className="text-xs text-slate-500">Объём (часы)</p>
+                      <p className="text-sm">{detailItem.hours} ч.</p>
+                    </div>
+                  )}
+                  {detailItem.description && (
+                    <div>
+                      <p className="text-xs text-slate-500">Описание</p>
+                      <p className="text-sm text-slate-700">{detailItem.description}</p>
+                    </div>
+                  )}
+                  {detailItem.study_status && (
+                    <div>
+                      <p className="text-xs text-slate-500">Статус изучения</p>
+                      <p className="text-sm">{({"uploaded_only": "Только загружен", "started": "Начал изучать", "partial": "Частично изучено", "studied": "Изучено", "applied": "Применял в работе"} as Record<string,string>)[detailItem.study_status] || detailItem.study_status}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Темы */}
+                {detailItem.topics && detailItem.topics.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-2">Темы (AI извлёк)</p>
+                    <div className="flex flex-wrap gap-1">
+                      {detailItem.topics.map((t, i) => (
+                        <span key={i} className="text-xs bg-slate-50 border border-slate-200 text-slate-700 px-2 py-0.5 rounded-full">{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Компетенции */}
+                {detailItem.competencies && detailItem.competencies.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-2">Предполагаемые компетенции</p>
+                    <ul className="space-y-1">
+                      {detailItem.competencies.map((c, i) => (
+                        <li key={i} className="text-xs text-slate-700 flex items-start gap-1"><span className="text-slate-400 mt-0.5">▸</span>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Прикреплённые файлы */}
+                {detailItem.files && detailItem.files.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-2">Прикреплённые файлы</p>
+                    <div className="space-y-2">
+                      {detailItem.files.map((f) => (
+                        <div key={f.id} className="flex items-center gap-2 border border-slate-200 rounded-lg p-2">
+                          <Icon name="FileText" size={16} className="text-slate-400 flex-shrink-0" />
+                          <span className="text-xs flex-1 truncate">{f.name}</span>
+                          <span className="text-xs text-slate-400">{(f.size / 1024).toFixed(0)} КБ</span>
+                          <button
+                            onClick={() => openFile(f)}
+                            disabled={fileUrlLoading === f.id}
+                            className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2 py-1 rounded-md disabled:opacity-50 flex-shrink-0"
+                          >
+                            {fileUrlLoading === f.id ? "..." : "Открыть"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Кнопки действий */}
+                <div className="flex gap-2 pt-2">
+                  {detailItem.status === "needs_review" && (
+                    <button
+                      onClick={() => { setDetailItem(null); openConfirmModal(detailItem); }}
+                      className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg py-2 text-sm font-medium"
+                    >
+                      ⚠️ Проверить AI-извлечение
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleArchive(detailItem.id)}
+                    className="border border-slate-200 hover:border-red-300 text-slate-500 hover:text-red-600 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <Icon name="Trash2" size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Модалка создания */}
       {showCreate && (

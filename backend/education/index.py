@@ -31,6 +31,9 @@ ALLOWED_ACTIONS = {
     "education.update",
     "education.archive",
     "education.upload_file",
+    "education.get_upload_url",
+    "education.file_ready",
+    "education.get_file_url",
     "education.analyze",
     "education.confirm",
     "education.profile_summary",
@@ -781,6 +784,160 @@ def handle_profile_summary(conn, user, request_id, origin):
 
 
 # ============================================================
+# Presigned upload — файл заливается напрямую из браузера в S3
+# ============================================================
+
+
+def handle_get_upload_url(conn, user, body, request_id, origin):
+    """Возвращает presigned PUT URL для загрузки файла напрямую в S3 из браузера.
+    Браузер НЕ шлёт base64 через нас — сразу PUT на S3 (обходит лимит 1МБ)."""
+    schema = get_schema()
+    item_id = body.get("id")
+    filename = body.get("filename", "file")
+    mime = body.get("mime", "application/octet-stream")
+    if not item_id or not filename:
+        return err_response("validation_error", "Нужны id и filename", 400, request_id, origin)
+
+    cur = conn.cursor()
+    cur.execute(f"SELECT user_id FROM {schema}.education_items WHERE id = %s", (int(item_id),))
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Запись не найдена", 404, request_id, origin)
+    if row[0] != user["id"]:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin)
+
+    import re
+    safe_name = re.sub(r"[^\w.\-]", "_", filename)[:120]
+    s3_key = f"education/{user['id']}/{item_id}_{safe_name}"
+
+    s3 = get_s3()
+    presigned_url = s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": "files", "Key": s3_key, "ContentType": mime},
+        ExpiresIn=600,
+    )
+    return ok_response({"upload_url": presigned_url, "s3_key": s3_key}, request_id, origin)
+
+
+def handle_file_ready(conn, user, body, request_id, origin):
+    """Вызывается после того как фронт залил файл в S3 через presigned URL.
+    Создаёт запись в education_item_files, скачивает файл из S3, парсит, запускает AI."""
+    schema = get_schema()
+    item_id = body.get("id")
+    filename = body.get("filename", "file")
+    mime = body.get("mime", "application/octet-stream")
+    s3_key = body.get("s3_key")
+    file_size = body.get("file_size", 0)
+    if not item_id or not s3_key:
+        return err_response("validation_error", "Нужны id и s3_key", 400, request_id, origin)
+
+    cur = conn.cursor()
+    cur.execute(f"SELECT user_id, kind FROM {schema}.education_items WHERE id = %s", (int(item_id),))
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Запись не найдена", 404, request_id, origin)
+    if row[0] != user["id"]:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin)
+    kind = row[1]
+
+    # Скачиваем файл из S3 для парсинга
+    s3 = get_s3()
+    file_bytes = b""
+    try:
+        obj = s3.get_object(Bucket="files", Key=s3_key)
+        file_bytes = obj["Body"].read()
+    except Exception as e:
+        log.warning("Не удалось скачать файл из S3: %s", e)
+
+    # Парсим текст
+    parsed_text = extract_text_from_file(file_bytes, mime) if file_bytes else ""
+    if not parsed_text:
+        parse_status = "empty"
+    elif parsed_text.startswith("[Ошибка") or parsed_text.startswith("[OCR"):
+        parse_status = "failed"
+    elif len(parsed_text.strip()) < 50:
+        parse_status = "too_short"
+    else:
+        parse_status = "done"
+
+    cur.execute(
+        f"""INSERT INTO {schema}.education_item_files
+            (education_item_id, s3_key, original_name, mime_type, size_bytes, parsed_text, parse_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+        (int(item_id), s3_key, filename, mime, file_size or len(file_bytes), parsed_text[:50000], parse_status),
+    )
+    file_id = cur.fetchone()[0]
+
+    extracted = None
+    if parse_status == "done":
+        cur.execute(
+            f"UPDATE {schema}.education_items SET status = 'processing', source_type = 'uploaded_file' WHERE id = %s",
+            (int(item_id),),
+        )
+        conn.commit()
+        extracted = ai_extract_formal(parsed_text) if kind in KIND_GROUPS["formal"] else ai_extract_material(parsed_text)
+        topics = extracted.get("topics") or extracted.get("main_topics") or []
+        competencies = extracted.get("suggested_competencies") or []
+        cur.execute(
+            f"""UPDATE {schema}.education_items SET
+                extracted_json = %s, topics_json = %s, competencies_json = %s,
+                status = 'needs_review', source_type = 'ai_extracted', updated_at = NOW()
+                WHERE id = %s""",
+            (json.dumps(extracted, ensure_ascii=False), json.dumps(topics, ensure_ascii=False),
+             json.dumps(competencies, ensure_ascii=False), int(item_id)),
+        )
+
+    warning = None
+    if parse_status == "failed":
+        warning = "Не удалось извлечь текст (файл повреждён или зашифрован). Введите данные вручную."
+    elif parse_status == "empty":
+        warning = "Файл пустой. Введите данные вручную."
+    elif parse_status == "too_short":
+        warning = f"Извлечено мало текста ({len(parsed_text.strip())} симв.). Проверьте результат AI."
+
+    conn.commit()
+    return ok_response({
+        "file_id": file_id, "parse_status": parse_status,
+        "extracted": extracted, "warning": warning,
+    }, request_id, origin)
+
+
+def handle_get_file_url(conn, user, body, request_id, origin):
+    """Возвращает presigned GET URL для скачивания/просмотра файла."""
+    schema = get_schema()
+    file_id = body.get("file_id")
+    if not file_id:
+        return err_response("validation_error", "Нужен file_id", 400, request_id, origin)
+
+    cur = conn.cursor()
+    cur.execute(
+        f"""SELECT eif.s3_key, eif.original_name, eif.mime_type, ei.user_id
+            FROM {schema}.education_item_files eif
+            JOIN {schema}.education_items ei ON ei.id = eif.education_item_id
+            WHERE eif.id = %s""",
+        (int(file_id),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Файл не найден", 404, request_id, origin)
+    if row[3] != user["id"]:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin)
+
+    s3_key, original_name, mime_type = row[0], row[1], row[2]
+    s3 = get_s3()
+    try:
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": "files", "Key": s3_key},
+            ExpiresIn=300,
+        )
+    except Exception as e:
+        return err_response("storage_error", f"Не удалось получить ссылку: {e}", 500, request_id, origin)
+
+    return ok_response({"url": url, "filename": original_name, "mime": mime_type}, request_id, origin)
+
+
+# ============================================================
 # Router
 # ============================================================
 
@@ -827,6 +984,12 @@ def handler(event: dict, context) -> dict:
             return handle_archive(conn, user, body, request_id, origin)
         if action == "education.upload_file":
             return handle_upload_file(conn, user, body, request_id, origin)
+        if action == "education.get_upload_url":
+            return handle_get_upload_url(conn, user, body, request_id, origin)
+        if action == "education.file_ready":
+            return handle_file_ready(conn, user, body, request_id, origin)
+        if action == "education.get_file_url":
+            return handle_get_file_url(conn, user, body, request_id, origin)
         if action == "education.analyze":
             return handle_analyze(conn, user, body, request_id, origin)
         if action == "education.confirm":

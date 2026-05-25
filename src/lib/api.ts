@@ -201,6 +201,12 @@ export const educationApi = {
     request(URLS.education, "/", "POST", {
       action: "education.upload_file", id, filename, mime, file_data: fileData,
     }),
+  getUploadUrl: (id: number, filename: string, mime: string) =>
+    request(URLS.education, "/", "POST", { action: "education.get_upload_url", id, filename, mime }),
+  fileReady: (id: number, filename: string, mime: string, s3Key: string, fileSize: number) =>
+    request(URLS.education, "/", "POST", { action: "education.file_ready", id, filename, mime, s3_key: s3Key, file_size: fileSize }),
+  getFileUrl: (fileId: number) =>
+    request(URLS.education, "/", "POST", { action: "education.get_file_url", file_id: fileId }),
   analyze: (id: number) =>
     request(URLS.education, "/", "POST", { action: "education.analyze", id }),
   confirm: (id: number, overrides?: Record<string, unknown>) =>
@@ -220,6 +226,21 @@ export function downloadBase64File(base64Data: string, filename: string, mimeTyp
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function uploadFileViaPresigned(
+  file: File,
+  getUploadUrlFn: (filename: string, mime: string) => Promise<{ upload_url: string; s3_key: string }>,
+): Promise<{ s3_key: string; file_size: number }> {
+  const mime = file.type || "application/octet-stream";
+  const { upload_url, s3_key } = await getUploadUrlFn(file.name, mime);
+  const res = await fetch(upload_url, {
+    method: "PUT",
+    headers: { "Content-Type": mime },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Ошибка загрузки файла: ${res.status} ${res.statusText}`);
+  return { s3_key, file_size: file.size };
 }
 
 export function fileToBase64(file: File): Promise<string> {

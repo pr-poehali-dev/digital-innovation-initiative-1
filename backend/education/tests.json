@@ -19,13 +19,51 @@
       "bodyMatcher": "partial"
     },
     {
-      "name": "REGRESSION: education.list под чужой сессией возвращает пустой массив, не чужие записи",
+      "name": "REGRESSION: education.list под чужой сессией возвращает пустой массив",
       "method": "POST",
       "path": "/",
       "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
       "body": {"action": "education.list"},
       "expectedStatus": 200,
       "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "get_upload_url requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "education.get_upload_url", "id": 1, "filename": "test.pdf", "mime": "application/pdf"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: get_upload_url чужая запись → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "education.get_upload_url", "id": 1, "filename": "test.pdf", "mime": "application/pdf"},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: file_ready чужая запись → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "education.file_ready", "id": 1, "filename": "test.pdf", "mime": "application/pdf", "s3_key": "education/1/test.pdf"},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: get_file_url без авторизации → 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "education.get_file_url", "file_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
     }
   ]
