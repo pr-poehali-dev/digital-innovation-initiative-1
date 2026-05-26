@@ -232,7 +232,21 @@ export const educationApi = {
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
-// Загрузка PPTX через бэкенд (base64) — без presigned URL, без CORS-проблем
+// Читает кусок файла как base64-строку (без data: префикса)
+function readChunkAsBase64(file: File, start: number, end: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const slice = file.slice(start, end);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1] ?? result);
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(slice);
+  });
+}
+
+// Чанковая загрузка PPTX через бэкенд — куски по 512KB, без проблем с лимитом тела
 export async function uploadPptxDirect(
   projectId: number,
   file: File,
@@ -242,32 +256,53 @@ export async function uploadPptxDirect(
   if (file.size > MAX_BYTES) throw new Error(`Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум — 50 МБ`);
   if (!file.name.toLowerCase().endsWith(".pptx")) throw new Error("Поддерживается только формат PPTX (.pptx)");
 
-  onProgress?.(10);
+  const CHUNK_SIZE = 512 * 1024; // 512 KB
 
-  // Читаем файл как base64
-  const fileB64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // убираем data:...;base64, префикс
-      resolve(result.split(",")[1] ?? result);
-    };
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
-    reader.readAsDataURL(file);
-  });
+  onProgress?.(5);
 
-  onProgress?.(40);
-
-  // Отправляем на бэкенд
-  const res = await request(URLS.audit, "/", "POST", {
-    action: "audit.upload",
+  // Шаг 1: инициализируем сессию
+  const init = await request(URLS.audit, "/", "POST", {
+    action: "audit.upload_init",
     project_id: projectId,
     filename: file.name,
-    file_b64: fileB64,
+    total_size: file.size,
+  }) as { session_id: string };
+
+  const sessionId = init.session_id;
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const parts: { part_number: number; etag: string }[] = [];
+  let uploadPartId = "";
+
+  // Шаг 2: отправляем чанки
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunkB64 = await readChunkAsBase64(file, start, end);
+
+    const res = await request(URLS.audit, "/", "POST", {
+      action: "audit.upload_chunk",
+      session_id: sessionId,
+      chunk_index: i,
+      chunk_b64: chunkB64,
+      upload_part_id: uploadPartId,
+    }) as { upload_part_id: string; etag: string; part_number: number };
+
+    uploadPartId = res.upload_part_id;
+    parts.push({ part_number: res.part_number, etag: res.etag });
+
+    const pct = 10 + Math.round(((i + 1) / totalChunks) * 80);
+    onProgress?.(pct);
+  }
+
+  // Шаг 3: завершаем загрузку
+  const complete = await request(URLS.audit, "/", "POST", {
+    action: "audit.upload_complete",
+    session_id: sessionId,
+    parts,
   }) as { upload_id: string };
 
   onProgress?.(100);
-  return res.upload_id;
+  return complete.upload_id;
 }
 
 // Обратная совместимость — фронт вызывает uploadPptxChunked, перенаправляем на новую функцию

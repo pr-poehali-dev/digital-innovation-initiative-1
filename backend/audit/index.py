@@ -369,34 +369,23 @@ def handler(event: dict, context) -> dict:
             log.info(f"audit.setup_cors: applied by user={user['email']}")
             return ok_resp({"message": "CORS настроен успешно", "cors": applied.get("CORSRules", [])})
 
-        # ---- audit.upload ----
-        # Принимает файл в base64, кладёт в S3, возвращает upload_id.
-        if action == "audit.upload":
-            import base64
+        # ---- audit.upload_init ----
+        # Начинает сессию чанковой загрузки, возвращает session_id.
+        if action == "audit.upload_init":
             project_id = body.get("project_id")
             filename = body.get("filename", "presentation.pptx")
-            file_b64 = body.get("file_b64", "")
+            total_size = int(body.get("total_size", 0))
 
             if not project_id:
                 return err_resp("Нужен project_id")
-            if not file_b64:
-                return err_resp("Нужен file_b64")
 
             clean_name = (filename or "").lower().strip()
             if not clean_name.endswith(".pptx"):
                 return err_resp("Поддерживается только формат PPTX (.pptx)")
 
-            try:
-                file_bytes = base64.b64decode(file_b64)
-            except Exception:
-                return err_resp("Невалидный base64")
-
             MAX_SIZE = 50 * 1024 * 1024
-            if len(file_bytes) > MAX_SIZE:
-                return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {len(file_bytes) // 1024 // 1024} МБ")
-
-            if not file_bytes[:4] == b'PK\x03\x04':
-                return err_resp("Файл не является валидным PPTX")
+            if total_size > MAX_SIZE:
+                return err_resp(f"Файл слишком большой. Максимум — 50 МБ")
 
             cur = conn.cursor()
             cur.execute(
@@ -406,27 +395,133 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return err_resp("Нет доступа к проекту", 403)
 
+            session_id = "upl_" + uuid.uuid4().hex
             PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            s3_key = f"audit_uploads/{user['id']}/{project_id}/{uuid.uuid4().hex}.pptx"
+            s3_key = f"audit_uploads/{user['id']}/{project_id}/{session_id}.pptx"
 
-            s3 = get_s3()
-            s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=PPTX_MIME)
-
-            upload_id = "upl_" + uuid.uuid4().hex
             cur.execute(
                 f"""INSERT INTO {schema}.audit_uploads
                     (id, project_id, user_id, filename, content_type, size_bytes_expected, s3_key, status, expires_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'ready', NOW() + INTERVAL '1 hour')""",
-                (upload_id, project_id, user["id"], filename, PPTX_MIME, len(file_bytes), s3_key),
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'uploading', NOW() + INTERVAL '1 hour')""",
+                (session_id, project_id, user["id"], filename, PPTX_MIME, total_size, s3_key),
             )
             conn.commit()
 
-            log.info(f"audit.upload: upload_id={upload_id}, key={s3_key}, size={len(file_bytes)}")
-            return ok_resp({"upload_id": upload_id, "s3_key": s3_key})
+            log.info(f"audit.upload_init: session_id={session_id}, size={total_size}")
+            return ok_resp({"session_id": session_id})
 
-        # ---- audit.prepare_upload (устарело, оставлено для совместимости) ----
+        # ---- audit.upload_chunk ----
+        # Принимает один чанк base64, накапливает в S3 через multipart upload.
+        if action == "audit.upload_chunk":
+            import base64
+            session_id = body.get("session_id")
+            chunk_b64 = body.get("chunk_b64", "")
+            chunk_index = int(body.get("chunk_index", 0))
+            upload_part_id = body.get("upload_part_id", "")  # mpu upload_id из S3
+
+            if not session_id or not chunk_b64:
+                return err_resp("Нужны session_id и chunk_b64")
+
+            try:
+                chunk_bytes = base64.b64decode(chunk_b64)
+            except Exception:
+                return err_resp("Невалидный base64")
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT s3_key, status FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
+                (session_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Сессия не найдена", 404)
+            s3_key, status = row
+            if status not in ("uploading",):
+                return err_resp(f"Неверный статус сессии: {status}")
+
+            s3 = get_s3()
+
+            # Первый чанк — инициализируем MPU
+            if chunk_index == 0:
+                PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                mpu = s3.create_multipart_upload(Bucket="files", Key=s3_key, ContentType=PPTX_MIME)
+                upload_part_id = mpu["UploadId"]
+                cur.execute(
+                    f"UPDATE {schema}.audit_uploads SET mpu_id = %s WHERE id = %s",
+                    (upload_part_id, session_id),
+                )
+                conn.commit()
+            elif not upload_part_id:
+                # Получаем сохранённый MPU id
+                cur.execute(
+                    f"SELECT mpu_id FROM {schema}.audit_uploads WHERE id = %s",
+                    (session_id,),
+                )
+                mpu_row = cur.fetchone()
+                if not mpu_row or not mpu_row[0]:
+                    return err_resp("MPU не инициализирован")
+                upload_part_id = mpu_row[0]
+
+            # S3 part numbers начинаются с 1
+            part_number = chunk_index + 1
+            part = s3.upload_part(
+                Bucket="files",
+                Key=s3_key,
+                PartNumber=part_number,
+                UploadId=upload_part_id,
+                Body=chunk_bytes,
+            )
+            etag = part["ETag"]
+
+            log.info(f"audit.upload_chunk: session={session_id}, part={part_number}, size={len(chunk_bytes)}, etag={etag}")
+            return ok_resp({"upload_part_id": upload_part_id, "etag": etag, "part_number": part_number})
+
+        # ---- audit.upload_complete ----
+        # Завершает multipart upload, регистрирует файл как готовый.
+        if action == "audit.upload_complete":
+            session_id = body.get("session_id")
+            parts = body.get("parts", [])  # [{part_number, etag}]
+
+            if not session_id or not parts:
+                return err_resp("Нужны session_id и parts")
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT s3_key, mpu_id, size_bytes_expected FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
+                (session_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Сессия не найдена", 404)
+            s3_key, mpu_id, size_expected = row
+
+            if not mpu_id:
+                return err_resp("MPU не инициализирован")
+
+            s3 = get_s3()
+            s3.complete_multipart_upload(
+                Bucket="files",
+                Key=s3_key,
+                UploadId=mpu_id,
+                MultipartUpload={"Parts": [{"PartNumber": p["part_number"], "ETag": p["etag"]} for p in parts]},
+            )
+
+            cur.execute(
+                f"UPDATE {schema}.audit_uploads SET status = 'ready', mpu_id = NULL WHERE id = %s",
+                (session_id,),
+            )
+            conn.commit()
+
+            log.info(f"audit.upload_complete: session={session_id}, parts={len(parts)}")
+            return ok_resp({"upload_id": session_id, "s3_key": s3_key})
+
+        # ---- audit.upload (устарело — оставлено для обратной совместимости) ----
+        if action == "audit.upload":
+            return err_resp("Используйте audit.upload_init / upload_chunk / upload_complete", 410)
+
+        # ---- audit.prepare_upload (устарело) ----
         if action == "audit.prepare_upload":
-            return err_resp("Используйте audit.upload для загрузки файлов", 410)
+            return err_resp("Используйте audit.upload_init для загрузки файлов", 410)
 
         # ---- audit.run ----
         if action == "audit.run":
