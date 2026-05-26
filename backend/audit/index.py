@@ -493,16 +493,25 @@ def handler(event: dict, context) -> dict:
                 obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
                 pptx_bytes = obj["Body"].read()
                 pptx_size = len(pptx_bytes)
+                log.info(f"audit.run: loaded {pptx_size} bytes from s3, magic={pptx_bytes[:4].hex() if pptx_bytes else 'empty'}")
             except Exception as e:
+                log.error(f"audit.run: s3 get_object failed: {e}")
                 return err_resp(f"Не удалось прочитать файл: {e}")
 
             # Валидация размера на сервере
             if pptx_size > 50 * 1024 * 1024:
                 return err_resp("Файл слишком большой (максимум 50 МБ)")
 
+            # Валидация ZIP-сигнатуры
+            if not pptx_bytes.startswith(b"PK\x03\x04"):
+                log.error(f"audit.run: not a valid ZIP/PPTX, first bytes: {pptx_bytes[:16].hex()}")
+                return err_resp(f"Файл повреждён при загрузке. Попробуйте загрузить снова.")
+
             # Извлекаем текст слайдов
             pptx_slides = extract_pptx_text(pptx_bytes)
+            log.info(f"audit.run: extracted {len(pptx_slides)} slides")
             if not pptx_slides or (len(pptx_slides) == 1 and "Ошибка" in pptx_slides[0].get("title", "")):
+                log.error(f"audit.run: extract failed: {pptx_slides}")
                 return err_resp("Не удалось прочитать презентацию. Убедитесь, что файл не повреждён и является корректным .pptx")
 
             # Запускаем AI-анализ

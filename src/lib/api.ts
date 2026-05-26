@@ -231,7 +231,7 @@ export const educationApi = {
 };
 
 // Загрузка PPTX чанками через наш бэкенд (обходит CORS S3)
-const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB на чанк → base64 ~1.3MB в теле запроса
+const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB на чанк — для большинства файлов один запрос
 
 export async function uploadPptxChunked(
   projectId: number,
