@@ -498,11 +498,6 @@ def apply_visual_plan(prs, visual_plan: list, style: dict):
     # Слайд 1 → prs.slides[1] (т.к. slides[0] = title)
     slide_list = list(prs.slides)
 
-    try:
-        from visual_renderer import render_diagram
-    except ImportError:
-        render_diagram = None
-
     for vp in visual_plan:
         si = int(vp.get("slide_index", 0))
         # si=1 → слайд контента № 1 → в prs это slides[1] (slides[0] = title)
@@ -548,14 +543,10 @@ def apply_visual_plan(prs, visual_plan: list, style: dict):
                 _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
                                      visual_type, prompt, style)
 
-        elif render_mode == "pptx_shapes" and render_diagram:
+        elif render_mode == "pptx_shapes":
             try:
-                # Сжимаем контентную зону для схемы: на всю ширину, нижняя область
-                vis_x2 = 0.55
-                vis_y2 = 1.85
-                # Изменяем позиции существующих буллетов — сдвигаем влево
-                # (схема займёт нижнюю область)
-                ok = render_diagram(visual_type, prompt, slide, style, 13.33, 7.5)
+                from diagram_renderer import render_diagram as _render_diag
+                ok = _render_diag(visual_type, prompt, slide, style, 13.33, 7.5)
                 if not ok:
                     _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
                                          visual_type, prompt, style)

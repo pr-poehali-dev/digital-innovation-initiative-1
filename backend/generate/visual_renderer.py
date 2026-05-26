@@ -11,6 +11,7 @@ B. Схемы (diagram/timeline/process/...) → python-pptx shapes → bytes pa
 """
 import os
 import io
+import re
 import time
 import json
 import base64
@@ -122,28 +123,30 @@ def _rgb(hex_str: str):
 def _parse_steps_from_prompt(prompt: str) -> list:
     """
     Извлекает список шагов из промпта.
-    Поддерживает: 'шаг1 -> шаг2 -> шаг3' или '1. шаг 2. шаг' или просто перечисление через запятую.
+    Поддерживает: → / -> / em-dash — / нумерацию / запятые.
+    Автоматически убирает prefix "N этапов:".
     """
-    # Стрелочный формат
-    if "->" in prompt or "→" in prompt:
-        parts = prompt.replace("→", "->").split("->")
-        steps = [p.strip().strip(".,;") for p in parts if p.strip()]
-        # Убираем числа вначале типа "4 этапа: диагностика" → берём только после ":"
+    norm = prompt.replace("→", "->").replace("—", ",")
+
+    if "->" in norm:
+        parts = norm.split("->")
         cleaned = []
-        for s in steps:
-            if ":" in s and len(s.split(":")[0]) < 20:
-                s = s.split(":", 1)[1].strip()
-            cleaned.append(s[:60])
-        return cleaned[:8]
+        for s in parts:
+            s = s.strip().strip(".,;")
+            if ":" in s:
+                prefix, _, rest = s.partition(":")
+                if len(prefix.strip()) < 40:
+                    s = rest.strip()
+            if s:
+                cleaned.append(s[:60])
+        if len(cleaned) >= 2:
+            return cleaned[:8]
 
-    # Нумерованный список
-    import re
-    numbered = re.findall(r'(?:^|\b)(\d+)[.\)]\s*([^\d\n,;]+)', prompt)
+    numbered = re.findall(r'(?:^|\b)(\d+)[.\)]\s*([^\d\n;]+?)(?=\s*\d+[.\)]|\Z)', norm)
     if len(numbered) >= 2:
-        return [v.strip()[:60] for _, v in numbered][:8]
+        return [v.strip().strip(",")[:60] for _, v in numbered][:8]
 
-    # Запятые
-    parts = [p.strip()[:60] for p in prompt.split(",") if p.strip()]
+    parts = [p.strip()[:60] for p in norm.split(",") if p.strip()]
     if len(parts) >= 2:
         return parts[:8]
 
@@ -154,10 +157,9 @@ def _add_rounded_rect(slide, x, y, w, h, fill_hex, text, font_size=11, text_colo
     """Добавляет прямоугольник со скруглёнными углами и текстом."""
     from pptx.util import Inches, Pt, Emu
     from pptx.enum.text import PP_ALIGN
-    MSO_CONNECTOR_TYPE_STRAIGHT = 1
-    MSO_SHAPE = 5  # ROUNDED_RECTANGLE
+    from pptx.enum.shapes import MSO_SHAPE
 
-    shape = slide.shapes.add_shape(MSO_SHAPE, Inches(x), Inches(y), Inches(w), Inches(h))
+    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
     shape.fill.solid()
     shape.fill.fore_color.rgb = _rgb(fill_hex)
     shape.line.color.rgb = _rgb(fill_hex)
@@ -176,15 +178,11 @@ def _add_rounded_rect(slide, x, y, w, h, fill_hex, text, font_size=11, text_colo
 
 
 def _add_arrow(slide, x1, y1, x2, y2, color_hex="#94A3B8"):
-    """Рисует стрелку между двумя точками."""
+    """Рисует линию-стрелку между двумя точками через add_connector."""
     from pptx.util import Inches, Emu
-    from pptx.oxml.ns import qn
-    from lxml import etree
-    import math
-
-    # Используем Connector
+    # MSO_CONNECTOR_TYPE.STRAIGHT = 1
     connector = slide.shapes.add_connector(
-        1,  # STRAIGHT
+        1,  # STRAIGHT connector
         Inches(x1), Inches(y1), Inches(x2), Inches(y2),
     )
     connector.line.color.rgb = _rgb(color_hex)
@@ -265,9 +263,10 @@ def render_timeline_diagram(prompt: str, slide, style: dict, slide_width=13.33, 
     for i, step in enumerate(steps):
         sx = margin_x + i * step_gap
 
-        # Точка на оси
-        dot = slide.shapes.add_shape(9, Inches(sx - 0.12), Inches(axis_y - 0.12),
-                                       Inches(0.24), Inches(0.24))  # OVAL
+        # Точка на оси (OVAL)
+        from pptx.enum.shapes import MSO_SHAPE as _MS
+        dot = slide.shapes.add_shape(_MS.OVAL, Inches(sx - 0.12), Inches(axis_y - 0.12),
+                                     Inches(0.24), Inches(0.24))
         dot.fill.solid()
         dot.fill.fore_color.rgb = _rgb(accent_hex)
         dot.line.fill.background()
@@ -307,7 +306,6 @@ def render_comparison_diagram(prompt: str, slide, style: dict, slide_width=13.33
     title_hex = "#{:02X}{:02X}{:02X}".format(*style.get("title", (0xFF, 0xFF, 0xFF)))
 
     # Пробуем выделить два объекта сравнения из промпта
-    import re
     parts = re.split(r'\bи\b|vs\.?|versus|\bпротив\b', prompt, flags=re.IGNORECASE)
     if len(parts) >= 2:
         left_label = parts[0].strip()[:40]

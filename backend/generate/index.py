@@ -795,7 +795,7 @@ def handler(event: dict, context) -> dict:
             # ================================================================
             # VISUAL PIPELINE: собираем visual_plan из документов + инструкций
             # ================================================================
-            use_visuals = body.get("use_visuals", True)
+            use_visuals = body.get("use_visuals", False)
             allow_ai_images = body.get("allow_ai_images", True)
             visual_plan = []
             visual_warnings = []
