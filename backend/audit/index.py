@@ -39,8 +39,35 @@ def get_db():
     return conn
 
 
+_schema_cache = None
+
 def get_schema():
-    return os.environ.get("MAIN_DB_SCHEMA", "public")
+    global _schema_cache
+    if _schema_cache:
+        return _schema_cache
+    val = os.environ.get("MAIN_DB_SCHEMA", "").strip()
+    if val:
+        _schema_cache = val
+        return _schema_cache
+    # Автоопределение: берём первую непубличную схему
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT nspname FROM pg_namespace "
+            "WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema' "
+            "ORDER BY nspname LIMIT 1"
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            _schema_cache = row[0]
+            log.warning(f"MAIN_DB_SCHEMA not set, auto-detected: {_schema_cache!r}")
+            return _schema_cache
+    except Exception as e:
+        log.error(f"get_schema auto-detect failed: {e}")
+    _schema_cache = "public"
+    return _schema_cache
 
 
 def ok_resp(data, origin=None):
@@ -340,11 +367,17 @@ def handler(event: dict, context) -> dict:
     session_id = event.get("headers", {}).get("X-Session-Id", "")
     conn = get_db()
     try:
-        user = get_user(conn, session_id)
+        schema = get_schema()
+        log.info(f"audit: schema={schema!r}, action={body.get('action')!r}")
+        try:
+            user = get_user(conn, session_id)
+        except Exception as e:
+            log.error(f"get_user failed: {e}, schema={schema!r}")
+            conn.rollback()
+            return err_resp(f"Ошибка авторизации: {e}", 500)
         if not user:
             return err_resp("Требуется авторизация", 401)
 
-        schema = get_schema()
         action = body.get("action", "")
 
         # ---- audit.setup_cors (одноразовый admin endpoint) ----
