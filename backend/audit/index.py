@@ -28,8 +28,9 @@ ROLE_PRIORITY = {
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Session-Id, X-User-Id, X-Auth-Token",
+    "Access-Control-Max-Age": "86400",
 }
 
 
@@ -326,7 +327,7 @@ def get_s3():
 def handler(event: dict, context) -> dict:
     """Аудит презентаций: проверка PPTX на соответствие документам."""
     if event.get("httpMethod") == "OPTIONS":
-        return {"statusCode": 200, "headers": CORS_HEADERS, "body": ""}
+        return {"statusCode": 200, "headers": {**CORS_HEADERS, "Content-Type": "application/json"}, "body": "{}"}
 
     if event.get("httpMethod") != "POST":
         return err_resp("Только POST", 405)
