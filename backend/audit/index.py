@@ -379,25 +379,6 @@ def handler(event: dict, context) -> dict:
 
             s3 = get_s3()
 
-            # Устанавливаем CORS на bucket чтобы браузер мог PUT напрямую
-            try:
-                s3.put_bucket_cors(
-                    Bucket="files",
-                    CORSConfiguration={
-                        "CORSRules": [
-                            {
-                                "AllowedOrigins": ["*"],
-                                "AllowedMethods": ["PUT", "GET", "HEAD"],
-                                "AllowedHeaders": ["*"],
-                                "ExposeHeaders": ["ETag"],
-                                "MaxAgeSeconds": 300,
-                            }
-                        ]
-                    },
-                )
-            except Exception as cors_err:
-                log.warning(f"CORS set failed (non-critical): {cors_err}")
-
             upload_url = s3.generate_presigned_url(
                 ClientMethod="put_object",
                 Params={
@@ -464,21 +445,37 @@ def handler(event: dict, context) -> dict:
             if upl_status == "consumed":
                 return err_resp("Этот upload уже использован")
 
-            # Загружаем PPTX из S3 и валидируем
+            # HEAD-валидация: проверяем что объект реально существует и размер совпадает
             s3 = get_s3()
+            try:
+                head = s3.head_object(Bucket="files", Key=pptx_s3_key)
+                actual_size = head["ContentLength"]
+                log.info(f"audit.run: head_object ok, upload_id={upload_id}, key={pptx_s3_key}, actual={actual_size}, expected={size_bytes_expected}")
+                if actual_size == 0:
+                    return err_resp("Файл загружен пустым — попробуйте загрузить снова")
+                # Обновляем фактический размер
+                cur.execute(
+                    f"UPDATE {schema}.audit_uploads SET size_bytes_actual=%s, status='uploaded' WHERE id=%s",
+                    (actual_size, upload_id),
+                )
+            except Exception as e:
+                log.error(f"audit.run: head_object failed, upload_id={upload_id}, key={pptx_s3_key}, err={e}")
+                return err_resp("Файл не найден в хранилище — браузер ещё не завершил загрузку или файл не был загружен. Попробуйте снова")
+
+            # Скачиваем PPTX
             try:
                 obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
                 pptx_bytes = obj["Body"].read()
                 pptx_size = len(pptx_bytes)
-                log.info(f"audit.run: loaded {pptx_size} bytes, upload_id={upload_id}, magic={pptx_bytes[:4].hex() if pptx_bytes else 'empty'}")
+                log.info(f"audit.run: downloaded {pptx_size} bytes, magic={pptx_bytes[:4].hex() if pptx_bytes else 'empty'}")
             except Exception as e:
-                log.error(f"audit.run: s3 get_object failed: {e}, key={pptx_s3_key}")
+                log.error(f"audit.run: get_object failed: {e}, key={pptx_s3_key}")
                 cur.execute(
                     f"UPDATE {schema}.audit_uploads SET status='failed', error_message=%s WHERE id=%s",
                     (str(e), upload_id),
                 )
                 conn.commit()
-                return err_resp("Файл не найден в хранилище — загрузите его заново")
+                return err_resp("Не удалось прочитать файл из хранилища — загрузите его заново")
 
             if pptx_size == 0:
                 return err_resp("Файл пустой — загрузите его заново")
