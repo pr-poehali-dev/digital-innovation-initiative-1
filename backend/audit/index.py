@@ -391,35 +391,35 @@ def handler(event: dict, context) -> dict:
             bucket = "files"
 
             if chunk_index == 0:
-                # s3_key строго привязан к user_id — исключает доступ к чужим файлам
+                # s3_key строго привязан к user_id
                 s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/presentation.pptx"
-                mp = s3.create_multipart_upload(
-                    Bucket=bucket, Key=s3_key,
-                    ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                )
-                upload_id = mp["UploadId"]
 
-            part_resp = s3.upload_part(
-                Bucket=bucket, Key=s3_key,
-                UploadId=upload_id,
-                PartNumber=chunk_index + 1,
-                Body=chunk_bytes,
-            )
-            etag = part_resp["ETag"]
+            # Накапливаем чанки в S3 как отдельные объекты-части
+            part_key = f"{s3_key}.part{chunk_index}"
+            s3.put_object(Bucket=bucket, Key=part_key, Body=chunk_bytes)
 
             if is_last:
-                parts = body.get("parts", [])
-                parts.append({"PartNumber": chunk_index + 1, "ETag": etag})
-                s3.complete_multipart_upload(
-                    Bucket=bucket, Key=s3_key, UploadId=upload_id,
-                    MultipartUpload={"Parts": parts},
+                # Собираем все части в один файл
+                all_parts = []
+                for i in range(chunk_index + 1):
+                    pk = f"{s3_key}.part{i}"
+                    obj = s3.get_object(Bucket=bucket, Key=pk)
+                    all_parts.append(obj["Body"].read())
+                    s3.delete_object(Bucket=bucket, Key=pk)
+
+                full_bytes = b"".join(all_parts)
+                s3.put_object(
+                    Bucket=bucket,
+                    Key=s3_key,
+                    Body=full_bytes,
+                    ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
                 return ok_resp({"s3_key": s3_key, "done": True, "filename": filename})
             else:
                 return ok_resp({
                     "s3_key": s3_key,
-                    "upload_id": upload_id,
-                    "part": {"PartNumber": chunk_index + 1, "ETag": etag},
+                    "upload_id": "n/a",
+                    "part": {"PartNumber": chunk_index + 1, "ETag": ""},
                     "done": False,
                 })
 
