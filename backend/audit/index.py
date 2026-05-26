@@ -369,24 +369,34 @@ def handler(event: dict, context) -> dict:
             log.info(f"audit.setup_cors: applied by user={user['email']}")
             return ok_resp({"message": "CORS настроен успешно", "cors": applied.get("CORSRules", [])})
 
-        # ---- audit.prepare_upload ----
-        # Возвращает presigned PUT URL для прямой загрузки PPTX в S3 из браузера.
-        # Frontend делает PUT напрямую в storage, без прогона бинарных данных через функцию.
-        if action == "audit.prepare_upload":
+        # ---- audit.upload ----
+        # Принимает файл в base64, кладёт в S3, возвращает upload_id.
+        if action == "audit.upload":
+            import base64
             project_id = body.get("project_id")
             filename = body.get("filename", "presentation.pptx")
-            size_bytes = int(body.get("size_bytes", 0))
+            file_b64 = body.get("file_b64", "")
 
             if not project_id:
                 return err_resp("Нужен project_id")
+            if not file_b64:
+                return err_resp("Нужен file_b64")
 
             clean_name = (filename or "").lower().strip()
             if not clean_name.endswith(".pptx"):
                 return err_resp("Поддерживается только формат PPTX (.pptx)")
 
+            try:
+                file_bytes = base64.b64decode(file_b64)
+            except Exception:
+                return err_resp("Невалидный base64")
+
             MAX_SIZE = 50 * 1024 * 1024
-            if size_bytes > MAX_SIZE:
-                return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {size_bytes // 1024 // 1024} МБ")
+            if len(file_bytes) > MAX_SIZE:
+                return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {len(file_bytes) // 1024 // 1024} МБ")
+
+            if not file_bytes[:4] == b'PK\x03\x04':
+                return err_resp("Файл не является валидным PPTX")
 
             cur = conn.cursor()
             cur.execute(
@@ -400,37 +410,23 @@ def handler(event: dict, context) -> dict:
             s3_key = f"audit_uploads/{user['id']}/{project_id}/{uuid.uuid4().hex}.pptx"
 
             s3 = get_s3()
+            s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=PPTX_MIME)
 
-            upload_url = s3.generate_presigned_url(
-                ClientMethod="put_object",
-                Params={
-                    "Bucket": "files",
-                    "Key": s3_key,
-                    "ContentType": PPTX_MIME,
-                },
-                ExpiresIn=900,
-                HttpMethod="PUT",
-            )
-
-            # Сохраняем upload-сессию в БД
             upload_id = "upl_" + uuid.uuid4().hex
             cur.execute(
                 f"""INSERT INTO {schema}.audit_uploads
                     (id, project_id, user_id, filename, content_type, size_bytes_expected, s3_key, status, expires_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', NOW() + INTERVAL '1 hour')""",
-                (upload_id, project_id, user["id"], filename, PPTX_MIME, size_bytes, s3_key),
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'ready', NOW() + INTERVAL '1 hour')""",
+                (upload_id, project_id, user["id"], filename, PPTX_MIME, len(file_bytes), s3_key),
             )
             conn.commit()
 
-            log.info(f"prepare_upload: upload_id={upload_id}, key={s3_key}, size={size_bytes}")
+            log.info(f"audit.upload: upload_id={upload_id}, key={s3_key}, size={len(file_bytes)}")
+            return ok_resp({"upload_id": upload_id, "s3_key": s3_key})
 
-            return ok_resp({
-                "upload_id": upload_id,
-                "upload_url": upload_url,
-                "method": "PUT",
-                "content_type": PPTX_MIME,
-                "s3_key": s3_key,
-            })
+        # ---- audit.prepare_upload (устарело, оставлено для совместимости) ----
+        if action == "audit.prepare_upload":
+            return err_resp("Используйте audit.upload для загрузки файлов", 410)
 
         # ---- audit.run ----
         if action == "audit.run":

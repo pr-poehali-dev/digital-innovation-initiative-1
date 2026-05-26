@@ -232,7 +232,7 @@ export const educationApi = {
 
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
-// Прямая загрузка PPTX в S3 через presigned PUT URL (без base64, без чанков)
+// Загрузка PPTX через бэкенд (base64) — без presigned URL, без CORS-проблем
 export async function uploadPptxDirect(
   projectId: number,
   file: File,
@@ -242,33 +242,32 @@ export async function uploadPptxDirect(
   if (file.size > MAX_BYTES) throw new Error(`Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум — 50 МБ`);
   if (!file.name.toLowerCase().endsWith(".pptx")) throw new Error("Поддерживается только формат PPTX (.pptx)");
 
-  // Шаг 1: получаем presigned PUT URL от бэкенда
-  onProgress?.(5);
-  const prep = await request(URLS.audit, "/", "POST", {
-    action: "audit.prepare_upload",
-    project_id: projectId,
-    filename: file.name,
-    size_bytes: file.size,
-  }) as { upload_id: string; upload_url: string; content_type: string };
+  onProgress?.(10);
 
-  // Шаг 2: грузим файл напрямую в S3 через PUT
-  onProgress?.(15);
-  const putRes = await fetch(prep.upload_url, {
-    method: "PUT",
-    headers: { "Content-Type": prep.content_type || PPTX_MIME },
-    body: file,
+  // Читаем файл как base64
+  const fileB64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // убираем data:...;base64, префикс
+      resolve(result.split(",")[1] ?? result);
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
   });
 
-  if (!putRes.ok) {
-    let bodyText = "";
-    try { bodyText = await putRes.text(); } catch (_e) { /* ignore */ }
-    console.error("[upload] PUT failed", putRes.status, putRes.statusText, bodyText, "url=", prep.upload_url.slice(0, 80));
-    throw new Error(`Ошибка загрузки в хранилище: ${putRes.status} ${putRes.statusText}${bodyText ? " — " + bodyText.slice(0, 200) : ""}`);
-  }
-  console.log("[upload] PUT ok", putRes.status, "upload_id=", prep.upload_id);
+  onProgress?.(40);
+
+  // Отправляем на бэкенд
+  const res = await request(URLS.audit, "/", "POST", {
+    action: "audit.upload",
+    project_id: projectId,
+    filename: file.name,
+    file_b64: fileB64,
+  }) as { upload_id: string };
 
   onProgress?.(100);
-  return prep.upload_id;
+  return res.upload_id;
 }
 
 // Обратная совместимость — фронт вызывает uploadPptxChunked, перенаправляем на новую функцию
