@@ -209,10 +209,17 @@ export default function AuditPage() {
     e.target.value = "";
   };
 
+  // Документы для отправки — берём все, у кого есть хоть что-то.
+  // Если extracted_text пустой — передаём пустую строку, backend не упадёт.
   const getDocsPayload = () =>
-    projectDocs.filter((d) => d.extracted_text).map((d) => ({
+    projectDocs.map((d) => ({
       name: d.name, role: d.role, text: d.extracted_text || "", instruction: d.instruction || undefined,
     }));
+
+  // Для блокировки кнопки — достаточно чтобы хоть один документ был в проекте
+  const hasAnyDocs = projectDocs.length > 0;
+  // Документы без извлечённого текста — предупреждаем пользователя, но не блокируем
+  const docsWithoutText = projectDocs.filter((d) => !d.extracted_text);
 
   const handleRunAudit = async () => {
     if (!pptxFile) return;
@@ -416,6 +423,10 @@ export default function AuditPage() {
                         <Icon name="FileText" size={15} className="text-slate-400 flex-shrink-0" />
                         <span className="text-sm font-medium flex-1 truncate">{doc.name}</span>
                         <span className="text-xs text-slate-400 uppercase">{doc.file_type}</span>
+                        {doc.extracted_text
+                          ? <span className="text-xs text-green-600 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-md flex-shrink-0">✓ Готов</span>
+                          : <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md flex-shrink-0" title="Текст ещё не извлечён, но документ будет включён в проверку">⚙ Обр.</span>
+                        }
                       </div>
                       <div className="flex flex-wrap gap-1.5 mb-2">
                         {ROLE_OPTIONS.map((opt) => (
@@ -436,17 +447,59 @@ export default function AuditPage() {
               )}
             </div>
 
-            <div className="flex gap-3">
+            {/* Предупреждение когда нет документов вообще */}
+            {projectDocs.length === 0 && (
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <Icon name="AlertTriangle" size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Нет документов для проверки</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Загрузите хотя бы один документ в проект — стандарт, критерии или источник.{" "}
+                    <Link to={`/cabinet/project/${projectId}`} className="underline hover:text-amber-900">Перейти в проект →</Link>
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Предупреждение когда документы есть, но текст не извлечён */}
+            {docsWithoutText.length > 0 && projectDocs.length > 0 && docsWithoutText.length === projectDocs.length && (
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <Icon name="AlertTriangle" size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Документы ещё обрабатываются</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    Текст из документов пока не извлечён. Вы можете запустить проверку — AI учтёт то, что успело обработаться, или попробуйте через минуту.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Частичное предупреждение */}
+            {docsWithoutText.length > 0 && docsWithoutText.length < projectDocs.length && (
+              <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                <Icon name="Info" size={15} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-blue-800">
+                  {docsWithoutText.length} из {projectDocs.length} документов ещё не обработаны — AI проверит только готовые.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 flex-wrap">
               <button onClick={() => { setPptxFile(null); setStep("upload"); }}
                 className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm">
                 ← Назад
               </button>
               <button onClick={handleRunAudit}
-                disabled={running || projectDocs.filter(d=>d.extracted_text).length === 0}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-medium">
+                disabled={running || !hasAnyDocs}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-medium">
                 <Icon name="ShieldCheck" size={16} />
                 Запустить проверку
               </button>
+              {!hasAnyDocs && (
+                <p className="text-xs text-slate-500">
+                  ← Сначала загрузите документы в проект
+                </p>
+              )}
             </div>
           </div>
         )}
