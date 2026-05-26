@@ -348,6 +348,9 @@ export const auditApi = {
     confirmed_plan_items: confirmedPlanItems,
   }),
 
+  downloadRevised: (auditId: number) =>
+    request(URLS.audit, "/", "POST", { action: "audit.download_revised", audit_id: auditId }),
+
   getRevisionStatus: (auditId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.get_revision_status", audit_id: auditId }),
 

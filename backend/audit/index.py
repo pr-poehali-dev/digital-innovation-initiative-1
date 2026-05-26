@@ -1073,11 +1073,152 @@ def handler(event: dict, context) -> dict:
                 )
                 conn.commit()
 
+                applied_ids_no_task = [p.get("plan_item_id") for p in revision_plan]
+                all_ids_no_task = [p.get("plan_item_id") for p in (plan_data.get("revision_plan") or [])]
+                skipped_ids_no_task = [i for i in all_ids_no_task if i not in applied_ids_no_task]
                 return ok_resp({
                     "audit_id": audit_id,
                     "content": ai_content,
-                    "revision_meta": {"source_audit_run_id": audit_id},
+                    "revision_meta": {
+                        "source_audit_run_id": audit_id,
+                        "applied_plan_item_ids": applied_ids_no_task,
+                        "skipped_plan_item_ids": skipped_ids_no_task,
+                        "applied_finding_ids": [f["issue_id"] for f in plan_data.get("applicable_findings", [])],
+                        "visual_changes": [],
+                        "warnings": [],
+                    },
                 })
+
+        # ================================================================
+        # audit.download_revised — скачать исправленный PPTX
+        # Применяет правки из revision_plan к оригинальному файлу
+        # ================================================================
+        if action == "audit.download_revised":
+            audit_id = int(body.get("audit_id", 0))
+
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT source_pptx_s3_key, revision_plan_json, revision_run_id
+                    FROM {schema}.audit_runs WHERE id = %s AND user_id = %s""",
+                (audit_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Аудит не найден", 404)
+
+            source_key, plan_json_raw, revision_run_id = row
+            if not source_key:
+                return err_resp("Исходный файл не найден")
+
+            plan_data = json.loads(plan_json_raw) if plan_json_raw else {}
+            revision_plan = plan_data.get("revision_plan") or []
+
+            # Загружаем оригинальный PPTX
+            try:
+                s3 = get_s3()
+                obj = s3.get_object(Bucket="files", Key=source_key)
+                pptx_bytes = obj["Body"].read()
+            except Exception as e:
+                detail = exc_detail("download_revised.get_s3", e, {"key": source_key})
+                return err_resp("Не удалось загрузить исходный файл", 500, detail=detail)
+
+            # Применяем правки из плана
+            try:
+                from pptx import Presentation
+                from pptx.util import Pt
+                import copy
+
+                prs = Presentation(io.BytesIO(pptx_bytes))
+                applied = 0
+
+                for item in revision_plan:
+                    slide_index = item.get("slide_index")
+                    change_type = item.get("change_type", "")
+                    proposed = item.get("proposed_change", "")
+                    target_text = item.get("target_text", "")
+
+                    if not proposed or slide_index is None:
+                        continue
+
+                    # Индекс слайда 1-based
+                    idx = int(slide_index) - 1
+                    if idx < 0 or idx >= len(prs.slides):
+                        continue
+
+                    slide = prs.slides[idx]
+
+                    if change_type in ("text_replace", "text_add", "fix"):
+                        # Ищем фрейм с целевым текстом и заменяем
+                        replaced = False
+                        for shape in slide.shapes:
+                            if not shape.has_text_frame:
+                                continue
+                            for para in shape.text_frame.paragraphs:
+                                full = "".join(r.text for r in para.runs)
+                                if target_text and target_text[:40].lower() in full.lower():
+                                    # Заменяем текст первого run, остальные очищаем
+                                    if para.runs:
+                                        para.runs[0].text = proposed
+                                        for r in para.runs[1:]:
+                                            r.text = ""
+                                    replaced = True
+                                    applied += 1
+                                    break
+                            if replaced:
+                                break
+
+                        # Если target не найден — ищем заголовок слайда и добавляем после
+                        if not replaced and change_type == "text_add":
+                            for shape in slide.shapes:
+                                if shape.has_text_frame and shape.shape_id in (2, 3):
+                                    tf = shape.text_frame
+                                    p = tf.add_paragraph()
+                                    p.text = proposed
+                                    applied += 1
+                                    break
+
+                    elif change_type == "title_replace":
+                        for shape in slide.shapes:
+                            try:
+                                ph = shape.placeholder_format
+                                if ph is not None and ph.idx == 0 and shape.has_text_frame:
+                                    if shape.text_frame.paragraphs:
+                                        shape.text_frame.paragraphs[0].runs[0].text = proposed if shape.text_frame.paragraphs[0].runs else ""
+                                    applied += 1
+                                    break
+                            except Exception:
+                                pass
+
+                # Сохраняем исправленный PPTX
+                buf = io.BytesIO()
+                prs.save(buf)
+                revised_bytes = buf.getvalue()
+
+            except Exception as e:
+                detail = exc_detail("download_revised.apply_fixes", e)
+                return err_resp("Ошибка при применении правок", 500, detail=detail)
+
+            # Сохраняем в S3 и отдаём base64 + ссылку
+            import base64
+            revised_key = source_key.replace(".pptx", f"_revised_{audit_id}.pptx")
+            try:
+                PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                s3.put_object(Bucket="files", Key=revised_key, Body=revised_bytes, ContentType=PPTX_MIME)
+                cdn_url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{revised_key}"
+            except Exception as e:
+                detail = exc_detail("download_revised.put_s3", e)
+                return err_resp("Ошибка сохранения исправленного файла", 500, detail=detail)
+
+            b64 = base64.b64encode(revised_bytes).decode()
+            log.info(f"audit.download_revised: audit_id={audit_id}, applied={applied}, size={len(revised_bytes)}, key={revised_key}")
+
+            return ok_resp({
+                "audit_id": audit_id,
+                "applied_count": applied,
+                "filename": source_key.split("/")[-1].replace(".pptx", "_revised.pptx"),
+                "cdn_url": cdn_url,
+                "pptx_b64": b64,
+            })
 
         # ================================================================
         # audit.get_revision_status

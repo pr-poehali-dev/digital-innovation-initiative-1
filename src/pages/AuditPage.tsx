@@ -81,6 +81,7 @@ interface RevisionPlan {
 }
 
 interface RevisionResult {
+  audit_id?: number;
   run_id?: number;
   task_id?: number;
   version?: number;
@@ -1095,6 +1096,31 @@ function RevisedView({ result, reaudit, onReaudit, onNewAudit, projectId }: {
 }) {
   const meta = result.revision_meta;
   const ra = reaudit as { score_before?: number; score_after?: number; score_delta?: number; issues_before?: number; issues_after?: number } | null;
+  const [downloading, setDownloading] = React.useState(false);
+  const [downloadError, setDownloadError] = React.useState("");
+
+  const handleDownload = async () => {
+    if (!result.audit_id) return;
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      const res = await auditApi.downloadRevised(result.audit_id) as { pptx_b64: string; filename: string; applied_count: number };
+      const binary = atob(res.pptx_b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.filename || "revised.pptx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Ошибка скачивания");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -1237,6 +1263,16 @@ function RevisedView({ result, reaudit, onReaudit, onNewAudit, projectId }: {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-3">
+        {result.audit_id && (
+          <button onClick={handleDownload} disabled={downloading}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
+            <Icon name={downloading ? "Loader2" : "Download"} size={15} className={downloading ? "animate-spin" : ""} />
+            {downloading ? "Формируем файл…" : "Скачать исправленный PPTX"}
+          </button>
+        )}
+        {downloadError && (
+          <p className="text-red-600 text-xs">{downloadError}</p>
+        )}
         {!reaudit && (
           <button onClick={onReaudit}
             className="flex items-center gap-2 border border-blue-400 text-blue-700 hover:bg-blue-50 px-5 py-2.5 rounded-xl text-sm font-medium">
