@@ -134,10 +134,17 @@ def extract_pptx_text(pptx_bytes: bytes) -> list:
                     continue
                 if shape.shape_type == 13:  # picture
                     continue
-                if not title and len(t) < 120 and shape.shape_id in (2, 3) or (
-                    hasattr(shape, "placeholder_format") and shape.placeholder_format
-                    and shape.placeholder_format.idx == 0
-                ):
+                is_title = False
+                if not title and len(t) < 120:
+                    try:
+                        ph = shape.placeholder_format
+                        if ph is not None and ph.idx == 0:
+                            is_title = True
+                    except Exception:
+                        pass
+                    if not is_title and shape.shape_id in (2, 3):
+                        is_title = True
+                if is_title:
                     title = t
                 else:
                     texts.append(t)
