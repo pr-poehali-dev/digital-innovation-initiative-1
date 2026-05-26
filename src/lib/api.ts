@@ -231,7 +231,7 @@ export const educationApi = {
 };
 
 // Загрузка PPTX чанками через наш бэкенд (обходит CORS S3)
-const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB на чанк (base64 ~5.5MB → ок для cloud func)
+const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB на чанк → base64 ~1.3MB в теле запроса
 
 export async function uploadPptxChunked(
   projectId: number,
@@ -254,9 +254,12 @@ export async function uploadPptxChunked(
     const end = Math.min(start + CHUNK_SIZE, bytes.length);
     const chunk = bytes.slice(start, end);
 
-    // Конвертируем в base64
+    // Конвертируем в base64 блоками (иначе stack overflow на >1MB чанках)
+    const BLOCK = 8192;
     let binary = "";
-    for (let j = 0; j < chunk.length; j++) binary += String.fromCharCode(chunk[j]);
+    for (let j = 0; j < chunk.length; j += BLOCK) {
+      binary += String.fromCharCode(...chunk.subarray(j, j + BLOCK));
+    }
     const chunkB64 = btoa(binary);
 
     const isLast = i === totalChunks - 1;
