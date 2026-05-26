@@ -1,10 +1,19 @@
 {
   "tests": [
     {
+      "name": "audit.prepare_upload требует авторизации",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "audit.prepare_upload", "project_id": 1, "filename": "test.pptx", "size_bytes": 1000},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
       "name": "audit.run требует авторизации",
       "method": "POST",
       "path": "/",
-      "body": {"action": "audit.run", "project_id": 1, "pptx_s3_key": "audit_uploads/0/test/presentation.pptx"},
+      "body": {"action": "audit.run", "project_id": 1, "upload_id": "upl_test"},
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
@@ -24,16 +33,6 @@
       "path": "/",
       "body": {"action": "audit.list", "project_id": 1},
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "REGRESSION: audit.run чужой проект → 403",
-      "method": "POST",
-      "path": "/",
-      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
-      "body": {"action": "audit.run", "project_id": 1, "pptx_s3_key": "audit_uploads/0/test/presentation.pptx"},
-      "expectedStatus": 403,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
     }

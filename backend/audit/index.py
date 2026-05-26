@@ -10,7 +10,6 @@ import json
 import os
 import io
 import uuid
-import base64
 import logging
 import psycopg2
 
@@ -348,29 +347,24 @@ def handler(event: dict, context) -> dict:
         schema = get_schema()
         action = body.get("action", "")
 
-        # ---- audit.upload_pptx ----
-        # Chunked upload: фронт режет файл на 4MB куски, шлёт последовательно.
-        # Валидация: только .pptx, лимит 50 МБ суммарно, ключ привязан к user.
-        if action == "audit.upload_pptx":
+        # ---- audit.prepare_upload ----
+        # Возвращает presigned PUT URL для прямой загрузки PPTX в S3 из браузера.
+        # Frontend делает PUT напрямую в storage, без прогона бинарных данных через функцию.
+        if action == "audit.prepare_upload":
             project_id = body.get("project_id")
             filename = body.get("filename", "presentation.pptx")
-            chunk_b64 = body.get("chunk")
-            chunk_index = int(body.get("chunk_index", 0))
-            total_chunks = int(body.get("total_chunks", 1))
-            is_last = bool(body.get("is_last", True))
-            s3_key = body.get("s3_key")
-            total_size = body.get("total_size", 0)
+            size_bytes = int(body.get("size_bytes", 0))
 
-            if not project_id or not chunk_b64:
-                return err_resp("Нужны project_id и chunk")
+            if not project_id:
+                return err_resp("Нужен project_id")
 
             clean_name = (filename or "").lower().strip()
             if not clean_name.endswith(".pptx"):
                 return err_resp("Поддерживается только формат PPTX (.pptx)")
 
             MAX_SIZE = 50 * 1024 * 1024
-            if total_size and int(total_size) > MAX_SIZE:
-                return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {int(total_size)//1024//1024} МБ")
+            if size_bytes > MAX_SIZE:
+                return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {size_bytes // 1024 // 1024} МБ")
 
             cur = conn.cursor()
             cur.execute(
@@ -380,65 +374,69 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return err_resp("Нет доступа к проекту", 403)
 
-            try:
-                chunk_bytes = base64.b64decode(chunk_b64)
-            except Exception:
-                return err_resp("Невалидный base64 chunk")
+            PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            s3_key = f"audit_uploads/{user['id']}/{project_id}/{uuid.uuid4().hex}.pptx"
 
             s3 = get_s3()
-            bucket = "files"
 
-            if chunk_index == 0:
-                s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/presentation.pptx"
-            elif not s3_key:
-                return err_resp("Нужен s3_key для чанков после первого")
-
-            log.info(f"upload_pptx chunk {chunk_index+1}/{total_chunks}, key={s3_key}, bytes={len(chunk_bytes)}")
-
-            # Сохраняем чанк как отдельный объект
-            part_key = f"{s3_key}.part{chunk_index}"
-            s3.put_object(Bucket=bucket, Key=part_key, Body=chunk_bytes)
-
-            if is_last:
-                # Собираем все части в нужном порядке
-                all_parts = []
-                for i in range(total_chunks):
-                    pk = f"{s3_key}.part{i}"
-                    obj = s3.get_object(Bucket=bucket, Key=pk)
-                    all_parts.append(obj["Body"].read())
-                    s3.delete_object(Bucket=bucket, Key=pk)
-
-                full_bytes = b"".join(all_parts)
-                log.info(f"upload_pptx assembled {len(full_bytes)} bytes from {total_chunks} chunks")
-
-                # Быстрая проверка — PPTX это ZIP-архив, начинается с PK\x03\x04
-                if not full_bytes.startswith(b"PK\x03\x04"):
-                    return err_resp("Файл повреждён или не является корректным PPTX")
-
-                s3.put_object(
-                    Bucket=bucket,
-                    Key=s3_key,
-                    Body=full_bytes,
-                    ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            # Устанавливаем CORS на bucket чтобы браузер мог PUT напрямую
+            try:
+                s3.put_bucket_cors(
+                    Bucket="files",
+                    CORSConfiguration={
+                        "CORSRules": [
+                            {
+                                "AllowedOrigins": ["*"],
+                                "AllowedMethods": ["PUT", "GET", "HEAD"],
+                                "AllowedHeaders": ["*"],
+                                "ExposeHeaders": ["ETag"],
+                                "MaxAgeSeconds": 300,
+                            }
+                        ]
+                    },
                 )
-                return ok_resp({"s3_key": s3_key, "done": True, "filename": filename})
-            else:
-                return ok_resp({
-                    "s3_key": s3_key,
-                    "upload_id": "n/a",
-                    "part": {"PartNumber": chunk_index + 1, "ETag": ""},
-                    "done": False,
-                })
+            except Exception as cors_err:
+                log.warning(f"CORS set failed (non-critical): {cors_err}")
+
+            upload_url = s3.generate_presigned_url(
+                ClientMethod="put_object",
+                Params={
+                    "Bucket": "files",
+                    "Key": s3_key,
+                    "ContentType": PPTX_MIME,
+                },
+                ExpiresIn=900,
+                HttpMethod="PUT",
+            )
+
+            # Сохраняем upload-сессию в БД
+            upload_id = "upl_" + uuid.uuid4().hex
+            cur.execute(
+                f"""INSERT INTO {schema}.audit_uploads
+                    (id, project_id, user_id, filename, content_type, size_bytes_expected, s3_key, status, expires_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', NOW() + INTERVAL '1 hour')""",
+                (upload_id, project_id, user["id"], filename, PPTX_MIME, size_bytes, s3_key),
+            )
+            conn.commit()
+
+            log.info(f"prepare_upload: upload_id={upload_id}, key={s3_key}, size={size_bytes}")
+
+            return ok_resp({
+                "upload_id": upload_id,
+                "upload_url": upload_url,
+                "method": "PUT",
+                "content_type": PPTX_MIME,
+                "s3_key": s3_key,
+            })
 
         # ---- audit.run ----
         if action == "audit.run":
             project_id = body.get("project_id")
-            pptx_s3_key = body.get("pptx_s3_key")
-            source_filename = body.get("source_filename", "presentation.pptx")
+            upload_id = body.get("upload_id")
             documents = body.get("documents") or []
 
-            if not project_id or not pptx_s3_key:
-                return err_resp("Нужны project_id и pptx_s3_key")
+            if not project_id or not upload_id:
+                return err_resp("Нужны project_id и upload_id")
 
             cur = conn.cursor()
             cur.execute(
@@ -448,66 +446,71 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return err_resp("Нет доступа к проекту", 403)
 
-            # Безопасность: s3_key должен принадлежать этому пользователю
-            expected_prefix = f"audit_uploads/{user['id']}/"
-            if not pptx_s3_key.startswith(expected_prefix):
-                return err_resp("Недопустимый s3_key", 403)
+            # Проверяем upload-сессию
+            cur.execute(
+                f"""SELECT id, s3_key, filename, size_bytes_expected, status, expires_at
+                    FROM {schema}.audit_uploads
+                    WHERE id = %s AND user_id = %s AND project_id = %s""",
+                (upload_id, user["id"], project_id),
+            )
+            upl = cur.fetchone()
+            if not upl:
+                return err_resp("Upload не найден или нет доступа", 404)
 
-            # Читаем документы из БД если переданы только роли без текста
-            if not documents or not any(d.get("text") for d in documents):
-                cur.execute(
-                    f"""SELECT id, original_name, file_type, extracted_text, status,
-                               COALESCE(default_ai_role, 'material') as default_role
-                        FROM {schema}.documents
-                        WHERE project_id = %s AND archived_at IS NULL
-                        ORDER BY created_at""",
-                    (project_id,),
-                )
-                db_docs = cur.fetchall()
-                # Применяем роли из запроса если есть, иначе default_role
-                role_map = {str(d["id"]): d["role"] for d in documents if isinstance(d, dict) and d.get("id")}
-                instr_map = {str(d["id"]): d.get("instruction", "") for d in documents if isinstance(d, dict) and d.get("id")}
-                documents = []
-                for r in db_docs:
-                    doc_id, orig_name, ftype, text, status, def_role = r
-                    if not text:
-                        continue  # пропускаем необработанные
-                    documents.append({
-                        "name": orig_name,
-                        "role": role_map.get(str(doc_id), def_role),
-                        "text": text,
-                        "instruction": instr_map.get(str(doc_id), ""),
-                    })
-            else:
-                # Текст пришёл с фронта — используем его, но берём missing тексты из БД
-                enriched = []
-                for d in documents:
-                    if d.get("text"):
-                        enriched.append(d)
-                    else:
-                        # попробуем найти в БД по имени
-                        enriched.append(d)
-                documents = enriched
+            upl_id, pptx_s3_key, source_filename, size_bytes_expected, upl_status, expires_at = upl
 
-            # Загружаем PPTX из S3
+            if upl_status == "expired":
+                return err_resp("Срок загрузки истёк, загрузите файл заново")
+            if upl_status == "consumed":
+                return err_resp("Этот upload уже использован")
+
+            # Загружаем PPTX из S3 и валидируем
             s3 = get_s3()
             try:
                 obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
                 pptx_bytes = obj["Body"].read()
                 pptx_size = len(pptx_bytes)
-                log.info(f"audit.run: loaded {pptx_size} bytes from s3, magic={pptx_bytes[:4].hex() if pptx_bytes else 'empty'}")
+                log.info(f"audit.run: loaded {pptx_size} bytes, upload_id={upload_id}, magic={pptx_bytes[:4].hex() if pptx_bytes else 'empty'}")
             except Exception as e:
-                log.error(f"audit.run: s3 get_object failed: {e}")
-                return err_resp(f"Не удалось прочитать файл: {e}")
+                log.error(f"audit.run: s3 get_object failed: {e}, key={pptx_s3_key}")
+                cur.execute(
+                    f"UPDATE {schema}.audit_uploads SET status='failed', error_message=%s WHERE id=%s",
+                    (str(e), upload_id),
+                )
+                conn.commit()
+                return err_resp("Файл не найден в хранилище — загрузите его заново")
 
-            # Валидация размера на сервере
-            if pptx_size > 50 * 1024 * 1024:
-                return err_resp("Файл слишком большой (максимум 50 МБ)")
+            if pptx_size == 0:
+                return err_resp("Файл пустой — загрузите его заново")
 
-            # Валидация ZIP-сигнатуры
             if not pptx_bytes.startswith(b"PK\x03\x04"):
-                log.error(f"audit.run: not a valid ZIP/PPTX, first bytes: {pptx_bytes[:16].hex()}")
-                return err_resp(f"Файл повреждён при загрузке. Попробуйте загрузить снова.")
+                log.error(f"audit.run: not valid ZIP/PPTX, bytes={pptx_bytes[:16].hex()}")
+                return err_resp("Файл загружен, но не является валидным PPTX. Убедитесь что файл не повреждён")
+
+            # Читаем документы из БД по ролям из запроса
+            role_map = {str(d["document_id"]): d.get("role", "material") for d in documents if isinstance(d, dict) and d.get("document_id")}
+            instr_map = {str(d["document_id"]): d.get("instruction", "") for d in documents if isinstance(d, dict) and d.get("document_id")}
+
+            cur.execute(
+                f"""SELECT id, original_name, file_type, extracted_text,
+                           COALESCE(default_ai_role, 'material') as default_role
+                    FROM {schema}.documents
+                    WHERE project_id = %s AND archived_at IS NULL
+                    ORDER BY created_at""",
+                (project_id,),
+            )
+            db_docs = cur.fetchall()
+            doc_list = []
+            for r in db_docs:
+                doc_id, orig_name, ftype, text, def_role = r
+                if not text:
+                    continue
+                doc_list.append({
+                    "name": orig_name,
+                    "role": role_map.get(str(doc_id), def_role),
+                    "text": text,
+                    "instruction": instr_map.get(str(doc_id), ""),
+                })
 
             # Извлекаем текст слайдов
             pptx_slides = extract_pptx_text(pptx_bytes)
@@ -516,12 +519,18 @@ def handler(event: dict, context) -> dict:
                 log.error(f"audit.run: extract failed: {pptx_slides}")
                 return err_resp("Не удалось прочитать презентацию. Убедитесь, что файл не повреждён и является корректным .pptx")
 
-            # Запускаем AI-анализ
-            audit_result = run_audit(pptx_slides, documents)
-            audit_result["slide_count"] = len(pptx_slides)
-            audit_result["document_count"] = len(documents)
+            # Помечаем upload как consumed
+            cur.execute(
+                f"UPDATE {schema}.audit_uploads SET status='consumed', consumed_at=NOW(), size_bytes_actual=%s WHERE id=%s",
+                (pptx_size, upload_id),
+            )
 
-            # Сохраняем в БД — включая source_pptx_s3_key для reaudit/revision
+            # Запускаем AI-анализ
+            audit_result = run_audit(pptx_slides, doc_list)
+            audit_result["slide_count"] = len(pptx_slides)
+            audit_result["document_count"] = len(doc_list)
+
+            # Сохраняем в БД
             cur.execute(
                 f"""INSERT INTO {schema}.audit_runs
                     (project_id, user_id, slide_count, doc_count, result_json, status,
@@ -529,7 +538,7 @@ def handler(event: dict, context) -> dict:
                     VALUES (%s, %s, %s, %s, %s, 'done', %s, %s, %s) RETURNING id""",
                 (
                     project_id, user["id"],
-                    len(pptx_slides), len(documents),
+                    len(pptx_slides), len(doc_list),
                     json.dumps(audit_result, ensure_ascii=False, default=str),
                     pptx_s3_key, source_filename, pptx_size,
                 ),
@@ -745,15 +754,19 @@ def handler(event: dict, context) -> dict:
             project_id = row[2]
             source_pptx_s3_key = row[3]
 
-            # Документы берём из БД если не переданы с текстом
-            if not documents or not any(d.get("text") for d in documents):
-                cur.execute(
-                    f"""SELECT original_name, COALESCE(default_ai_role, 'material'), extracted_text
-                        FROM {schema}.documents
-                        WHERE project_id = %s AND archived_at IS NULL AND extracted_text IS NOT NULL""",
-                    (project_id,),
-                )
-                documents = [{"name": r[0], "role": r[1], "text": r[2]} for r in cur.fetchall()]
+            # Берём документы из БД по document_id+role из запроса
+            role_map_cr = {str(d["document_id"]): d.get("role", "material") for d in documents if isinstance(d, dict) and d.get("document_id")}
+            instr_map_cr = {str(d["document_id"]): d.get("instruction", "") for d in documents if isinstance(d, dict) and d.get("document_id")}
+            cur.execute(
+                f"""SELECT id, original_name, COALESCE(default_ai_role, 'material'), extracted_text
+                    FROM {schema}.documents
+                    WHERE project_id = %s AND archived_at IS NULL AND extracted_text IS NOT NULL""",
+                (project_id,),
+            )
+            documents = [
+                {"name": r[1], "role": role_map_cr.get(str(r[0]), r[2]), "text": r[3], "instruction": instr_map_cr.get(str(r[0]), "")}
+                for r in cur.fetchall()
+            ]
 
             if not plan_data:
                 return err_resp("Сначала постройте план исправлений (audit.build_revision_plan)")
@@ -960,15 +973,19 @@ def handler(event: dict, context) -> dict:
             except Exception as e:
                 return err_resp(f"Не удалось загрузить файл презентации: {e}")
 
-            # Если документы не переданы — берём из БД проекта
-            if not documents or not any(d.get("text") for d in documents):
-                cur.execute(
-                    f"""SELECT original_name, COALESCE(default_ai_role, 'material'), extracted_text
-                        FROM {schema}.documents
-                        WHERE project_id = %s AND archived_at IS NULL AND extracted_text IS NOT NULL""",
-                    (project_id_stored,),
-                )
-                documents = [{"name": r[0], "role": r[1], "text": r[2]} for r in cur.fetchall()]
+            # Берём документы из БД по document_id+role из запроса
+            role_map_r = {str(d["document_id"]): d.get("role", "material") for d in documents if isinstance(d, dict) and d.get("document_id")}
+            instr_map_r = {str(d["document_id"]): d.get("instruction", "") for d in documents if isinstance(d, dict) and d.get("document_id")}
+            cur.execute(
+                f"""SELECT id, original_name, COALESCE(default_ai_role, 'material'), extracted_text
+                    FROM {schema}.documents
+                    WHERE project_id = %s AND archived_at IS NULL AND extracted_text IS NOT NULL""",
+                (project_id_stored,),
+            )
+            documents = [
+                {"name": r[1], "role": role_map_r.get(str(r[0]), r[2]), "text": r[3], "instruction": instr_map_r.get(str(r[0]), "")}
+                for r in cur.fetchall()
+            ]
 
             pptx_slides = extract_pptx_text(pptx_bytes)
             new_result = run_audit(pptx_slides, documents)

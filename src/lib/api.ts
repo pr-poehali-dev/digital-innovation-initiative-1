@@ -230,68 +230,55 @@ export const educationApi = {
     request(URLS.education, "/", "POST", { action: "education.profile_summary" }),
 };
 
-// Загрузка PPTX чанками через наш бэкенд (обходит CORS S3)
-const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB на чанк → base64 ~5.5MB в теле запроса
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
-export async function uploadPptxChunked(
+// Прямая загрузка PPTX в S3 через presigned PUT URL (без base64, без чанков)
+export async function uploadPptxDirect(
   projectId: number,
   file: File,
   onProgress?: (pct: number) => void,
 ): Promise<string> {
   const MAX_BYTES = 50 * 1024 * 1024;
   if (file.size > MAX_BYTES) throw new Error(`Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум — 50 МБ`);
+  if (!file.name.toLowerCase().endsWith(".pptx")) throw new Error("Поддерживается только формат PPTX (.pptx)");
 
-  const arrayBuf = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuf);
-  const totalChunks = Math.ceil(bytes.length / CHUNK_SIZE);
+  // Шаг 1: получаем presigned PUT URL от бэкенда
+  onProgress?.(5);
+  const prep = await request(URLS.audit, "/", "POST", {
+    action: "audit.prepare_upload",
+    project_id: projectId,
+    filename: file.name,
+    size_bytes: file.size,
+  }) as { upload_id: string; upload_url: string; content_type: string };
 
-  let s3Key = "";
-  let uploadId = "";
-  const parts: { PartNumber: number; ETag: string }[] = [];
+  // Шаг 2: грузим файл напрямую в S3 через PUT
+  onProgress?.(15);
+  const putRes = await fetch(prep.upload_url, {
+    method: "PUT",
+    headers: { "Content-Type": prep.content_type || PPTX_MIME },
+    body: file,
+  });
 
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, bytes.length);
-    const chunk = bytes.slice(start, end);
-
-    // Конвертируем в base64 блоками (иначе stack overflow на >1MB чанках)
-    const BLOCK = 8192;
-    let binary = "";
-    for (let j = 0; j < chunk.length; j += BLOCK) {
-      binary += String.fromCharCode(...chunk.subarray(j, j + BLOCK));
-    }
-    const chunkB64 = btoa(binary);
-
-    const isLast = i === totalChunks - 1;
-    const body: Record<string, unknown> = {
-      action: "audit.upload_pptx",
-      project_id: projectId,
-      filename: file.name,
-      chunk: chunkB64,
-      chunk_index: i,
-      total_chunks: totalChunks,
-      is_last: isLast,
-      total_size: bytes.length,
-    };
-    if (i > 0) { body.s3_key = s3Key; body.upload_id = uploadId; }
-    if (isLast && parts.length > 0) body.parts = parts;
-
-    const res = await request(URLS.audit, "/", "POST", body) as {
-      s3_key: string; upload_id?: string; part?: { PartNumber: number; ETag: string }; done: boolean
-    };
-
-    if (i === 0) s3Key = res.s3_key;
-    if (res.upload_id) uploadId = res.upload_id;
-    if (res.part) parts.push(res.part);
-    onProgress?.(Math.round(((i + 1) / totalChunks) * 100));
+  if (!putRes.ok) {
+    throw new Error(`Ошибка загрузки в хранилище: ${putRes.status} ${putRes.statusText}`);
   }
 
-  return s3Key;
+  onProgress?.(100);
+  return prep.upload_id;
+}
+
+// Обратная совместимость — фронт вызывает uploadPptxChunked, перенаправляем на новую функцию
+export async function uploadPptxChunked(
+  projectId: number,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<string> {
+  return uploadPptxDirect(projectId, file, onProgress);
 }
 
 export const auditApi = {
-  run: (projectId: number, pptxS3Key: string, sourceFilename: string, documents: { name: string; role: string; text: string; instruction?: string }[]) =>
-    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, pptx_s3_key: pptxS3Key, source_filename: sourceFilename, documents }),
+  run: (projectId: number, uploadId: string, documents: { document_id: number; role: string; instruction?: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, upload_id: uploadId, documents }),
 
   get: (auditId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.get", audit_id: auditId }),
@@ -312,24 +299,22 @@ export const auditApi = {
 
   createRevisionRun: (
     auditId: number,
-    documents: { name: string; role: string; text: string }[],
+    documents: { document_id: number; role: string; instruction?: string }[],
     taskId?: number,
-    pptxS3Key?: string,
     confirmedPlanItems?: string[],
   ) => request(URLS.audit, "/", "POST", {
     action: "audit.create_revision_run",
     audit_id: auditId,
     documents,
     task_id: taskId,
-    pptx_s3_key: pptxS3Key,
     confirmed_plan_items: confirmedPlanItems,
   }),
 
   getRevisionStatus: (auditId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.get_revision_status", audit_id: auditId }),
 
-  runReaudit: (auditId: number, pptxS3Key: string, documents: { name: string; role: string; text: string }[]) =>
-    request(URLS.audit, "/", "POST", { action: "audit.run_reaudit", audit_id: auditId, pptx_s3_key: pptxS3Key, documents }),
+  runReaudit: (auditId: number, documents: { document_id: number; role: string; instruction?: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run_reaudit", audit_id: auditId, documents }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {
