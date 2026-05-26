@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { auditApi, documentsApi, uploadPptxChunked } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
@@ -66,6 +66,7 @@ interface AuditResult {
   warnings: string[];
   document_count?: number;
   slide_count?: number;
+  documents_used?: { name: string; role: string }[];
 }
 
 interface PlanItem {
@@ -199,6 +200,7 @@ function SetupCorsButton() {
 export default function AuditPage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   type Step = "upload" | "configure" | "running" | "result" | "plan" | "revising" | "revised" | "reauditing";
   const [step, setStep] = useState<Step>("upload");
@@ -265,6 +267,20 @@ export default function AuditPage() {
 
   useEffect(() => { loadDocs(); }, [projectId]);
 
+  // Загружаем существующий аудит по ?audit=ID из URL
+  useEffect(() => {
+    const auditIdParam = searchParams.get("audit");
+    if (!auditIdParam) return;
+    const auditId = Number(auditIdParam);
+    if (!auditId) return;
+    auditApi.get(auditId).then((res: Record<string, unknown>) => {
+      const result = (res.result || res) as AuditResult;
+      setAuditResult(result);
+      setCurrentAuditId(auditId);
+      setStep("result");
+    }).catch(() => {});
+  }, []);
+
   // Polling: обновляем список каждые 8 сек пока есть документы в статусе processing
   useEffect(() => {
     const hasProcessing = projectDocs.some(d => d.status === "processing");
@@ -313,8 +329,10 @@ export default function AuditPage() {
     setError("");
     try {
       const res = await auditApi.run(projectId, pptxUploadId, getDocsPayload());
+      const newAuditId = res.data?.audit_id || res.audit_id || null;
       setAuditResult(res.data?.result || res.result || res);
-      setCurrentAuditId(res.data?.audit_id || res.audit_id || null);
+      setCurrentAuditId(newAuditId);
+      if (newAuditId) setSearchParams({ audit: String(newAuditId) }, { replace: true });
       setStep("result");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Ошибка аудита");
@@ -682,8 +700,11 @@ export default function AuditPage() {
                       {exportingReport ? "Формируем…" : "Скачать отчёт"}
                     </button>
                   )}
-                  <button onClick={() => { setPptxFile(null); setAuditResult(null); setStep("upload"); }}
-                    className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm">
+                  <button onClick={() => {
+                    setPptxFile(null); setAuditResult(null); setCurrentAuditId(null);
+                    setSearchParams({}, { replace: true });
+                    setStep("upload");
+                  }} className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm">
                     ← Новая проверка
                   </button>
                 </div>
@@ -922,26 +943,36 @@ export default function AuditPage() {
                 {/* Что проверялось */}
                 <div className="border border-slate-200 rounded-xl p-4 bg-card">
                   <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="FileSearch" size={15} className="text-blue-600" />Что проверялось</h3>
-                  <div className="grid sm:grid-cols-3 gap-3 text-center">
-                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{summary.total_slides}</p><p className="text-xs text-slate-500">Слайдов проверено</p></div>
-                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{auditResult.document_count ?? getDocsPayload().length}</p><p className="text-xs text-slate-500">Документов использовано</p></div>
-                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{(auditResult.criteria||[]).length}</p><p className="text-xs text-slate-500">Критериев извлечено</p></div>
-                  </div>
-                  <div className="grid sm:grid-cols-3 gap-3 text-center mt-3">
-                    <div className="bg-green-50 rounded-lg p-3"><p className="text-xl font-bold text-green-700">{summary.matched_count ?? auditResult.compliance_matrix.filter(c=>c.status==="met").length}</p><p className="text-xs text-slate-500">Соответствует</p></div>
-                    <div className="bg-amber-50 rounded-lg p-3"><p className="text-xl font-bold text-amber-700">{summary.partial_count ?? auditResult.compliance_matrix.filter(c=>c.status==="partially_met").length}</p><p className="text-xs text-slate-500">Частично</p></div>
-                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold text-slate-500">{(auditResult.unverified_items||[]).length}</p><p className="text-xs text-slate-500">Не удалось проверить</p></div>
-                  </div>
+                  {(() => {
+                    const realSlides = auditResult.slide_count ?? summary.total_slides;
+                    const realDocs = auditResult.documents_used?.length ?? auditResult.document_count ?? 0;
+                    const realCriteria = (auditResult.criteria||[]).length;
+                    const realMatched = auditResult.compliance_matrix.filter(c=>c.status==="met").length;
+                    const realPartial = auditResult.compliance_matrix.filter(c=>c.status==="partially_met").length;
+                    const realUnverified = (auditResult.unverified_items||[]).length;
+                    return (<>
+                      <div className="grid sm:grid-cols-3 gap-3 text-center">
+                        <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{realSlides}</p><p className="text-xs text-slate-500">Слайдов проверено</p></div>
+                        <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{realDocs}</p><p className="text-xs text-slate-500">Документов использовано</p></div>
+                        <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{realCriteria}</p><p className="text-xs text-slate-500">Критериев извлечено</p></div>
+                      </div>
+                      <div className="grid sm:grid-cols-3 gap-3 text-center mt-3">
+                        <div className="bg-green-50 rounded-lg p-3"><p className="text-xl font-bold text-green-700">{realMatched}</p><p className="text-xs text-slate-500">Соответствует</p></div>
+                        <div className="bg-amber-50 rounded-lg p-3"><p className="text-xl font-bold text-amber-700">{realPartial}</p><p className="text-xs text-slate-500">Частично</p></div>
+                        <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold text-slate-500">{realUnverified}</p><p className="text-xs text-slate-500">Не удалось проверить</p></div>
+                      </div>
+                    </>);
+                  })()}
                 </div>
 
                 {/* Документы */}
                 <div className="border border-slate-200 rounded-xl p-4 bg-card">
-                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="Files" size={15} className="text-blue-600" />Использованные документы</h3>
-                  {docsReady.length === 0
-                    ? <p className="text-xs text-slate-400">Нет данных</p>
+                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="Files" size={15} className="text-blue-600" />Документы, участвовавшие в этой проверке</h3>
+                  {!(auditResult.documents_used?.length)
+                    ? <p className="text-xs text-slate-400">Данные о документах доступны только для новых аудитов</p>
                     : <div className="space-y-1">
-                      {docsReady.map(d => (
-                        <div key={d.id} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+                      {auditResult.documents_used.map((d, i) => (
+                        <div key={i} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
                           <Icon name="FileText" size={14} className="text-slate-400 flex-shrink-0" />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{d.name}</p>
@@ -949,7 +980,7 @@ export default function AuditPage() {
                           <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full flex-shrink-0">
                             {d.role === "standard" ? "Стандарт" : d.role === "criteria" ? "Критерии" : d.role === "source" ? "Источник" : d.role === "template" ? "Шаблон" : "Материал"}
                           </span>
-                          <span className="text-xs text-green-600 flex-shrink-0">✓ Готов</span>
+                          <span className="text-xs text-green-600 flex-shrink-0">✓ Использован</span>
                         </div>
                       ))}
                     </div>

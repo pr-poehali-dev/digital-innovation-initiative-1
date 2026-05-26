@@ -730,6 +730,11 @@ def handler(event: dict, context) -> dict:
             audit_result = run_audit(pptx_slides, doc_list)
             audit_result["slide_count"] = len(pptx_slides)
             audit_result["document_count"] = len(doc_list)
+            # Сохраняем точный список документов этого аудита (имя + роль)
+            audit_result["documents_used"] = [
+                {"name": doc["name"], "role": doc["role"]}
+                for doc in doc_list
+            ]
 
             # Сохраняем в БД
             cur.execute(

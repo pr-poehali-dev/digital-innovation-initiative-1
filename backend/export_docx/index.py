@@ -231,7 +231,15 @@ def handler(event: dict, context) -> dict:
             criteria = audit.get("criteria") or []
             compliance = audit.get("compliance_matrix") or []
             unverified = audit.get("unverified_items") or []
+            documents_used = audit.get("documents_used") or []
             presentation_name = source_filename or "Презентация"
+
+            # Считаем цифры из реальных массивов, не из summary AI
+            real_findings = len(findings)
+            real_matched = len([c for c in compliance if c.get("status") == "met"])
+            real_partial = len([c for c in compliance if c.get("status") == "partially_met"])
+            real_not_met = len([c for c in compliance if c.get("status") == "not_met"])
+            real_unverified = len(unverified)
 
             from datetime import datetime
             from docx import Document
@@ -290,14 +298,16 @@ def handler(event: dict, context) -> dict:
             add_heading(doc, "1. Сводка результатов", 1)
             score = summary.get("compliance_score")
             add_kv(doc, "Файл", presentation_name)
-            add_kv(doc, "Слайдов проверено", summary.get("total_slides"))
-            add_kv(doc, "Замечаний найдено", summary.get("total_issues"))
+            add_kv(doc, "Слайдов проверено", audit.get("slide_count") or summary.get("total_slides"))
+            add_kv(doc, "Документов использовано", len(documents_used) or audit.get("document_count"))
+            add_kv(doc, "Замечаний найдено", real_findings)
+            add_kv(doc, "Критериев проверено", len(compliance))
             if score is not None:
                 add_kv(doc, "Оценка соответствия", f"{score}%")
-            add_kv(doc, "Критично", summary.get("critical_count", 0))
-            add_kv(doc, "Высокий приоритет", summary.get("high_count", 0))
-            add_kv(doc, "Средний приоритет", summary.get("medium_count", 0))
-            add_kv(doc, "Низкий приоритет", summary.get("low_count", 0))
+            add_kv(doc, "Соответствует критериям", real_matched)
+            add_kv(doc, "Частичное соответствие", real_partial)
+            add_kv(doc, "Не соответствует", real_not_met)
+            add_kv(doc, "Не удалось проверить", real_unverified)
 
             key_risks = summary.get("key_risks") or []
             if key_risks:
@@ -307,10 +317,24 @@ def handler(event: dict, context) -> dict:
                     p.paragraph_format.first_line_indent = Cm(0)
                     p.add_run(r)
 
-            # 2. Извлечённые критерии
+            # 2. Использованные документы
+            if documents_used:
+                doc.add_page_break()
+                add_heading(doc, "2. Использованные документы", 1)
+                role_label_map = {
+                    "standard": "Стандарт", "criteria": "Критерии",
+                    "source": "Источник", "template": "Шаблон", "material": "Материал"
+                }
+                for d in documents_used:
+                    p = doc.add_paragraph(style="List Bullet")
+                    p.paragraph_format.first_line_indent = Cm(0)
+                    role_txt = role_label_map.get(d.get("role",""), d.get("role",""))
+                    p.add_run(f"{d.get('name','')} — [{role_txt}]")
+
+            # 3. Извлечённые критерии
             if criteria:
                 doc.add_page_break()
-                add_heading(doc, "2. Критерии проверки", 1)
+                add_heading(doc, "3. Критерии проверки", 1)
                 add_para(doc, f"Из документов извлечено {len(criteria)} критериев:", italic=True)
                 for cr in criteria:
                     doc.add_paragraph()
