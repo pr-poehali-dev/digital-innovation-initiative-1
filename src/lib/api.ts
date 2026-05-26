@@ -29,14 +29,18 @@ async function request(base: string, path: string, method = "GET", body?: unknow
   });
   const data = await res.json();
   if (!res.ok) {
+    const trace = data?.detail?.trace_id ? ` [${data.detail.trace_id}]` : "";
+    const stage = data?.detail?.stage ? ` (${data.detail.stage})` : "";
     const msg = data?.error?.message || data?.error || "Ошибка запроса";
-    throw new Error(msg);
+    throw new Error(`${msg}${stage}${trace}`);
   }
   // Новый формат v1: {ok, data?, error?, request_id, ...}
   if (data && typeof data === "object" && data !== null && Object.prototype.hasOwnProperty.call(data, "ok")) {
     if (data.ok === false) {
-      const errMsg = (data.error && data.error.message) || "Ошибка";
-      throw new Error(errMsg);
+      const trace = data?.detail?.trace_id ? ` [${data.detail.trace_id}]` : "";
+      const stage = data?.detail?.stage ? ` (${data.detail.stage})` : "";
+      const errMsg = (data.error && data.error.message) || data.error || "Ошибка";
+      throw new Error(`${errMsg}${stage}${trace}`);
     }
     // Если есть поле data — возвращаем его (полный v1 контракт, как projects)
     if (Object.prototype.hasOwnProperty.call(data, "data")) {

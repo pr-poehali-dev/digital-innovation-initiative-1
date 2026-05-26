@@ -11,7 +11,9 @@ import os
 import io
 import uuid
 import logging
+import traceback
 import psycopg2
+from botocore.exceptions import ClientError
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("audit")
@@ -55,12 +57,45 @@ def ok_resp(data, origin=None):
     }
 
 
-def err_resp(msg, status=400, origin=None):
+def err_resp(msg, status=400, origin=None, detail: dict = None):
+    body = {"ok": False, "error": msg}
+    if detail:
+        body["detail"] = detail
     return {
         "statusCode": status,
         "headers": {**CORS_HEADERS, "Content-Type": "application/json"},
-        "body": json.dumps({"ok": False, "error": msg}, ensure_ascii=False),
+        "body": json.dumps(body, ensure_ascii=False, default=str),
     }
+
+
+def exc_detail(stage: str, e: Exception, extra: dict = None) -> dict:
+    """Возвращает структурированные детали исключения для диагностики."""
+    trace_id = uuid.uuid4().hex[:12]
+    d = {
+        "trace_id": trace_id,
+        "stage": stage,
+        "error_type": type(e).__name__,
+        "message": str(e),
+    }
+    pgcode = getattr(e, "pgcode", None)
+    pgerror = getattr(e, "pgerror", None)
+    diag = getattr(e, "diag", None)
+    if pgcode:
+        d["pgcode"] = pgcode
+    if pgerror:
+        d["pgerror"] = pgerror.strip() if pgerror else None
+    if diag:
+        d["pg_primary"] = getattr(diag, "message_primary", None)
+        d["pg_schema"] = getattr(diag, "schema_name", None)
+        d["pg_table"] = getattr(diag, "table_name", None)
+    if isinstance(e, ClientError):
+        err = e.response.get("Error", {})
+        d["aws_code"] = err.get("Code")
+        d["aws_message"] = err.get("Message")
+    if extra:
+        d.update(extra)
+    log.error(json.dumps({**d, "tb": traceback.format_exc()}, ensure_ascii=False, default=str))
+    return d
 
 
 def get_user(conn, session_id: str):
@@ -349,9 +384,9 @@ def handler(event: dict, context) -> dict:
         try:
             user = get_user(conn, session_id)
         except Exception as e:
-            log.error(f"get_user failed: {e}, schema={schema!r}")
             conn.rollback()
-            return err_resp(f"Ошибка авторизации: {e}", 500)
+            detail = exc_detail("get_user", e, {"schema": schema})
+            return err_resp("Ошибка авторизации", 500, detail=detail)
         if not user:
             return err_resp("Требуется авторизация", 401)
 
@@ -437,23 +472,33 @@ def handler(event: dict, context) -> dict:
                 return err_resp("Невалидный base64")
 
             cur = conn.cursor()
-            cur.execute(
-                f"SELECT s3_key, status FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
-                (session_id, user["id"]),
-            )
+            try:
+                cur.execute(
+                    f"SELECT s3_key, status FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
+                    (session_id, user["id"]),
+                )
+            except Exception as e:
+                conn.rollback()
+                detail = exc_detail("upload_chunk.select", e, {"schema": schema, "session_id": session_id})
+                return err_resp("Ошибка БД при поиске сессии", 500, detail=detail)
+
             row = cur.fetchone()
             if not row:
-                return err_resp("Сессия не найдена", 404)
+                return err_resp(f"Сессия не найдена: {session_id}", 404)
             s3_key, status = row
             if status not in ("uploading",):
                 return err_resp(f"Неверный статус сессии: {status}")
 
             # Сохраняем чанк как отдельный объект: s3_key.chunk.N
             chunk_key = f"{s3_key}.chunk.{chunk_index:04d}"
-            s3 = get_s3()
-            s3.put_object(Bucket="files", Key=chunk_key, Body=chunk_bytes)
+            try:
+                s3 = get_s3()
+                s3.put_object(Bucket="files", Key=chunk_key, Body=chunk_bytes)
+            except Exception as e:
+                detail = exc_detail("upload_chunk.s3_put", e, {"chunk_key": chunk_key, "chunk_index": chunk_index})
+                return err_resp("Ошибка S3 при сохранении чанка", 500, detail=detail)
 
-            log.info(f"audit.upload_chunk: session={session_id}, chunk={chunk_index}, size={len(chunk_bytes)}")
+            log.info(f"audit.upload_chunk: session={session_id}, chunk={chunk_index}, key={chunk_key}, size={len(chunk_bytes)}")
             return ok_resp({"chunk_index": chunk_index, "size": len(chunk_bytes)})
 
         # ---- audit.upload_complete ----
@@ -467,13 +512,19 @@ def handler(event: dict, context) -> dict:
                 return err_resp("Нужны session_id и total_chunks")
 
             cur = conn.cursor()
-            cur.execute(
-                f"SELECT s3_key FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
-                (session_id, user["id"]),
-            )
+            try:
+                cur.execute(
+                    f"SELECT s3_key FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
+                    (session_id, user["id"]),
+                )
+            except Exception as e:
+                conn.rollback()
+                detail = exc_detail("upload_complete.select", e, {"schema": schema, "session_id": session_id})
+                return err_resp("Ошибка БД при поиске сессии", 500, detail=detail)
+
             row = cur.fetchone()
             if not row:
-                return err_resp("Сессия не найдена", 404)
+                return err_resp(f"Сессия не найдена: {session_id}", 404)
             s3_key = row[0]
 
             s3 = get_s3()
@@ -482,15 +533,25 @@ def handler(event: dict, context) -> dict:
             file_parts = []
             for i in range(total_chunks):
                 chunk_key = f"{s3_key}.chunk.{i:04d}"
-                obj = s3.get_object(Bucket="files", Key=chunk_key)
-                file_parts.append(obj["Body"].read())
-                # Удаляем временный чанк
-                s3.delete_object(Bucket="files", Key=chunk_key)
+                try:
+                    obj = s3.get_object(Bucket="files", Key=chunk_key)
+                    file_parts.append(obj["Body"].read())
+                    s3.delete_object(Bucket="files", Key=chunk_key)
+                except Exception as e:
+                    detail = exc_detail("upload_complete.get_chunk", e, {
+                        "chunk_index": i, "chunk_key": chunk_key,
+                        "total_chunks": total_chunks, "chunks_got": len(file_parts),
+                    })
+                    return err_resp(f"Ошибка S3: не найден чанк {i}", 500, detail=detail)
 
             file_bytes = b"".join(file_parts)
 
             PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=PPTX_MIME)
+            try:
+                s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=PPTX_MIME)
+            except Exception as e:
+                detail = exc_detail("upload_complete.put_final", e, {"s3_key": s3_key, "size": len(file_bytes)})
+                return err_resp("Ошибка S3 при сохранении файла", 500, detail=detail)
 
             cur.execute(
                 f"UPDATE {schema}.audit_uploads SET status = 'ready', size_bytes_actual = %s WHERE id = %s",
@@ -498,7 +559,7 @@ def handler(event: dict, context) -> dict:
             )
             conn.commit()
 
-            log.info(f"audit.upload_complete: session={session_id}, total_size={len(file_bytes)}")
+            log.info(f"audit.upload_complete: session={session_id}, s3_key={s3_key}, total_size={len(file_bytes)}, chunks={total_chunks}")
             return ok_resp({"upload_id": session_id, "s3_key": s3_key})
 
         # ---- audit.upload (устарело — оставлено для обратной совместимости) ----
@@ -1117,7 +1178,12 @@ def handler(event: dict, context) -> dict:
         return err_resp("Неизвестное действие")
 
     except Exception as e:
-        log.exception("audit error")
-        return err_resp(f"Ошибка сервера: {str(e)[:200]}", 500)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        action_name = body.get("action", "unknown") if isinstance(body, dict) else "unknown"
+        detail = exc_detail(f"handler.{action_name}", e)
+        return err_resp(f"Ошибка сервера: {detail['message']}", 500, detail=detail)
     finally:
         conn.close()
