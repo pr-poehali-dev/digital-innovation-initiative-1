@@ -21,12 +21,16 @@ interface DocForAudit {
 
 interface Finding {
   issue_id: string;
+  criterion_id?: string;
   severity: string;
   slide_index: number;
   slide_title: string;
   issue_type: string;
   short_title: string;
   explanation: string;
+  what_required?: string;
+  what_found?: string;
+  gap_description?: string;
   evidence_from_presentation: string;
   evidence_from_source_docs: string;
   related_document_name: string;
@@ -37,22 +41,31 @@ interface Finding {
 }
 
 interface SlideReport { slide_index: number; slide_title: string; status: string; issue_count: number; summary: string; }
-interface ComplianceItem { criterion: string; source: string; status: string; slide_index: number | null; comment: string; }
+interface ComplianceItem { criterion_id?: string; criterion: string; source: string; status: string; slide_index: number | null; comment: string; }
 interface SuggestedChange { slide_index: number; slide_title: string; action: string; current_text: string; proposed_text: string; rationale: string; }
+interface CriterionItem { criterion_id: string; role: string; title: string; description: string; source_document: string; source_quote: string; }
+interface UnverifiedItem { criterion_id: string; criterion: string; reason: string; reason_text: string; }
 
 interface AuditSummary {
   total_slides: number; total_issues: number;
   critical_count: number; high_count: number; medium_count: number; low_count: number;
-  compliance_score: number | null; key_risks: string[];
+  compliance_score: number | null;
+  matched_count?: number;
+  partial_count?: number;
+  key_risks: string[];
 }
 
 interface AuditResult {
   audit_summary: AuditSummary;
+  criteria: CriterionItem[];
   findings: Finding[];
   slide_reports: SlideReport[];
   compliance_matrix: ComplianceItem[];
+  unverified_items: UnverifiedItem[];
   suggested_changes: SuggestedChange[];
   warnings: string[];
+  document_count?: number;
+  slide_count?: number;
 }
 
 interface PlanItem {
@@ -205,7 +218,8 @@ export default function AuditPage() {
   // Findings filters
   const [filterSev, setFilterSev]     = useState("all");
   const [filterSlide, setFilterSlide] = useState("all");
-  const [activeTab, setActiveTab]     = useState<"findings"|"slides"|"compliance"|"changes">("findings");
+  const [activeTab, setActiveTab]     = useState<"findings"|"slides"|"compliance"|"changes"|"transparency">("findings");
+  const [expandedFinding, setExpandedFinding] = useState<string | null>(null);
 
   // Revision
   const [revisionOptions, setRevisionOptions] = useState({
@@ -221,6 +235,7 @@ export default function AuditPage() {
   const [confirmedItems, setConfirmedItems]   = useState<Set<string>>(new Set());
   const [revisionResult, setRevisionResult]   = useState<RevisionResult | null>(null);
   const [reauditResult, setReauditResult]     = useState<Record<string, unknown> | null>(null);
+  const [exportingReport, setExportingReport] = useState(false);
 
   // Load docs + polling пока есть processing
   const loadDocs = (silent = false) => {
@@ -650,6 +665,23 @@ export default function AuditPage() {
                       <p className="text-xs font-medium">Соответствие</p>
                     </div>
                   )}
+                  {currentAuditId && (
+                    <button onClick={async () => {
+                      setExportingReport(true);
+                      try {
+                        const res = await auditApi.exportReport(currentAuditId) as { file_data: string; filename: string };
+                        const mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                        const bytes = Uint8Array.from(atob(res.file_data), c => c.charCodeAt(0));
+                        const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+                        const a = document.createElement("a"); a.href = url; a.download = res.filename; a.click();
+                        URL.revokeObjectURL(url);
+                      } catch { /* silent */ } finally { setExportingReport(false); }
+                    }} disabled={exportingReport}
+                      className="flex items-center gap-1.5 border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50 px-4 py-2 rounded-xl text-sm">
+                      <Icon name={exportingReport ? "Loader2" : "FileDown"} size={14} className={exportingReport ? "animate-spin" : ""} />
+                      {exportingReport ? "Формируем…" : "Скачать отчёт"}
+                    </button>
+                  )}
                   <button onClick={() => { setPptxFile(null); setAuditResult(null); setStep("upload"); }}
                     className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm">
                     ← Новая проверка
@@ -684,12 +716,21 @@ export default function AuditPage() {
 
             {/* Tabs */}
             <div className="flex gap-1 border border-slate-200 rounded-xl p-1 bg-slate-50 overflow-x-auto">
-              {(["findings","slides","compliance","changes"] as const).map((tab) => {
-                const labels = { findings:"Замечания", slides:"По слайдам", compliance:"Критерии", changes:"Правки" };
-                const counts = { findings:auditResult.findings.length, slides:auditResult.slide_reports.length, compliance:auditResult.compliance_matrix.length, changes:auditResult.suggested_changes.length };
+              {(["findings","slides","compliance","changes","transparency"] as const).map((tab) => {
+                const labels = { findings:"Замечания", slides:"По слайдам", compliance:"Критерии", changes:"Правки", transparency:"Как проверяли" };
+                const unverifiedCount = (auditResult.unverified_items||[]).length;
+                const criteriaCount = (auditResult.criteria||[]).length;
+                const counts: Record<string,number> = {
+                  findings: auditResult.findings.length,
+                  slides: auditResult.slide_reports.length,
+                  compliance: auditResult.compliance_matrix.length,
+                  changes: auditResult.suggested_changes.length,
+                  transparency: criteriaCount + unverifiedCount,
+                };
                 return (
                   <button key={tab} onClick={() => setActiveTab(tab)}
                     className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab===tab ? "bg-white shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                    {tab === "transparency" && <Icon name="Eye" size={13} />}
                     {labels[tab]}
                     {counts[tab] > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab===tab?"bg-slate-100":"bg-slate-200"}`}>{counts[tab]}</span>}
                   </button>
@@ -717,43 +758,99 @@ export default function AuditPage() {
                 </div>
                 {filteredFindings.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">Замечаний нет</p>
-                ) : filteredFindings.map((f) => (
-                  <div key={f.issue_id} className={`border rounded-xl p-4 space-y-3 ${SEV_COLOR[f.severity]||"border-slate-200"}`}>
-                    <div className="flex items-start gap-3 flex-wrap">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${SEV_COLOR[f.severity]}`}>{SEV_LABEL[f.severity]||f.severity}</span>
-                      <span className="text-xs text-slate-500">Слайд {f.slide_index} · {f.slide_title}</span>
-                      <span className="text-xs text-slate-400 font-mono">{f.issue_type}</span>
-                      {f.confidence==="low" && <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ Нужна проверка</span>}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-sm">{f.short_title}</p>
-                      <p className="text-sm text-slate-700 mt-1">{f.explanation}</p>
-                    </div>
-                    {(f.evidence_from_presentation || f.evidence_from_source_docs) && (
-                      <div className="grid sm:grid-cols-2 gap-3">
-                        {f.evidence_from_presentation && (
-                          <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
-                            <p className="text-xs font-medium text-slate-500 mb-1">📊 В презентации:</p>
-                            <p className="text-xs italic text-slate-700">«{f.evidence_from_presentation}»</p>
-                          </div>
-                        )}
-                        {f.evidence_from_source_docs && (
-                          <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
-                            <p className="text-xs font-medium text-slate-500 mb-1">📄 {f.related_document_name||"Документ"}:</p>
-                            <p className="text-xs italic text-slate-700">«{f.evidence_from_source_docs}»</p>
-                          </div>
+                ) : filteredFindings.map((f) => {
+                  const isExpanded = expandedFinding === f.issue_id;
+                  const hasDetails = !!(f.violated_criterion || f.what_required || f.what_found || f.gap_description);
+                  return (
+                  <div key={f.issue_id} className={`border rounded-xl overflow-hidden ${SEV_COLOR[f.severity]||"border-slate-200"}`}>
+                    {/* Заголовок карточки */}
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2 flex-wrap flex-1">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${SEV_COLOR[f.severity]}`}>{SEV_LABEL[f.severity]||f.severity}</span>
+                          <span className="text-xs text-slate-500">Слайд {f.slide_index} · {f.slide_title}</span>
+                          {f.confidence==="high" && <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">● Высокая уверенность</span>}
+                          {f.confidence==="medium" && <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">● Средняя уверенность</span>}
+                          {f.confidence==="low" && <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ Требует проверки</span>}
+                        </div>
+                        {hasDetails && (
+                          <button onClick={() => setExpandedFinding(isExpanded ? null : f.issue_id)}
+                            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 whitespace-nowrap flex-shrink-0">
+                            <Icon name={isExpanded ? "ChevronUp" : "ChevronDown"} size={13} />
+                            {isExpanded ? "Свернуть" : "Подробнее"}
+                          </button>
                         )}
                       </div>
-                    )}
-                    {f.suggested_fix && (
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                        <p className="text-xs font-medium text-green-700 mb-1">💡 Рекомендация:</p>
-                        <p className="text-xs text-green-800">{f.suggested_fix}</p>
-                        {f.rationale && <p className="text-xs text-green-600 mt-1 italic">{f.rationale}</p>}
+
+                      <div>
+                        <p className="font-semibold text-sm">{f.short_title}</p>
+                        <p className="text-sm text-slate-700 mt-1">{f.explanation}</p>
+                      </div>
+
+                      {f.violated_criterion && (
+                        <div className="text-xs text-slate-500 bg-white/50 rounded-lg px-3 py-2 border border-slate-200">
+                          <span className="font-medium text-slate-600">Критерий: </span>{f.violated_criterion}
+                        </div>
+                      )}
+
+                      {/* Доказательства */}
+                      {(f.evidence_from_presentation || f.evidence_from_source_docs) && (
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          {f.evidence_from_presentation && (
+                            <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
+                              <p className="text-xs font-medium text-slate-500 mb-1">📊 В презентации (Слайд {f.slide_index}):</p>
+                              <p className="text-xs italic text-slate-700">«{f.evidence_from_presentation}»</p>
+                            </div>
+                          )}
+                          {f.evidence_from_source_docs && (
+                            <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
+                              <p className="text-xs font-medium text-slate-500 mb-1">📄 {f.related_document_name||"Документ"}:</p>
+                              <p className="text-xs italic text-slate-700">«{f.evidence_from_source_docs}»</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {f.suggested_fix && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                          <p className="text-xs font-medium text-green-700 mb-1">💡 Рекомендация:</p>
+                          <p className="text-xs text-green-800">{f.suggested_fix}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Развёрнутый блок — детальное обоснование */}
+                    {isExpanded && (
+                      <div className="border-t border-slate-200 bg-slate-50/80 p-4 space-y-3">
+                        <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Обоснование вывода</p>
+                        {f.what_required && (
+                          <div>
+                            <p className="text-xs font-medium text-slate-500 mb-0.5">Что требовал документ:</p>
+                            <p className="text-xs text-slate-700">{f.what_required}</p>
+                          </div>
+                        )}
+                        {f.what_found && (
+                          <div>
+                            <p className="text-xs font-medium text-slate-500 mb-0.5">Что найдено в презентации:</p>
+                            <p className="text-xs text-slate-700">{f.what_found}</p>
+                          </div>
+                        )}
+                        {f.gap_description && (
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-xs font-medium text-red-600 mb-0.5">В чём расхождение:</p>
+                            <p className="text-xs text-red-800">{f.gap_description}</p>
+                          </div>
+                        )}
+                        {f.rationale && (
+                          <div>
+                            <p className="text-xs font-medium text-slate-500 mb-0.5">Почему такая рекомендация:</p>
+                            <p className="text-xs text-slate-600 italic">{f.rationale}</p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                ))}
+                );})}
               </div>
             )}
 
@@ -816,6 +913,117 @@ export default function AuditPage() {
                       {ch.rationale && <p className="text-xs text-slate-500 italic">{ch.rationale}</p>}
                     </div>
                   ))}
+              </div>
+            )}
+
+            {/* Transparency */}
+            {activeTab === "transparency" && (
+              <div className="space-y-5">
+                {/* Что проверялось */}
+                <div className="border border-slate-200 rounded-xl p-4 bg-card">
+                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="FileSearch" size={15} className="text-blue-600" />Что проверялось</h3>
+                  <div className="grid sm:grid-cols-3 gap-3 text-center">
+                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{summary.total_slides}</p><p className="text-xs text-slate-500">Слайдов проверено</p></div>
+                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{auditResult.document_count ?? getDocsPayload().length}</p><p className="text-xs text-slate-500">Документов использовано</p></div>
+                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold">{(auditResult.criteria||[]).length}</p><p className="text-xs text-slate-500">Критериев извлечено</p></div>
+                  </div>
+                  <div className="grid sm:grid-cols-3 gap-3 text-center mt-3">
+                    <div className="bg-green-50 rounded-lg p-3"><p className="text-xl font-bold text-green-700">{summary.matched_count ?? auditResult.compliance_matrix.filter(c=>c.status==="met").length}</p><p className="text-xs text-slate-500">Соответствует</p></div>
+                    <div className="bg-amber-50 rounded-lg p-3"><p className="text-xl font-bold text-amber-700">{summary.partial_count ?? auditResult.compliance_matrix.filter(c=>c.status==="partially_met").length}</p><p className="text-xs text-slate-500">Частично</p></div>
+                    <div className="bg-slate-50 rounded-lg p-3"><p className="text-xl font-bold text-slate-500">{(auditResult.unverified_items||[]).length}</p><p className="text-xs text-slate-500">Не удалось проверить</p></div>
+                  </div>
+                </div>
+
+                {/* Документы */}
+                <div className="border border-slate-200 rounded-xl p-4 bg-card">
+                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="Files" size={15} className="text-blue-600" />Использованные документы</h3>
+                  {docsReady.length === 0
+                    ? <p className="text-xs text-slate-400">Нет данных</p>
+                    : <div className="space-y-1">
+                      {docsReady.map(d => (
+                        <div key={d.id} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+                          <Icon name="FileText" size={14} className="text-slate-400 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{d.name}</p>
+                          </div>
+                          <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full flex-shrink-0">
+                            {d.role === "standard" ? "Стандарт" : d.role === "criteria" ? "Критерии" : d.role === "source" ? "Источник" : d.role === "template" ? "Шаблон" : "Материал"}
+                          </span>
+                          <span className="text-xs text-green-600 flex-shrink-0">✓ Готов</span>
+                        </div>
+                      ))}
+                    </div>
+                  }
+                </div>
+
+                {/* Извлечённые критерии */}
+                {(auditResult.criteria||[]).length > 0 && (
+                  <div className="border border-slate-200 rounded-xl p-4 bg-card">
+                    <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="ListChecks" size={15} className="text-blue-600" />Извлечённые критерии по ролям</h3>
+                    <div className="space-y-3">
+                      {(auditResult.criteria||[]).map((cr) => (
+                        <div key={cr.criterion_id} className="border border-slate-100 rounded-lg p-3 bg-slate-50/50">
+                          <div className="flex items-start gap-2 mb-1">
+                            <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full flex-shrink-0">{cr.role}</span>
+                            <p className="text-xs font-medium text-slate-700">{cr.title}</p>
+                          </div>
+                          {cr.description && <p className="text-xs text-slate-600 mb-1">{cr.description}</p>}
+                          <div className="flex items-start gap-1 mt-1">
+                            <Icon name="BookOpen" size={11} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-xs text-slate-400">{cr.source_document}</p>
+                          </div>
+                          {cr.source_quote && (
+                            <p className="text-xs italic text-slate-500 mt-1 pl-3 border-l-2 border-slate-200">«{cr.source_quote}»</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Что не удалось проверить */}
+                {(auditResult.unverified_items||[]).length > 0 && (
+                  <div className="border border-amber-200 rounded-xl p-4 bg-amber-50/50">
+                    <h3 className="font-semibold text-sm mb-3 flex items-center gap-2 text-amber-800"><Icon name="HelpCircle" size={15} className="text-amber-500" />Что система не смогла проверить</h3>
+                    <p className="text-xs text-amber-700 mb-3">Это не ошибки — просто места, где у системы не хватило данных для уверенного вывода. Требуют ручной проверки.</p>
+                    <div className="space-y-2">
+                      {(auditResult.unverified_items||[]).map((u, i) => (
+                        <div key={i} className="bg-white rounded-lg p-3 border border-amber-200">
+                          <p className="text-xs font-medium text-slate-700">{u.criterion}</p>
+                          <p className="text-xs text-amber-700 mt-1">
+                            {u.reason === "insufficient_data" ? "Недостаточно данных в презентации" :
+                             u.reason === "ambiguous_criterion" ? "Критерий в документе сформулирован неоднозначно" :
+                             u.reason === "missing_section" ? "Раздел отсутствует в презентации" :
+                             u.reason === "no_relevant_slide" ? "Не найден подходящий слайд" : u.reason}
+                            {u.reason_text ? ` — ${u.reason_text}` : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Этапы проверки */}
+                <div className="border border-slate-200 rounded-xl p-4 bg-card">
+                  <h3 className="font-semibold text-sm mb-3 flex items-center gap-2"><Icon name="GitBranch" size={15} className="text-blue-600" />Как проходила проверка</h3>
+                  <div className="space-y-2">
+                    {[
+                      { icon: "Upload", text: `Загружена презентация (${summary.total_slides} слайдов)` },
+                      { icon: "FileText", text: `Подключены документы (${auditResult.document_count ?? getDocsPayload().length} шт.) с ролями` },
+                      { icon: "Lightbulb", text: `Из документов извлечены критерии по выбранным ролям (${(auditResult.criteria||[]).length} критериев)` },
+                      { icon: "Search", text: "Каждый критерий сопоставлен с содержимым слайдов" },
+                      { icon: "Scale", text: `Каждому критерию присвоен статус: соответствует / частично / не соответствует / недостаточно данных` },
+                      { icon: "MessageSquare", text: `Для каждого несоответствия сформировано объяснение с цитатами из документа и слайда` },
+                    ].map((step, i) => (
+                      <div key={i} className="flex items-start gap-3">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-xs font-bold text-blue-600">{i+1}</span>
+                        </div>
+                        <p className="text-xs text-slate-600 pt-1">{step.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 

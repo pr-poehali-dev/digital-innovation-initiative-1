@@ -356,6 +356,9 @@ export const auditApi = {
 
   runReaudit: (auditId: number, documents: { document_id: number; role: string; instruction?: string }[]) =>
     request(URLS.audit, "/", "POST", { action: "audit.run_reaudit", audit_id: auditId, documents }),
+
+  exportReport: (auditId: number) =>
+    request(URLS.exportDocx, "/", "POST", { action: "audit_report", audit_id: auditId }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {

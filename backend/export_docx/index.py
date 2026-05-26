@@ -206,6 +206,207 @@ def handler(event: dict, context) -> dict:
         if method != "POST":
             return json_response({"error": "Method not allowed"}, 405, origin=origin)
 
+        action = body.get("action", "export_run")
+
+        # ── audit_report: DOCX-отчёт прозрачного аудита ──────────────────
+        if action == "audit_report":
+            audit_id = body.get("audit_id")
+            if not audit_id:
+                return json_response({"error": "Нужен audit_id"}, 400, origin=origin)
+
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT result_json, source_filename FROM {schema}.audit_runs
+                    WHERE id = %s AND user_id = %s""",
+                (int(audit_id), user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Аудит не найден"}, 404, origin=origin)
+
+            result_raw, source_filename = row
+            audit = json.loads(result_raw) if result_raw else {}
+            summary = audit.get("audit_summary") or {}
+            findings = audit.get("findings") or []
+            criteria = audit.get("criteria") or []
+            compliance = audit.get("compliance_matrix") or []
+            unverified = audit.get("unverified_items") or []
+            presentation_name = source_filename or "Презентация"
+
+            from datetime import datetime
+            from docx import Document
+            from docx.shared import Pt, Cm, RGBColor
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            import io as _io
+
+            def add_heading(doc, text, level=1):
+                h = doc.add_heading(text, level=level)
+                h.paragraph_format.first_line_indent = Cm(0)
+                return h
+
+            def add_para(doc, text, bold=False, italic=False, color=None):
+                p = doc.add_paragraph()
+                p.paragraph_format.first_line_indent = Cm(0)
+                run = p.add_run(text)
+                run.bold = bold
+                run.italic = italic
+                if color:
+                    run.font.color.rgb = RGBColor(*color)
+                return p
+
+            def add_kv(doc, key, value):
+                if not value:
+                    return
+                p = doc.add_paragraph()
+                p.paragraph_format.first_line_indent = Cm(0)
+                r1 = p.add_run(f"{key}: ")
+                r1.bold = True
+                p.add_run(str(value))
+
+            doc = Document()
+            for section in doc.sections:
+                section.left_margin = Cm(2.5)
+                section.right_margin = Cm(1.5)
+                section.top_margin = Cm(2)
+                section.bottom_margin = Cm(2)
+
+            # Титул
+            tp = doc.add_paragraph()
+            tp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            tr = tp.add_run("Отчёт аудита презентации")
+            tr.font.size = Pt(18)
+            tr.font.bold = True
+
+            sp = doc.add_paragraph()
+            sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            sp.add_run(presentation_name).font.size = Pt(13)
+
+            dp = doc.add_paragraph()
+            dp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            dp.add_run(datetime.now().strftime("%d.%m.%Y")).font.size = Pt(11)
+            doc.add_page_break()
+
+            # 1. Сводка
+            add_heading(doc, "1. Сводка результатов", 1)
+            score = summary.get("compliance_score")
+            add_kv(doc, "Файл", presentation_name)
+            add_kv(doc, "Слайдов проверено", summary.get("total_slides"))
+            add_kv(doc, "Замечаний найдено", summary.get("total_issues"))
+            if score is not None:
+                add_kv(doc, "Оценка соответствия", f"{score}%")
+            add_kv(doc, "Критично", summary.get("critical_count", 0))
+            add_kv(doc, "Высокий приоритет", summary.get("high_count", 0))
+            add_kv(doc, "Средний приоритет", summary.get("medium_count", 0))
+            add_kv(doc, "Низкий приоритет", summary.get("low_count", 0))
+
+            key_risks = summary.get("key_risks") or []
+            if key_risks:
+                add_para(doc, "Ключевые риски:", bold=True)
+                for r in key_risks:
+                    p = doc.add_paragraph(style="List Bullet")
+                    p.paragraph_format.first_line_indent = Cm(0)
+                    p.add_run(r)
+
+            # 2. Извлечённые критерии
+            if criteria:
+                doc.add_page_break()
+                add_heading(doc, "2. Критерии проверки", 1)
+                add_para(doc, f"Из документов извлечено {len(criteria)} критериев:", italic=True)
+                for cr in criteria:
+                    doc.add_paragraph()
+                    add_para(doc, f"[{cr.get('criterion_id','?')}] {cr.get('title','')}", bold=True)
+                    add_kv(doc, "Роль", cr.get("role"))
+                    add_kv(doc, "Источник", cr.get("source_document"))
+                    if cr.get("description"):
+                        add_para(doc, cr["description"])
+                    if cr.get("source_quote"):
+                        p = doc.add_paragraph()
+                        p.paragraph_format.first_line_indent = Cm(0)
+                        p.add_run(f"«{cr['source_quote']}»").italic = True
+
+            # 3. Замечания
+            if findings:
+                doc.add_page_break()
+                add_heading(doc, "3. Замечания и несоответствия", 1)
+                sev_label = {"critical": "Критично", "high": "Высокий", "medium": "Средний", "low": "Низкий"}
+                for i, f in enumerate(findings, 1):
+                    doc.add_paragraph()
+                    add_para(doc, f"Замечание {i}: {f.get('short_title','')}", bold=True)
+                    sev = sev_label.get(f.get("severity",""), f.get("severity",""))
+                    add_kv(doc, "Приоритет", sev)
+                    add_kv(doc, "Слайд", f"{f.get('slide_index','?')} — {f.get('slide_title','')}")
+                    add_kv(doc, "Критерий", f.get("violated_criterion") or f.get("issue_type",""))
+                    add_kv(doc, "Уверенность системы", f.get("confidence",""))
+                    if f.get("explanation"):
+                        add_para(doc, f.get("explanation",""))
+                    if f.get("what_required"):
+                        add_para(doc, "Что требовал документ:", bold=True)
+                        add_para(doc, f.get("what_required",""))
+                    if f.get("what_found"):
+                        add_para(doc, "Что найдено в презентации:", bold=True)
+                        add_para(doc, f.get("what_found",""))
+                    if f.get("gap_description"):
+                        add_para(doc, "В чём расхождение:", bold=True)
+                        add_para(doc, f.get("gap_description",""))
+                    if f.get("evidence_from_presentation"):
+                        add_kv(doc, "Цитата из презентации", f"«{f['evidence_from_presentation']}»")
+                    if f.get("evidence_from_source_docs"):
+                        add_kv(doc, f"Цитата из {f.get('related_document_name','документа')}", f"«{f['evidence_from_source_docs']}»")
+                    if f.get("suggested_fix"):
+                        add_para(doc, "Рекомендация:", bold=True)
+                        add_para(doc, f.get("suggested_fix",""))
+
+            # 4. Матрица соответствия
+            if compliance:
+                doc.add_page_break()
+                add_heading(doc, "4. Матрица соответствия критериям", 1)
+                status_label = {"met": "Соответствует", "partially_met": "Частично", "not_met": "Не соответствует", "not_checked": "Не проверено"}
+                for c in compliance:
+                    p = doc.add_paragraph(style="List Bullet")
+                    p.paragraph_format.first_line_indent = Cm(0)
+                    sl = status_label.get(c.get("status",""), c.get("status",""))
+                    slide_txt = f" (Слайд {c['slide_index']})" if c.get("slide_index") else ""
+                    p.add_run(f"[{sl}] {c.get('criterion','')} — {c.get('source','')}{slide_txt}")
+                    if c.get("comment"):
+                        p2 = doc.add_paragraph()
+                        p2.paragraph_format.left_indent = Cm(1)
+                        p2.paragraph_format.first_line_indent = Cm(0)
+                        p2.add_run(c["comment"]).italic = True
+
+            # 5. Что не удалось проверить
+            if unverified:
+                doc.add_page_break()
+                add_heading(doc, "5. Что система не смогла проверить", 1)
+                add_para(doc, "Следующие критерии требуют ручной проверки:", italic=True)
+                reason_label = {
+                    "insufficient_data": "Недостаточно данных",
+                    "ambiguous_criterion": "Неоднозначный критерий",
+                    "missing_section": "Раздел отсутствует",
+                    "no_relevant_slide": "Нет подходящего слайда",
+                }
+                for u in unverified:
+                    p = doc.add_paragraph(style="List Bullet")
+                    p.paragraph_format.first_line_indent = Cm(0)
+                    reason = reason_label.get(u.get("reason",""), u.get("reason",""))
+                    p.add_run(f"{u.get('criterion','')} — {reason}")
+                    if u.get("reason_text"):
+                        p2 = doc.add_paragraph()
+                        p2.paragraph_format.left_indent = Cm(1)
+                        p2.paragraph_format.first_line_indent = Cm(0)
+                        p2.add_run(u["reason_text"]).italic = True
+
+            buf = _io.BytesIO()
+            doc.save(buf)
+            docx_bytes = buf.getvalue()
+            b64 = base64.b64encode(docx_bytes).decode("utf-8")
+            safe_name = re.sub(r"[^\w\d\-_\u0400-\u04FF]", "_", (presentation_name or "audit")[:40])
+
+            return json_response({
+                "filename": f"Аудит_{safe_name}.docx",
+                "file_data": b64,
+            }, origin=origin)
+
+        # ── export_run: оригинальная логика ──────────────────────────────
         run_id = body.get("run_id")
         if not run_id:
             return json_response({"error": "Нужен run_id"}, 400, origin=origin)

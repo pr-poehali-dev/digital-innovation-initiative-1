@@ -254,10 +254,18 @@ def run_audit(pptx_slides: list, documents: list) -> dict:
         for s in pptx_slides
     )
 
-    user_prompt = f"""ДОКУМЕНТЫ ДЛЯ ПРОВЕРКИ:
+    # Список документов для явного указания в промпте
+    docs_list_txt = "\n".join(
+        f"- [{doc.get('role','material').upper()}] {doc.get('name','Документ')}"
+        for doc in sorted(documents, key=lambda d: ROLE_PRIORITY.get(d.get("role","material"), 99))
+    )
+
+    user_prompt = f"""ДОКУМЕНТЫ ДЛЯ ПРОВЕРКИ ({len(documents)} шт.):
+{docs_list_txt}
+
 {doc_context}
 
-СЛАЙДЫ ПРЕЗЕНТАЦИИ:
+СЛАЙДЫ ПРЕЗЕНТАЦИИ ({len(pptx_slides)} шт.):
 {slides_ctx}
 
 Проверь презентацию и верни JSON в формате:
@@ -270,17 +278,33 @@ def run_audit(pptx_slides: list, documents: list) -> dict:
     "medium_count": <число>,
     "low_count": <число>,
     "compliance_score": <0-100>,
+    "matched_count": <число критериев выполнено>,
+    "partial_count": <число критериев частично>,
     "key_risks": ["..."]
   }},
+  "criteria": [
+    {{
+      "criterion_id": "C001",
+      "role": "название роли документа",
+      "title": "Краткое название критерия",
+      "description": "Полная формулировка требования",
+      "source_document": "название файла",
+      "source_quote": "точная цитата из документа, на которой основан критерий"
+    }}
+  ],
   "findings": [
     {{
       "issue_id": "F001",
+      "criterion_id": "C001",
       "severity": "critical|high|medium|low",
       "slide_index": <номер>,
       "slide_title": "...",
       "issue_type": "<тип из списка: {', '.join(ISSUE_TYPES)}>",
       "short_title": "...",
       "explanation": "...",
+      "what_required": "Что требовал документ",
+      "what_found": "Что найдено в презентации",
+      "gap_description": "В чём конкретно расхождение",
       "evidence_from_presentation": "цитата из слайда",
       "evidence_from_source_docs": "цитата из документа",
       "related_document_name": "название документа",
@@ -301,11 +325,20 @@ def run_audit(pptx_slides: list, documents: list) -> dict:
   ],
   "compliance_matrix": [
     {{
+      "criterion_id": "C001",
       "criterion": "Описание требования",
       "source": "Название документа",
       "status": "met|partially_met|not_met|not_checked",
       "slide_index": <N или null>,
       "comment": "..."
+    }}
+  ],
+  "unverified_items": [
+    {{
+      "criterion_id": "C001",
+      "criterion": "Что не удалось проверить",
+      "reason": "insufficient_data|ambiguous_criterion|missing_section|no_relevant_slide",
+      "reason_text": "Объяснение почему не удалось проверить"
     }}
   ],
   "suggested_changes": [
@@ -345,11 +378,15 @@ def run_audit(pptx_slides: list, documents: list) -> dict:
             "medium_count": 0,
             "low_count": 0,
             "compliance_score": None,
+            "matched_count": 0,
+            "partial_count": 0,
             "key_risks": [],
         },
+        "criteria": [],
         "findings": [],
         "slide_reports": [],
         "compliance_matrix": [],
+        "unverified_items": [],
         "suggested_changes": [],
         "warnings": [f"AI вернул нечитаемый ответ: {raw[:200]}"],
     }
