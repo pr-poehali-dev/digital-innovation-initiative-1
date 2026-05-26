@@ -356,20 +356,18 @@ def handler(event: dict, context) -> dict:
             filename = body.get("filename", "presentation.pptx")
             chunk_b64 = body.get("chunk")
             chunk_index = int(body.get("chunk_index", 0))
+            total_chunks = int(body.get("total_chunks", 1))
             is_last = bool(body.get("is_last", True))
-            upload_id = body.get("upload_id")
             s3_key = body.get("s3_key")
-            total_size = body.get("total_size", 0)  # размер файла в байтах
+            total_size = body.get("total_size", 0)
 
             if not project_id or not chunk_b64:
                 return err_resp("Нужны project_id и chunk")
 
-            # Валидация расширения
             clean_name = (filename or "").lower().strip()
             if not clean_name.endswith(".pptx"):
                 return err_resp("Поддерживается только формат PPTX (.pptx)")
 
-            # Валидация размера (50 МБ лимит)
             MAX_SIZE = 50 * 1024 * 1024
             if total_size and int(total_size) > MAX_SIZE:
                 return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {int(total_size)//1024//1024} МБ")
@@ -391,23 +389,30 @@ def handler(event: dict, context) -> dict:
             bucket = "files"
 
             if chunk_index == 0:
-                # s3_key строго привязан к user_id
                 s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/presentation.pptx"
 
-            # Накапливаем чанки в S3 как отдельные объекты-части
+            log.info(f"upload_pptx chunk {chunk_index+1}/{total_chunks}, key={s3_key}, bytes={len(chunk_bytes)}")
+
+            # Сохраняем чанк как отдельный объект
             part_key = f"{s3_key}.part{chunk_index}"
             s3.put_object(Bucket=bucket, Key=part_key, Body=chunk_bytes)
 
             if is_last:
-                # Собираем все части в один файл
+                # Собираем все части в нужном порядке
                 all_parts = []
-                for i in range(chunk_index + 1):
+                for i in range(total_chunks):
                     pk = f"{s3_key}.part{i}"
                     obj = s3.get_object(Bucket=bucket, Key=pk)
                     all_parts.append(obj["Body"].read())
                     s3.delete_object(Bucket=bucket, Key=pk)
 
                 full_bytes = b"".join(all_parts)
+                log.info(f"upload_pptx assembled {len(full_bytes)} bytes from {total_chunks} chunks")
+
+                # Быстрая проверка — PPTX это ZIP-архив, начинается с PK\x03\x04
+                if not full_bytes.startswith(b"PK\x03\x04"):
+                    return err_resp("Файл повреждён или не является корректным PPTX")
+
                 s3.put_object(
                     Bucket=bucket,
                     Key=s3_key,

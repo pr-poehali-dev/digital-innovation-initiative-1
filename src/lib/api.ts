@@ -269,8 +269,9 @@ export async function uploadPptxChunked(
       filename: file.name,
       chunk: chunkB64,
       chunk_index: i,
+      total_chunks: totalChunks,
       is_last: isLast,
-      total_size: bytes.length, // для серверной валидации 50МБ
+      total_size: bytes.length,
     };
     if (i > 0) { body.s3_key = s3Key; body.upload_id = uploadId; }
     if (isLast && parts.length > 0) body.parts = parts;
