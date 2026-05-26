@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { projectsApi, documentsApi, fileToBase64, mediaApi, tasksApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import HelpPanel from "@/components/HelpPanel";
 
 interface Document {
   id: number;
@@ -293,6 +294,44 @@ export default function ProjectPage() {
           </div>
         </div>
 
+        <HelpPanel
+          title="Как работать с проектом"
+          summary="Проект — ваше рабочее пространство. Загрузите материалы, создайте задание — AI сделает презентацию."
+          steps={[
+            { num: 1, title: "Загрузите материалы", description: "Перейдите на вкладку «Материалы» и загрузите документы: конспекты, статьи, стандарты, шаблоны." },
+            { num: 2, title: "Создайте задание", description: "Нажмите «Новое задание» — выберите тип (презентация, анализ, доклад) и опишите тему." },
+            { num: 3, title: "Запустите AI", description: "На странице задания нажмите «Запустить AI». AI прочитает ваши материалы и создаст результат." },
+            { num: 4, title: "Проверьте или скачайте", description: "Просмотрите результат, скачайте PPTX или запустите аудит готовой презентации." },
+          ]}
+          sections={[
+            {
+              title: "Какие роли у документов",
+              icon: "Tag",
+              subsections: [
+                { title: "📜 Стандарт / Критерии", content: "Нормативные требования и чеклисты. AI сверяет с ними содержимое." },
+                { title: "📋 Образец / Шаблон", content: "Пример структуры и оформления. AI берёт форму, но не предметный смысл." },
+                { title: "📚 Источник", content: "Основные материалы — лекции, статьи, конспекты. AI использует как фактическую базу." },
+                { title: "📎 Дополнительный", content: "Вспомогательные материалы для контекста." },
+              ],
+            },
+            {
+              title: "Что такое Аудит",
+              icon: "ShieldCheck",
+              content: "Аудит проверяет готовую PPTX на соответствие вашим документам. Найдёт противоречия, отсутствующие разделы, неточные формулировки. Доступен через кнопку «Аудит» в правом углу.",
+            },
+            {
+              title: "Что такое Поиск",
+              icon: "Search",
+              content: "Семантический поиск по всем загруженным материалам. Найдите нужную цитату или факт в своих документах без ручного просмотра.",
+            },
+          ]}
+          tips={[
+            { kind: "tip", text: "Назначайте роли документам — это помогает AI правильно расставить приоритеты при генерации." },
+            { kind: "warning", text: "Без загруженных материалов AI будет опираться только на общие знания, а не на ваши источники." },
+            { kind: "example", text: "Хороший стек: Программа курса (Критерии) + 3–5 лекций (Источник) + образец презентации (Шаблон)." },
+          ]}
+        />
+
         <div className="flex gap-1 mb-6 border-b">
           {(["tasks", "docs", "team"] as const).map((t) => (
             <button
@@ -312,22 +351,82 @@ export default function ProjectPage() {
         {tab === "tasks" && (
           <div className="space-y-3">
             {tasks.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mx-auto mb-3">
-                  <Icon name="ListTodo" size={22} />
+              <div className="space-y-4">
+                {/* Empty state — дружелюбный с карточками */}
+                <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center mb-2">
+                  <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto mb-4">
+                    <Icon name="Sparkles" size={26} className="text-orange-400" />
+                  </div>
+                  <p className="font-semibold text-foreground text-lg mb-1">Заданий пока нет</p>
+                  <p className="text-sm text-muted-foreground mb-5 max-w-sm mx-auto">
+                    Создайте первое задание — AI прочитает ваши материалы и подготовит результат
+                  </p>
+                  <Link
+                    to={`/cabinet/project/${projectId}/new-task`}
+                    className="inline-flex items-center gap-2 bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors"
+                  >
+                    <Icon name="Plus" size={15} />
+                    Создать первое задание
+                  </Link>
                 </div>
-                <p className="font-medium text-foreground mb-1">Заданий пока нет</p>
-                <p className="text-sm mb-4">Создайте задание чтобы начать работу с AI</p>
-                <Link
-                  to={`/cabinet/project/${projectId}/new-task`}
-                  className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors"
-                >
-                  <Icon name="Plus" size={14} />
-                  Создать задание
-                </Link>
+
+                {/* Карточки быстрых сценариев */}
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">Что можно сделать</p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {[
+                    {
+                      emoji: "✨", title: "Создать презентацию",
+                      desc: "AI соберёт PPTX из ваших документов по теме",
+                      color: "border-orange-200 bg-orange-50/50 hover:border-orange-300",
+                      link: `/cabinet/project/${projectId}/new-task`,
+                    },
+                    {
+                      emoji: "🛡", title: "Проверить готовую презентацию",
+                      desc: "Загрузите PPTX — AI найдёт ошибки и даст правки",
+                      color: "border-blue-200 bg-blue-50/50 hover:border-blue-300",
+                      link: `/cabinet/project/${projectId}/audit`,
+                    },
+                    {
+                      emoji: "📝", title: "Подготовить доклад или анализ",
+                      desc: "AI напишет текст, ответит на вопрос или составит план",
+                      color: "border-green-200 bg-green-50/50 hover:border-green-300",
+                      link: `/cabinet/project/${projectId}/new-task`,
+                    },
+                    {
+                      emoji: "🔍", title: "Найти в материалах",
+                      desc: "Умный поиск по всем загруженным документам проекта",
+                      color: "border-slate-200 bg-slate-50/50 hover:border-slate-300",
+                      link: `/cabinet/project/${projectId}/search`,
+                    },
+                  ].map((s) => (
+                    <Link key={s.title} to={s.link}
+                      className={`flex items-start gap-3 border rounded-xl p-4 transition-all ${s.color}`}>
+                      <span className="text-xl flex-shrink-0">{s.emoji}</span>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{s.title}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{s.desc}</p>
+                      </div>
+                      <Icon name="ChevronRight" size={14} className="text-slate-400 ml-auto flex-shrink-0 mt-0.5" />
+                    </Link>
+                  ))}
+                </div>
               </div>
             ) : (
-              tasks.map((t) => (
+              <>
+              {/* Quick action bar — когда уже есть задания */}
+              <div className="flex flex-wrap gap-2 mb-1 pb-4 border-b border-slate-100">
+                {[
+                  { emoji: "✨", label: "Новое задание", link: `/cabinet/project/${projectId}/new-task`, cls: "bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100" },
+                  { emoji: "🛡", label: "Аудит PPTX", link: `/cabinet/project/${projectId}/audit`, cls: "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100" },
+                  { emoji: "🔍", label: "Поиск по материалам", link: `/cabinet/project/${projectId}/search`, cls: "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100" },
+                ].map((a) => (
+                  <Link key={a.label} to={a.link}
+                    className={`inline-flex items-center gap-1.5 border text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${a.cls}`}>
+                    <span>{a.emoji}</span>{a.label}
+                  </Link>
+                ))}
+              </div>
+              {tasks.map((t) => (
                 <Link
                   key={t.id}
                   to={`/cabinet/project/${projectId}/task/${t.id}`}
@@ -354,7 +453,8 @@ export default function ProjectPage() {
                     <p className="text-xs text-muted-foreground">{t.created_by}</p>
                   </div>
                 </Link>
-              ))
+              ))}
+              </>
             )}
           </div>
         )}

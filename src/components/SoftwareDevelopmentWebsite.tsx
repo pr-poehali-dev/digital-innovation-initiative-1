@@ -303,14 +303,14 @@ export default function SoftwareDevelopmentWebsite() {
                     </div>
                   </a>
 
-                  <h1 className="mt-8 max-w-4xl mx-auto text-balance text-6xl md:text-7xl lg:mt-16 xl:text-[5.25rem]">
-                    Учись умнее —{" "}
-                    <span className="inline-block text-slate-600 text-6xl md:text-7xl xl:text-[5.25rem] font-semibold">
-                      с AI в кармане
+                  <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
+                    Создавайте презентации{" "}
+                    <span className="inline-block text-slate-600">
+                      по вашим материалам
                     </span>
                   </h1>
-                  <p className="mx-auto mt-8 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Храни конспекты, статьи и раздаточные материалы. Давай AI задание: «Подготовь диплом по теме X, используй стандарт IPMO, возьми структуру из прилагаемой презентации и дополни из интернета» — и получай готовый результат.
+                  <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
+                    Загрузите конспекты, стандарты и шаблоны — AI соберёт готовую презентацию, учтёт все требования и вставит схемы. Проверит соответствие и предложит правки.
                   </p>
                 </AnimatedGroup>
 
@@ -318,27 +318,24 @@ export default function SoftwareDevelopmentWebsite() {
                   variants={{
                     container: {
                       visible: {
-                        transition: {
-                          staggerChildren: 0.05,
-                          delayChildren: 0.75,
-                        },
+                        transition: { staggerChildren: 0.05, delayChildren: 0.75 },
                       },
                     },
                     ...transitionVariants,
                   }}
-                  className="mt-12 flex flex-col items-center justify-center gap-2 md:flex-row"
+                  className="mt-10 flex flex-col items-center justify-center gap-3 md:flex-row"
                 >
                   <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
                     <Link to="/cabinet">
-                      <Button size="lg" className="rounded-xl px-5 text-base bg-slate-800 hover:bg-slate-700">
-                        <Upload className="mr-2 h-4 w-4" />
-                        <span className="text-nowrap">Открыть кабинет</span>
+                      <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        <span className="text-nowrap">Создать презентацию</span>
                       </Button>
                     </Link>
                   </div>
                   <Link to="/login" key={2}>
                     <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
-                      <span className="text-nowrap">Войти</span>
+                      <span className="text-nowrap">Войти в кабинет</span>
                     </Button>
                   </Link>
                 </AnimatedGroup>
@@ -371,6 +368,96 @@ export default function SoftwareDevelopmentWebsite() {
               </div>
 
             </AnimatedGroup>
+          </div>
+        </section>
+
+        {/* ── Блок сценариев ── */}
+        <section className="py-16 md:py-24 bg-background">
+          <div className="mx-auto max-w-5xl px-6">
+            <div className="text-center mb-12">
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">С чего начать</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Что вы хотите сделать?</h2>
+              <p className="mt-3 text-muted-foreground">Выберите сценарий — система проведёт по всем шагам</p>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[
+                {
+                  emoji: "✨",
+                  color: "bg-orange-50 border-orange-200 hover:border-orange-400",
+                  iconBg: "bg-orange-100",
+                  title: "Создать презентацию",
+                  desc: "Загрузите материалы — AI соберёт PPTX с текстом, структурой и схемами",
+                  cta: "Начать →",
+                  link: "/cabinet",
+                  ctaCls: "bg-orange-600 hover:bg-orange-700 text-white",
+                },
+                {
+                  emoji: "🛡",
+                  color: "bg-blue-50 border-blue-200 hover:border-blue-400",
+                  iconBg: "bg-blue-100",
+                  title: "Проверить готовую",
+                  desc: "Загрузите PPTX — AI найдёт ошибки, противоречия и несоответствия критериям",
+                  cta: "Проверить →",
+                  link: "/cabinet",
+                  ctaCls: "bg-blue-600 hover:bg-blue-700 text-white",
+                },
+                {
+                  emoji: "🔧",
+                  color: "bg-violet-50 border-violet-200 hover:border-violet-400",
+                  iconBg: "bg-violet-100",
+                  title: "Исправить замечания",
+                  desc: "После аудита — AI составит план правок и создаст улучшенную версию",
+                  cta: "Исправить →",
+                  link: "/cabinet",
+                  ctaCls: "bg-violet-600 hover:bg-violet-700 text-white",
+                },
+                {
+                  emoji: "📚",
+                  color: "bg-green-50 border-green-200 hover:border-green-400",
+                  iconBg: "bg-green-100",
+                  title: "Загрузить материалы",
+                  desc: "Конспекты, статьи, стандарты, шаблоны — всё станет базой для AI",
+                  cta: "Загрузить →",
+                  link: "/cabinet",
+                  ctaCls: "bg-green-600 hover:bg-green-700 text-white",
+                },
+                {
+                  emoji: "🎨",
+                  color: "bg-pink-50 border-pink-200 hover:border-pink-400",
+                  iconBg: "bg-pink-100",
+                  title: "Добавить визуалы",
+                  desc: "Схемы, диаграммы, таймлайны — AI вставит их прямо в слайды",
+                  cta: "Узнать →",
+                  link: "/cabinet",
+                  ctaCls: "bg-pink-600 hover:bg-pink-700 text-white",
+                },
+                {
+                  emoji: "🔍",
+                  color: "bg-slate-50 border-slate-200 hover:border-slate-400",
+                  iconBg: "bg-slate-100",
+                  title: "Найти в материалах",
+                  desc: "Умный поиск по всем документам проекта — без ручного просмотра",
+                  cta: "Искать →",
+                  link: "/cabinet",
+                  ctaCls: "bg-slate-700 hover:bg-slate-800 text-white",
+                },
+              ].map((s) => (
+                <Link
+                  key={s.title}
+                  to={s.link}
+                  className={`group flex flex-col border-2 rounded-2xl p-5 transition-all duration-200 ${s.color}`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-4 ${s.iconBg}`}>
+                    {s.emoji}
+                  </div>
+                  <h3 className="font-semibold text-slate-800 mb-1.5">{s.title}</h3>
+                  <p className="text-sm text-slate-600 flex-1 mb-4">{s.desc}</p>
+                  <span className={`self-start text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${s.ctaCls}`}>
+                    {s.cta}
+                  </span>
+                </Link>
+              ))}
+            </div>
           </div>
         </section>
 

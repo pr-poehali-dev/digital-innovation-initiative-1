@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { auditApi, documentsApi, fileToBase64 } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import HelpPanel from "@/components/HelpPanel";
 
 // ------------------------------------------------------------------ //
 //  Types                                                               //
@@ -308,15 +309,59 @@ export default function AuditPage() {
           <span className="text-foreground font-medium">Аудит презентации</span>
         </div>
 
-        <div className="mb-6">
+        <div className="mb-4">
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Icon name="ShieldCheck" size={24} className="text-blue-600" />
             Аудит презентации
           </h1>
           <p className="text-muted-foreground text-sm mt-1 max-w-xl">
-            Загрузите PPTX и документы-критерии. AI проверит соответствие и поможет исправить.
+            Загрузите готовую PPTX — AI найдёт ошибки, противоречия и предложит конкретные правки.
           </p>
         </div>
+
+        <HelpPanel
+          title="Как пользоваться аудитом"
+          summary="Загрузите презентацию и документы-критерии. AI сравнит содержимое со стандартами и источниками, найдёт несоответствия и предложит исправления."
+          steps={[
+            { num: 1, title: "Загрузите PPTX", description: "Выберите готовую презентацию в формате .pptx. Это та версия, которую хотите проверить." },
+            { num: 2, title: "Назначьте роли документам", description: "Документы проекта отображаются автоматически. Укажите роль каждого: Стандарт, Критерии, Источник и т.д." },
+            { num: 3, title: "Запустите проверку", description: "AI прочитает слайды и сравнит с вашими документами. Займёт 30–60 секунд." },
+            { num: 4, title: "Изучите замечания", description: "Каждое замечание содержит цитату из слайда, цитату из документа и конкретную рекомендацию." },
+            { num: 5, title: "Создайте исправленную версию", description: "Выберите режим правок, просмотрите план изменений и запустите генерацию исправленной версии." },
+          ]}
+          sections={[
+            {
+              title: "Роли документов — что они значат",
+              icon: "Tag",
+              subsections: [
+                { title: "📜 Стандарт", content: "Нормативный документ с обязательными требованиями. Высший приоритет для проверки." },
+                { title: "✅ Критерии", content: "Чеклист оценки или требования к содержанию. AI проверяет выполнение каждого пункта." },
+                { title: "📚 Источник", content: "Документ с фактами и правильными формулировками. AI ищет противоречия с ним." },
+                { title: "🎨 Шаблон / Пример", content: "Только для проверки структуры. AI не считает шаблон источником фактической истины." },
+              ],
+            },
+            {
+              title: "Как читать замечания",
+              icon: "AlertCircle",
+              subsections: [
+                { title: "🔴 Критично", content: "Серьёзное нарушение требований. Исправить обязательно." },
+                { title: "🟠 Высокий", content: "Значимая проблема, влияет на оценку или восприятие." },
+                { title: "🟡 Средний", content: "Желательно исправить, но некритично." },
+                { title: "⚠ Нужна проверка", content: "AI не уверен — проверьте вручную перед внесением изменений." },
+              ],
+            },
+            {
+              title: "Как работает план исправлений",
+              icon: "ClipboardList",
+              content: "После просмотра замечаний нажмите «Создать исправленную версию». Настройте режим и фильтры — AI составит пошаговый план. Каждый пункт можно включить или выключить чекбоксом. Спорные пункты отключены по умолчанию.",
+            },
+          ]}
+          tips={[
+            { kind: "tip", text: "Чем точнее роли документов — тем точнее аудит. Стандарт важнее Примера." },
+            { kind: "warning", text: "Если AI пометил замечание «Нужна проверка» — не применяйте его автоматически, сначала проверьте вручную." },
+            { kind: "example", text: "После исправлений запустите «Повторный аудит» — увидите, насколько улучшился score соответствия." },
+          ]}
+        />
 
         {error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
@@ -646,6 +691,7 @@ export default function AuditPage() {
           <RevisedView
             result={revisionResult}
             reaudit={reauditResult}
+            projectId={projectId}
             onReaudit={handleReaudit}
             onNewAudit={() => { setPptxFile(null); setAuditResult(null); setRevisionResult(null); setRevisionPlan(null); setReauditResult(null); setStep("upload"); }}
           />
@@ -872,11 +918,12 @@ function RevisionPlanView({ plan, confirmedItems, onToggleItem, onConfirmAll, on
 //  RevisedView sub-component                                        //
 // ================================================================ //
 
-function RevisedView({ result, reaudit, onReaudit, onNewAudit }: {
+function RevisedView({ result, reaudit, onReaudit, onNewAudit, projectId }: {
   result: RevisionResult;
   reaudit: Record<string, unknown> | null;
   onReaudit: () => void;
   onNewAudit: () => void;
+  projectId: number;
 }) {
   const meta = result.revision_meta;
   const ra = reaudit as { score_before?: number; score_after?: number; score_delta?: number; issues_before?: number; issues_after?: number } | null;
@@ -996,7 +1043,7 @@ function RevisedView({ result, reaudit, onReaudit, onNewAudit }: {
           </button>
         )}
         {result.task_id && (
-          <Link to={`/cabinet/project/${0}/task/${result.task_id}`}
+          <Link to={`/cabinet/project/${projectId}/task/${result.task_id}`}
             className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
             <Icon name="ExternalLink" size={15} />
             Открыть задание с результатом
