@@ -320,19 +320,127 @@ def resolve_style(style_preset: str, template_bytes: bytes = None) -> dict:
     return STYLE_PRESETS["dark_corporate"]
 
 
-def build_pptx(slides: list, title: str, style: dict = None) -> bytes:
+def _choose_layout_mode(visual_type: str) -> str:
+    """Выбирает layout-режим по типу визуала."""
+    if visual_type in ("timeline", "cycle"):
+        return "title_text_top_timeline_bottom"
+    if visual_type in ("diagram", "process", "comparison", "matrix", "orgchart", "image"):
+        return "title_text_left_visual_right"
+    return "title_text_left_visual_right"
+
+
+def _draw_slide_chrome(slide, slide_num: int, title_text: str, style: dict):
+    """Рисует общие элементы слайда: фон, полоска, номер, заголовок, разделитель."""
+    from pptx.util import Inches, Pt, Emu
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    COLOR_BG = RGBColor(*style["bg"])
+    COLOR_TITLE = RGBColor(*style["title"])
+    COLOR_ACCENT = RGBColor(*style["accent"])
+    COLOR_NUM = RGBColor(*style["num"])
+    FONT_NAME = style.get("font", "Calibri")
+
+    # Фон
+    bg = slide.background.fill
+    bg.solid()
+    bg.fore_color.rgb = COLOR_BG
+
+    # Акцентная полоска слева
+    bar = slide.shapes.add_shape(1, Inches(0), Inches(0), Inches(0.08), Inches(7.5))
+    bar.fill.solid()
+    bar.fill.fore_color.rgb = COLOR_ACCENT
+    bar.line.fill.background()
+
+    # Номер слайда
+    num_box = slide.shapes.add_textbox(Inches(12.3), Inches(0.2), Inches(0.8), Inches(0.5))
+    tf = num_box.text_frame
+    tf.text = str(slide_num)
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.RIGHT
+    run = p.runs[0]
+    run.font.size = Pt(14)
+    run.font.color.rgb = COLOR_NUM
+    run.font.bold = False
+    run.font.name = FONT_NAME
+
+    # Заголовок
+    title_box = slide.shapes.add_textbox(Inches(0.4), Inches(0.2), Inches(12.5), Inches(1.1))
+    tf = title_box.text_frame
+    tf.word_wrap = True
+    tf.text = title_text
+    p = tf.paragraphs[0]
+    run = p.runs[0]
+    run.font.size = Pt(28)
+    run.font.bold = True
+    run.font.color.rgb = COLOR_TITLE
+    run.font.name = FONT_NAME
+
+    # Разделитель
+    div = slide.shapes.add_shape(1, Inches(0.4), Inches(1.35), Inches(12.5), Emu(32000))
+    div.fill.solid()
+    div.fill.fore_color.rgb = COLOR_ACCENT
+    div.line.fill.background()
+
+
+def _draw_bullets(slide, bullets: list, x: float, y: float, w: float, h: float,
+                  max_bullets: int, style: dict, font_size: int = 16):
+    """Рисует буллеты в заданной зоне. Обрезает до max_bullets, уменьшает шрифт если надо."""
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    if not bullets:
+        return
+
+    COLOR_BULLET = RGBColor(*style["bullet"])
+    COLOR_ACCENT = RGBColor(*style["accent"])
+    FONT_NAME = style.get("font", "Calibri")
+
+    # Ограничиваем количество и длину
+    capped = bullets[:max_bullets]
+    # Если буллет длиннее 120 символов — обрезаем
+    capped = [b[:120] + ("…" if len(b) > 120 else "") for b in capped]
+
+    content_box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = content_box.text_frame
+    tf.word_wrap = True
+
+    for i, bullet in enumerate(capped):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.space_before = Pt(3)
+        p.space_after = Pt(3)
+
+        run_bullet = p.add_run()
+        run_bullet.text = "▸  "
+        run_bullet.font.size = Pt(max(10, font_size - 4))
+        run_bullet.font.color.rgb = COLOR_ACCENT
+        run_bullet.font.bold = True
+        run_bullet.font.name = FONT_NAME
+
+        run_text = p.add_run()
+        run_text.text = bullet
+        run_text.font.size = Pt(font_size)
+        run_text.font.color.rgb = COLOR_BULLET
+        run_text.font.bold = False
+        run_text.font.name = FONT_NAME
+
+
+def build_pptx(slides: list, title: str, style: dict = None, visual_plan: list = None) -> bytes:
+    """
+    Строит PPTX. Если передан visual_plan — применяет layout-движок:
+      - title_text_left_visual_right: текст слева 42%, визуал справа 52%
+      - title_text_top_timeline_bottom: текст сверху 30%, визуал внизу 65%
+    Визуалы рисуются сразу без overlap с текстом.
+    """
     from pptx import Presentation
     from pptx.util import Inches, Pt, Emu
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
 
-    prs = Presentation()
-    prs.slide_width = Inches(13.33)
-    prs.slide_height = Inches(7.5)
-
-    # Цвета из стиля
     if style is None:
         style = STYLE_PRESETS["dark_corporate"]
+
     COLOR_BG = RGBColor(*style["bg"])
     COLOR_TITLE = RGBColor(*style["title"])
     COLOR_BULLET = RGBColor(*style["bullet"])
@@ -340,95 +448,73 @@ def build_pptx(slides: list, title: str, style: dict = None) -> bytes:
     COLOR_NUM = RGBColor(*style["num"])
     FONT_NAME = style.get("font", "Calibri")
 
-    blank_layout = prs.slide_layouts[6]  # пустой layout
+    # Строим индекс: slide_index → visual_plan_item (1-based, title=0)
+    visual_index: dict = {}
+    if visual_plan:
+        for vp in visual_plan:
+            si = int(vp.get("slide_index", 0))
+            if si > 0:
+                visual_index[si] = vp
 
+    prs = Presentation()
+    prs.slide_width = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+    blank_layout = prs.slide_layouts[6]
+
+    # slide_data["num"] начинается с 1 — совпадает с visual_plan slide_index
     for slide_data in slides:
         slide = prs.slides.add_slide(blank_layout)
+        snum = slide_data["num"]
 
-        # Фон
-        bg = slide.background.fill
-        bg.solid()
-        bg.fore_color.rgb = COLOR_BG
+        # --- Chrome (фон, полоска, номер, заголовок, разделитель) ---
+        _draw_slide_chrome(slide, snum, slide_data["title"], style)
 
-        # Акцентная полоска слева
-        from pptx.util import Emu
-        accent_bar = slide.shapes.add_shape(
-            1,  # MSO_SHAPE_TYPE.RECTANGLE
-            Inches(0), Inches(0),
-            Inches(0.08), Inches(7.5)
-        )
-        accent_bar.fill.solid()
-        accent_bar.fill.fore_color.rgb = COLOR_ACCENT
-        accent_bar.line.fill.background()
+        bullets = slide_data.get("bullets") or []
+        vp = visual_index.get(snum)
 
-        # Номер слайда (верхний правый угол)
-        num_box = slide.shapes.add_textbox(Inches(12.3), Inches(0.2), Inches(0.8), Inches(0.5))
-        tf = num_box.text_frame
-        tf.text = str(slide_data["num"])
-        p = tf.paragraphs[0]
-        p.alignment = PP_ALIGN.RIGHT
-        run = p.runs[0]
-        run.font.size = Pt(14)
-        run.font.color.rgb = COLOR_NUM
-        run.font.bold = False
-        run.font.name = FONT_NAME
+        if not vp:
+            # ===== Обычный слайд — полная ширина =====
+            _draw_bullets(slide, bullets,
+                          x=0.55, y=1.55, w=12.3, h=5.6,
+                          max_bullets=8, style=style, font_size=17)
+        else:
+            # ===== Слайд с визуалом — layout-движок =====
+            visual_type = vp.get("visual_type", "diagram")
+            render_mode = vp.get("render_mode", "pptx_shapes")
+            prompt = vp.get("source_prompt", "")
+            layout_mode = _choose_layout_mode(visual_type)
+            vp["layout_mode"] = layout_mode   # сохраняем в metadata
 
-        # Заголовок
-        title_box = slide.shapes.add_textbox(Inches(0.4), Inches(0.35), Inches(12.5), Inches(1.2))
-        tf = title_box.text_frame
-        tf.word_wrap = True
-        tf.text = slide_data["title"]
-        p = tf.paragraphs[0]
-        run = p.runs[0]
-        run.font.size = Pt(32)
-        run.font.bold = True
-        run.font.color.rgb = COLOR_TITLE
-        run.font.name = FONT_NAME
+            # ------ LAYOUT A: title_text_left_visual_right ------
+            if layout_mode == "title_text_left_visual_right":
+                # Зоны: текст x=0.4..5.7 (5.3"), визуал x=5.9..13.1 (7.2")
+                TEXT_X, TEXT_Y, TEXT_W, TEXT_H = 0.4, 1.55, 5.3, 5.6
+                VIS_X,  VIS_Y,  VIS_W,  VIS_H  = 5.9, 1.55, 7.0, 5.6
 
-        # Разделитель под заголовком
-        divider = slide.shapes.add_shape(
-            1,
-            Inches(0.4), Inches(1.55),
-            Inches(12.5), Emu(36000)
-        )
-        divider.fill.solid()
-        divider.fill.fore_color.rgb = COLOR_ACCENT
-        divider.line.fill.background()
+                _draw_bullets(slide, bullets,
+                              x=TEXT_X, y=TEXT_Y, w=TEXT_W, h=TEXT_H,
+                              max_bullets=5, style=style, font_size=15)
 
-        # Буллеты
-        if slide_data["bullets"]:
-            content_box = slide.shapes.add_textbox(Inches(0.55), Inches(1.75), Inches(12.3), Inches(5.3))
-            tf = content_box.text_frame
-            tf.word_wrap = True
+                # Рисуем визуал в правой зоне
+                _render_visual_in_zone(slide, vp, style,
+                                       VIS_X, VIS_Y, VIS_W, VIS_H)
 
-            for i, bullet in enumerate(slide_data["bullets"]):
-                if i == 0:
-                    p = tf.paragraphs[0]
-                else:
-                    p = tf.add_paragraph()
-                p.space_before = Pt(4)
-                p.space_after = Pt(4)
+            # ------ LAYOUT B: title_text_top_timeline_bottom ------
+            elif layout_mode == "title_text_top_timeline_bottom":
+                # Текст в верхней полосе; timeline занимает нижние 65%
+                TEXT_X, TEXT_Y, TEXT_W, TEXT_H = 0.4, 1.55, 12.5, 1.6
+                VIS_X,  VIS_Y,  VIS_W,  VIS_H  = 0.4, 3.25, 12.5, 4.0
 
-                # Маркер
-                run_bullet = p.add_run()
-                run_bullet.text = "▸  "
-                run_bullet.font.size = Pt(14)
-                run_bullet.font.color.rgb = COLOR_ACCENT
-                run_bullet.font.bold = True
-                run_bullet.font.name = FONT_NAME
+                _draw_bullets(slide, bullets,
+                              x=TEXT_X, y=TEXT_Y, w=TEXT_W, h=TEXT_H,
+                              max_bullets=3, style=style, font_size=14)
 
-                # Текст
-                run_text = p.add_run()
-                run_text.text = bullet
-                run_text.font.size = Pt(18)
-                run_text.font.color.rgb = COLOR_BULLET
-                run_text.font.bold = False
-                run_text.font.name = FONT_NAME
+                _render_visual_in_zone(slide, vp, style,
+                                       VIS_X, VIS_Y, VIS_W, VIS_H)
 
         # Заметки спикера
         if slide_data.get("notes"):
-            notes_slide = slide.notes_slide
-            notes_slide.notes_text_frame.text = slide_data["notes"]
+            slide.notes_slide.notes_text_frame.text = slide_data["notes"]
 
     # Титульный слайд в начало
     title_slide = prs.slides.add_slide(blank_layout)
@@ -478,85 +564,96 @@ def build_pptx(slides: list, title: str, style: dict = None) -> bytes:
     return buf.getvalue()
 
 
-def apply_visual_plan(prs, visual_plan: list, style: dict):
+def _render_visual_in_zone(slide, vp: dict, style: dict,
+                           zone_x: float, zone_y: float, zone_w: float, zone_h: float):
     """
-    Вставляет визуалы из visual_plan в слайды презентации.
+    Рисует визуал точно в заданной прямоугольной зоне (Inches).
+    Dispatch по render_mode: pptx_shapes → diagram_renderer, ai_image → S3 download.
+    При ошибке — аккуратный fallback внутри той же зоны.
+    """
+    visual_type = vp.get("visual_type", "diagram")
+    render_mode = vp.get("render_mode", "pptx_shapes")
+    prompt = vp.get("source_prompt", "")
 
-    - visual_type=image + asset_url → add_picture
-    - render_mode=pptx_shapes → вызываем visual_renderer
-    - fallback → текстовый placeholder на слайде
-    """
-    from pptx.util import Inches, Pt
+    if render_mode == "pptx_shapes":
+        try:
+            from diagram_renderer import render_diagram_in_zone
+            ok = render_diagram_in_zone(
+                visual_type, prompt, slide, style,
+                zone_x, zone_y, zone_w, zone_h,
+            )
+            if ok:
+                vp["generation_status"] = "rendered"
+                return
+        except Exception:
+            pass
+        _add_visual_fallback(slide, zone_x, zone_y, zone_w, zone_h, visual_type, prompt, style)
+        vp["generation_status"] = "fallback"
+
+    elif render_mode == "ai_image":
+        s3_key = vp.get("asset_s3_key")
+        if s3_key:
+            try:
+                s3_client = boto3.client(
+                    "s3",
+                    endpoint_url="https://bucket.poehali.dev",
+                    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+                )
+                obj = s3_client.get_object(Bucket="files", Key=s3_key)
+                img_bytes = obj["Body"].read()
+                from pptx.util import Inches as _In
+                slide.shapes.add_picture(
+                    io.BytesIO(img_bytes),
+                    _In(zone_x), _In(zone_y), _In(zone_w), _In(zone_h),
+                )
+                vp["generation_status"] = "rendered"
+                return
+            except Exception:
+                pass
+        # Картинка не готова — красивый placeholder
+        _add_image_placeholder(slide, zone_x, zone_y, zone_w, zone_h, prompt, style)
+        vp["generation_status"] = "image_pending"
+
+    else:
+        _add_visual_fallback(slide, zone_x, zone_y, zone_w, zone_h, visual_type, prompt, style)
+        vp["generation_status"] = "fallback"
+
+
+def _add_image_placeholder(slide, x, y, w, h, prompt, style):
+    """Placeholder для ещё не сгенерированной картинки."""
+    from pptx.util import Inches, Pt, Emu
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
 
-    if not visual_plan:
-        return
+    accent = style.get("accent", (0x60, 0x8B, 0xC4))
+    title_rgb = style.get("title", (0xFF, 0xFF, 0xFF))
 
-    # Индекс слайдов: slide_index в visual_plan 1-based, в prs.slides — 0-based
-    # Но мы ещё не знаем порядок после перестановки титульного.
-    # Слайд 1 → prs.slides[1] (т.к. slides[0] = title)
-    slide_list = list(prs.slides)
+    box = slide.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+    box.fill.solid()
+    r, g, b = accent
+    box.fill.fore_color.rgb = RGBColor(max(0, r - 60), max(0, g - 40), max(0, b - 20))
+    box.line.color.rgb = RGBColor(*accent)
+    box.line.width = Emu(20000)
 
-    for vp in visual_plan:
-        si = int(vp.get("slide_index", 0))
-        # si=1 → слайд контента № 1 → в prs это slides[1] (slides[0] = title)
-        prs_idx = si  # title занял [0], первый контент = [1]
+    tf = box.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    run = p.add_run()
+    run.text = f"🖼 Картинка\n{prompt[:90]}"
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(*title_rgb)
+    run.font.italic = True
 
-        if prs_idx >= len(slide_list):
-            continue
 
-        slide = slide_list[prs_idx]
-        visual_type = vp.get("visual_type", "image")
-        render_mode = vp.get("render_mode", "fallback_text")
-        prompt = vp.get("source_prompt", "")
-
-        # Дефолтная зона визуала: правая половина, ниже заголовка
-        vis_x = 7.0
-        vis_y = 1.8
-        vis_w = 6.0
-        vis_h = 5.0
-
-        if render_mode == "ai_image":
-            # Картинка уже в S3 — скачиваем и вставляем
-            s3_key = vp.get("asset_s3_key")
-            if s3_key:
-                try:
-                    s3 = boto3.client(
-                        "s3",
-                        endpoint_url="https://bucket.poehali.dev",
-                        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-                        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-                    )
-                    obj = s3.get_object(Bucket="files", Key=s3_key)
-                    img_bytes = obj["Body"].read()
-                    img_buf = io.BytesIO(img_bytes)
-                    slide.shapes.add_picture(
-                        img_buf,
-                        Inches(vis_x), Inches(vis_y),
-                        Inches(vis_w), Inches(vis_h),
-                    )
-                except Exception:
-                    _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
-                                         visual_type, prompt, style)
-            else:
-                _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
-                                     visual_type, prompt, style)
-
-        elif render_mode == "pptx_shapes":
-            try:
-                from diagram_renderer import render_diagram as _render_diag
-                ok = _render_diag(visual_type, prompt, slide, style, 13.33, 7.5)
-                if not ok:
-                    _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
-                                         visual_type, prompt, style)
-            except Exception:
-                _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
-                                     visual_type, prompt, style)
-
-        else:
-            _add_visual_fallback(slide, vis_x, vis_y, vis_w, vis_h,
-                                 visual_type, prompt, style)
+def apply_visual_plan(prs, visual_plan: list, style: dict):
+    """
+    Теперь build_pptx сам встраивает визуалы через layout-движок.
+    apply_visual_plan — резервный проход: ничего не делает, visual_plan уже обработан.
+    Оставлен для обратной совместимости.
+    """
+    pass
 
 
 def _add_visual_fallback(slide, x, y, w, h, visual_type, prompt, style):
@@ -712,19 +809,8 @@ def handler(event: dict, context) -> dict:
             except Exception:
                 pass
 
-        pptx_bytes = build_pptx(slides, pptx_title, style=style)
-
-        # Вставка визуалов если есть план
-        if visual_plan:
-            try:
-                from pptx import Presentation as PptxPrs
-                prs2 = PptxPrs(io.BytesIO(pptx_bytes))
-                apply_visual_plan(prs2, visual_plan, style)
-                buf2 = io.BytesIO()
-                prs2.save(buf2)
-                pptx_bytes = buf2.getvalue()
-            except Exception:
-                pass  # не ломаем экспорт если визуал не удался
+        # build_pptx теперь принимает visual_plan и строит layout сразу
+        pptx_bytes = build_pptx(slides, pptx_title, style=style, visual_plan=visual_plan)
 
         # Возвращаем base64
         pptx_b64 = base64.b64encode(pptx_bytes).decode("utf-8")
