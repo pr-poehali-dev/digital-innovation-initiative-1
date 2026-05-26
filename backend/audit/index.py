@@ -411,13 +411,12 @@ def handler(event: dict, context) -> dict:
             return ok_resp({"session_id": session_id})
 
         # ---- audit.upload_chunk ----
-        # Принимает один чанк base64, накапливает в S3 через multipart upload.
+        # Принимает один чанк base64, сохраняет как отдельный объект в S3.
         if action == "audit.upload_chunk":
             import base64
             session_id = body.get("session_id")
             chunk_b64 = body.get("chunk_b64", "")
             chunk_index = int(body.get("chunk_index", 0))
-            upload_part_id = body.get("upload_part_id", "")  # mpu upload_id из S3
 
             if not session_id or not chunk_b64:
                 return err_resp("Нужны session_id и chunk_b64")
@@ -439,80 +438,57 @@ def handler(event: dict, context) -> dict:
             if status not in ("uploading",):
                 return err_resp(f"Неверный статус сессии: {status}")
 
+            # Сохраняем чанк как отдельный объект: s3_key.chunk.N
+            chunk_key = f"{s3_key}.chunk.{chunk_index:04d}"
             s3 = get_s3()
+            s3.put_object(Bucket="files", Key=chunk_key, Body=chunk_bytes)
 
-            # Первый чанк — инициализируем MPU
-            if chunk_index == 0:
-                PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                mpu = s3.create_multipart_upload(Bucket="files", Key=s3_key, ContentType=PPTX_MIME)
-                upload_part_id = mpu["UploadId"]
-                cur.execute(
-                    f"UPDATE {schema}.audit_uploads SET mpu_id = %s WHERE id = %s",
-                    (upload_part_id, session_id),
-                )
-                conn.commit()
-            elif not upload_part_id:
-                # Получаем сохранённый MPU id
-                cur.execute(
-                    f"SELECT mpu_id FROM {schema}.audit_uploads WHERE id = %s",
-                    (session_id,),
-                )
-                mpu_row = cur.fetchone()
-                if not mpu_row or not mpu_row[0]:
-                    return err_resp("MPU не инициализирован")
-                upload_part_id = mpu_row[0]
-
-            # S3 part numbers начинаются с 1
-            part_number = chunk_index + 1
-            part = s3.upload_part(
-                Bucket="files",
-                Key=s3_key,
-                PartNumber=part_number,
-                UploadId=upload_part_id,
-                Body=chunk_bytes,
-            )
-            etag = part["ETag"]
-
-            log.info(f"audit.upload_chunk: session={session_id}, part={part_number}, size={len(chunk_bytes)}, etag={etag}")
-            return ok_resp({"upload_part_id": upload_part_id, "etag": etag, "part_number": part_number})
+            log.info(f"audit.upload_chunk: session={session_id}, chunk={chunk_index}, size={len(chunk_bytes)}")
+            return ok_resp({"chunk_index": chunk_index, "size": len(chunk_bytes)})
 
         # ---- audit.upload_complete ----
-        # Завершает multipart upload, регистрирует файл как готовый.
+        # Склеивает все чанки из S3 в один файл и регистрирует как готовый.
         if action == "audit.upload_complete":
+            import base64
             session_id = body.get("session_id")
-            parts = body.get("parts", [])  # [{part_number, etag}]
+            total_chunks = int(body.get("total_chunks", 0))
 
-            if not session_id or not parts:
-                return err_resp("Нужны session_id и parts")
+            if not session_id or not total_chunks:
+                return err_resp("Нужны session_id и total_chunks")
 
             cur = conn.cursor()
             cur.execute(
-                f"SELECT s3_key, mpu_id, size_bytes_expected FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
+                f"SELECT s3_key FROM {schema}.audit_uploads WHERE id = %s AND user_id = %s",
                 (session_id, user["id"]),
             )
             row = cur.fetchone()
             if not row:
                 return err_resp("Сессия не найдена", 404)
-            s3_key, mpu_id, size_expected = row
-
-            if not mpu_id:
-                return err_resp("MPU не инициализирован")
+            s3_key = row[0]
 
             s3 = get_s3()
-            s3.complete_multipart_upload(
-                Bucket="files",
-                Key=s3_key,
-                UploadId=mpu_id,
-                MultipartUpload={"Parts": [{"PartNumber": p["part_number"], "ETag": p["etag"]} for p in parts]},
-            )
+
+            # Скачиваем и склеиваем все чанки
+            file_parts = []
+            for i in range(total_chunks):
+                chunk_key = f"{s3_key}.chunk.{i:04d}"
+                obj = s3.get_object(Bucket="files", Key=chunk_key)
+                file_parts.append(obj["Body"].read())
+                # Удаляем временный чанк
+                s3.delete_object(Bucket="files", Key=chunk_key)
+
+            file_bytes = b"".join(file_parts)
+
+            PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=PPTX_MIME)
 
             cur.execute(
-                f"UPDATE {schema}.audit_uploads SET status = 'ready', mpu_id = NULL WHERE id = %s",
-                (session_id,),
+                f"UPDATE {schema}.audit_uploads SET status = 'ready', size_bytes_actual = %s WHERE id = %s",
+                (len(file_bytes), session_id),
             )
             conn.commit()
 
-            log.info(f"audit.upload_complete: session={session_id}, parts={len(parts)}")
+            log.info(f"audit.upload_complete: session={session_id}, total_size={len(file_bytes)}")
             return ok_resp({"upload_id": session_id, "s3_key": s3_key})
 
         # ---- audit.upload (устарело — оставлено для обратной совместимости) ----

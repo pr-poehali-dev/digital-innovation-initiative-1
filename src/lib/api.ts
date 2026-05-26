@@ -270,35 +270,28 @@ export async function uploadPptxDirect(
 
   const sessionId = init.session_id;
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-  const parts: { part_number: number; etag: string }[] = [];
-  let uploadPartId = "";
-
   // Шаг 2: отправляем чанки
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, file.size);
     const chunkB64 = await readChunkAsBase64(file, start, end);
 
-    const res = await request(URLS.audit, "/", "POST", {
+    await request(URLS.audit, "/", "POST", {
       action: "audit.upload_chunk",
       session_id: sessionId,
       chunk_index: i,
       chunk_b64: chunkB64,
-      upload_part_id: uploadPartId,
-    }) as { upload_part_id: string; etag: string; part_number: number };
-
-    uploadPartId = res.upload_part_id;
-    parts.push({ part_number: res.part_number, etag: res.etag });
+    });
 
     const pct = 10 + Math.round(((i + 1) / totalChunks) * 80);
     onProgress?.(pct);
   }
 
-  // Шаг 3: завершаем загрузку
+  // Шаг 3: завершаем загрузку (бэкенд склеивает чанки)
   const complete = await request(URLS.audit, "/", "POST", {
     action: "audit.upload_complete",
     session_id: sessionId,
-    parts,
+    total_chunks: totalChunks,
   }) as { upload_id: string };
 
   onProgress?.(100);
