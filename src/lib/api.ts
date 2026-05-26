@@ -260,8 +260,12 @@ export async function uploadPptxDirect(
   });
 
   if (!putRes.ok) {
-    throw new Error(`Ошибка загрузки в хранилище: ${putRes.status} ${putRes.statusText}`);
+    let bodyText = "";
+    try { bodyText = await putRes.text(); } catch (_e) { /* ignore */ }
+    console.error("[upload] PUT failed", putRes.status, putRes.statusText, bodyText, "url=", prep.upload_url.slice(0, 80));
+    throw new Error(`Ошибка загрузки в хранилище: ${putRes.status} ${putRes.statusText}${bodyText ? " — " + bodyText.slice(0, 200) : ""}`);
   }
+  console.log("[upload] PUT ok", putRes.status, "upload_id=", prep.upload_id);
 
   onProgress?.(100);
   return prep.upload_id;
