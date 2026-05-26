@@ -390,6 +390,8 @@ def handler(event: dict, context) -> dict:
 
             if chunk_index == 0:
                 s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/presentation.pptx"
+            elif not s3_key:
+                return err_resp("Нужен s3_key для чанков после первого")
 
             log.info(f"upload_pptx chunk {chunk_index+1}/{total_chunks}, key={s3_key}, bytes={len(chunk_bytes)}")
 
