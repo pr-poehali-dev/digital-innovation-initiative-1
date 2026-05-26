@@ -1096,8 +1096,8 @@ function RevisedView({ result, reaudit, onReaudit, onNewAudit, projectId }: {
 }) {
   const meta = result.revision_meta;
   const ra = reaudit as { score_before?: number; score_after?: number; score_delta?: number; issues_before?: number; issues_after?: number } | null;
-  const [downloading, setDownloading] = React.useState(false);
-  const [downloadError, setDownloadError] = React.useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
 
   const handleDownload = async () => {
     if (!result.audit_id) return;
