@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { auditApi, documentsApi, putFileToPresignedUrl } from "@/lib/api";
+import { auditApi, documentsApi, uploadPptxChunked } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -154,6 +154,7 @@ export default function AuditPage() {
   const [pptxFile, setPptxFile]       = useState<File | null>(null);
   const [pptxS3Key, setPptxS3Key]     = useState<string>("");
   const [uploadingPptx, setUploadingPptx] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [projectDocs, setProjectDocs] = useState<DocForAudit[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [running, setRunning]         = useState(false);
@@ -206,15 +207,15 @@ export default function AuditPage() {
     setPptxFile(f);
     setError("");
     setUploadingPptx(true);
+    setUploadProgress(0);
     try {
-      // Получаем presigned URL и загружаем PPTX напрямую в S3
-      const { upload_url, s3_key } = await auditApi.getUploadUrl(projectId, f.name);
-      await putFileToPresignedUrl(upload_url, f);
-      setPptxS3Key(s3_key);
+      const s3Key = await uploadPptxChunked(projectId, f, setUploadProgress);
+      setPptxS3Key(s3Key);
       setStep("configure");
     } catch (err) {
       setError("Не удалось загрузить файл: " + (err instanceof Error ? err.message : "попробуйте ещё раз"));
       setPptxFile(null);
+      setPptxS3Key("");
     } finally {
       setUploadingPptx(false);
     }
@@ -400,12 +401,26 @@ export default function AuditPage() {
             <h2 className="font-semibold text-lg mb-2">
               {uploadingPptx ? "Загружаем файл…" : "Загрузите презентацию для проверки"}
             </h2>
-            <p className="text-muted-foreground text-sm mb-6">
+            <p className="text-muted-foreground text-sm mb-4">
               {uploadingPptx
-                ? `${pptxFile?.name} — подождите секунду`
+                ? `${pptxFile?.name}`
                 : "Поддерживается PPTX · любой размер"
               }
             </p>
+            {uploadingPptx && (
+              <div className="w-full max-w-xs mx-auto mb-6">
+                <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                  <span>Загрузка</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {!uploadingPptx && (
               <label className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors">
                 <Icon name="Upload" size={16} />

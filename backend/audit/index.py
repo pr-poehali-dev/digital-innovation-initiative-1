@@ -347,13 +347,21 @@ def handler(event: dict, context) -> dict:
         schema = get_schema()
         action = body.get("action", "")
 
-        # ---- audit.get_upload_url ----
-        # Возвращает presigned URL для загрузки PPTX прямо в S3 (минуя cloud function)
-        if action == "audit.get_upload_url":
+        # ---- audit.upload_pptx ----
+        # Принимает чанк base64 PPTX, накапливает в S3 через multipart upload.
+        # chunk_index=0, is_last=False/True, upload_id (для продолжения), s3_key
+        if action == "audit.upload_pptx":
             project_id = body.get("project_id")
             filename = body.get("filename", "presentation.pptx")
-            if not project_id:
-                return err_resp("Нужен project_id")
+            chunk_b64 = body.get("chunk")          # base64 чанка
+            chunk_index = int(body.get("chunk_index", 0))   # 0-based
+            is_last = bool(body.get("is_last", True))
+            upload_id = body.get("upload_id")      # multipart upload id
+            s3_key = body.get("s3_key")            # передаётся с chunk_index > 0
+
+            if not project_id or not chunk_b64:
+                return err_resp("Нужны project_id и chunk")
+
             cur = conn.cursor()
             cur.execute(
                 f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
@@ -362,18 +370,48 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return err_resp("Нет доступа к проекту", 403)
 
-            s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/{filename}"
+            try:
+                chunk_bytes = base64.b64decode(chunk_b64)
+            except Exception:
+                return err_resp("Невалидный base64 chunk")
+
             s3 = get_s3()
-            upload_url = s3.generate_presigned_url(
-                "put_object",
-                Params={
-                    "Bucket": "files",
-                    "Key": s3_key,
-                    "ContentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                },
-                ExpiresIn=600,
+            bucket = "files"
+
+            if chunk_index == 0:
+                # Первый чанк — инициируем multipart upload
+                s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/{filename}"
+                mp = s3.create_multipart_upload(
+                    Bucket=bucket, Key=s3_key,
+                    ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                )
+                upload_id = mp["UploadId"]
+
+            # Загружаем чанк (part numbers 1-based)
+            part_resp = s3.upload_part(
+                Bucket=bucket, Key=s3_key,
+                UploadId=upload_id,
+                PartNumber=chunk_index + 1,
+                Body=chunk_bytes,
             )
-            return ok_resp({"upload_url": upload_url, "s3_key": s3_key})
+            etag = part_resp["ETag"]
+
+            if is_last:
+                # Финализируем — нужно собрать все parts. Для упрощения: храним ETags в теле запроса.
+                parts = body.get("parts", [])
+                parts.append({"PartNumber": chunk_index + 1, "ETag": etag})
+                s3.complete_multipart_upload(
+                    Bucket=bucket, Key=s3_key, UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+                return ok_resp({"s3_key": s3_key, "done": True})
+            else:
+                return ok_resp({
+                    "s3_key": s3_key,
+                    "upload_id": upload_id,
+                    "part": {"PartNumber": chunk_index + 1, "ETag": etag},
+                    "done": False,
+                })
 
         # ---- audit.run ----
         if action == "audit.run":
