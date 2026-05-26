@@ -348,19 +348,30 @@ def handler(event: dict, context) -> dict:
         action = body.get("action", "")
 
         # ---- audit.upload_pptx ----
-        # Принимает чанк base64 PPTX, накапливает в S3 через multipart upload.
-        # chunk_index=0, is_last=False/True, upload_id (для продолжения), s3_key
+        # Chunked upload: фронт режет файл на 4MB куски, шлёт последовательно.
+        # Валидация: только .pptx, лимит 50 МБ суммарно, ключ привязан к user.
         if action == "audit.upload_pptx":
             project_id = body.get("project_id")
             filename = body.get("filename", "presentation.pptx")
-            chunk_b64 = body.get("chunk")          # base64 чанка
-            chunk_index = int(body.get("chunk_index", 0))   # 0-based
+            chunk_b64 = body.get("chunk")
+            chunk_index = int(body.get("chunk_index", 0))
             is_last = bool(body.get("is_last", True))
-            upload_id = body.get("upload_id")      # multipart upload id
-            s3_key = body.get("s3_key")            # передаётся с chunk_index > 0
+            upload_id = body.get("upload_id")
+            s3_key = body.get("s3_key")
+            total_size = body.get("total_size", 0)  # размер файла в байтах
 
             if not project_id or not chunk_b64:
                 return err_resp("Нужны project_id и chunk")
+
+            # Валидация расширения
+            clean_name = (filename or "").lower().strip()
+            if not clean_name.endswith(".pptx"):
+                return err_resp("Поддерживается только формат PPTX (.pptx)")
+
+            # Валидация размера (50 МБ лимит)
+            MAX_SIZE = 50 * 1024 * 1024
+            if total_size and int(total_size) > MAX_SIZE:
+                return err_resp(f"Файл слишком большой. Максимум — 50 МБ, получено {int(total_size)//1024//1024} МБ")
 
             cur = conn.cursor()
             cur.execute(
@@ -379,15 +390,14 @@ def handler(event: dict, context) -> dict:
             bucket = "files"
 
             if chunk_index == 0:
-                # Первый чанк — инициируем multipart upload
-                s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/{filename}"
+                # s3_key строго привязан к user_id — исключает доступ к чужим файлам
+                s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/presentation.pptx"
                 mp = s3.create_multipart_upload(
                     Bucket=bucket, Key=s3_key,
                     ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
                 upload_id = mp["UploadId"]
 
-            # Загружаем чанк (part numbers 1-based)
             part_resp = s3.upload_part(
                 Bucket=bucket, Key=s3_key,
                 UploadId=upload_id,
@@ -397,14 +407,13 @@ def handler(event: dict, context) -> dict:
             etag = part_resp["ETag"]
 
             if is_last:
-                # Финализируем — нужно собрать все parts. Для упрощения: храним ETags в теле запроса.
                 parts = body.get("parts", [])
                 parts.append({"PartNumber": chunk_index + 1, "ETag": etag})
                 s3.complete_multipart_upload(
                     Bucket=bucket, Key=s3_key, UploadId=upload_id,
                     MultipartUpload={"Parts": parts},
                 )
-                return ok_resp({"s3_key": s3_key, "done": True})
+                return ok_resp({"s3_key": s3_key, "done": True, "filename": filename})
             else:
                 return ok_resp({
                     "s3_key": s3_key,
@@ -416,12 +425,12 @@ def handler(event: dict, context) -> dict:
         # ---- audit.run ----
         if action == "audit.run":
             project_id = body.get("project_id")
-            pptx_b64 = body.get("pptx_file")       # base64 PPTX (legacy, малые файлы)
-            pptx_s3_key = body.get("pptx_s3_key")  # S3 ключ (большие файлы)
-            documents = body.get("documents") or []  # [{name, role, text, instruction}]
+            pptx_s3_key = body.get("pptx_s3_key")
+            source_filename = body.get("source_filename", "presentation.pptx")
+            documents = body.get("documents") or []
 
-            if not project_id or (not pptx_b64 and not pptx_s3_key):
-                return err_resp("Нужны project_id и pptx_file (base64) или pptx_s3_key")
+            if not project_id or not pptx_s3_key:
+                return err_resp("Нужны project_id и pptx_s3_key")
 
             cur = conn.cursor()
             cur.execute(
@@ -431,61 +440,81 @@ def handler(event: dict, context) -> dict:
             if not cur.fetchone():
                 return err_resp("Нет доступа к проекту", 403)
 
-            # Если документы не переданы напрямую — берём из задания по doc_ids
-            if not documents and body.get("document_ids"):
-                doc_ids = body["document_ids"]
-                placeholders = ",".join(["%s"] * len(doc_ids))
-                cur.execute(
-                    f"""SELECT id, original_name, file_type, extracted_text
-                        FROM {schema}.documents
-                        WHERE id IN ({placeholders}) AND archived_at IS NULL""",
-                    doc_ids,
-                )
-                for r in cur.fetchall():
-                    role_map = body.get("document_roles") or {}
-                    documents.append({
-                        "name": r[1],
-                        "role": role_map.get(str(r[0]), "material"),
-                        "text": r[3] or "",
-                        "instruction": "",
-                    })
+            # Безопасность: s3_key должен принадлежать этому пользователю
+            expected_prefix = f"audit_uploads/{user['id']}/"
+            if not pptx_s3_key.startswith(expected_prefix):
+                return err_resp("Недопустимый s3_key", 403)
 
-            # Получаем байты PPTX: из S3 или из base64
-            if pptx_s3_key:
-                try:
-                    s3 = get_s3()
-                    obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
-                    pptx_bytes = obj["Body"].read()
-                    # Удаляем временный файл после чтения
-                    try:
-                        s3.delete_object(Bucket="files", Key=pptx_s3_key)
-                    except Exception:
-                        pass
-                except Exception as e:
-                    return err_resp(f"Не удалось прочитать PPTX из S3: {e}")
+            # Читаем документы из БД если переданы только роли без текста
+            if not documents or not any(d.get("text") for d in documents):
+                cur.execute(
+                    f"""SELECT id, original_name, file_type, extracted_text, status,
+                               COALESCE(default_ai_role, 'material') as default_role
+                        FROM {schema}.documents
+                        WHERE project_id = %s AND archived_at IS NULL
+                        ORDER BY created_at""",
+                    (project_id,),
+                )
+                db_docs = cur.fetchall()
+                # Применяем роли из запроса если есть, иначе default_role
+                role_map = {str(d["id"]): d["role"] for d in documents if isinstance(d, dict) and d.get("id")}
+                instr_map = {str(d["id"]): d.get("instruction", "") for d in documents if isinstance(d, dict) and d.get("id")}
+                documents = []
+                for r in db_docs:
+                    doc_id, orig_name, ftype, text, status, def_role = r
+                    if not text:
+                        continue  # пропускаем необработанные
+                    documents.append({
+                        "name": orig_name,
+                        "role": role_map.get(str(doc_id), def_role),
+                        "text": text,
+                        "instruction": instr_map.get(str(doc_id), ""),
+                    })
             else:
-                try:
-                    pptx_bytes = base64.b64decode(pptx_b64)
-                except Exception:
-                    return err_resp("Невалидный base64 для pptx_file")
+                # Текст пришёл с фронта — используем его, но берём missing тексты из БД
+                enriched = []
+                for d in documents:
+                    if d.get("text"):
+                        enriched.append(d)
+                    else:
+                        # попробуем найти в БД по имени
+                        enriched.append(d)
+                documents = enriched
+
+            # Загружаем PPTX из S3
+            s3 = get_s3()
+            try:
+                obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
+                pptx_bytes = obj["Body"].read()
+                pptx_size = len(pptx_bytes)
+            except Exception as e:
+                return err_resp(f"Не удалось прочитать файл: {e}")
+
+            # Валидация размера на сервере
+            if pptx_size > 50 * 1024 * 1024:
+                return err_resp("Файл слишком большой (максимум 50 МБ)")
 
             # Извлекаем текст слайдов
             pptx_slides = extract_pptx_text(pptx_bytes)
+            if not pptx_slides or (len(pptx_slides) == 1 and "Ошибка" in pptx_slides[0].get("title", "")):
+                return err_resp("Не удалось прочитать презентацию. Убедитесь, что файл не повреждён и является корректным .pptx")
 
             # Запускаем AI-анализ
             audit_result = run_audit(pptx_slides, documents)
             audit_result["slide_count"] = len(pptx_slides)
             audit_result["document_count"] = len(documents)
 
-            # Сохраняем в БД
+            # Сохраняем в БД — включая source_pptx_s3_key для reaudit/revision
             cur.execute(
                 f"""INSERT INTO {schema}.audit_runs
-                    (project_id, user_id, slide_count, doc_count, result_json, status)
-                    VALUES (%s, %s, %s, %s, %s, 'done') RETURNING id""",
+                    (project_id, user_id, slide_count, doc_count, result_json, status,
+                     source_pptx_s3_key, source_filename, source_size_bytes)
+                    VALUES (%s, %s, %s, %s, %s, 'done', %s, %s, %s) RETURNING id""",
                 (
                     project_id, user["id"],
                     len(pptx_slides), len(documents),
                     json.dumps(audit_result, ensure_ascii=False, default=str),
+                    pptx_s3_key, source_filename, pptx_size,
                 ),
             )
             audit_id = cur.fetchone()[0]
@@ -680,14 +709,13 @@ def handler(event: dict, context) -> dict:
         # ================================================================
         if action == "audit.create_revision_run":
             audit_id = int(body.get("audit_id", 0))
-            task_id = body.get("task_id")               # исходное задание (опционально)
-            pptx_b64 = body.get("pptx_file")            # исходная PPTX base64
-            documents = body.get("documents") or []     # те же документы, что были при аудите
-            confirmed_plan_items = body.get("confirmed_plan_items")  # None = все из плана
+            task_id = body.get("task_id")
+            documents = body.get("documents") or []
+            confirmed_plan_items = body.get("confirmed_plan_items")
 
             cur = conn.cursor()
             cur.execute(
-                f"""SELECT result_json, revision_plan_json, project_id
+                f"""SELECT result_json, revision_plan_json, project_id, source_pptx_s3_key
                     FROM {schema}.audit_runs WHERE id = %s AND user_id = %s""",
                 (audit_id, user["id"]),
             )
@@ -698,6 +726,17 @@ def handler(event: dict, context) -> dict:
             audit_result = json.loads(row[0]) if row[0] else {}
             plan_data = json.loads(row[1]) if row[1] else {}
             project_id = row[2]
+            source_pptx_s3_key = row[3]
+
+            # Документы берём из БД если не переданы с текстом
+            if not documents or not any(d.get("text") for d in documents):
+                cur.execute(
+                    f"""SELECT original_name, COALESCE(default_ai_role, 'material'), extracted_text
+                        FROM {schema}.documents
+                        WHERE project_id = %s AND archived_at IS NULL AND extracted_text IS NOT NULL""",
+                    (project_id,),
+                )
+                documents = [{"name": r[0], "role": r[1], "text": r[2]} for r in cur.fetchall()]
 
             if not plan_data:
                 return err_resp("Сначала постройте план исправлений (audit.build_revision_plan)")
@@ -874,39 +913,45 @@ def handler(event: dict, context) -> dict:
 
         # ================================================================
         # audit.run_reaudit — повторный аудит после ревизии
+        # Берёт PPTX из source_pptx_s3_key сохранённого в audit_run (не требует UI-state)
         # ================================================================
         if action == "audit.run_reaudit":
             audit_id = int(body.get("audit_id", 0))
-            pptx_b64 = body.get("pptx_file")
-            pptx_s3_key = body.get("pptx_s3_key")
             documents = body.get("documents") or []
 
             cur = conn.cursor()
             cur.execute(
-                f"SELECT project_id, result_json FROM {schema}.audit_runs WHERE id = %s AND user_id = %s",
+                f"""SELECT project_id, result_json, source_pptx_s3_key
+                    FROM {schema}.audit_runs WHERE id = %s AND user_id = %s""",
                 (audit_id, user["id"]),
             )
             row = cur.fetchone()
             if not row:
                 return err_resp("Аудит не найден", 404)
 
-            original_result = json.loads(row[1]) if row[1] else {}
+            project_id_stored, result_json_raw, source_pptx_s3_key = row[0], row[1], row[2]
+            original_result = json.loads(result_json_raw) if result_json_raw else {}
             original_score = (original_result.get("audit_summary") or {}).get("compliance_score")
 
-            if pptx_s3_key:
-                try:
-                    s3 = get_s3()
-                    obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
-                    pptx_bytes = obj["Body"].read()
-                except Exception as e:
-                    return err_resp(f"Не удалось прочитать PPTX из S3: {e}")
-            elif pptx_b64:
-                try:
-                    pptx_bytes = base64.b64decode(pptx_b64)
-                except Exception:
-                    return err_resp("Невалидный base64")
-            else:
-                return err_resp("Нужен pptx_s3_key или pptx_file")
+            if not source_pptx_s3_key:
+                return err_resp("Исходный файл презентации не найден. Загрузите файл заново для повторной проверки.")
+
+            try:
+                s3 = get_s3()
+                obj = s3.get_object(Bucket="files", Key=source_pptx_s3_key)
+                pptx_bytes = obj["Body"].read()
+            except Exception as e:
+                return err_resp(f"Не удалось загрузить файл презентации: {e}")
+
+            # Если документы не переданы — берём из БД проекта
+            if not documents or not any(d.get("text") for d in documents):
+                cur.execute(
+                    f"""SELECT original_name, COALESCE(default_ai_role, 'material'), extracted_text
+                        FROM {schema}.documents
+                        WHERE project_id = %s AND archived_at IS NULL AND extracted_text IS NOT NULL""",
+                    (project_id_stored,),
+                )
+                documents = [{"name": r[0], "role": r[1], "text": r[2]} for r in cur.fetchall()]
 
             pptx_slides = extract_pptx_text(pptx_bytes)
             new_result = run_audit(pptx_slides, documents)

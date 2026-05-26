@@ -4,7 +4,7 @@
       "name": "audit.run требует авторизации",
       "method": "POST",
       "path": "/",
-      "body": {"action": "audit.run", "project_id": 1, "pptx_file": "dGVzdA=="},
+      "body": {"action": "audit.run", "project_id": 1, "pptx_s3_key": "audit_uploads/0/test/presentation.pptx"},
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
@@ -32,7 +32,7 @@
       "method": "POST",
       "path": "/",
       "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
-      "body": {"action": "audit.run", "project_id": 1, "pptx_file": "dGVzdA=="},
+      "body": {"action": "audit.run", "project_id": 1, "pptx_s3_key": "audit_uploads/0/test/presentation.pptx"},
       "expectedStatus": 403,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"

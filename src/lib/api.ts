@@ -238,6 +238,9 @@ export async function uploadPptxChunked(
   file: File,
   onProgress?: (pct: number) => void,
 ): Promise<string> {
+  const MAX_BYTES = 50 * 1024 * 1024;
+  if (file.size > MAX_BYTES) throw new Error(`Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум — 50 МБ`);
+
   const arrayBuf = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuf);
   const totalChunks = Math.ceil(bytes.length / CHUNK_SIZE);
@@ -264,6 +267,7 @@ export async function uploadPptxChunked(
       chunk: chunkB64,
       chunk_index: i,
       is_last: isLast,
+      total_size: bytes.length, // для серверной валидации 50МБ
     };
     if (i > 0) { body.s3_key = s3Key; body.upload_id = uploadId; }
     if (isLast && parts.length > 0) body.parts = parts;
@@ -282,9 +286,8 @@ export async function uploadPptxChunked(
 }
 
 export const auditApi = {
-  // Запустить аудит по s3_key
-  run: (projectId: number, pptxS3Key: string, documents: { name: string; role: string; text: string; instruction?: string }[]) =>
-    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, pptx_s3_key: pptxS3Key, documents }),
+  run: (projectId: number, pptxS3Key: string, sourceFilename: string, documents: { name: string; role: string; text: string; instruction?: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, pptx_s3_key: pptxS3Key, source_filename: sourceFilename, documents }),
 
   get: (auditId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.get", audit_id: auditId }),

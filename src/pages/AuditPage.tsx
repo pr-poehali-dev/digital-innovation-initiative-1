@@ -14,6 +14,7 @@ interface DocForAudit {
   name: string;
   file_type: string;
   extracted_text?: string;
+  status?: string; // processing | ready | failed
   role: string;
   instruction: string;
 }
@@ -155,6 +156,7 @@ export default function AuditPage() {
   const [pptxS3Key, setPptxS3Key]     = useState<string>("");
   const [uploadingPptx, setUploadingPptx] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState("");
   const [projectDocs, setProjectDocs] = useState<DocForAudit[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [running, setRunning]         = useState(false);
@@ -182,29 +184,47 @@ export default function AuditPage() {
   const [revisionResult, setRevisionResult]   = useState<RevisionResult | null>(null);
   const [reauditResult, setReauditResult]     = useState<Record<string, unknown> | null>(null);
 
-  // Load docs
-  useEffect(() => {
+  // Load docs + polling пока есть processing
+  const loadDocs = (silent = false) => {
     if (!projectId) return;
-    setLoadingDocs(true);
+    if (!silent) setLoadingDocs(true);
     documentsApi.list(projectId)
       .then((d) => {
-        setProjectDocs((d.documents || d || []).map((doc: Record<string,unknown>) => ({
-          id: doc.id as number,
-          name: (doc.original_name || doc.name || "Документ") as string,
-          file_type: doc.file_type as string,
-          extracted_text: (doc.extracted_text || "") as string,
-          role: "material",
-          instruction: "",
-        })));
+        setProjectDocs((prev) => {
+          const fresh = (d.documents || d || []).map((doc: Record<string, unknown>) => {
+            const existing = prev.find(p => p.id === (doc.id as number));
+            return {
+              id: doc.id as number,
+              name: (doc.original_name || doc.name || "Документ") as string,
+              file_type: doc.file_type as string,
+              extracted_text: (doc.extracted_text || "") as string,
+              status: (doc.status || "ready") as string,
+              role: existing?.role ?? "material",
+              instruction: existing?.instruction ?? "",
+            };
+          });
+          return fresh;
+        });
       })
       .catch(() => {})
-      .finally(() => setLoadingDocs(false));
-  }, [projectId]);
+      .finally(() => { if (!silent) setLoadingDocs(false); });
+  };
+
+  useEffect(() => { loadDocs(); }, [projectId]);
+
+  // Polling: обновляем список каждые 8 сек пока есть документы в статусе processing
+  useEffect(() => {
+    const hasProcessing = projectDocs.some(d => d.status === "processing");
+    if (!hasProcessing) return;
+    const timer = setTimeout(() => loadDocs(true), 8000);
+    return () => clearTimeout(timer);
+  }, [projectDocs]);
 
   const handlePptxSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setPptxFile(f);
+    setUploadError("");
     setError("");
     setUploadingPptx(true);
     setUploadProgress(0);
@@ -213,7 +233,8 @@ export default function AuditPage() {
       setPptxS3Key(s3Key);
       setStep("configure");
     } catch (err) {
-      setError("Не удалось загрузить файл: " + (err instanceof Error ? err.message : "попробуйте ещё раз"));
+      const msg = err instanceof Error ? err.message : "попробуйте ещё раз";
+      setUploadError(msg);
       setPptxFile(null);
       setPptxS3Key("");
     } finally {
@@ -229,10 +250,10 @@ export default function AuditPage() {
       name: d.name, role: d.role, text: d.extracted_text || "", instruction: d.instruction || undefined,
     }));
 
-  // Для блокировки кнопки — достаточно чтобы хоть один документ был в проекте
   const hasAnyDocs = projectDocs.length > 0;
-  // Документы без извлечённого текста — предупреждаем пользователя, но не блокируем
-  const docsWithoutText = projectDocs.filter((d) => !d.extracted_text);
+  const docsProcessing = projectDocs.filter((d) => d.status === "processing");
+  const docsFailed = projectDocs.filter((d) => d.status === "failed");
+  const docsReady = projectDocs.filter((d) => d.status !== "processing" && d.status !== "failed");
 
   const handleRunAudit = async () => {
     if (!pptxFile || !pptxS3Key) return;
@@ -240,7 +261,7 @@ export default function AuditPage() {
     setStep("running");
     setError("");
     try {
-      const res = await auditApi.run(projectId, pptxS3Key, getDocsPayload());
+      const res = await auditApi.run(projectId, pptxS3Key, pptxFile?.name ?? "presentation.pptx", getDocsPayload());
       setAuditResult(res.data?.result || res.result || res);
       setCurrentAuditId(res.data?.audit_id || res.audit_id || null);
       setStep("result");
@@ -391,40 +412,44 @@ export default function AuditPage() {
 
         {/* ===== UPLOAD ===== */}
         {step === "upload" && (
-          <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center">
-            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${uploadingPptx ? "bg-slate-100" : "bg-blue-50"}`}>
+          <div className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors ${uploadError ? "border-red-300 bg-red-50" : "border-slate-300"}`}>
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${
+              uploadingPptx ? "bg-slate-100" : uploadError ? "bg-red-100" : "bg-blue-50"
+            }`}>
               {uploadingPptx
                 ? <div className="w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                : uploadError
+                ? <Icon name="AlertCircle" size={28} className="text-red-500" />
                 : <Icon name="FileUp" size={28} className="text-blue-600" />
               }
             </div>
             <h2 className="font-semibold text-lg mb-2">
-              {uploadingPptx ? "Загружаем файл…" : "Загрузите презентацию для проверки"}
+              {uploadingPptx ? "Загружаем файл…"
+               : uploadError ? "Не удалось загрузить файл"
+               : "Загрузите презентацию для проверки"}
             </h2>
-            <p className="text-muted-foreground text-sm mb-4">
-              {uploadingPptx
-                ? `${pptxFile?.name}`
-                : "Поддерживается PPTX · любой размер"
-              }
+            <p className={`text-sm mb-4 ${uploadError ? "text-red-600" : "text-muted-foreground"}`}>
+              {uploadingPptx ? pptxFile?.name
+               : uploadError ? uploadError
+               : "Поддерживается PPTX · максимум 50 МБ"}
             </p>
             {uploadingPptx && (
               <div className="w-full max-w-xs mx-auto mb-6">
                 <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                  <span>Загрузка</span>
+                  <span>Загрузка {pptxFile?.name}</span>
                   <span>{uploadProgress}%</span>
                 </div>
                 <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 rounded-full transition-all duration-300"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
+                  <div className="h-full bg-blue-600 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
                 </div>
               </div>
             )}
             {!uploadingPptx && (
-              <label className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors">
-                <Icon name="Upload" size={16} />
-                Выбрать PPTX
+              <label className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors text-white ${
+                uploadError ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"
+              }`}>
+                <Icon name={uploadError ? "RefreshCw" : "Upload"} size={16} />
+                {uploadError ? "Попробовать снова" : "Выбрать PPTX"}
                 <input type="file" accept=".pptx" className="hidden" onChange={handlePptxSelect} />
               </label>
             )}
@@ -462,9 +487,11 @@ export default function AuditPage() {
                         <Icon name="FileText" size={15} className="text-slate-400 flex-shrink-0" />
                         <span className="text-sm font-medium flex-1 truncate">{doc.name}</span>
                         <span className="text-xs text-slate-400 uppercase">{doc.file_type}</span>
-                        {doc.extracted_text
-                          ? <span className="text-xs text-green-600 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-md flex-shrink-0">✓ Готов</span>
-                          : <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md flex-shrink-0" title="Текст ещё не извлечён, но документ будет включён в проверку">⚙ Обр.</span>
+                        {doc.status === "processing"
+                          ? <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md flex-shrink-0 animate-pulse">⚙ Обработка…</span>
+                          : doc.status === "failed"
+                          ? <span className="text-xs text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md flex-shrink-0" title="Не удалось извлечь текст из документа">✗ Ошибка</span>
+                          : <span className="text-xs text-green-600 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-md flex-shrink-0">✓ Готов</span>
                         }
                       </div>
                       <div className="flex flex-wrap gap-1.5 mb-2">
@@ -486,7 +513,7 @@ export default function AuditPage() {
               )}
             </div>
 
-            {/* Предупреждение когда нет документов вообще */}
+            {/* Нет документов */}
             {projectDocs.length === 0 && (
               <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <Icon name="AlertTriangle" size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -500,45 +527,59 @@ export default function AuditPage() {
               </div>
             )}
 
-            {/* Предупреждение когда документы есть, но текст не извлечён */}
-            {docsWithoutText.length > 0 && projectDocs.length > 0 && docsWithoutText.length === projectDocs.length && (
+            {/* Все документы ещё обрабатываются */}
+            {docsProcessing.length > 0 && docsReady.length === 0 && (
               <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                <Icon name="AlertTriangle" size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                <Icon name="Loader" size={16} className="text-amber-600 flex-shrink-0 mt-0.5 animate-spin" />
                 <div>
-                  <p className="text-sm font-medium text-amber-800">Документы ещё обрабатываются</p>
+                  <p className="text-sm font-medium text-amber-800">Документы обрабатываются…</p>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    Текст из документов пока не извлечён. Вы можете запустить проверку — AI учтёт то, что успело обработаться, или попробуйте через минуту.
+                    Статус обновляется автоматически. Запуск возможен как только хотя бы один документ будет готов.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Частичное предупреждение */}
-            {docsWithoutText.length > 0 && docsWithoutText.length < projectDocs.length && (
+            {/* Часть обрабатывается */}
+            {docsProcessing.length > 0 && docsReady.length > 0 && (
               <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
                 <Icon name="Info" size={15} className="text-blue-600 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-blue-800">
-                  {docsWithoutText.length} из {projectDocs.length} документов ещё не обработаны — AI проверит только готовые.
+                  {docsProcessing.length} из {projectDocs.length} документов ещё обрабатываются — AI проверит только готовые. Статус обновляется автоматически.
+                </p>
+              </div>
+            )}
+
+            {/* Ошибки обработки */}
+            {docsFailed.length > 0 && (
+              <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                <Icon name="AlertCircle" size={15} className="text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-800">
+                  {docsFailed.length} документ(ов) не удалось обработать (отмечены красным). Они не будут учтены при проверке.
                 </p>
               </div>
             )}
 
             <div className="flex items-center gap-3 flex-wrap">
-              <button onClick={() => { setPptxFile(null); setPptxS3Key(""); setStep("upload"); }}
+              <button onClick={() => { setPptxFile(null); setPptxS3Key(""); setUploadError(""); setStep("upload"); }}
                 className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm">
                 ← Назад
               </button>
               <button onClick={handleRunAudit}
-                disabled={running || !hasAnyDocs || !pptxS3Key}
+                disabled={running || !hasAnyDocs || !pptxS3Key || docsReady.length === 0}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-medium">
                 <Icon name="ShieldCheck" size={16} />
                 Запустить проверку
               </button>
               {!hasAnyDocs && (
-                <p className="text-xs text-slate-500">
-                  ← Сначала загрузите документы в проект
-                </p>
+                <p className="text-xs text-slate-500">Сначала загрузите документы в проект</p>
               )}
+              {hasAnyDocs && docsReady.length === 0 && (
+                <p className="text-xs text-slate-500">Ждём обработки документов…</p>
+              )}
+              <button onClick={() => loadDocs(true)} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                Обновить
+              </button>
             </div>
           </div>
         )}
@@ -785,7 +826,7 @@ export default function AuditPage() {
             reaudit={reauditResult}
             projectId={projectId}
             onReaudit={handleReaudit}
-            onNewAudit={() => { setPptxFile(null); setPptxS3Key(""); setAuditResult(null); setRevisionResult(null); setRevisionPlan(null); setReauditResult(null); setStep("upload"); }}
+            onNewAudit={() => { setPptxFile(null); setPptxS3Key(""); setUploadError(""); setAuditResult(null); setRevisionResult(null); setRevisionPlan(null); setReauditResult(null); setStep("upload"); }}
           />
         )}
       </div>
