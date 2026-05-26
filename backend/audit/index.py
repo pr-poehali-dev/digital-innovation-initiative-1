@@ -110,7 +110,7 @@ def get_user(conn, session_id: str):
         (session_id,),
     )
     row = cur.fetchone()
-    return {"id": row[0], "email": row[1]} if row else None
+    return {"id": str(row[0]), "email": row[1]} if row else None
 
 
 # ------------------------------------------------------------------ #
