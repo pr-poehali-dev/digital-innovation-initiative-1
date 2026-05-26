@@ -33,41 +33,18 @@ CORS_HEADERS = {
 }
 
 
+def get_schema() -> str:
+    val = os.environ.get("MAIN_DB_SCHEMA", "").strip()
+    if val:
+        return val
+    # Fallback: жёстко зашитая схема проекта
+    return "t_p61016064_digital_innovation_i"
+
+
 def get_db():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = False
     return conn
-
-
-_schema_cache = None
-
-def get_schema():
-    global _schema_cache
-    if _schema_cache:
-        return _schema_cache
-    val = os.environ.get("MAIN_DB_SCHEMA", "").strip()
-    if val:
-        _schema_cache = val
-        return _schema_cache
-    # Автоопределение: берём первую непубличную схему
-    try:
-        conn = psycopg2.connect(os.environ["DATABASE_URL"])
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT nspname FROM pg_namespace "
-            "WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema' "
-            "ORDER BY nspname LIMIT 1"
-        )
-        row = cur.fetchone()
-        conn.close()
-        if row:
-            _schema_cache = row[0]
-            log.warning(f"MAIN_DB_SCHEMA not set, auto-detected: {_schema_cache!r}")
-            return _schema_cache
-    except Exception as e:
-        log.error(f"get_schema auto-detect failed: {e}")
-    _schema_cache = "public"
-    return _schema_cache
 
 
 def ok_resp(data, origin=None):
