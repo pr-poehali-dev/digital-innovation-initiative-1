@@ -277,6 +277,9 @@ export async function uploadPptxChunked(
 }
 
 export const auditApi = {
+  setupCors: (token: string) =>
+    request(URLS.audit, "/", "POST", { action: "audit.setup_cors", token }),
+
   run: (projectId: number, uploadId: string, documents: { document_id: number; role: string; instruction?: string }[]) =>
     request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, upload_id: uploadId, documents }),
 

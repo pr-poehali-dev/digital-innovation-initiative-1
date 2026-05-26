@@ -347,6 +347,28 @@ def handler(event: dict, context) -> dict:
         schema = get_schema()
         action = body.get("action", "")
 
+        # ---- audit.setup_cors (одноразовый admin endpoint) ----
+        if action == "audit.setup_cors":
+            expected_token = os.environ.get("CORS_SETUP_TOKEN", "")
+            provided_token = body.get("token", "")
+            if not expected_token or provided_token != expected_token:
+                return err_resp("Неверный токен", 403)
+
+            s3 = get_s3()
+            cors_config = {
+                "CORSRules": [{
+                    "AllowedOrigins": ["*"],
+                    "AllowedMethods": ["PUT", "GET", "HEAD", "DELETE"],
+                    "AllowedHeaders": ["*"],
+                    "ExposeHeaders": ["ETag"],
+                    "MaxAgeSeconds": 3600,
+                }]
+            }
+            s3.put_bucket_cors(Bucket="files", CORSConfiguration=cors_config)
+            applied = s3.get_bucket_cors(Bucket="files")
+            log.info(f"audit.setup_cors: applied by user={user['email']}")
+            return ok_resp({"message": "CORS настроен успешно", "cors": applied.get("CORSRules", [])})
+
         # ---- audit.prepare_upload ----
         # Возвращает presigned PUT URL для прямой загрузки PPTX в S3 из браузера.
         # Frontend делает PUT напрямую в storage, без прогона бинарных данных через функцию.

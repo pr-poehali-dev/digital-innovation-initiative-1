@@ -142,6 +142,43 @@ const VISUAL_ACTION_LABEL: Record<string, string> = {
 };
 
 // ------------------------------------------------------------------ //
+//  Setup CORS — одноразовая кнопка для настройки bucket               //
+// ------------------------------------------------------------------ //
+
+function SetupCorsButton() {
+  const [status, setStatus] = useState<"idle" | "loading" | "ok" | "err">("idle");
+  const [msg, setMsg] = useState("");
+
+  const handleClick = async () => {
+    const token = prompt("Введи CORS_SETUP_TOKEN из секретов:");
+    if (!token) return;
+    setStatus("loading");
+    try {
+      const res = await auditApi.setupCors(token) as { message?: string };
+      setMsg(res.message || "Готово");
+      setStatus("ok");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Ошибка");
+      setStatus("err");
+    }
+  };
+
+  if (status === "ok") return <p className="mt-4 text-xs text-green-600">✓ {msg} — CORS настроен, кнопку можно убрать</p>;
+  return (
+    <div className="mt-6">
+      <button
+        onClick={handleClick}
+        disabled={status === "loading"}
+        className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2"
+      >
+        {status === "loading" ? "Настраиваем…" : "⚙ Настроить CORS (одноразово)"}
+      </button>
+      {status === "err" && <p className="mt-1 text-xs text-red-500">{msg}</p>}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ //
 //  Main component                                                      //
 // ------------------------------------------------------------------ //
 
@@ -450,6 +487,7 @@ export default function AuditPage() {
                 <input type="file" accept=".pptx" className="hidden" onChange={handlePptxSelect} />
               </label>
             )}
+            <SetupCorsButton />
           </div>
         )}
 
