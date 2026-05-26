@@ -237,6 +237,39 @@ export const auditApi = {
     request(URLS.audit, "/", "POST", { action: "audit.get", audit_id: auditId }),
   list: (projectId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.list", project_id: projectId }),
+
+  buildRevisionPlan: (
+    auditId: number,
+    options: {
+      severity_filter?: string[];
+      exclude_low_confidence?: boolean;
+      revision_mode?: string;
+      keep_slide_count?: boolean;
+      allow_add_slides?: boolean;
+      keep_visuals?: boolean;
+    },
+  ) => request(URLS.audit, "/", "POST", { action: "audit.build_revision_plan", audit_id: auditId, options }),
+
+  createRevisionRun: (
+    auditId: number,
+    documents: { name: string; role: string; text: string }[],
+    taskId?: number,
+    pptxBase64?: string,
+    confirmedPlanItems?: string[],
+  ) => request(URLS.audit, "/", "POST", {
+    action: "audit.create_revision_run",
+    audit_id: auditId,
+    documents,
+    task_id: taskId,
+    pptx_file: pptxBase64,
+    confirmed_plan_items: confirmedPlanItems,
+  }),
+
+  getRevisionStatus: (auditId: number) =>
+    request(URLS.audit, "/", "POST", { action: "audit.get_revision_status", audit_id: auditId }),
+
+  runReaudit: (auditId: number, pptxBase64: string, documents: { name: string; role: string; text: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run_reaudit", audit_id: auditId, pptx_file: pptxBase64, documents }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {

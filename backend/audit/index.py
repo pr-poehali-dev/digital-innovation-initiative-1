@@ -458,6 +458,386 @@ def handler(event: dict, context) -> dict:
                 for r in rows
             ]})
 
+        # ================================================================
+        # audit.build_revision_plan
+        # ================================================================
+        if action == "audit.build_revision_plan":
+            audit_id = int(body.get("audit_id", 0))
+            options = body.get("options") or {}   # revision_mode, filters, etc.
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT result_json, project_id FROM {schema}.audit_runs WHERE id = %s AND user_id = %s",
+                (audit_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Аудит не найден", 404)
+
+            audit_result = json.loads(row[0]) if row[0] else {}
+            findings = audit_result.get("findings") or []
+            suggested = audit_result.get("suggested_changes") or []
+            compliance = audit_result.get("compliance_matrix") or []
+
+            # --- Фильтрация findings по опциям ---
+            severity_filter = options.get("severity_filter", ["critical", "high"])  # по умолчанию только critical+high
+            exclude_low_confidence = options.get("exclude_low_confidence", True)
+
+            applicable = []
+            skipped = []
+            for f in findings:
+                sev = f.get("severity", "low")
+                conf = f.get("confidence", "high")
+                if sev not in severity_filter:
+                    skipped.append({"issue_id": f.get("issue_id"), "reason": f"severity={sev} не в фильтре"})
+                    continue
+                if exclude_low_confidence and conf == "low":
+                    skipped.append({"issue_id": f.get("issue_id"), "reason": "низкая уверенность AI"})
+                    continue
+                applicable.append(f)
+
+            # --- AI строит revision plan ---
+            revision_mode = options.get("revision_mode", "fix_text")  # fix_text | fix_and_add | full_revision
+            keep_slide_count = options.get("keep_slide_count", True)
+            allow_add_slides = options.get("allow_add_slides", False)
+            keep_visuals = options.get("keep_visuals", True)
+
+            findings_txt = json.dumps(applicable, ensure_ascii=False, default=str)
+            suggested_txt = json.dumps(suggested, ensure_ascii=False, default=str)
+            compliance_txt = json.dumps([c for c in compliance if c.get("status") != "met"], ensure_ascii=False, default=str)
+
+            plan_prompt = f"""Ты — редактор презентаций. На основе результатов аудита составь план исправлений.
+
+ПРИМЕНЯЕМЫЕ ЗАМЕЧАНИЯ ({len(applicable)} шт.):
+{findings_txt[:3000]}
+
+ПРЕДЛОЖЕННЫЕ ПРАВКИ:
+{suggested_txt[:2000]}
+
+НЕВЫПОЛНЕННЫЕ КРИТЕРИИ:
+{compliance_txt[:1000]}
+
+РЕЖИМ ИСПРАВЛЕНИЯ: {revision_mode}
+СОХРАНЯТЬ ЧИСЛО СЛАЙДОВ: {keep_slide_count}
+РАЗРЕШИТЬ ДОБАВЛЕНИЕ СЛАЙДОВ: {allow_add_slides}
+СОХРАНЯТЬ ВИЗУАЛЫ: {keep_visuals}
+
+Составь детальный план исправлений. Верни ТОЛЬКО JSON:
+{{
+  "revision_plan": [
+    {{
+      "plan_item_id": "P001",
+      "slide_index": <N>,
+      "slide_title": "...",
+      "change_type": "rewrite_text|add_missing_point|remove_unsupported_claim|replace_terminology|add_missing_slide|restructure_slide|update_numbers|mark_for_manual_review",
+      "based_on_finding_ids": ["F001", "F002"],
+      "problem_summary": "...",
+      "proposed_change": "Конкретное изменение текста или структуры",
+      "rationale": "Почему это исправление нужно",
+      "confidence": "high|medium|low",
+      "will_affect_visual": false,
+      "visual_action": "keep|needs_review|needs_regeneration|preserve_user_override",
+      "requires_user_review": false,
+      "priority": 1
+    }}
+  ],
+  "revision_summary": {{
+    "total_changes": <N>,
+    "slides_affected": [1, 2, 3],
+    "will_add_slides": false,
+    "expected_improvement": "Краткое описание ожидаемого результата",
+    "manual_review_required": ["P003", "P007"]
+  }},
+  "generate_instruction": "Инструкция для AI генерации исправленной версии в 2-3 абзаца"
+}}"""
+
+            plan_raw = call_gpt([
+                {"role": "system", "content": "Ты — редактор презентаций. Отвечай ТОЛЬКО валидным JSON без markdown."},
+                {"role": "user", "content": plan_prompt},
+            ])
+
+            import re as _re
+            plan_data = {}
+            jm = _re.search(r'\{.*\}', plan_raw, _re.DOTALL)
+            if jm:
+                try:
+                    plan_data = json.loads(jm.group(0))
+                except Exception:
+                    pass
+
+            if not plan_data:
+                plan_data = {
+                    "revision_plan": [],
+                    "revision_summary": {"total_changes": 0, "expected_improvement": "AI не смог построить план"},
+                    "generate_instruction": "",
+                }
+
+            plan_data["applicable_findings"] = applicable
+            plan_data["skipped_findings"] = skipped
+            plan_data["options"] = options
+
+            # Сохраняем план в audit_runs
+            cur.execute(
+                f"UPDATE {schema}.audit_runs SET revision_plan_json = %s, revision_status = 'plan_ready' WHERE id = %s",
+                (json.dumps(plan_data, ensure_ascii=False, default=str), audit_id),
+            )
+            conn.commit()
+
+            return ok_resp({"audit_id": audit_id, "revision_plan": plan_data})
+
+        # ================================================================
+        # audit.create_revision_run — создаёт задание + run на исправление
+        # ================================================================
+        if action == "audit.create_revision_run":
+            audit_id = int(body.get("audit_id", 0))
+            task_id = body.get("task_id")               # исходное задание (опционально)
+            pptx_b64 = body.get("pptx_file")            # исходная PPTX base64
+            documents = body.get("documents") or []     # те же документы, что были при аудите
+            confirmed_plan_items = body.get("confirmed_plan_items")  # None = все из плана
+
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT result_json, revision_plan_json, project_id
+                    FROM {schema}.audit_runs WHERE id = %s AND user_id = %s""",
+                (audit_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Аудит не найден", 404)
+
+            audit_result = json.loads(row[0]) if row[0] else {}
+            plan_data = json.loads(row[1]) if row[1] else {}
+            project_id = row[2]
+
+            if not plan_data:
+                return err_resp("Сначала постройте план исправлений (audit.build_revision_plan)")
+
+            revision_plan = plan_data.get("revision_plan") or []
+            if confirmed_plan_items is not None:
+                revision_plan = [p for p in revision_plan if p.get("plan_item_id") in confirmed_plan_items]
+
+            # --- Формируем instruction для generate ---
+            base_instruction = plan_data.get("generate_instruction", "")
+            changes_txt = "\n".join(
+                f"- Слайд {p['slide_index']} ({p['change_type']}): {p['proposed_change']}"
+                for p in revision_plan[:20]
+            )
+            findings_for_gen = json.dumps(
+                audit_result.get("findings", [])[:10], ensure_ascii=False, default=str
+            )
+
+            final_instruction = f"""ЭТО ИСПРАВЛЕННАЯ ВЕРСИЯ НА ОСНОВЕ АУДИТА.
+
+Исходный аудит выявил следующие проблемы (применяются):
+{findings_for_gen[:2000]}
+
+КОНКРЕТНЫЙ ПЛАН ИСПРАВЛЕНИЙ ПО СЛАЙДАМ:
+{changes_txt}
+
+{base_instruction}
+
+ПРАВИЛА:
+1. Исправляй ТОЛЬКО то, что указано в плане — не переписывай всё заново.
+2. Сохраняй общую структуру презентации, если не указано иное.
+3. При исправлении терминологии — используй термины из документов-источников.
+4. Не добавляй новые утверждения без основания в документах.
+5. Нумеруй слайды явно: "Слайд 1:", "Слайд 2:", и т.д."""
+
+            # Если есть исходное задание — создаём ревизию
+            if task_id:
+                # Создаём новый run как ревизию исходного задания
+                cur.execute(
+                    f"""SELECT version_number FROM {schema}.generation_runs
+                        WHERE task_id = %s ORDER BY version_number DESC LIMIT 1""",
+                    (int(task_id),),
+                )
+                vr = cur.fetchone()
+                next_version = (vr[0] + 1) if vr else 1
+
+                cur.execute(
+                    f"""INSERT INTO {schema}.generation_runs
+                        (task_id, created_by, version_number, input_prompt, system_constraints, status)
+                        VALUES (%s, %s, %s, %s, %s, 'running') RETURNING id""",
+                    (int(task_id), user["id"], next_version, final_instruction[:2000], "revision_from_audit", ),
+                )
+                new_run_id = cur.fetchone()[0]
+
+                # Вызываем AI для генерации исправленной версии
+                doc_ctx = "\n\n".join(
+                    f"=== [{d.get('role','material').upper()}] {d.get('name','Документ')} ===\n{(d.get('text') or '')[:3000]}"
+                    for d in sorted(documents, key=lambda d: ROLE_PRIORITY.get(d.get("role","material"), 99))
+                )
+
+                ai_content = call_gpt([
+                    {"role": "system", "content": f"Ты — профессиональный редактор презентаций.\n\nДОКУМЕНТЫ:\n{doc_ctx[:4000]}"},
+                    {"role": "user", "content": final_instruction},
+                ])
+
+                # Строим revision_meta для result_json
+                applied_ids = [p.get("plan_item_id") for p in revision_plan]
+                all_ids = [p.get("plan_item_id") for p in (plan_data.get("revision_plan") or [])]
+                skipped_ids = [i for i in all_ids if i not in applied_ids]
+
+                # Визуальные изменения
+                visual_changes = []
+                for p in revision_plan:
+                    if p.get("will_affect_visual") or p.get("visual_action") not in (None, "keep"):
+                        visual_changes.append({
+                            "slide_index": p["slide_index"],
+                            "visual_action": p.get("visual_action", "keep"),
+                            "reason": p.get("problem_summary", ""),
+                        })
+
+                revision_meta = {
+                    "source_audit_run_id": audit_id,
+                    "revision_mode": plan_data.get("options", {}).get("revision_mode", "fix_text"),
+                    "applied_finding_ids": [
+                        f["issue_id"] for f in plan_data.get("applicable_findings", [])
+                    ],
+                    "applied_plan_item_ids": applied_ids,
+                    "skipped_plan_item_ids": skipped_ids,
+                    "visual_changes": visual_changes,
+                    "revision_plan": revision_plan,
+                    "warnings": [],
+                }
+
+                result_payload = {
+                    "content": ai_content,
+                    "version": next_version,
+                    "revision_meta": revision_meta,
+                }
+
+                cur.execute(
+                    f"""UPDATE {schema}.generation_runs
+                        SET result_json = %s, output_summary = %s, status = 'done'
+                        WHERE id = %s""",
+                    (json.dumps(result_payload, ensure_ascii=False, default=str),
+                     ai_content[:300],
+                     new_run_id),
+                )
+
+                # Линкуем audit к новому run
+                cur.execute(
+                    f"""UPDATE {schema}.audit_runs
+                        SET revision_run_id = %s, revision_status = 'revision_done'
+                        WHERE id = %s""",
+                    (new_run_id, audit_id),
+                )
+                conn.commit()
+
+                return ok_resp({
+                    "audit_id": audit_id,
+                    "run_id": new_run_id,
+                    "task_id": int(task_id),
+                    "version": next_version,
+                    "content": ai_content,
+                    "revision_meta": revision_meta,
+                })
+            else:
+                # Нет исходного задания — возвращаем готовый текст без run
+                doc_ctx = "\n\n".join(
+                    f"=== [{d.get('role','material').upper()}] {d.get('name','Документ')} ===\n{(d.get('text') or '')[:3000]}"
+                    for d in sorted(documents, key=lambda d: ROLE_PRIORITY.get(d.get("role","material"), 99))
+                )
+                ai_content = call_gpt([
+                    {"role": "system", "content": f"Ты — профессиональный редактор презентаций.\n\nДОКУМЕНТЫ:\n{doc_ctx[:4000]}"},
+                    {"role": "user", "content": final_instruction},
+                ])
+
+                cur.execute(
+                    f"UPDATE {schema}.audit_runs SET revision_status = 'revision_done' WHERE id = %s",
+                    (audit_id,),
+                )
+                conn.commit()
+
+                return ok_resp({
+                    "audit_id": audit_id,
+                    "content": ai_content,
+                    "revision_meta": {"source_audit_run_id": audit_id},
+                })
+
+        # ================================================================
+        # audit.get_revision_status
+        # ================================================================
+        if action == "audit.get_revision_status":
+            audit_id = int(body.get("audit_id", 0))
+            cur = conn.cursor()
+            cur.execute(
+                f"""SELECT revision_status, revision_plan_json, revision_run_id, reaudit_result_json
+                    FROM {schema}.audit_runs WHERE id = %s AND user_id = %s""",
+                (audit_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Аудит не найден", 404)
+
+            plan = json.loads(row[1]) if row[1] else None
+            reaudit = json.loads(row[3]) if row[3] else None
+
+            return ok_resp({
+                "audit_id": audit_id,
+                "revision_status": row[0],
+                "revision_plan": plan,
+                "revision_run_id": row[2],
+                "reaudit_result": reaudit,
+            })
+
+        # ================================================================
+        # audit.run_reaudit — повторный аудит после ревизии
+        # ================================================================
+        if action == "audit.run_reaudit":
+            audit_id = int(body.get("audit_id", 0))
+            pptx_b64 = body.get("pptx_file")
+            documents = body.get("documents") or []
+
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT project_id, result_json FROM {schema}.audit_runs WHERE id = %s AND user_id = %s",
+                (audit_id, user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                return err_resp("Аудит не найден", 404)
+
+            original_result = json.loads(row[1]) if row[1] else {}
+            original_score = (original_result.get("audit_summary") or {}).get("compliance_score")
+
+            try:
+                pptx_bytes = base64.b64decode(pptx_b64)
+            except Exception:
+                return err_resp("Невалидный base64")
+
+            pptx_slides = extract_pptx_text(pptx_bytes)
+            new_result = run_audit(pptx_slides, documents)
+            new_score = (new_result.get("audit_summary") or {}).get("compliance_score")
+
+            # Дельта
+            delta = None
+            if original_score is not None and new_score is not None:
+                try:
+                    delta = int(new_score) - int(original_score)
+                except Exception:
+                    pass
+
+            reaudit_payload = {
+                "audit_result": new_result,
+                "score_before": original_score,
+                "score_after": new_score,
+                "score_delta": delta,
+                "issues_before": (original_result.get("audit_summary") or {}).get("total_issues"),
+                "issues_after": (new_result.get("audit_summary") or {}).get("total_issues"),
+            }
+
+            cur.execute(
+                f"""UPDATE {schema}.audit_runs
+                    SET reaudit_result_json = %s, revision_status = 'reaudited'
+                    WHERE id = %s""",
+                (json.dumps(reaudit_payload, ensure_ascii=False, default=str), audit_id),
+            )
+            conn.commit()
+
+            return ok_resp({"audit_id": audit_id, "reaudit": reaudit_payload})
+
         return err_resp("Неизвестное действие")
 
     except Exception as e:

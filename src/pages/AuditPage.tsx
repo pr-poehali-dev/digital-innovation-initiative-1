@@ -4,6 +4,10 @@ import { auditApi, documentsApi, fileToBase64 } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
+// ------------------------------------------------------------------ //
+//  Types                                                               //
+// ------------------------------------------------------------------ //
+
 interface DocForAudit {
   id: number;
   name: string;
@@ -30,40 +34,14 @@ interface Finding {
   confidence: string;
 }
 
-interface SlideReport {
-  slide_index: number;
-  slide_title: string;
-  status: string;
-  issue_count: number;
-  summary: string;
-}
-
-interface ComplianceItem {
-  criterion: string;
-  source: string;
-  status: string;
-  slide_index: number | null;
-  comment: string;
-}
-
-interface SuggestedChange {
-  slide_index: number;
-  slide_title: string;
-  action: string;
-  current_text: string;
-  proposed_text: string;
-  rationale: string;
-}
+interface SlideReport { slide_index: number; slide_title: string; status: string; issue_count: number; summary: string; }
+interface ComplianceItem { criterion: string; source: string; status: string; slide_index: number | null; comment: string; }
+interface SuggestedChange { slide_index: number; slide_title: string; action: string; current_text: string; proposed_text: string; rationale: string; }
 
 interface AuditSummary {
-  total_slides: number;
-  total_issues: number;
-  critical_count: number;
-  high_count: number;
-  medium_count: number;
-  low_count: number;
-  compliance_score: number | null;
-  key_risks: string[];
+  total_slides: number; total_issues: number;
+  critical_count: number; high_count: number; medium_count: number; low_count: number;
+  compliance_score: number | null; key_risks: string[];
 }
 
 interface AuditResult {
@@ -75,111 +53,165 @@ interface AuditResult {
   warnings: string[];
 }
 
+interface PlanItem {
+  plan_item_id: string;
+  slide_index: number;
+  slide_title: string;
+  change_type: string;
+  based_on_finding_ids: string[];
+  problem_summary: string;
+  proposed_change: string;
+  rationale: string;
+  confidence: string;
+  will_affect_visual: boolean;
+  visual_action: string;
+  requires_user_review: boolean;
+  priority: number;
+}
+
+interface RevisionPlan {
+  revision_plan: PlanItem[];
+  revision_summary: { total_changes: number; slides_affected: number[]; will_add_slides: boolean; expected_improvement: string; manual_review_required: string[] };
+  generate_instruction: string;
+  applicable_findings: Finding[];
+  skipped_findings: { issue_id: string; reason: string }[];
+  options: Record<string, unknown>;
+}
+
+interface RevisionResult {
+  run_id?: number;
+  task_id?: number;
+  version?: number;
+  content?: string;
+  revision_meta?: {
+    source_audit_run_id: number;
+    revision_mode: string;
+    applied_finding_ids: string[];
+    applied_plan_item_ids: string[];
+    skipped_plan_item_ids: string[];
+    visual_changes: { slide_index: number; visual_action: string; reason: string }[];
+    warnings: string[];
+  };
+}
+
+// ------------------------------------------------------------------ //
+//  Constants                                                           //
+// ------------------------------------------------------------------ //
+
 const ROLE_OPTIONS = [
-  { value: "standard",  label: "📜 Стандарт",  desc: "Нормативы и обязательные требования (высший приоритет)" },
-  { value: "criteria",  label: "✅ Критерии",   desc: "Чеклист и критерии оценки" },
-  { value: "source",    label: "📚 Источник",   desc: "Факты и формулировки для проверки" },
-  { value: "material",  label: "📄 Материал",   desc: "Дополнительный контекст" },
-  { value: "template",  label: "🎨 Шаблон",     desc: "Образец структуры (не источник фактов)" },
-  { value: "example",   label: "💡 Пример",     desc: "Пример похожей работы" },
+  { value: "standard", label: "📜 Стандарт",  desc: "Нормативы и обязательные требования" },
+  { value: "criteria", label: "✅ Критерии",   desc: "Чеклист и критерии оценки" },
+  { value: "source",   label: "📚 Источник",   desc: "Факты и формулировки для проверки" },
+  { value: "material", label: "📄 Материал",   desc: "Дополнительный контекст" },
+  { value: "template", label: "🎨 Шаблон",     desc: "Образец структуры (не источник фактов)" },
+  { value: "example",  label: "💡 Пример",     desc: "Пример похожей работы" },
 ];
 
-const SEVERITY_COLORS: Record<string, string> = {
+const SEV_COLOR: Record<string, string> = {
   critical: "bg-red-100 text-red-800 border-red-200",
   high:     "bg-orange-100 text-orange-800 border-orange-200",
   medium:   "bg-amber-100 text-amber-800 border-amber-200",
   low:      "bg-slate-100 text-slate-700 border-slate-200",
 };
-
-const SEVERITY_LABELS: Record<string, string> = {
-  critical: "🔴 Критично",
-  high:     "🟠 Высокий",
-  medium:   "🟡 Средний",
-  low:      "⚪ Низкий",
+const SEV_LABEL: Record<string, string> = {
+  critical: "🔴 Критично", high: "🟠 Высокий", medium: "🟡 Средний", low: "⚪ Низкий",
+};
+const COMPLIANCE_COLOR: Record<string, string> = {
+  met: "text-green-700", partially_met: "text-amber-700", not_met: "text-red-700", not_checked: "text-slate-500",
+};
+const COMPLIANCE_LABEL: Record<string, string> = {
+  met: "✅ Выполнен", partially_met: "⚠️ Частично", not_met: "❌ Не выполнен", not_checked: "— Н/п",
+};
+const CHANGE_TYPE_LABEL: Record<string, string> = {
+  rewrite_text: "✏️ Переписать",
+  add_missing_point: "➕ Добавить тезис",
+  remove_unsupported_claim: "🗑 Убрать необоснованное",
+  replace_terminology: "🔤 Заменить термин",
+  add_missing_slide: "📄 Добавить слайд",
+  restructure_slide: "🔀 Реструктурировать",
+  update_numbers: "🔢 Обновить данные",
+  mark_for_manual_review: "👁 Ручная проверка",
+};
+const VISUAL_ACTION_LABEL: Record<string, string> = {
+  keep: "✅ Сохранить визуал",
+  needs_review: "👁 Требует проверки",
+  needs_regeneration: "♻️ Перегенерировать",
+  preserve_user_override: "👤 Сохранить (заменён пользователем)",
 };
 
-const SLIDE_STATUS_COLORS: Record<string, string> = {
-  ok:               "text-green-700 bg-green-50",
-  needs_attention:  "text-amber-700 bg-amber-50",
-  critical:         "text-red-700 bg-red-50",
-};
-
-const COMPLIANCE_COLORS: Record<string, string> = {
-  met:           "text-green-700",
-  partially_met: "text-amber-700",
-  not_met:       "text-red-700",
-  not_checked:   "text-slate-500",
-};
-
-const COMPLIANCE_LABELS: Record<string, string> = {
-  met:           "✅ Выполнен",
-  partially_met: "⚠️ Частично",
-  not_met:       "❌ Не выполнен",
-  not_checked:   "— Не проверено",
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  rewrite: "Переписать",
-  add:     "Добавить",
-  remove:  "Удалить",
-  replace: "Заменить",
-};
+// ------------------------------------------------------------------ //
+//  Main component                                                      //
+// ------------------------------------------------------------------ //
 
 export default function AuditPage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
 
-  // Шаг: upload | configure | running | result
-  const [step, setStep] = useState<"upload" | "configure" | "running" | "result">("upload");
+  type Step = "upload" | "configure" | "running" | "result" | "plan" | "revising" | "revised" | "reauditing";
+  const [step, setStep] = useState<Step>("upload");
 
-  const [pptxFile, setPptxFile] = useState<File | null>(null);
+  const [pptxFile, setPptxFile]       = useState<File | null>(null);
+  const [pptxBase64, setPptxBase64]   = useState<string>("");
   const [projectDocs, setProjectDocs] = useState<DocForAudit[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning]         = useState(false);
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
-  const [error, setError] = useState("");
+  const [currentAuditId, setCurrentAuditId] = useState<number | null>(null);
+  const [error, setError]             = useState("");
 
-  // Фильтры в результате
-  const [filterSeverity, setFilterSeverity] = useState<string>("all");
-  const [filterSlide, setFilterSlide] = useState<string>("all");
-  const [activeTab, setActiveTab] = useState<"findings" | "slides" | "compliance" | "changes">("findings");
+  // Findings filters
+  const [filterSev, setFilterSev]     = useState("all");
+  const [filterSlide, setFilterSlide] = useState("all");
+  const [activeTab, setActiveTab]     = useState<"findings"|"slides"|"compliance"|"changes">("findings");
 
-  // Загружаем документы проекта
+  // Revision
+  const [revisionOptions, setRevisionOptions] = useState({
+    revision_mode: "fix_text",
+    severity_filter: ["critical", "high"],
+    exclude_low_confidence: true,
+    keep_slide_count: true,
+    allow_add_slides: false,
+    keep_visuals: true,
+  });
+  const [revisionPlan, setRevisionPlan]       = useState<RevisionPlan | null>(null);
+  const [buildingPlan, setBuildingPlan]       = useState(false);
+  const [confirmedItems, setConfirmedItems]   = useState<Set<string>>(new Set());
+  const [revisionResult, setRevisionResult]   = useState<RevisionResult | null>(null);
+  const [reauditResult, setReauditResult]     = useState<Record<string, unknown> | null>(null);
+
+  // Load docs
   useEffect(() => {
     if (!projectId) return;
     setLoadingDocs(true);
     documentsApi.list(projectId)
       .then((d) => {
-        const docs = (d.documents || d || []).map((doc: { id: number; original_name?: string; name?: string; file_type: string; extracted_text?: string }) => ({
-          id: doc.id,
-          name: doc.original_name || doc.name || "Документ",
-          file_type: doc.file_type,
-          extracted_text: doc.extracted_text || "",
+        setProjectDocs((d.documents || d || []).map((doc: Record<string,unknown>) => ({
+          id: doc.id as number,
+          name: (doc.original_name || doc.name || "Документ") as string,
+          file_type: doc.file_type as string,
+          extracted_text: (doc.extracted_text || "") as string,
           role: "material",
           instruction: "",
-        }));
-        setProjectDocs(docs);
+        })));
       })
       .catch(() => {})
       .finally(() => setLoadingDocs(false));
   }, [projectId]);
 
-  const handlePptxSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePptxSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      setPptxFile(f);
-      setStep("configure");
-    }
+    if (!f) return;
+    setPptxFile(f);
+    const b64 = await fileToBase64(f);
+    setPptxBase64(b64);
+    setStep("configure");
     e.target.value = "";
   };
 
-  const updateDocRole = (docId: number, role: string) => {
-    setProjectDocs((prev) => prev.map((d) => d.id === docId ? { ...d, role } : d));
-  };
-
-  const updateDocInstruction = (docId: number, instruction: string) => {
-    setProjectDocs((prev) => prev.map((d) => d.id === docId ? { ...d, instruction } : d));
-  };
+  const getDocsPayload = () =>
+    projectDocs.filter((d) => d.extracted_text).map((d) => ({
+      name: d.name, role: d.role, text: d.extracted_text || "", instruction: d.instruction || undefined,
+    }));
 
   const handleRunAudit = async () => {
     if (!pptxFile) return;
@@ -187,18 +219,9 @@ export default function AuditPage() {
     setStep("running");
     setError("");
     try {
-      const pptxB64 = await fileToBase64(pptxFile);
-      const docs = projectDocs
-        .filter((d) => d.extracted_text)
-        .map((d) => ({
-          name: d.name,
-          role: d.role,
-          text: d.extracted_text || "",
-          instruction: d.instruction || undefined,
-        }));
-
-      const res = await auditApi.run(projectId, pptxB64, docs);
-      setAuditResult(res.result || res);
+      const res = await auditApi.run(projectId, pptxBase64, getDocsPayload());
+      setAuditResult(res.data?.result || res.result || res);
+      setCurrentAuditId(res.data?.audit_id || res.audit_id || null);
       setStep("result");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Ошибка аудита");
@@ -208,18 +231,71 @@ export default function AuditPage() {
     }
   };
 
+  const handleBuildPlan = async () => {
+    if (!currentAuditId) return;
+    setBuildingPlan(true);
+    try {
+      const res = await auditApi.buildRevisionPlan(currentAuditId, revisionOptions);
+      const plan: RevisionPlan = res.data?.revision_plan || res.revision_plan;
+      setRevisionPlan(plan);
+      // По умолчанию подтверждаем все, кроме requires_user_review
+      const defaults = new Set<string>();
+      (plan.revision_plan || []).forEach((p) => {
+        if (!p.requires_user_review && p.confidence !== "low") defaults.add(p.plan_item_id);
+      });
+      setConfirmedItems(defaults);
+      setStep("plan");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Ошибка построения плана");
+    } finally {
+      setBuildingPlan(false);
+    }
+  };
+
+  const handleCreateRevision = async () => {
+    if (!currentAuditId || !revisionPlan) return;
+    setStep("revising");
+    try {
+      const res = await auditApi.createRevisionRun(
+        currentAuditId,
+        getDocsPayload(),
+        undefined,
+        pptxBase64,
+        Array.from(confirmedItems),
+      );
+      setRevisionResult(res.data || res);
+      setStep("revised");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Ошибка создания версии");
+      setStep("plan");
+    }
+  };
+
+  const handleReaudit = async () => {
+    if (!currentAuditId) return;
+    setStep("reauditing");
+    try {
+      const res = await auditApi.runReaudit(currentAuditId, pptxBase64, getDocsPayload());
+      setReauditResult(res.data?.reaudit || res.reaudit);
+      setStep("revised");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Ошибка повторного аудита");
+      setStep("revised");
+    }
+  };
+
   const summary = auditResult?.audit_summary;
 
   const filteredFindings = (auditResult?.findings || []).filter((f) => {
-    if (filterSeverity !== "all" && f.severity !== filterSeverity) return false;
+    if (filterSev !== "all" && f.severity !== filterSev) return false;
     if (filterSlide !== "all" && String(f.slide_index) !== filterSlide) return false;
     return true;
   });
+  const uniqueSlides = Array.from(new Set((auditResult?.findings || []).map((f) => f.slide_index))).sort((a,b)=>a-b);
 
-  const uniqueSlides = Array.from(
-    new Set((auditResult?.findings || []).map((f) => f.slide_index))
-  ).sort((a, b) => a - b);
-
+  // ---------------------------------------------------------------- //
+  //  Render                                                            //
+  // ---------------------------------------------------------------- //
   return (
     <Layout>
       <div className="max-w-5xl mx-auto px-4 py-8">
@@ -232,126 +308,97 @@ export default function AuditPage() {
           <span className="text-foreground font-medium">Аудит презентации</span>
         </div>
 
-        <div className="flex items-start justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Icon name="ShieldCheck" size={24} className="text-blue-600" />
-              Аудит презентации
-            </h1>
-            <p className="text-muted-foreground text-sm mt-1 max-w-xl">
-              Загрузите готовую PPTX и документы-критерии. AI проверит соответствие,
-              найдёт противоречия и предложит правки.
-            </p>
-          </div>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Icon name="ShieldCheck" size={24} className="text-blue-600" />
+            Аудит презентации
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1 max-w-xl">
+            Загрузите PPTX и документы-критерии. AI проверит соответствие и поможет исправить.
+          </p>
         </div>
 
-        {/* ===== ШАГ 1: Загрузка PPTX ===== */}
+        {error && (
+          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+            {error}
+          </div>
+        )}
+
+        {/* ===== UPLOAD ===== */}
         {step === "upload" && (
           <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center">
             <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <Icon name="FileUp" size={28} className="text-blue-600" />
             </div>
             <h2 className="font-semibold text-lg mb-2">Загрузите презентацию для проверки</h2>
-            <p className="text-muted-foreground text-sm mb-6">Поддерживается формат PPTX</p>
+            <p className="text-muted-foreground text-sm mb-6">Поддерживается PPTX</p>
             <label className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors">
               <Icon name="Upload" size={16} />
-              Выбрать PPTX-файл
+              Выбрать PPTX
               <input type="file" accept=".pptx" className="hidden" onChange={handlePptxSelect} />
             </label>
           </div>
         )}
 
-        {/* ===== ШАГ 2: Настройка документов ===== */}
+        {/* ===== CONFIGURE ===== */}
         {step === "configure" && pptxFile && (
           <div className="space-y-6">
-            {/* Выбранный файл */}
             <div className="flex items-center gap-3 border border-green-200 bg-green-50 rounded-xl px-4 py-3">
               <Icon name="FileCheck" size={18} className="text-green-600" />
               <div className="flex-1">
                 <p className="text-sm font-medium">{pptxFile.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {(pptxFile.size / 1024 / 1024).toFixed(1)} МБ
-                </p>
+                <p className="text-xs text-muted-foreground">{(pptxFile.size/1024/1024).toFixed(1)} МБ</p>
               </div>
-              <button
-                onClick={() => { setPptxFile(null); setStep("upload"); }}
-                className="text-slate-400 hover:text-slate-600"
-              >
+              <button onClick={() => { setPptxFile(null); setStep("upload"); }} className="text-slate-400 hover:text-slate-600">
                 <Icon name="X" size={16} />
               </button>
             </div>
 
-            {/* Документы */}
             <div>
               <h2 className="font-semibold mb-1">Документы для проверки</h2>
-              <p className="text-xs text-muted-foreground mb-4">
-                Назначьте роль каждому документу. Стандарты и критерии имеют высший приоритет.
-              </p>
-
+              <p className="text-xs text-muted-foreground mb-4">Назначьте роль каждому документу.</p>
               {loadingDocs ? (
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}
-                </div>
+                <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-14 bg-slate-100 rounded-xl animate-pulse"/>)}</div>
               ) : projectDocs.length === 0 ? (
-                <div className="text-sm text-muted-foreground border border-slate-200 rounded-xl p-4 text-center">
-                  В проекте нет документов. Загрузите их на странице проекта.
-                </div>
+                <p className="text-sm text-muted-foreground text-center py-4 border border-slate-200 rounded-xl">
+                  В проекте нет документов.
+                </p>
               ) : (
                 <div className="space-y-3">
                   {projectDocs.map((doc) => (
                     <div key={doc.id} className="border border-slate-200 rounded-xl p-4">
-                      <div className="flex items-center gap-3 mb-3">
-                        <Icon name="FileText" size={16} className="text-slate-400 flex-shrink-0" />
+                      <div className="flex items-center gap-2 mb-3">
+                        <Icon name="FileText" size={15} className="text-slate-400 flex-shrink-0" />
                         <span className="text-sm font-medium flex-1 truncate">{doc.name}</span>
                         <span className="text-xs text-slate-400 uppercase">{doc.file_type}</span>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                      <div className="flex flex-wrap gap-1.5 mb-2">
                         {ROLE_OPTIONS.map((opt) => (
-                          <button
-                            key={opt.value}
-                            onClick={() => updateDocRole(doc.id, opt.value)}
+                          <button key={opt.value} onClick={() => setProjectDocs((p) => p.map(d => d.id===doc.id ? {...d,role:opt.value} : d))}
                             title={opt.desc}
-                            className={`text-xs px-2.5 py-1.5 rounded-lg border text-left transition-colors ${
-                              doc.role === opt.value
-                                ? "border-blue-500 bg-blue-50 text-blue-700 font-medium"
-                                : "border-slate-200 text-slate-600 hover:border-slate-400"
-                            }`}
-                          >
+                            className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${doc.role===opt.value ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
                             {opt.label}
                           </button>
                         ))}
                       </div>
-                      <input
-                        type="text"
-                        value={doc.instruction}
-                        onChange={(e) => updateDocInstruction(doc.id, e.target.value)}
-                        placeholder="Доп. инструкция (необязательно)..."
-                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                      />
+                      <input type="text" value={doc.instruction}
+                        onChange={(e) => setProjectDocs((p) => p.map(d => d.id===doc.id ? {...d,instruction:e.target.value} : d))}
+                        placeholder="Доп. инструкция..."
+                        className="w-full text-xs border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"/>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
-                {error}
-              </div>
-            )}
-
             <div className="flex gap-3">
-              <button
-                onClick={() => { setPptxFile(null); setStep("upload"); }}
-                className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm"
-              >
+              <button onClick={() => { setPptxFile(null); setStep("upload"); }}
+                className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm">
                 ← Назад
               </button>
-              <button
-                onClick={handleRunAudit}
-                disabled={running || projectDocs.filter((d) => d.extracted_text).length === 0}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
-              >
+              <button onClick={handleRunAudit}
+                disabled={running || projectDocs.filter(d=>d.extracted_text).length === 0}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-medium">
                 <Icon name="ShieldCheck" size={16} />
                 Запустить проверку
               </button>
@@ -359,59 +406,52 @@ export default function AuditPage() {
           </div>
         )}
 
-        {/* ===== ШАГ 3: Выполнение ===== */}
-        {step === "running" && (
+        {/* ===== RUNNING / REVISING / REAUDITING ===== */}
+        {(step === "running" || step === "revising" || step === "reauditing") && (
           <div className="text-center py-20">
-            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-6" />
-            <h2 className="font-semibold text-lg mb-2">AI анализирует презентацию</h2>
-            <p className="text-muted-foreground text-sm">
-              Сравниваем слайды с документами, ищем противоречия и несоответствия...
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">Обычно занимает 30–60 секунд</p>
+            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-6"/>
+            <h2 className="font-semibold text-lg mb-2">
+              {step === "running"    ? "AI анализирует презентацию..." :
+               step === "revising"  ? "Создаю исправленную версию..." :
+               "Повторная проверка..."}
+            </h2>
+            <p className="text-muted-foreground text-sm">Обычно 30–90 секунд</p>
           </div>
         )}
 
-        {/* ===== ШАГ 4: Результат ===== */}
+        {/* ===== RESULT ===== */}
         {step === "result" && auditResult && summary && (
           <div className="space-y-6">
-            {/* Summary header */}
+            {/* Summary */}
             <div className="border border-slate-200 rounded-2xl p-5 bg-card">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                  <h2 className="font-semibold text-lg mb-1">Результат аудита</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {summary.total_slides} слайдов · {projectDocs.filter((d) => d.extracted_text).length} документов
-                  </p>
+                  <h2 className="font-semibold text-lg">Результат аудита</h2>
+                  <p className="text-sm text-muted-foreground">{summary.total_slides} слайдов · {getDocsPayload().length} документов</p>
                 </div>
                 <div className="flex items-center gap-3">
                   {summary.compliance_score !== null && (
-                    <div className={`text-center px-4 py-2 rounded-xl ${
-                      summary.compliance_score >= 80 ? "bg-green-50 text-green-700" :
-                      summary.compliance_score >= 60 ? "bg-amber-50 text-amber-700" :
-                      "bg-red-50 text-red-700"
-                    }`}>
+                    <div className={`text-center px-4 py-2 rounded-xl ${summary.compliance_score >= 80 ? "bg-green-50 text-green-700" : summary.compliance_score >= 60 ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>
                       <p className="text-2xl font-bold">{summary.compliance_score}%</p>
                       <p className="text-xs font-medium">Соответствие</p>
                     </div>
                   )}
-                  <button
-                    onClick={() => { setPptxFile(null); setAuditResult(null); setStep("upload"); }}
-                    className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm"
-                  >
+                  <button onClick={() => { setPptxFile(null); setAuditResult(null); setStep("upload"); }}
+                    className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm">
                     ← Новая проверка
                   </button>
                 </div>
               </div>
 
-              {/* Счётчики */}
+              {/* Counters */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                 {[
-                  { label: "Критично", count: summary.critical_count, color: "text-red-700 bg-red-50" },
-                  { label: "Высокий", count: summary.high_count,     color: "text-orange-700 bg-orange-50" },
-                  { label: "Средний", count: summary.medium_count,   color: "text-amber-700 bg-amber-50" },
-                  { label: "Низкий",  count: summary.low_count,      color: "text-slate-600 bg-slate-100" },
+                  { label: "Критично", count: summary.critical_count, cls: "text-red-700 bg-red-50" },
+                  { label: "Высокий",  count: summary.high_count,     cls: "text-orange-700 bg-orange-50" },
+                  { label: "Средний",  count: summary.medium_count,   cls: "text-amber-700 bg-amber-50" },
+                  { label: "Низкий",   count: summary.low_count,      cls: "text-slate-600 bg-slate-100" },
                 ].map((s) => (
-                  <div key={s.label} className={`rounded-xl p-3 text-center ${s.color}`}>
+                  <div key={s.label} className={`rounded-xl p-3 text-center ${s.cls}`}>
                     <p className="text-xl font-bold">{s.count}</p>
                     <p className="text-xs">{s.label}</p>
                   </div>
@@ -421,227 +461,552 @@ export default function AuditPage() {
               {summary.key_risks && summary.key_risks.length > 0 && (
                 <div className="mt-4 border-t border-slate-100 pt-4">
                   <p className="text-xs font-medium text-slate-700 mb-2">Ключевые риски:</p>
-                  <ul className="space-y-1">
-                    {summary.key_risks.map((r, i) => (
-                      <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5">
-                        <span className="text-red-500 mt-0.5">▸</span>{r}
-                      </li>
-                    ))}
-                  </ul>
+                  <ul className="space-y-1">{summary.key_risks.map((r,i) => (
+                    <li key={i} className="text-xs text-slate-600 flex gap-1.5"><span className="text-red-500">▸</span>{r}</li>
+                  ))}</ul>
                 </div>
               )}
             </div>
 
-            {/* Вкладки */}
+            {/* Tabs */}
             <div className="flex gap-1 border border-slate-200 rounded-xl p-1 bg-slate-50 overflow-x-auto">
-              {(["findings", "slides", "compliance", "changes"] as const).map((tab) => {
-                const labels = { findings: "Замечания", slides: "По слайдам", compliance: "Критерии", changes: "Правки" };
-                const counts = {
-                  findings: auditResult.findings.length,
-                  slides: auditResult.slide_reports.length,
-                  compliance: auditResult.compliance_matrix.length,
-                  changes: auditResult.suggested_changes.length,
-                };
+              {(["findings","slides","compliance","changes"] as const).map((tab) => {
+                const labels = { findings:"Замечания", slides:"По слайдам", compliance:"Критерии", changes:"Правки" };
+                const counts = { findings:auditResult.findings.length, slides:auditResult.slide_reports.length, compliance:auditResult.compliance_matrix.length, changes:auditResult.suggested_changes.length };
                 return (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
-                      activeTab === tab ? "bg-white shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
+                  <button key={tab} onClick={() => setActiveTab(tab)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab===tab ? "bg-white shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                     {labels[tab]}
-                    {counts[tab] > 0 && (
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                        activeTab === tab ? "bg-slate-100" : "bg-slate-200"
-                      }`}>
-                        {counts[tab]}
-                      </span>
-                    )}
+                    {counts[tab] > 0 && <span className={`text-xs px-1.5 py-0.5 rounded-full ${activeTab===tab?"bg-slate-100":"bg-slate-200"}`}>{counts[tab]}</span>}
                   </button>
                 );
               })}
             </div>
 
-            {/* ─── Findings ─── */}
+            {/* Findings */}
             {activeTab === "findings" && (
               <div className="space-y-4">
-                {/* Фильтры */}
                 <div className="flex flex-wrap gap-2">
-                  <select
-                    value={filterSeverity}
-                    onChange={(e) => setFilterSeverity(e.target.value)}
-                    className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white"
-                  >
+                  <select value={filterSev} onChange={(e) => setFilterSev(e.target.value)}
+                    className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
                     <option value="all">Все уровни</option>
                     <option value="critical">🔴 Критично</option>
                     <option value="high">🟠 Высокий</option>
                     <option value="medium">🟡 Средний</option>
                     <option value="low">⚪ Низкий</option>
                   </select>
-                  <select
-                    value={filterSlide}
-                    onChange={(e) => setFilterSlide(e.target.value)}
-                    className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white"
-                  >
+                  <select value={filterSlide} onChange={(e) => setFilterSlide(e.target.value)}
+                    className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
                     <option value="all">Все слайды</option>
-                    {uniqueSlides.map((si) => (
-                      <option key={si} value={String(si)}>Слайд {si}</option>
-                    ))}
+                    {uniqueSlides.map((si) => <option key={si} value={String(si)}>Слайд {si}</option>)}
                   </select>
                 </div>
-
                 {filteredFindings.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">Замечаний нет</p>
-                ) : (
-                  filteredFindings.map((f) => (
-                    <div key={f.issue_id} className={`border rounded-xl p-4 space-y-3 ${SEVERITY_COLORS[f.severity] || "border-slate-200"}`}>
-                      <div className="flex items-start gap-3 flex-wrap">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${SEVERITY_COLORS[f.severity]}`}>
-                          {SEVERITY_LABELS[f.severity] || f.severity}
-                        </span>
-                        <span className="text-xs text-slate-500">Слайд {f.slide_index} · {f.slide_title}</span>
-                        <span className="text-xs text-slate-400 font-mono">{f.issue_type}</span>
-                        {f.confidence === "low" && (
-                          <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ Нужна проверка</span>
+                ) : filteredFindings.map((f) => (
+                  <div key={f.issue_id} className={`border rounded-xl p-4 space-y-3 ${SEV_COLOR[f.severity]||"border-slate-200"}`}>
+                    <div className="flex items-start gap-3 flex-wrap">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${SEV_COLOR[f.severity]}`}>{SEV_LABEL[f.severity]||f.severity}</span>
+                      <span className="text-xs text-slate-500">Слайд {f.slide_index} · {f.slide_title}</span>
+                      <span className="text-xs text-slate-400 font-mono">{f.issue_type}</span>
+                      {f.confidence==="low" && <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ Нужна проверка</span>}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm">{f.short_title}</p>
+                      <p className="text-sm text-slate-700 mt-1">{f.explanation}</p>
+                    </div>
+                    {(f.evidence_from_presentation || f.evidence_from_source_docs) && (
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        {f.evidence_from_presentation && (
+                          <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
+                            <p className="text-xs font-medium text-slate-500 mb-1">📊 В презентации:</p>
+                            <p className="text-xs italic text-slate-700">«{f.evidence_from_presentation}»</p>
+                          </div>
+                        )}
+                        {f.evidence_from_source_docs && (
+                          <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
+                            <p className="text-xs font-medium text-slate-500 mb-1">📄 {f.related_document_name||"Документ"}:</p>
+                            <p className="text-xs italic text-slate-700">«{f.evidence_from_source_docs}»</p>
+                          </div>
                         )}
                       </div>
-                      <div>
-                        <p className="font-semibold text-sm">{f.short_title}</p>
-                        <p className="text-sm text-slate-700 mt-1">{f.explanation}</p>
+                    )}
+                    {f.suggested_fix && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-green-700 mb-1">💡 Рекомендация:</p>
+                        <p className="text-xs text-green-800">{f.suggested_fix}</p>
+                        {f.rationale && <p className="text-xs text-green-600 mt-1 italic">{f.rationale}</p>}
                       </div>
-                      {(f.evidence_from_presentation || f.evidence_from_source_docs) && (
-                        <div className="grid sm:grid-cols-2 gap-3">
-                          {f.evidence_from_presentation && (
-                            <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
-                              <p className="text-xs font-medium text-slate-500 mb-1">📊 В презентации:</p>
-                              <p className="text-xs italic text-slate-700">«{f.evidence_from_presentation}»</p>
-                            </div>
-                          )}
-                          {f.evidence_from_source_docs && (
-                            <div className="bg-white/60 rounded-lg p-3 border border-slate-200">
-                              <p className="text-xs font-medium text-slate-500 mb-1">📄 В документе{f.related_document_name ? ` (${f.related_document_name})` : ""}:</p>
-                              <p className="text-xs italic text-slate-700">«{f.evidence_from_source_docs}»</p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {f.suggested_fix && (
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                          <p className="text-xs font-medium text-green-700 mb-1">💡 Рекомендация:</p>
-                          <p className="text-xs text-green-800">{f.suggested_fix}</p>
-                          {f.rationale && (
-                            <p className="text-xs text-green-600 mt-1 italic">{f.rationale}</p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
+                    )}
+                  </div>
+                ))}
               </div>
             )}
 
-            {/* ─── Slides ─── */}
+            {/* Slides */}
             {activeTab === "slides" && (
               <div className="space-y-2">
-                {auditResult.slide_reports.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">Нет данных по слайдам</p>
-                ) : (
-                  auditResult.slide_reports.map((sr) => (
+                {auditResult.slide_reports.length === 0
+                  ? <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
+                  : auditResult.slide_reports.map((sr) => (
                     <div key={sr.slide_index} className="border border-slate-200 rounded-xl p-4 flex items-start gap-4">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                        {sr.slide_index}
-                      </div>
+                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-xs font-bold flex-shrink-0">{sr.slide_index}</div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <p className="text-sm font-medium">{sr.slide_title}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${SLIDE_STATUS_COLORS[sr.status] || "bg-slate-100 text-slate-600"}`}>
-                            {sr.status === "ok" ? "✅ OK" : sr.status === "critical" ? "🔴 Критично" : "⚠️ Внимание"}
-                            {sr.issue_count > 0 && ` · ${sr.issue_count} замеч.`}
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${sr.status==="ok"?"bg-green-50 text-green-700":sr.status==="critical"?"bg-red-50 text-red-700":"bg-amber-50 text-amber-700"}`}>
+                            {sr.status==="ok"?"✅ OK":sr.status==="critical"?"🔴 Критично":"⚠️ Внимание"}
+                            {sr.issue_count > 0 && ` · ${sr.issue_count}`}
                           </span>
                         </div>
                         <p className="text-xs text-slate-600">{sr.summary}</p>
                       </div>
                     </div>
-                  ))
-                )}
+                  ))}
               </div>
             )}
 
-            {/* ─── Compliance ─── */}
+            {/* Compliance */}
             {activeTab === "compliance" && (
               <div className="space-y-2">
-                {auditResult.compliance_matrix.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
-                ) : (
-                  auditResult.compliance_matrix.map((c, i) => (
+                {auditResult.compliance_matrix.length === 0
+                  ? <p className="text-sm text-muted-foreground text-center py-8">Нет данных</p>
+                  : auditResult.compliance_matrix.map((c, i) => (
                     <div key={i} className="border border-slate-200 rounded-xl p-4">
                       <div className="flex items-start gap-3">
-                        <span className={`text-xs font-semibold whitespace-nowrap ${COMPLIANCE_COLORS[c.status]}`}>
-                          {COMPLIANCE_LABELS[c.status] || c.status}
-                        </span>
+                        <span className={`text-xs font-semibold whitespace-nowrap ${COMPLIANCE_COLOR[c.status]}`}>{COMPLIANCE_LABEL[c.status]||c.status}</span>
                         <div>
                           <p className="text-sm font-medium">{c.criterion}</p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {c.source}
-                            {c.slide_index ? ` · Слайд ${c.slide_index}` : ""}
-                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">{c.source}{c.slide_index ? ` · Слайд ${c.slide_index}` : ""}</p>
                           {c.comment && <p className="text-xs text-slate-600 mt-1">{c.comment}</p>}
                         </div>
                       </div>
                     </div>
-                  ))
-                )}
+                  ))}
               </div>
             )}
 
-            {/* ─── Changes ─── */}
+            {/* Changes */}
             {activeTab === "changes" && (
               <div className="space-y-4">
-                {auditResult.suggested_changes.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">Нет предложений по правкам</p>
-                ) : (
-                  auditResult.suggested_changes.map((ch, i) => (
+                {auditResult.suggested_changes.length === 0
+                  ? <p className="text-sm text-muted-foreground text-center py-8">Нет предложений</p>
+                  : auditResult.suggested_changes.map((ch, i) => (
                     <div key={i} className="border border-slate-200 rounded-xl p-4 space-y-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                          {ACTION_LABELS[ch.action] || ch.action}
-                        </span>
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{ch.action}</span>
                         <span className="text-xs text-slate-500">Слайд {ch.slide_index} · {ch.slide_title}</span>
                       </div>
-                      {ch.current_text && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                          <p className="text-xs text-red-600 font-medium mb-1">Сейчас:</p>
-                          <p className="text-xs text-red-800 italic">«{ch.current_text}»</p>
-                        </div>
-                      )}
-                      {ch.proposed_text && (
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                          <p className="text-xs text-green-600 font-medium mb-1">Предлагаем:</p>
-                          <p className="text-xs text-green-800">«{ch.proposed_text}»</p>
-                        </div>
-                      )}
-                      {ch.rationale && (
-                        <p className="text-xs text-slate-500 italic">{ch.rationale}</p>
-                      )}
+                      {ch.current_text && <div className="bg-red-50 border border-red-200 rounded-lg p-3"><p className="text-xs text-red-600 font-medium mb-1">Сейчас:</p><p className="text-xs italic text-red-800">«{ch.current_text}»</p></div>}
+                      {ch.proposed_text && <div className="bg-green-50 border border-green-200 rounded-lg p-3"><p className="text-xs text-green-600 font-medium mb-1">Предлагаем:</p><p className="text-xs text-green-800">«{ch.proposed_text}»</p></div>}
+                      {ch.rationale && <p className="text-xs text-slate-500 italic">{ch.rationale}</p>}
                     </div>
-                  ))
-                )}
+                  ))}
               </div>
             )}
 
-            {/* Warnings */}
             {auditResult.warnings && auditResult.warnings.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <p className="text-xs font-medium text-amber-700 mb-2">⚠️ Предупреждения системы:</p>
-                {auditResult.warnings.map((w, i) => (
-                  <p key={i} className="text-xs text-amber-600">• {w}</p>
-                ))}
+                <p className="text-xs font-medium text-amber-700 mb-2">⚠️ Предупреждения:</p>
+                {auditResult.warnings.map((w,i) => <p key={i} className="text-xs text-amber-600">• {w}</p>)}
               </div>
+            )}
+
+            {/* ===== REVISION LAUNCHER ===== */}
+            {(summary.critical_count > 0 || summary.high_count > 0 || summary.medium_count > 0) && (
+              <RevisionLauncher
+                options={revisionOptions}
+                onOptionsChange={setRevisionOptions}
+                onBuildPlan={handleBuildPlan}
+                building={buildingPlan}
+                findingCounts={{ critical: summary.critical_count, high: summary.high_count, medium: summary.medium_count }}
+              />
             )}
           </div>
         )}
+
+        {/* ===== PLAN ===== */}
+        {step === "plan" && revisionPlan && (
+          <RevisionPlanView
+            plan={revisionPlan}
+            confirmedItems={confirmedItems}
+            onToggleItem={(id) => setConfirmedItems((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) { next.delete(id); } else { next.add(id); }
+              return next;
+            })}
+            onConfirmAll={() => setConfirmedItems(new Set(revisionPlan.revision_plan.map(p => p.plan_item_id)))}
+            onBack={() => setStep("result")}
+            onCreate={handleCreateRevision}
+          />
+        )}
+
+        {/* ===== REVISED ===== */}
+        {step === "revised" && revisionResult && (
+          <RevisedView
+            result={revisionResult}
+            reaudit={reauditResult}
+            onReaudit={handleReaudit}
+            onNewAudit={() => { setPptxFile(null); setAuditResult(null); setRevisionResult(null); setRevisionPlan(null); setReauditResult(null); setStep("upload"); }}
+          />
+        )}
       </div>
     </Layout>
+  );
+}
+
+// ================================================================ //
+//  RevisionLauncher sub-component                                   //
+// ================================================================ //
+
+function RevisionLauncher({ options, onOptionsChange, onBuildPlan, building, findingCounts }:{
+  options: Record<string, unknown>;
+  onOptionsChange: (o: Record<string, unknown>) => void;
+  onBuildPlan: () => void;
+  building: boolean;
+  findingCounts: { critical: number; high: number; medium: number };
+}) {
+  const totalApplicable = findingCounts.critical + findingCounts.high;
+  const sevFilter = options.severity_filter as string[] || ["critical","high"];
+
+  const toggleSev = (sev: string) => {
+    const next = sevFilter.includes(sev) ? sevFilter.filter(s=>s!==sev) : [...sevFilter, sev];
+    onOptionsChange({ ...options, severity_filter: next });
+  };
+
+  return (
+    <div className="border-2 border-blue-200 bg-blue-50/50 rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Icon name="Wand2" size={18} className="text-blue-600" />
+        <h3 className="font-semibold text-blue-900">Создать исправленную версию</h3>
+      </div>
+
+      <div className="space-y-4">
+        {/* Режим */}
+        <div>
+          <p className="text-xs font-medium text-slate-600 mb-2">Режим исправления</p>
+          <div className="grid sm:grid-cols-3 gap-2">
+            {[
+              { val: "fix_text", label: "Только текст", desc: "Переписываем формулировки, структура не меняется" },
+              { val: "fix_and_add", label: "Текст + блоки", desc: "Можно добавить недостающие тезисы / разделы" },
+              { val: "full_revision", label: "Полная редакция", desc: "Разрешена реструктуризация по findings" },
+            ].map((m) => (
+              <button key={m.val} onClick={() => onOptionsChange({ ...options, revision_mode: m.val })}
+                title={m.desc}
+                className={`text-xs px-3 py-2 rounded-lg border text-left transition-colors ${options.revision_mode===m.val ? "border-blue-500 bg-white text-blue-700 font-medium shadow-sm" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}>
+                {m.label}
+                <span className="block text-slate-400 font-normal mt-0.5 text-[10px] leading-tight">{m.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Фильтр severity */}
+        <div>
+          <p className="text-xs font-medium text-slate-600 mb-2">Применять замечания</p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { val: "critical", label: `🔴 Критично (${findingCounts.critical})` },
+              { val: "high",     label: `🟠 Высокий (${findingCounts.high})` },
+              { val: "medium",   label: `🟡 Средний (${findingCounts.medium})` },
+            ].map((s) => (
+              <button key={s.val} onClick={() => toggleSev(s.val)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${sevFilter.includes(s.val) ? "border-blue-500 bg-blue-100 text-blue-700 font-medium" : "border-slate-200 bg-white text-slate-500"}`}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Переключатели */}
+        <div className="grid sm:grid-cols-2 gap-3">
+          {[
+            { key: "exclude_low_confidence", label: "Исключить замечания с низкой уверенностью AI" },
+            { key: "keep_slide_count",        label: "Сохранять число слайдов" },
+            { key: "allow_add_slides",        label: "Разрешить добавление новых слайдов" },
+            { key: "keep_visuals",            label: "Сохранять текущие визуалы" },
+          ].map((opt) => (
+            <label key={opt.key} className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={Boolean(options[opt.key])}
+                onChange={(e) => onOptionsChange({ ...options, [opt.key]: e.target.checked })}
+                className="w-4 h-4 rounded accent-blue-600"/>
+              <span className="text-xs text-slate-700">{opt.label}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-blue-200">
+          <p className="text-xs text-blue-700">
+            Будет применено: <b>{sevFilter.includes("critical")?findingCounts.critical:0} + {sevFilter.includes("high")?findingCounts.high:0}</b> замечаний
+          </p>
+          <button onClick={onBuildPlan} disabled={building}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
+            <Icon name={building ? "Loader" : "ClipboardList"} size={15} className={building ? "animate-spin" : ""} />
+            {building ? "Строю план..." : "Сформировать план →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================ //
+//  RevisionPlanView sub-component                                   //
+// ================================================================ //
+
+function RevisionPlanView({ plan, confirmedItems, onToggleItem, onConfirmAll, onBack, onCreate }: {
+  plan: RevisionPlan;
+  confirmedItems: Set<string>;
+  onToggleItem: (id: string) => void;
+  onConfirmAll: () => void;
+  onBack: () => void;
+  onCreate: () => void;
+}) {
+  const rs = plan.revision_summary;
+  const items = plan.revision_plan || [];
+  const confirmed = items.filter(p => confirmedItems.has(p.plan_item_id)).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm">← Назад</button>
+        <div>
+          <h2 className="font-semibold text-lg">План исправлений</h2>
+          <p className="text-sm text-muted-foreground">{confirmed} из {items.length} изменений выбрано</p>
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div className="border border-slate-200 rounded-2xl p-4 bg-card space-y-3">
+        <div className="flex items-start gap-4 flex-wrap">
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Ожидаемый результат</p>
+            <p className="text-sm text-slate-600 mt-1">{rs?.expected_improvement || "—"}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-bold text-blue-700">{rs?.total_changes || items.length}</p>
+            <p className="text-xs text-slate-500">изменений</p>
+          </div>
+        </div>
+        {rs?.manual_review_required && rs.manual_review_required.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-xs text-amber-700 font-medium">⚠️ Требуют ручной проверки: {rs.manual_review_required.join(", ")}</p>
+          </div>
+        )}
+
+        {/* Применяемые / пропущенные findings */}
+        <div className="grid sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+          <div>
+            <p className="text-xs font-medium text-green-700 mb-1">✅ Будут применены ({plan.applicable_findings?.length||0})</p>
+            {(plan.applicable_findings||[]).slice(0,5).map(f => (
+              <p key={f.issue_id} className="text-xs text-slate-600">• [{f.issue_id}] {f.short_title}</p>
+            ))}
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500 mb-1">⏭ Пропущено ({plan.skipped_findings?.length||0})</p>
+            {(plan.skipped_findings||[]).slice(0,5).map(f => (
+              <p key={f.issue_id} className="text-xs text-slate-400">• [{f.issue_id}] {f.reason}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Plan items */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Изменения по слайдам</p>
+          <button onClick={onConfirmAll} className="text-xs text-blue-600 hover:text-blue-800">Выбрать все</button>
+        </div>
+        {items.map((p) => {
+          const isOn = confirmedItems.has(p.plan_item_id);
+          const needsReview = p.requires_user_review || p.confidence === "low";
+          return (
+            <div key={p.plan_item_id} onClick={() => onToggleItem(p.plan_item_id)}
+              className={`border rounded-xl p-4 cursor-pointer transition-colors ${isOn ? "border-blue-400 bg-blue-50/40" : "border-slate-200 hover:border-slate-300"}`}>
+              <div className="flex items-start gap-3">
+                <div className={`w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-colors ${isOn ? "border-blue-600 bg-blue-600" : "border-slate-300"}`}>
+                  {isOn && <Icon name="Check" size={12} className="text-white" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-xs font-medium text-slate-400">{p.plan_item_id}</span>
+                    <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                      {CHANGE_TYPE_LABEL[p.change_type] || p.change_type}
+                    </span>
+                    <span className="text-xs text-slate-500">Слайд {p.slide_index} · {p.slide_title}</span>
+                    {needsReview && <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ Ручная проверка</span>}
+                    {p.will_affect_visual && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${p.visual_action==="keep" ? "text-green-700 bg-green-50" : "text-orange-700 bg-orange-50"}`}>
+                        {VISUAL_ACTION_LABEL[p.visual_action] || p.visual_action}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600">{p.problem_summary}</p>
+                  {p.proposed_change && (
+                    <div className="mt-2 bg-white border border-slate-200 rounded-lg p-2">
+                      <p className="text-xs text-slate-500 mb-0.5">Предлагаемое изменение:</p>
+                      <p className="text-xs text-slate-800">{p.proposed_change}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Action */}
+      <div className="flex items-center gap-3 pt-4 border-t border-slate-200">
+        <button onClick={onBack} className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm">← Назад</button>
+        <button onClick={onCreate} disabled={confirmed === 0}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-medium">
+          <Icon name="Sparkles" size={15} />
+          Создать исправленную версию ({confirmed} изм.)
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================ //
+//  RevisedView sub-component                                        //
+// ================================================================ //
+
+function RevisedView({ result, reaudit, onReaudit, onNewAudit }: {
+  result: RevisionResult;
+  reaudit: Record<string, unknown> | null;
+  onReaudit: () => void;
+  onNewAudit: () => void;
+}) {
+  const meta = result.revision_meta;
+  const ra = reaudit as { score_before?: number; score_after?: number; score_delta?: number; issues_before?: number; issues_after?: number } | null;
+
+  return (
+    <div className="space-y-6">
+      <div className="border border-green-200 bg-green-50 rounded-2xl p-5">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+            <Icon name="CheckCircle" size={20} className="text-green-600" />
+          </div>
+          <div>
+            <h2 className="font-semibold">Исправленная версия создана</h2>
+            {result.run_id && <p className="text-xs text-slate-500">Run #{result.run_id} · v{result.version}</p>}
+          </div>
+        </div>
+
+        {meta && (
+          <div className="grid sm:grid-cols-3 gap-3 mt-4">
+            <div className="bg-white rounded-xl p-3 border border-green-200">
+              <p className="text-xl font-bold text-green-700">{meta.applied_plan_item_ids?.length || 0}</p>
+              <p className="text-xs text-slate-500">Изменений применено</p>
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-green-200">
+              <p className="text-xl font-bold text-slate-500">{meta.skipped_plan_item_ids?.length || 0}</p>
+              <p className="text-xs text-slate-500">Пропущено</p>
+            </div>
+            <div className="bg-white rounded-xl p-3 border border-green-200">
+              <p className="text-xl font-bold text-blue-700">{meta.applied_finding_ids?.length || 0}</p>
+              <p className="text-xs text-slate-500">Findings закрыто</p>
+            </div>
+          </div>
+        )}
+
+        {/* Визуальные изменения */}
+        {meta?.visual_changes && meta.visual_changes.length > 0 && (
+          <div className="mt-4 border-t border-green-200 pt-4">
+            <p className="text-xs font-medium text-slate-700 mb-2">Статус визуалов:</p>
+            <div className="space-y-1.5">
+              {meta.visual_changes.map((vc, i) => (
+                <div key={i} className={`flex items-center gap-2 text-xs rounded-lg px-3 py-1.5 ${vc.visual_action === "keep" || vc.visual_action === "preserve_user_override" ? "bg-green-100 text-green-800" : "bg-orange-100 text-orange-800"}`}>
+                  <span>Слайд {vc.slide_index}:</span>
+                  <span className="font-medium">{VISUAL_ACTION_LABEL[vc.visual_action] || vc.visual_action}</span>
+                  {vc.reason && <span className="text-slate-500">— {vc.reason}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Предпросмотр текста */}
+      {result.content && (
+        <div className="border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="bg-slate-50 border-b px-4 py-2 flex items-center gap-2">
+            <Icon name="FileText" size={14} className="text-slate-500" />
+            <span className="text-sm font-medium">Содержимое исправленной версии</span>
+          </div>
+          <div className="p-4 max-h-64 overflow-y-auto">
+            <pre className="text-xs text-slate-700 whitespace-pre-wrap font-sans">{result.content.slice(0, 2000)}{result.content.length > 2000 ? "\n..." : ""}</pre>
+          </div>
+        </div>
+      )}
+
+      {/* Re-audit результат */}
+      {ra && (
+        <div className="border border-blue-200 bg-blue-50/40 rounded-2xl p-5">
+          <h3 className="font-semibold mb-4 flex items-center gap-2">
+            <Icon name="BarChart3" size={16} className="text-blue-600" />
+            Повторный аудит: было → стало
+          </h3>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl p-4 border border-blue-200">
+              <p className="text-xs text-slate-500 mb-2">Соответствие</p>
+              <div className="flex items-center gap-3">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-red-600">{ra.score_before ?? "—"}%</p>
+                  <p className="text-xs text-slate-400">До</p>
+                </div>
+                <Icon name="ArrowRight" size={16} className="text-slate-400" />
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-green-600">{ra.score_after ?? "—"}%</p>
+                  <p className="text-xs text-slate-400">После</p>
+                </div>
+                {ra.score_delta !== null && ra.score_delta !== undefined && (
+                  <div className={`ml-2 text-sm font-bold ${Number(ra.score_delta) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {Number(ra.score_delta) >= 0 ? "+" : ""}{ra.score_delta}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="bg-white rounded-xl p-4 border border-blue-200">
+              <p className="text-xs text-slate-500 mb-2">Замечания</p>
+              <div className="flex items-center gap-3">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-red-600">{ra.issues_before ?? "—"}</p>
+                  <p className="text-xs text-slate-400">До</p>
+                </div>
+                <Icon name="ArrowRight" size={16} className="text-slate-400" />
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-green-600">{ra.issues_after ?? "—"}</p>
+                  <p className="text-xs text-slate-400">После</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex flex-wrap gap-3">
+        {!reaudit && (
+          <button onClick={onReaudit}
+            className="flex items-center gap-2 border border-blue-400 text-blue-700 hover:bg-blue-50 px-5 py-2.5 rounded-xl text-sm font-medium">
+            <Icon name="RotateCcw" size={15} />
+            Повторный аудит (проверить улучшение)
+          </button>
+        )}
+        {result.task_id && (
+          <Link to={`/cabinet/project/${0}/task/${result.task_id}`}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
+            <Icon name="ExternalLink" size={15} />
+            Открыть задание с результатом
+          </Link>
+        )}
+        <button onClick={onNewAudit}
+          className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm">
+          ← Новая проверка
+        </button>
+      </div>
+    </div>
   );
 }
