@@ -154,6 +154,7 @@ def call_yandex_gpt(messages: list) -> str:
         return "[AI недоступен: добавьте YANDEX_GPT_API_KEY и YANDEX_FOLDER_ID в настройках проекта.]"
 
     import urllib.request
+    import urllib.error
 
     # Конвертируем формат сообщений в YandexGPT
     yandex_messages = []
@@ -1053,6 +1054,181 @@ def handler(event: dict, context) -> dict:
                 # pptx_shapes — при экспорте отрисуется, ставим ready
                 target["generation_status"] = "pending_render"
                 target["warnings"] = []
+
+            rj["visual_plan"] = vplan
+            cur.execute(
+                f"UPDATE {schema}.generation_runs SET result_json = %s WHERE id = %s",
+                (json.dumps(rj, ensure_ascii=False), run_id),
+            )
+            conn.commit()
+            return json_response({"ok": True, "visual": target}, origin=origin)
+
+        # ============================================================
+        # action=visual.get_upload_url — presigned PUT для user-override
+        # ============================================================
+        if body.get("action") == "visual.get_upload_url":
+            run_id = int(body.get("run_id"))
+            slide_index = int(body.get("slide_index", 0))
+            filename = (body.get("filename") or "override.png").strip()
+            mime = body.get("mime", "image/png")
+
+            cur.execute(
+                f"""SELECT gr.result_json, t.project_id
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
+                    WHERE gr.id = %s""",
+                (run_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Run не найден"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (row[1], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            import re as _re2
+            safe = _re2.sub(r"[^\w.\-]", "_", filename)[:80]
+            s3_key = f"visuals/override/{user['id']}/{run_id}_slide{slide_index}_{safe}"
+
+            import boto3 as _b3
+            s3c = _b3.client(
+                "s3",
+                endpoint_url="https://bucket.poehali.dev",
+                aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            )
+            presigned = s3c.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": "files", "Key": s3_key, "ContentType": mime},
+                ExpiresIn=600,
+            )
+            return json_response({"upload_url": presigned, "s3_key": s3_key}, origin=origin)
+
+        # ============================================================
+        # action=visual.confirm_override — патчим visual_plan после загрузки
+        # ============================================================
+        if body.get("action") == "visual.confirm_override":
+            run_id = int(body.get("run_id"))
+            slide_index = int(body.get("slide_index", 0))
+            s3_key = body.get("s3_key", "")
+            mime = body.get("mime", "image/png")
+            filename = body.get("filename", "")
+
+            cur.execute(
+                f"""SELECT gr.result_json, t.project_id
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
+                    WHERE gr.id = %s""",
+                (run_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Run не найден"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (row[1], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            rj = {}
+            try:
+                rj = json.loads(row[0]) if row[0] else {}
+            except Exception:
+                pass
+
+            vplan = rj.get("visual_plan") or []
+            target = None
+            for vp in vplan:
+                if int(vp.get("slide_index", -1)) == slide_index:
+                    target = vp
+                    break
+
+            if not target:
+                return json_response({"error": "Визуал не найден"}, 404, origin=origin)
+
+            aws_key = os.environ.get("AWS_ACCESS_KEY_ID", "")
+            cdn_url = f"https://cdn.poehali.dev/projects/{aws_key}/bucket/{s3_key}"
+
+            # Сохраняем оригинальный AI-asset (если ещё не сохранили)
+            if not target.get("ai_asset_s3_key") and target.get("asset_s3_key"):
+                target["ai_asset_s3_key"] = target["asset_s3_key"]
+                target["ai_asset_url"] = target.get("asset_url")
+
+            target["user_override_s3_key"] = s3_key
+            target["user_override_url"] = cdn_url
+            target["user_override_mime"] = mime
+            target["user_override_filename"] = filename
+            target["active_asset_kind"] = "user_uploaded"
+            target["active_asset_s3_key"] = s3_key
+            target["active_asset_url"] = cdn_url
+            target["generation_status"] = "user_override"
+            target["render_mode"] = "user_image"    # при экспорте — вставить картинку
+            target["can_restore_ai"] = bool(target.get("ai_asset_s3_key") or target.get("asset_s3_key"))
+
+            rj["visual_plan"] = vplan
+            cur.execute(
+                f"UPDATE {schema}.generation_runs SET result_json = %s WHERE id = %s",
+                (json.dumps(rj, ensure_ascii=False), run_id),
+            )
+            conn.commit()
+            return json_response({"ok": True, "visual": target}, origin=origin)
+
+        # ============================================================
+        # action=visual.restore_ai — откат к AI-версии
+        # ============================================================
+        if body.get("action") == "visual.restore_ai":
+            run_id = int(body.get("run_id"))
+            slide_index = int(body.get("slide_index", 0))
+
+            cur.execute(
+                f"""SELECT gr.result_json, t.project_id
+                    FROM {schema}.generation_runs gr
+                    JOIN {schema}.tasks t ON t.id = gr.task_id
+                    WHERE gr.id = %s""",
+                (run_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return json_response({"error": "Run не найден"}, 404, origin=origin)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (row[1], user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            rj = {}
+            try:
+                rj = json.loads(row[0]) if row[0] else {}
+            except Exception:
+                pass
+
+            vplan = rj.get("visual_plan") or []
+            target = None
+            for vp in vplan:
+                if int(vp.get("slide_index", -1)) == slide_index:
+                    target = vp
+                    break
+
+            if not target:
+                return json_response({"error": "Визуал не найден"}, 404, origin=origin)
+
+            # Восстанавливаем AI render_mode
+            ai_s3 = target.get("ai_asset_s3_key") or target.get("asset_s3_key")
+            ai_url = target.get("ai_asset_url") or target.get("asset_url")
+            original_render_mode = "pptx_shapes" if target.get("visual_type") not in ("image",) else "ai_image"
+
+            target["active_asset_kind"] = "ai_generated"
+            target["active_asset_s3_key"] = ai_s3
+            target["active_asset_url"] = ai_url
+            target["generation_status"] = "done" if ai_s3 else "pending_render"
+            target["render_mode"] = original_render_mode
+            target.pop("user_override_s3_key", None)
+            target.pop("user_override_url", None)
 
             rj["visual_plan"] = vplan
             cur.execute(

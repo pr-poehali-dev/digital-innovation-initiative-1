@@ -10,6 +10,7 @@ const URLS = {
   search: "https://functions.poehali.dev/54999e08-24f7-478d-92d8-8d66785f0a00",
   mediaUpload: "https://functions.poehali.dev/c3f6a32b-87f2-4ebb-8954-ccbae46e81a3",
   education: "https://functions.poehali.dev/54faac64-7c7d-43d5-8590-e64e08067d56",
+  audit: "https://functions.poehali.dev/0ac33ef6-6473-4be1-a1e6-a9565e6289a7",
 };
 
 function getSession(): string {
@@ -161,6 +162,12 @@ export const generateApi = {
     request(URLS.generate, "/", "POST", { action: "refine_block", run_id: runId, block_text: blockText, instruction }),
   renderVisual: (runId: number, slideIndex: number, prompt?: string) =>
     request(URLS.generate, "/", "POST", { action: "render_visual", run_id: runId, slide_index: slideIndex, prompt }),
+  getVisualUploadUrl: (runId: number, slideIndex: number, filename: string, mime: string) =>
+    request(URLS.generate, "/", "POST", { action: "visual.get_upload_url", run_id: runId, slide_index: slideIndex, filename, mime }),
+  confirmVisualOverride: (runId: number, slideIndex: number, s3Key: string, mime: string, filename: string) =>
+    request(URLS.generate, "/", "POST", { action: "visual.confirm_override", run_id: runId, slide_index: slideIndex, s3_key: s3Key, mime, filename }),
+  restoreAiVisual: (runId: number, slideIndex: number) =>
+    request(URLS.generate, "/", "POST", { action: "visual.restore_ai", run_id: runId, slide_index: slideIndex }),
 };
 
 export const exportApi = {
@@ -223,6 +230,15 @@ export const educationApi = {
     request(URLS.education, "/", "POST", { action: "education.profile_summary" }),
 };
 
+export const auditApi = {
+  run: (projectId: number, pptxBase64: string, documents: { name: string; role: string; text: string; instruction?: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, pptx_file: pptxBase64, documents }),
+  get: (auditId: number) =>
+    request(URLS.audit, "/", "POST", { action: "audit.get", audit_id: auditId }),
+  list: (projectId: number) =>
+    request(URLS.audit, "/", "POST", { action: "audit.list", project_id: projectId }),
+};
+
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {
   const byteChars = atob(base64Data);
   const byteArr = new Uint8Array(byteChars.length);
@@ -234,6 +250,16 @@ export function downloadBase64File(base64Data: string, filename: string, mimeTyp
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function putFileToPresignedUrl(uploadUrl: string, file: File): Promise<void> {
+  const mime = file.type || "application/octet-stream";
+  const res = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": mime },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Ошибка загрузки: ${res.status} ${res.statusText}`);
 }
 
 export async function uploadFileViaPresigned(

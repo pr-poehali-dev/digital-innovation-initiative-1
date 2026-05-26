@@ -1,0 +1,41 @@
+{
+  "tests": [
+    {
+      "name": "audit.run требует авторизации",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "audit.run", "project_id": 1, "pptx_file": "dGVzdA=="},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "audit.get без авторизации → 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "audit.get", "audit_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "audit.list без авторизации → 401",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "audit.list", "project_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: audit.run чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "audit.run", "project_id": 1, "pptx_file": "dGVzdA=="},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

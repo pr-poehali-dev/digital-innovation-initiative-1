@@ -564,17 +564,65 @@ def build_pptx(slides: list, title: str, style: dict = None, visual_plan: list =
     return buf.getvalue()
 
 
+def _load_image_from_s3(s3_key: str):
+    """Скачивает файл из S3. Возвращает bytes или None при ошибке."""
+    try:
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url="https://bucket.poehali.dev",
+            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        )
+        obj = s3_client.get_object(Bucket="files", Key=s3_key)
+        return obj["Body"].read()
+    except Exception:
+        return None
+
+
 def _render_visual_in_zone(slide, vp: dict, style: dict,
                            zone_x: float, zone_y: float, zone_w: float, zone_h: float):
     """
-    Рисует визуал точно в заданной прямоугольной зоне (Inches).
-    Dispatch по render_mode: pptx_shapes → diagram_renderer, ai_image → S3 download.
-    При ошибке — аккуратный fallback внутри той же зоны.
+    Рисует визуал в заданной зоне (Inches).
+
+    Приоритет active_asset:
+      1. user_override_s3_key  (user_image / user_override)
+      2. active_asset_s3_key
+      3. asset_s3_key          (ai_image)
+      4. pptx_shapes           (схема через diagram_renderer)
+      5. fallback placeholder
     """
+    from pptx.util import Inches as _In
+
     visual_type = vp.get("visual_type", "diagram")
     render_mode = vp.get("render_mode", "pptx_shapes")
     prompt = vp.get("source_prompt", "")
 
+    # --- Определяем S3-ключ для картинки: user override > active > ai ---
+    image_s3_key = (
+        vp.get("user_override_s3_key")
+        or vp.get("active_asset_s3_key")
+        or (vp.get("asset_s3_key") if render_mode == "ai_image" else None)
+    )
+
+    # Если есть user-override или ai-картинка — вставляем как изображение
+    if image_s3_key and render_mode in ("user_image", "ai_image", "user_override"):
+        img_bytes = _load_image_from_s3(image_s3_key)
+        if img_bytes:
+            try:
+                slide.shapes.add_picture(
+                    io.BytesIO(img_bytes),
+                    _In(zone_x), _In(zone_y), _In(zone_w), _In(zone_h),
+                )
+                vp["generation_status"] = "rendered"
+                return
+            except Exception:
+                pass
+        # Картинка есть в плане, но не загрузилась
+        _add_image_placeholder(slide, zone_x, zone_y, zone_w, zone_h, prompt, style)
+        vp["generation_status"] = "image_pending"
+        return
+
+    # --- Схемы через diagram_renderer ---
     if render_mode == "pptx_shapes":
         try:
             from diagram_renderer import render_diagram_in_zone
@@ -589,35 +637,16 @@ def _render_visual_in_zone(slide, vp: dict, style: dict,
             pass
         _add_visual_fallback(slide, zone_x, zone_y, zone_w, zone_h, visual_type, prompt, style)
         vp["generation_status"] = "fallback"
+        return
 
-    elif render_mode == "ai_image":
-        s3_key = vp.get("asset_s3_key")
-        if s3_key:
-            try:
-                s3_client = boto3.client(
-                    "s3",
-                    endpoint_url="https://bucket.poehali.dev",
-                    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-                    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-                )
-                obj = s3_client.get_object(Bucket="files", Key=s3_key)
-                img_bytes = obj["Body"].read()
-                from pptx.util import Inches as _In
-                slide.shapes.add_picture(
-                    io.BytesIO(img_bytes),
-                    _In(zone_x), _In(zone_y), _In(zone_w), _In(zone_h),
-                )
-                vp["generation_status"] = "rendered"
-                return
-            except Exception:
-                pass
-        # Картинка не готова — красивый placeholder
+    # --- ai_image без s3_key ---
+    if render_mode == "ai_image":
         _add_image_placeholder(slide, zone_x, zone_y, zone_w, zone_h, prompt, style)
         vp["generation_status"] = "image_pending"
+        return
 
-    else:
-        _add_visual_fallback(slide, zone_x, zone_y, zone_w, zone_h, visual_type, prompt, style)
-        vp["generation_status"] = "fallback"
+    _add_visual_fallback(slide, zone_x, zone_y, zone_w, zone_h, visual_type, prompt, style)
+    vp["generation_status"] = "fallback"
 
 
 def _add_image_placeholder(slide, x, y, w, h, prompt, style):

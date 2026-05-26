@@ -270,6 +270,13 @@ export default function ProjectPage() {
           </div>
           <div className="flex gap-2">
             <Link
+              to={`/cabinet/project/${projectId}/audit`}
+              className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Icon name="ShieldCheck" size={16} />
+              Аудит
+            </Link>
+            <Link
               to={`/cabinet/project/${projectId}/search`}
               className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
             >

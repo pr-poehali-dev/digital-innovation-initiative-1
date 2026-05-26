@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { tasksApi, generateApi, exportApi, downloadBase64File } from "@/lib/api";
+import { tasksApi, generateApi, exportApi, downloadBase64File, putFileToPresignedUrl } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import TaskSettingsModal from "@/components/TaskSettingsModal";
@@ -120,6 +120,8 @@ export default function TaskPage() {
   const [allowAiImages, setAllowAiImages] = useState(true);
   const [reRenderingVisual, setReRenderingVisual] = useState<number | null>(null);
   const [editingVisualPrompt, setEditingVisualPrompt] = useState<Record<number, string>>({});
+  const [uploadingVisual, setUploadingVisual] = useState<number | null>(null);
+  const [restoringVisual, setRestoringVisual] = useState<number | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Explainable AI: панель рассуждения и правки фрагмента
@@ -207,6 +209,59 @@ export default function TaskPage() {
       alert(err instanceof Error ? err.message : "Ошибка");
     } finally {
       setReRenderingVisual(null);
+    }
+  };
+
+  const handleVisualUpload = async (slideIndex: number, file: File) => {
+    if (!activeRun) return;
+    setUploadingVisual(slideIndex);
+    try {
+      const mime = file.type || "image/png";
+      const { upload_url, s3_key } = await generateApi.getVisualUploadUrl(
+        activeRun.id, slideIndex, file.name, mime,
+      );
+      await putFileToPresignedUrl(upload_url, file);
+      const result = await generateApi.confirmVisualOverride(
+        activeRun.id, slideIndex, s3_key, mime, file.name,
+      );
+      if (result?.visual) {
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            visual_plan: (prev.visual_plan || []).map((vp) =>
+              vp.slide_index === slideIndex ? { ...vp, ...result.visual } : vp,
+            ),
+          };
+        });
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка загрузки");
+    } finally {
+      setUploadingVisual(null);
+    }
+  };
+
+  const handleRestoreAi = async (slideIndex: number) => {
+    if (!activeRun) return;
+    setRestoringVisual(slideIndex);
+    try {
+      const result = await generateApi.restoreAiVisual(activeRun.id, slideIndex);
+      if (result?.visual) {
+        setActiveRun((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            visual_plan: (prev.visual_plan || []).map((vp) =>
+              vp.slide_index === slideIndex ? { ...vp, ...result.visual } : vp,
+            ),
+          };
+        });
+      }
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setRestoringVisual(null);
     }
   };
 
@@ -642,17 +697,27 @@ export default function TaskPage() {
                         </div>
                         <div className="divide-y divide-slate-100">
                           {activeRun.visual_plan.map((vp) => {
+                            const isUserOverride = vp.generation_status === "user_override" ||
+                              (vp as Record<string,unknown>).active_asset_kind === "user_uploaded";
+                            const canRestoreAi = !!(vp as Record<string,unknown>).can_restore_ai;
+
                             const statusColor: Record<string, string> = {
                               done: "bg-green-100 text-green-700",
                               pending_render: "bg-blue-100 text-blue-700",
                               failed: "bg-red-100 text-red-700",
                               pending: "bg-slate-100 text-slate-600",
+                              rendered: "bg-green-100 text-green-700",
+                              user_override: "bg-violet-100 text-violet-700",
+                              image_pending: "bg-amber-100 text-amber-700",
                             };
                             const statusLabel: Record<string, string> = {
                               done: "✅ Готово",
                               pending_render: "⚙️ При экспорте",
+                              rendered: "✅ Отрисован",
                               failed: "❌ Ошибка",
                               pending: "⏳ Ожидает",
+                              user_override: "👤 Заменено пользователем",
+                              image_pending: "🕐 Картинка не готова",
                             };
                             const typeIcon: Record<string, string> = {
                               image: "🖼", diagram: "📊", timeline: "📅",
@@ -668,9 +733,17 @@ export default function TaskPage() {
                               pdf: "PDF",
                               text: "Документ",
                             };
+                            const layoutLabel: Record<string, string> = {
+                              title_text_left_visual_right: "Текст слева / Визуал справа",
+                              title_text_top_timeline_bottom: "Текст сверху / Таймлайн снизу",
+                            };
                             const isEditing = vp.slide_index in editingVisualPrompt;
+                            const activeUrl = (vp as Record<string,unknown>).user_override_url as string
+                              || (vp as Record<string,unknown>).active_asset_url as string
+                              || vp.asset_url;
+
                             return (
-                              <div key={vp.slide_index} className="px-4 py-3 space-y-2">
+                              <div key={vp.slide_index} className={`px-4 py-3 space-y-2 ${isUserOverride ? "bg-violet-50/40" : ""}`}>
                                 <div className="flex items-start gap-2 flex-wrap">
                                   <span className="text-base">{typeIcon[vp.visual_type] || "🎨"}</span>
                                   <div className="flex-1 min-w-0">
@@ -678,24 +751,27 @@ export default function TaskPage() {
                                       <span className="text-xs font-semibold text-slate-700">
                                         Слайд {vp.slide_index}
                                       </span>
-                                      <span className="text-xs text-slate-500 truncate max-w-[200px]">
+                                      <span className="text-xs text-slate-500 truncate max-w-[180px]">
                                         {vp.slide_title}
                                       </span>
-                                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[vp.generation_status] || statusColor.pending}`}>
+                                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[vp.generation_status] || "bg-slate-100 text-slate-600"}`}>
                                         {statusLabel[vp.generation_status] || vp.generation_status}
                                       </span>
                                       <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full capitalize">
                                         {vp.visual_type}
                                       </span>
                                     </div>
+                                    {(vp as Record<string,unknown>).layout_mode && (
+                                      <p className="text-xs text-slate-400 mb-0.5">
+                                        📐 {layoutLabel[(vp as Record<string,unknown>).layout_mode as string] || (vp as Record<string,unknown>).layout_mode as string}
+                                      </p>
+                                    )}
                                     <p className="text-xs text-slate-500 mb-0.5">
-                                      📌 Источник: {sourceLabel[vp.source_type || ""] || vp.source_type}
+                                      📌 {sourceLabel[vp.source_type || ""] || vp.source_type}
                                       {vp.source_doc_name ? ` · ${vp.source_doc_name}` : ""}
                                     </p>
                                     {!isEditing ? (
-                                      <p className="text-xs text-slate-700 italic">
-                                        «{vp.source_prompt}»
-                                      </p>
+                                      <p className="text-xs text-slate-700 italic">«{vp.source_prompt}»</p>
                                     ) : (
                                       <textarea
                                         value={editingVisualPrompt[vp.slide_index]}
@@ -707,14 +783,17 @@ export default function TaskPage() {
                                     {vp.warnings && vp.warnings.length > 0 && (
                                       <p className="text-xs text-red-500 mt-1">⚠️ {vp.warnings[0]}</p>
                                     )}
-                                    {vp.asset_url && (
-                                      <a href={vp.asset_url} target="_blank" rel="noopener noreferrer"
+                                    {activeUrl && (
+                                      <a href={activeUrl} target="_blank" rel="noopener noreferrer"
                                         className="text-xs text-blue-600 hover:text-blue-800 underline mt-1 inline-block">
-                                        Открыть картинку ↗
+                                        {isUserOverride ? "Открыть мой файл ↗" : "Открыть ↗"}
                                       </a>
                                     )}
                                   </div>
+
+                                  {/* Кнопки действий */}
                                   <div className="flex flex-col gap-1 flex-shrink-0">
+                                    {/* Изменить промпт */}
                                     {!isEditing ? (
                                       <button
                                         onClick={() => setEditingVisualPrompt((p) => ({ ...p, [vp.slide_index]: vp.source_prompt }))}
@@ -730,13 +809,47 @@ export default function TaskPage() {
                                         Отмена
                                       </button>
                                     )}
-                                    <button
-                                      onClick={() => handleRenderVisual(vp.slide_index)}
-                                      disabled={reRenderingVisual === vp.slide_index}
-                                      className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded-md disabled:opacity-50"
-                                    >
-                                      {reRenderingVisual === vp.slide_index ? "..." : "↺ Перегенерировать"}
-                                    </button>
+
+                                    {/* Перегенерировать (только если не user override) */}
+                                    {!isUserOverride && (
+                                      <button
+                                        onClick={() => handleRenderVisual(vp.slide_index)}
+                                        disabled={reRenderingVisual === vp.slide_index}
+                                        className="text-xs bg-slate-800 hover:bg-slate-700 text-white px-2 py-1 rounded-md disabled:opacity-50"
+                                      >
+                                        {reRenderingVisual === vp.slide_index ? "..." : "↺ Перегенерировать"}
+                                      </button>
+                                    )}
+
+                                    {/* Загрузить своё */}
+                                    <label className={`text-xs border px-2 py-1 rounded-md text-center cursor-pointer transition-colors
+                                      ${uploadingVisual === vp.slide_index
+                                        ? "border-slate-200 text-slate-400 pointer-events-none"
+                                        : "border-violet-300 text-violet-700 hover:bg-violet-50"}`}>
+                                      {uploadingVisual === vp.slide_index ? "Загружаю..." : "⬆ Загрузить своё"}
+                                      <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/jpg,image/svg+xml"
+                                        className="hidden"
+                                        disabled={uploadingVisual === vp.slide_index}
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0];
+                                          if (f) handleVisualUpload(vp.slide_index, f);
+                                          e.target.value = "";
+                                        }}
+                                      />
+                                    </label>
+
+                                    {/* Вернуть AI */}
+                                    {isUserOverride && canRestoreAi && (
+                                      <button
+                                        onClick={() => handleRestoreAi(vp.slide_index)}
+                                        disabled={restoringVisual === vp.slide_index}
+                                        className="text-xs border border-slate-200 text-slate-500 hover:text-slate-800 px-2 py-1 rounded-md disabled:opacity-50"
+                                      >
+                                        {restoringVisual === vp.slide_index ? "..." : "↩ AI-версия"}
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
