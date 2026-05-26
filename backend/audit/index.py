@@ -1198,8 +1198,7 @@ def handler(event: dict, context) -> dict:
                 detail = exc_detail("download_revised.apply_fixes", e)
                 return err_resp("Ошибка при применении правок", 500, detail=detail)
 
-            # Сохраняем в S3 и отдаём base64 + ссылку
-            import base64
+            # Сохраняем в S3 и отдаём только CDN-ссылку (файл может быть >10МБ, base64 не подходит)
             revised_key = source_key.replace(".pptx", f"_revised_{audit_id}.pptx")
             try:
                 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -1209,7 +1208,6 @@ def handler(event: dict, context) -> dict:
                 detail = exc_detail("download_revised.put_s3", e)
                 return err_resp("Ошибка сохранения исправленного файла", 500, detail=detail)
 
-            b64 = base64.b64encode(revised_bytes).decode()
             log.info(f"audit.download_revised: audit_id={audit_id}, applied={applied}, size={len(revised_bytes)}, key={revised_key}")
 
             return ok_resp({
@@ -1217,7 +1215,6 @@ def handler(event: dict, context) -> dict:
                 "applied_count": applied,
                 "filename": source_key.split("/")[-1].replace(".pptx", "_revised.pptx"),
                 "cdn_url": cdn_url,
-                "pptx_b64": b64,
             })
 
         # ================================================================

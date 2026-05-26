@@ -1104,17 +1104,12 @@ function RevisedView({ result, reaudit, onReaudit, onNewAudit, projectId }: {
     setDownloading(true);
     setDownloadError("");
     try {
-      const res = await auditApi.downloadRevised(result.audit_id) as { pptx_b64: string; filename: string; applied_count: number };
-      const binary = atob(res.pptx_b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" });
-      const url = URL.createObjectURL(blob);
+      const res = await auditApi.downloadRevised(result.audit_id) as { cdn_url: string; filename: string; applied_count: number };
       const a = document.createElement("a");
-      a.href = url;
+      a.href = res.cdn_url;
       a.download = res.filename || "revised.pptx";
+      a.target = "_blank";
       a.click();
-      URL.revokeObjectURL(url);
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : "Ошибка скачивания");
     } finally {
