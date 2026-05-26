@@ -313,6 +313,16 @@ def run_audit(pptx_slides: list, documents: list) -> dict:
 #  Handler                                                            #
 # ------------------------------------------------------------------ #
 
+def get_s3():
+    import boto3
+    return boto3.client(
+        "s3",
+        endpoint_url="https://bucket.poehali.dev",
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+    )
+
+
 def handler(event: dict, context) -> dict:
     """Аудит презентаций: проверка PPTX на соответствие документам."""
     if event.get("httpMethod") == "OPTIONS":
@@ -337,14 +347,43 @@ def handler(event: dict, context) -> dict:
         schema = get_schema()
         action = body.get("action", "")
 
+        # ---- audit.get_upload_url ----
+        # Возвращает presigned URL для загрузки PPTX прямо в S3 (минуя cloud function)
+        if action == "audit.get_upload_url":
+            project_id = body.get("project_id")
+            filename = body.get("filename", "presentation.pptx")
+            if not project_id:
+                return err_resp("Нужен project_id")
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return err_resp("Нет доступа к проекту", 403)
+
+            s3_key = f"audit_uploads/{user['id']}/{uuid.uuid4().hex}/{filename}"
+            s3 = get_s3()
+            upload_url = s3.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": "files",
+                    "Key": s3_key,
+                    "ContentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                },
+                ExpiresIn=600,
+            )
+            return ok_resp({"upload_url": upload_url, "s3_key": s3_key})
+
         # ---- audit.run ----
         if action == "audit.run":
             project_id = body.get("project_id")
-            pptx_b64 = body.get("pptx_file")      # base64 PPTX
-            documents = body.get("documents") or [] # [{name, role, text, instruction}]
+            pptx_b64 = body.get("pptx_file")       # base64 PPTX (legacy, малые файлы)
+            pptx_s3_key = body.get("pptx_s3_key")  # S3 ключ (большие файлы)
+            documents = body.get("documents") or []  # [{name, role, text, instruction}]
 
-            if not project_id or not pptx_b64:
-                return err_resp("Нужны project_id и pptx_file (base64)")
+            if not project_id or (not pptx_b64 and not pptx_s3_key):
+                return err_resp("Нужны project_id и pptx_file (base64) или pptx_s3_key")
 
             cur = conn.cursor()
             cur.execute(
@@ -373,11 +412,24 @@ def handler(event: dict, context) -> dict:
                         "instruction": "",
                     })
 
-            # Декодируем PPTX
-            try:
-                pptx_bytes = base64.b64decode(pptx_b64)
-            except Exception:
-                return err_resp("Невалидный base64 для pptx_file")
+            # Получаем байты PPTX: из S3 или из base64
+            if pptx_s3_key:
+                try:
+                    s3 = get_s3()
+                    obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
+                    pptx_bytes = obj["Body"].read()
+                    # Удаляем временный файл после чтения
+                    try:
+                        s3.delete_object(Bucket="files", Key=pptx_s3_key)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    return err_resp(f"Не удалось прочитать PPTX из S3: {e}")
+            else:
+                try:
+                    pptx_bytes = base64.b64decode(pptx_b64)
+                except Exception:
+                    return err_resp("Невалидный base64 для pptx_file")
 
             # Извлекаем текст слайдов
             pptx_slides = extract_pptx_text(pptx_bytes)
@@ -788,6 +840,7 @@ def handler(event: dict, context) -> dict:
         if action == "audit.run_reaudit":
             audit_id = int(body.get("audit_id", 0))
             pptx_b64 = body.get("pptx_file")
+            pptx_s3_key = body.get("pptx_s3_key")
             documents = body.get("documents") or []
 
             cur = conn.cursor()
@@ -802,10 +855,20 @@ def handler(event: dict, context) -> dict:
             original_result = json.loads(row[1]) if row[1] else {}
             original_score = (original_result.get("audit_summary") or {}).get("compliance_score")
 
-            try:
-                pptx_bytes = base64.b64decode(pptx_b64)
-            except Exception:
-                return err_resp("Невалидный base64")
+            if pptx_s3_key:
+                try:
+                    s3 = get_s3()
+                    obj = s3.get_object(Bucket="files", Key=pptx_s3_key)
+                    pptx_bytes = obj["Body"].read()
+                except Exception as e:
+                    return err_resp(f"Не удалось прочитать PPTX из S3: {e}")
+            elif pptx_b64:
+                try:
+                    pptx_bytes = base64.b64decode(pptx_b64)
+                except Exception:
+                    return err_resp("Невалидный base64")
+            else:
+                return err_resp("Нужен pptx_s3_key или pptx_file")
 
             pptx_slides = extract_pptx_text(pptx_bytes)
             new_result = run_audit(pptx_slides, documents)

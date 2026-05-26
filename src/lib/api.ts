@@ -231,8 +231,14 @@ export const educationApi = {
 };
 
 export const auditApi = {
-  run: (projectId: number, pptxBase64: string, documents: { name: string; role: string; text: string; instruction?: string }[]) =>
-    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, pptx_file: pptxBase64, documents }),
+  // Шаг 1: получить presigned URL для загрузки PPTX напрямую в S3
+  getUploadUrl: (projectId: number, filename: string) =>
+    request(URLS.audit, "/", "POST", { action: "audit.get_upload_url", project_id: projectId, filename }),
+
+  // Шаг 2: запустить аудит по s3_key (основной путь) или base64 (fallback для малых файлов)
+  run: (projectId: number, pptxS3Key: string, documents: { name: string; role: string; text: string; instruction?: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run", project_id: projectId, pptx_s3_key: pptxS3Key, documents }),
+
   get: (auditId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.get", audit_id: auditId }),
   list: (projectId: number) =>
@@ -254,22 +260,22 @@ export const auditApi = {
     auditId: number,
     documents: { name: string; role: string; text: string }[],
     taskId?: number,
-    pptxBase64?: string,
+    pptxS3Key?: string,
     confirmedPlanItems?: string[],
   ) => request(URLS.audit, "/", "POST", {
     action: "audit.create_revision_run",
     audit_id: auditId,
     documents,
     task_id: taskId,
-    pptx_file: pptxBase64,
+    pptx_s3_key: pptxS3Key,
     confirmed_plan_items: confirmedPlanItems,
   }),
 
   getRevisionStatus: (auditId: number) =>
     request(URLS.audit, "/", "POST", { action: "audit.get_revision_status", audit_id: auditId }),
 
-  runReaudit: (auditId: number, pptxBase64: string, documents: { name: string; role: string; text: string }[]) =>
-    request(URLS.audit, "/", "POST", { action: "audit.run_reaudit", audit_id: auditId, pptx_file: pptxBase64, documents }),
+  runReaudit: (auditId: number, pptxS3Key: string, documents: { name: string; role: string; text: string }[]) =>
+    request(URLS.audit, "/", "POST", { action: "audit.run_reaudit", audit_id: auditId, pptx_s3_key: pptxS3Key, documents }),
 };
 
 export function downloadBase64File(base64Data: string, filename: string, mimeType: string) {

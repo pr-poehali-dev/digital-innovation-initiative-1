@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { auditApi, documentsApi, fileToBase64 } from "@/lib/api";
+import { auditApi, documentsApi, putFileToPresignedUrl } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -152,7 +152,8 @@ export default function AuditPage() {
   const [step, setStep] = useState<Step>("upload");
 
   const [pptxFile, setPptxFile]       = useState<File | null>(null);
-  const [pptxBase64, setPptxBase64]   = useState<string>("");
+  const [pptxS3Key, setPptxS3Key]     = useState<string>("");
+  const [uploadingPptx, setUploadingPptx] = useState(false);
   const [projectDocs, setProjectDocs] = useState<DocForAudit[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [running, setRunning]         = useState(false);
@@ -203,9 +204,20 @@ export default function AuditPage() {
     const f = e.target.files?.[0];
     if (!f) return;
     setPptxFile(f);
-    const b64 = await fileToBase64(f);
-    setPptxBase64(b64);
-    setStep("configure");
+    setError("");
+    setUploadingPptx(true);
+    try {
+      // Получаем presigned URL и загружаем PPTX напрямую в S3
+      const { upload_url, s3_key } = await auditApi.getUploadUrl(projectId, f.name);
+      await putFileToPresignedUrl(upload_url, f);
+      setPptxS3Key(s3_key);
+      setStep("configure");
+    } catch (err) {
+      setError("Не удалось загрузить файл: " + (err instanceof Error ? err.message : "попробуйте ещё раз"));
+      setPptxFile(null);
+    } finally {
+      setUploadingPptx(false);
+    }
     e.target.value = "";
   };
 
@@ -222,12 +234,12 @@ export default function AuditPage() {
   const docsWithoutText = projectDocs.filter((d) => !d.extracted_text);
 
   const handleRunAudit = async () => {
-    if (!pptxFile) return;
+    if (!pptxFile || !pptxS3Key) return;
     setRunning(true);
     setStep("running");
     setError("");
     try {
-      const res = await auditApi.run(projectId, pptxBase64, getDocsPayload());
+      const res = await auditApi.run(projectId, pptxS3Key, getDocsPayload());
       setAuditResult(res.data?.result || res.result || res);
       setCurrentAuditId(res.data?.audit_id || res.audit_id || null);
       setStep("result");
@@ -268,7 +280,7 @@ export default function AuditPage() {
         currentAuditId,
         getDocsPayload(),
         undefined,
-        pptxBase64,
+        pptxS3Key || undefined,
         Array.from(confirmedItems),
       );
       setRevisionResult(res.data || res);
@@ -280,10 +292,10 @@ export default function AuditPage() {
   };
 
   const handleReaudit = async () => {
-    if (!currentAuditId) return;
+    if (!currentAuditId || !pptxS3Key) return;
     setStep("reauditing");
     try {
-      const res = await auditApi.runReaudit(currentAuditId, pptxBase64, getDocsPayload());
+      const res = await auditApi.runReaudit(currentAuditId, pptxS3Key, getDocsPayload());
       setReauditResult(res.data?.reaudit || res.reaudit);
       setStep("revised");
     } catch (err: unknown) {
@@ -379,16 +391,28 @@ export default function AuditPage() {
         {/* ===== UPLOAD ===== */}
         {step === "upload" && (
           <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center">
-            <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Icon name="FileUp" size={28} className="text-blue-600" />
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${uploadingPptx ? "bg-slate-100" : "bg-blue-50"}`}>
+              {uploadingPptx
+                ? <div className="w-7 h-7 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                : <Icon name="FileUp" size={28} className="text-blue-600" />
+              }
             </div>
-            <h2 className="font-semibold text-lg mb-2">Загрузите презентацию для проверки</h2>
-            <p className="text-muted-foreground text-sm mb-6">Поддерживается PPTX</p>
-            <label className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors">
-              <Icon name="Upload" size={16} />
-              Выбрать PPTX
-              <input type="file" accept=".pptx" className="hidden" onChange={handlePptxSelect} />
-            </label>
+            <h2 className="font-semibold text-lg mb-2">
+              {uploadingPptx ? "Загружаем файл…" : "Загрузите презентацию для проверки"}
+            </h2>
+            <p className="text-muted-foreground text-sm mb-6">
+              {uploadingPptx
+                ? `${pptxFile?.name} — подождите секунду`
+                : "Поддерживается PPTX · любой размер"
+              }
+            </p>
+            {!uploadingPptx && (
+              <label className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-medium cursor-pointer transition-colors">
+                <Icon name="Upload" size={16} />
+                Выбрать PPTX
+                <input type="file" accept=".pptx" className="hidden" onChange={handlePptxSelect} />
+              </label>
+            )}
           </div>
         )}
 
@@ -401,7 +425,7 @@ export default function AuditPage() {
                 <p className="text-sm font-medium">{pptxFile.name}</p>
                 <p className="text-xs text-muted-foreground">{(pptxFile.size/1024/1024).toFixed(1)} МБ</p>
               </div>
-              <button onClick={() => { setPptxFile(null); setStep("upload"); }} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => { setPptxFile(null); setPptxS3Key(""); setStep("upload"); }} className="text-slate-400 hover:text-slate-600">
                 <Icon name="X" size={16} />
               </button>
             </div>
@@ -485,12 +509,12 @@ export default function AuditPage() {
             )}
 
             <div className="flex items-center gap-3 flex-wrap">
-              <button onClick={() => { setPptxFile(null); setStep("upload"); }}
+              <button onClick={() => { setPptxFile(null); setPptxS3Key(""); setStep("upload"); }}
                 className="border border-slate-300 text-slate-600 hover:bg-slate-50 px-4 py-2.5 rounded-xl text-sm">
                 ← Назад
               </button>
               <button onClick={handleRunAudit}
-                disabled={running || !hasAnyDocs}
+                disabled={running || !hasAnyDocs || !pptxS3Key}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-sm font-medium">
                 <Icon name="ShieldCheck" size={16} />
                 Запустить проверку
@@ -746,7 +770,7 @@ export default function AuditPage() {
             reaudit={reauditResult}
             projectId={projectId}
             onReaudit={handleReaudit}
-            onNewAudit={() => { setPptxFile(null); setAuditResult(null); setRevisionResult(null); setRevisionPlan(null); setReauditResult(null); setStep("upload"); }}
+            onNewAudit={() => { setPptxFile(null); setPptxS3Key(""); setAuditResult(null); setRevisionResult(null); setRevisionPlan(null); setReauditResult(null); setStep("upload"); }}
           />
         )}
       </div>
