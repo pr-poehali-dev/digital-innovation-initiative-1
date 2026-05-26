@@ -472,9 +472,9 @@ def handler(event: dict, context) -> dict:
             if not clean_name.endswith(".pptx"):
                 return err_resp("Поддерживается только формат PPTX (.pptx)")
 
-            MAX_SIZE = 50 * 1024 * 1024
+            MAX_SIZE = 200 * 1024 * 1024
             if total_size > MAX_SIZE:
-                return err_resp(f"Файл слишком большой. Максимум — 50 МБ")
+                return err_resp(f"Файл слишком большой. Максимум — 200 МБ")
 
             cur = conn.cursor()
             cur.execute(
