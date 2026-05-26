@@ -1,5 +1,5 @@
 """
-Presentation Audit — проверка готовой презентации на соответствие документам.
+Presentation Audit v2 — проверка готовой презентации на соответствие документам.
 
 Действия:
   audit.run     — запустить анализ PPTX против документов с ролями
@@ -1240,12 +1240,17 @@ def handler(event: dict, context) -> dict:
                 detail = exc_detail("download_revised.apply_fixes", e)
                 return err_resp("Ошибка при применении правок", 500, detail=detail)
 
-            # Сохраняем в S3 и отдаём только CDN-ссылку (файл может быть >10МБ, base64 не подходит)
+            # Сохраняем в S3 и отдаём presigned URL (CDN недоступен, используем прямой S3)
             revised_key = source_key.replace(".pptx", f"_revised_{audit_id}.pptx")
             try:
                 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 s3.put_object(Bucket="files", Key=revised_key, Body=revised_bytes, ContentType=PPTX_MIME)
-                cdn_url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{revised_key}"
+                # Presigned URL — работает напрямую, не зависит от CDN
+                download_url = s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": "files", "Key": revised_key},
+                    ExpiresIn=3600,
+                )
             except Exception as e:
                 detail = exc_detail("download_revised.put_s3", e)
                 return err_resp("Ошибка сохранения исправленного файла", 500, detail=detail)
@@ -1256,7 +1261,7 @@ def handler(event: dict, context) -> dict:
                 "audit_id": audit_id,
                 "applied_count": applied,
                 "filename": source_key.split("/")[-1].replace(".pptx", "_revised.pptx"),
-                "cdn_url": cdn_url,
+                "cdn_url": download_url,
             })
 
         # ================================================================

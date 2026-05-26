@@ -256,8 +256,8 @@ export async function uploadPptxDirect(
   file: File,
   onProgress?: (pct: number) => void,
 ): Promise<string> {
-  const MAX_BYTES = 50 * 1024 * 1024;
-  if (file.size > MAX_BYTES) throw new Error(`Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум — 50 МБ`);
+  const MAX_BYTES = 200 * 1024 * 1024;
+  if (file.size > MAX_BYTES) throw new Error(`Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)} МБ. Максимум — 200 МБ`);
   if (!file.name.toLowerCase().endsWith(".pptx")) throw new Error("Поддерживается только формат PPTX (.pptx)");
 
   const CHUNK_SIZE = 512 * 1024; // 512 KB
