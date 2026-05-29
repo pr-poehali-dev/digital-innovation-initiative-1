@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { projectsApi, documentsApi, fileToBase64, mediaApi, tasksApi } from "@/lib/api";
+import { projectsApi, documentsApi, putFileToPresignedUrl, mediaApi, tasksApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -115,8 +115,12 @@ export default function ProjectPage() {
     setUploading(true);
     setUploadError("");
     try {
-      const b64 = await fileToBase64(file);
-      await documentsApi.upload(projectId, file.name, ext, b64, uploadCategory);
+      // Шаг 1: получаем presigned URL для прямой загрузки в S3
+      const { upload_url, s3_key } = await documentsApi.getUploadUrl(projectId, file.name, ext) as { upload_url: string; s3_key: string };
+      // Шаг 2: загружаем файл напрямую в S3 (без лимита тела функции)
+      await putFileToPresignedUrl(upload_url, file);
+      // Шаг 3: сообщаем бэкенду — он извлекает текст и сохраняет в БД
+      await documentsApi.confirmUpload(projectId, s3_key, file.name, ext, file.size, uploadCategory);
       load();
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : "Ошибка загрузки");

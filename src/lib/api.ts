@@ -93,6 +93,10 @@ export const documentsApi = {
     request(URLS.documents, "/", "POST", { action: "list_documents", project_id: projectId }),
   upload: (projectId: number, filename: string, fileType: string, fileData: string, category = "other") =>
     request(URLS.documents, "/", "POST", { project_id: projectId, filename, file_type: fileType, file_data: fileData, category }),
+  getUploadUrl: (projectId: number, filename: string, fileType: string) =>
+    request(URLS.documents, "/", "POST", { action: "document.get_upload_url", project_id: projectId, filename, file_type: fileType }),
+  confirmUpload: (projectId: number, s3Key: string, filename: string, fileType: string, fileSize: number, category: string) =>
+    request(URLS.documents, "/", "POST", { action: "document.confirm_upload", project_id: projectId, s3_key: s3Key, filename, file_type: fileType, file_size: fileSize, category }),
   getText: (docId: number) =>
     request(URLS.documents, "/", "POST", { action: "get_text", document_id: docId }),
   setCategory: (docId: number, category: string) =>

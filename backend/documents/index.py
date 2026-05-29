@@ -560,6 +560,105 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return json_response({"ok": True, "name": new_name[:255]}, origin=origin)
 
+        # document.get_upload_url — presigned PUT URL для прямой загрузки в S3
+        if action == "document.get_upload_url":
+            project_id = body.get("project_id")
+            filename = (body.get("filename") or "file").strip()
+            file_type = (body.get("file_type") or "").lower().strip(".")
+            if not project_id or not filename or not file_type:
+                return json_response({"error": "Нужны project_id, filename, file_type"}, 400, origin=origin)
+            project_id = int(project_id)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            import uuid as _uuid
+            s3_key = f"documents/{project_id}/{_uuid.uuid4().hex}_{filename}"
+            content_types = {
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                "ogg": "audio/ogg", "mp3": "audio/mpeg",
+            }
+            mime = content_types.get(file_type, "application/octet-stream")
+            s3 = get_s3()
+            upload_url = s3.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": "files", "Key": s3_key, "ContentType": mime},
+                ExpiresIn=3600,
+            )
+            return json_response({"upload_url": upload_url, "s3_key": s3_key, "mime": mime}, origin=origin)
+
+        # document.confirm_upload — подтвердить загрузку, извлечь текст, сохранить в БД
+        if action == "document.confirm_upload":
+            project_id = body.get("project_id")
+            s3_key = body.get("s3_key")
+            filename = (body.get("filename") or "file").strip()
+            file_type = (body.get("file_type") or "").lower().strip(".")
+            file_size = int(body.get("file_size") or 0)
+            category = body.get("category") or "other"
+            if not project_id or not s3_key or not file_type:
+                return json_response({"error": "Нужны project_id, s3_key, file_type"}, 400, origin=origin)
+            project_id = int(project_id)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            # Скачиваем из S3 для извлечения текста
+            s3 = get_s3()
+            obj = s3.get_object(Bucket="files", Key=s3_key)
+            file_bytes = obj["Body"].read()
+            if not file_size:
+                file_size = len(file_bytes)
+
+            extracted_text = ""
+            structure_json = None
+            chunks = []
+            page_count = None
+
+            if file_type == "pdf":
+                extracted_text, chunks, page_count = extract_text_from_pdf(file_bytes)
+            elif file_type == "docx":
+                extracted_text, chunks, page_count = extract_text_from_docx(file_bytes)
+            elif file_type == "pptx":
+                result = extract_from_pptx(file_bytes)
+                extracted_text = result["text"][:MAX_TEXT_LEN]
+                structure_json = json.dumps(result["structure"], ensure_ascii=False)
+                chunks = chunk_text(extracted_text)
+                page_count = len(result.get("structure", []))
+
+            cur.execute(
+                f"""INSERT INTO {schema}.documents
+                    (project_id, uploaded_by, filename, original_name, file_type, file_size, s3_key,
+                     extracted_text, structure_json, status, category, page_count, extracted_length)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s)
+                    RETURNING id""",
+                (project_id, user["id"], s3_key, filename, file_type, file_size, s3_key,
+                 extracted_text, structure_json, category, page_count, len(extracted_text)),
+            )
+            doc_id = cur.fetchone()[0]
+            for ch in chunks[:500]:
+                cur.execute(
+                    f"""INSERT INTO {schema}.document_chunks (document_id, chunk_index, page_number, content, content_length)
+                        VALUES (%s, %s, %s, %s, %s)""",
+                    (doc_id, ch["index"], ch.get("page"), ch["content"], len(ch["content"])),
+                )
+            log_activity(cur, schema, project_id, user["id"], "uploaded_document", "document", doc_id, filename)
+            conn.commit()
+            return json_response({
+                "id": doc_id, "filename": filename, "file_type": file_type,
+                "file_size": file_size, "status": "ready", "category": category,
+                "page_count": page_count, "chunks_count": len(chunks),
+                "text_length": len(extracted_text),
+            }, origin=origin)
+
         return json_response({"error": "Not found"}, 404, origin=origin)
 
     finally:
