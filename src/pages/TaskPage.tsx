@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { tasksApi, generateApi, exportApi, downloadBase64File, putFileToPresignedUrl } from "@/lib/api";
+import { analytics, normalizeErrorCode } from "@/lib/analytics";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import TaskSettingsModal from "@/components/TaskSettingsModal";
@@ -131,18 +132,47 @@ export default function TaskPage() {
 
   useEffect(() => { loadTask(); }, [tId]);
 
-  // Определяем поддержку визуалов по контексту:
-  // — прямые презентационные типы
-  // — revise, если активный run содержит visual_plan (дорабатывается презентация)
-  // — fallback для revise: если нет activeRun но task_type=revise — не скрываем, даём пользователю выбор
+  // Определяем поддержку визуалов по контексту + reason для аналитики
   const VISUAL_TASK_TYPES = ["prepare_presentation", "presentation_by_reference"];
+  const hasVisualPlan = (activeRun?.visual_plan?.length ?? 0) > 0;
+
+  const visualsReason = (() => {
+    if (!task) return "unsupported_task_type" as const;
+    if (VISUAL_TASK_TYPES.includes(task.task_type)) return "presentation_task" as const;
+    if (task.task_type === "revise" && hasVisualPlan) return "revise_visual_plan" as const;
+    if (task.task_type === "revise" && !activeRun) return "revise_fallback_no_active_run" as const;
+    return "unsupported_task_type" as const;
+  })();
+
   const isReviseOfPresentation =
     task?.task_type === "revise" &&
-    ((activeRun?.visual_plan?.length ?? 0) > 0 ||
-      (!activeRun && task.task_type === "revise")); // нет run — не блокируем
+    (hasVisualPlan || !activeRun);
   const supportsVisuals = task ? (VISUAL_TASK_TYPES.includes(task.task_type) || isReviseOfPresentation) : false;
 
+  // Отправляем availability один раз при изменении task/activeRun
+  const availabilityTrackedRef = useRef<string>("");
+  useEffect(() => {
+    if (!task) return;
+    const key = `${task.id}-${activeRun?.id ?? "none"}-${hasVisualPlan}`;
+    if (availabilityTrackedRef.current === key) return;
+    availabilityTrackedRef.current = key;
+    analytics.visualsAvailabilityResolved(
+      task.id, task.task_type, supportsVisuals, visualsReason,
+      !!activeRun, hasVisualPlan,
+    );
+  }, [task?.id, activeRun?.id, hasVisualPlan]);
+
   const handleGenerate = async (isRevision = false) => {
+    if (!task) return;
+    const effectiveVisuals = supportsVisuals ? useVisuals : false;
+    const effectiveAiImages = supportsVisuals ? allowAiImages : false;
+
+    analytics.generationSubmitted(
+      tId, task.task_type,
+      effectiveVisuals, effectiveAiImages,
+      supportsVisuals, isRevision,
+    );
+
     setGenerating(true);
     setGenError("");
     try {
@@ -151,9 +181,10 @@ export default function TaskPage() {
         isRevision ? revision : prompt || undefined,
         isRevision && activeRun ? activeRun.id : undefined,
         useWebSearch,
-        supportsVisuals ? useVisuals : false,
-        supportsVisuals ? allowAiImages : false,
+        effectiveVisuals,
+        effectiveAiImages,
       );
+      analytics.generationResult(tId, task.task_type, "success", effectiveVisuals, effectiveAiImages);
       setActiveRun({
         id: result.run_id || result.id,
         version: result.version,
@@ -168,13 +199,15 @@ export default function TaskPage() {
       setTimeout(() => contentRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (err: unknown) {
       const raw = err instanceof Error ? err.message : String(err);
-      // Логируем техническую причину для диагностики
-      console.error("[generate] error:", raw, { taskId: tId, taskType: task?.task_type });
+      const errorCode = normalizeErrorCode(raw);
+      console.error("[generate] error:", raw, { taskId: tId, taskType: task.task_type, errorCode });
+      analytics.generationResult(tId, task.task_type, "error", effectiveVisuals, effectiveAiImages, errorCode);
+
       let friendly: string;
       if (raw.includes("timeout") || raw.includes("Execution timeout") || raw.includes("504")) {
         friendly = "Генерация заняла слишком много времени. Попробуйте отключить «Картинки AI» или уменьшить число слайдов.";
       } else if (raw.includes("обязательн") && raw.includes("документ")) {
-        friendly = raw; // уже человекочитаемое из бэкенда
+        friendly = raw;
       } else if (raw.includes("429") || raw.includes("rate") || raw.includes("лимит")) {
         friendly = "Слишком много запросов подряд. Подождите минуту и попробуйте снова.";
       } else if (raw.includes("422") || raw.includes("validation") || raw.includes("Нужен")) {
@@ -482,14 +515,23 @@ export default function TaskPage() {
                     <>
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={useVisuals}
-                          onChange={(e) => setUseVisuals(e.target.checked)}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setUseVisuals(val);
+                            if (!val) setAllowAiImages(false);
+                            analytics.visualsToggle(val, tId, task.task_type, supportsVisuals, visualsReason);
+                          }}
                           className="w-4 h-4 rounded accent-slate-800" />
                         <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
                         <span>Генерировать визуалы</span>
                       </label>
                       <label className={`flex items-center gap-2 ${useVisuals ? "cursor-pointer" : "opacity-40 cursor-not-allowed"}`}>
                         <input type="checkbox" checked={allowAiImages && useVisuals}
-                          onChange={(e) => setAllowAiImages(e.target.checked)}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setAllowAiImages(val);
+                            analytics.aiImagesToggle(val, tId, task.task_type, useVisuals);
+                          }}
                           disabled={!useVisuals}
                           className="w-4 h-4 rounded accent-slate-800" />
                         <Icon name="Image" size={14} className="text-slate-600" />

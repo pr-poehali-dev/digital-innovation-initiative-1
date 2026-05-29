@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { projectsApi, tasksApi, generateApi, documentsApi, putFileToPresignedUrl } from "@/lib/api";
+import { analytics } from "@/lib/analytics";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
@@ -118,7 +119,13 @@ export default function VisualsPage() {
       .then((d) => {
         const docs = (d as { documents: ProjectDoc[] }).documents || [];
         const PPTX_TYPES = ["pptx", "ppt", "pptm"];
-        setProjectDocs(docs.filter(doc => PPTX_TYPES.includes(doc.file_type?.toLowerCase())));
+        const pptxDocs = docs.filter(doc => PPTX_TYPES.includes(doc.file_type?.toLowerCase()));
+        setProjectDocs(pptxDocs);
+        // Отправляем событие после загрузки — знаем реальное число файлов
+        analytics.visiualsModeSelected("project_files", projectId, { count: pptxDocs.length });
+        if (pptxDocs.length === 0) {
+          analytics.projectFilesEmptyState(projectId, docs.length);
+        }
       })
       .catch(() => setError("Не удалось загрузить материалы"))
       .finally(() => setLoadingDocs(false));
@@ -167,14 +174,19 @@ export default function VisualsPage() {
       const details = await Promise.all(
         sample.map(t => tasksApi.get(t.id).then(r => r as { id: number; documents: { document_id: number }[] }).catch(() => null))
       );
-      const found = details.find(r => r && r.documents?.some(d => d.document_id === docId));
-      if (found) {
+      const matches = details.filter(r => r && r.documents?.some(d => d.document_id === docId));
+      if (matches.length > 0) {
+        const found = matches[0]!;
+        analytics.projectFileLookupResult(projectId, docId, "found", matches.length, found.id);
         setMode("task");
         setTaskId(found.id);
       } else {
+        analytics.projectFileLookupResult(projectId, docId, "not_found", 0);
         setError("Этот файл не прикреплён ни к одному заданию. Создайте новое задание.");
       }
-    } catch {
+    } catch (e) {
+      const errCode = e instanceof Error ? e.message : "unknown";
+      analytics.projectFileLookupResult(projectId, docId, "error", 0, undefined, errCode);
       setError("Не удалось выполнить поиск. Попробуйте вручную.");
     } finally {
       setFindingDocId(null);
@@ -254,7 +266,14 @@ export default function VisualsPage() {
             { key: "task",  label: "Из задания",        icon: "Sparkles" },
             { key: "files", label: "По файлам проекта", icon: "FolderOpen" },
           ] as const).map(tab => (
-            <button key={tab.key} onClick={() => setMode(tab.key)}
+            <button key={tab.key} onClick={() => {
+                if (tab.key === mode) return;
+                setMode(tab.key);
+                // для "task" событие отправляем сразу; для "files" — после загрузки (в useEffect)
+                if (tab.key === "task") {
+                  analytics.visiualsModeSelected("task", projectId, { count: 0 });
+                }
+              }}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 mode === tab.key ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
               }`}>
@@ -369,11 +388,15 @@ export default function VisualsPage() {
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       <Link to={`/cabinet/project/${projectId}/new-task`}
+                        onClick={() => analytics.projectFileCta("create_task", projectId, { id: doc.id, file_type: doc.file_type })}
                         className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700">
                         Создать задание
                       </Link>
                       <button
-                        onClick={() => handleFindTaskByDoc(doc.id)}
+                        onClick={() => {
+                          analytics.projectFileCta("find_in_tasks", projectId, { id: doc.id, file_type: doc.file_type });
+                          handleFindTaskByDoc(doc.id);
+                        }}
                         disabled={findingDocId === doc.id}
                         className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700 disabled:opacity-50 flex items-center gap-1">
                         {findingDocId === doc.id
