@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { documentsApi, tasksApi } from "@/lib/api";
 import Layout from "@/components/Layout";
@@ -224,15 +224,46 @@ export default function NewTaskPage() {
                 </button>
               ))}
             </div>
-            {(taskType === "prepare_presentation" || taskType === "presentation_by_reference") && (
-              <div className="mt-3 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 text-xs text-blue-700">
-                <Icon name="Sparkles" size={14} className="mt-0.5 flex-shrink-0 text-blue-500" />
-                <span>
-                  Для этого типа доступны <strong>визуалы и AI-картинки</strong> — диаграммы, схемы, таймлайны.
-                  После создания задания включите галочку «Генерировать визуалы» перед запуском.
-                </span>
-              </div>
-            )}
+            {taskType && (() => {
+              const hints: Record<string, { icon: string; color: string; text: React.ReactNode }> = {
+                prepare_presentation: {
+                  icon: "Sparkles", color: "bg-blue-50 border-blue-200 text-blue-700",
+                  text: <>Доступны <strong>визуалы и AI-картинки</strong> — диаграммы, схемы, таймлайны. Включите «Генерировать визуалы» перед запуском.</>
+                },
+                presentation_by_reference: {
+                  icon: "Sparkles", color: "bg-blue-50 border-blue-200 text-blue-700",
+                  text: <>Доступны <strong>визуалы и AI-картинки</strong>. Прикрепите PPTX-образец с ролью «Образец формата» и поставьте «Обязательно использовать» — AI воспроизведёт его структуру.</>
+                },
+                revise: {
+                  icon: "Info", color: "bg-amber-50 border-amber-200 text-amber-700",
+                  text: <>Визуалы доступны если вы дорабатываете <strong>презентацию</strong> (в активной версии есть визуалы). Для текстовых результатов визуалы не применяются.</>
+                },
+                analyze: {
+                  icon: "Info", color: "bg-slate-50 border-slate-200 text-slate-600",
+                  text: <>Визуалы и AI-картинки для этого типа недоступны. Результат — текстовый анализ.</>
+                },
+                write_text: {
+                  icon: "Info", color: "bg-slate-50 border-slate-200 text-slate-600",
+                  text: <>Визуалы и AI-картинки для этого типа недоступны. Результат — текстовая работа.</>
+                },
+                answer_question: {
+                  icon: "Info", color: "bg-slate-50 border-slate-200 text-slate-600",
+                  text: <>Визуалы для этого типа недоступны. Результат — текстовый ответ по документам.</>
+                },
+                structure: {
+                  icon: "Info", color: "bg-slate-50 border-slate-200 text-slate-600",
+                  text: <>Визуалы недоступны. Результат — план структуры. Для презентации с визуалами используйте «Подготовить презентацию».</>
+                },
+              };
+              const h = hints[taskType];
+              if (!h) return null;
+              return (
+                <div className={`mt-3 flex items-start gap-2 border rounded-xl px-3 py-2.5 text-xs ${h.color}`}>
+                  <Icon name={h.icon} size={14} className="mt-0.5 flex-shrink-0" fallback="Info" />
+                  <span>{h.text}</span>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="space-y-4">

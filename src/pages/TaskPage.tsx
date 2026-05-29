@@ -131,12 +131,17 @@ export default function TaskPage() {
 
   useEffect(() => { loadTask(); }, [tId]);
 
+  // Определяем поддержку визуалов по контексту:
+  // — прямые презентационные типы
+  // — revise, если активный run содержит visual_plan (дорабатывается презентация)
+  const VISUAL_TASK_TYPES = ["prepare_presentation", "presentation_by_reference"];
+  const isReviseOfPresentation = task?.task_type === "revise" && (activeRun?.visual_plan?.length ?? 0) > 0;
+  const supportsVisuals = task ? (VISUAL_TASK_TYPES.includes(task.task_type) || isReviseOfPresentation) : false;
+
   const handleGenerate = async (isRevision = false) => {
     setGenerating(true);
     setGenError("");
     try {
-      const visualTypes = ["prepare_presentation", "presentation_by_reference"];
-      const supportsVisuals = visualTypes.includes(task.task_type);
       const result = await generateApi.run(
         tId,
         isRevision ? revision : prompt || undefined,
@@ -158,7 +163,23 @@ export default function TaskPage() {
       loadTask();
       setTimeout(() => contentRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (err: unknown) {
-      setGenError(err instanceof Error ? err.message : "Ошибка генерации");
+      // Разбираем ошибку на конкретные сообщения
+      const raw = err instanceof Error ? err.message : "Ошибка генерации";
+      let friendly = raw;
+      if (raw.includes("timeout") || raw.includes("Execution timeout") || raw.includes("504")) {
+        friendly = "Генерация заняла слишком много времени. Попробуйте отключить «Картинки AI» или уменьшить число слайдов.";
+      } else if (raw.includes("обязательн") && raw.includes("документ")) {
+        friendly = raw; // уже человекочитаемое из бэкенда
+      } else if (raw.includes("rate") || raw.includes("429")) {
+        friendly = "Слишком много запросов подряд. Подождите минуту и попробуйте снова.";
+      } else if (raw.includes("не найдено") || raw.includes("404")) {
+        friendly = "Задание не найдено. Обновите страницу.";
+      } else if (raw.includes("доступ") || raw.includes("403")) {
+        friendly = "Нет доступа к этому заданию.";
+      } else if (raw.includes("GPT") || raw.includes("AI") || raw.includes("YandexGPT") || raw.includes("500")) {
+        friendly = "Сервис генерации временно недоступен. Попробуйте через минуту.";
+      }
+      setGenError(friendly);
     } finally {
       setGenerating(false);
     }
@@ -438,47 +459,41 @@ export default function TaskPage() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
-                {(() => {
-                  const visualTypes = ["prepare_presentation", "presentation_by_reference"];
-                  const supportsVisuals = visualTypes.includes(task.task_type);
-                  const isRevise = task.task_type === "revise";
-                  return (
-                    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4 text-sm">
+                <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={useWebSearch}
+                      onChange={(e) => setUseWebSearch(e.target.checked)}
+                      className="w-4 h-4 rounded accent-slate-800" />
+                    <Icon name="Globe" size={14} className="text-slate-600" />
+                    <span>Интернет</span>
+                  </label>
+                  {supportsVisuals ? (
+                    <>
                       <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={useWebSearch}
-                          onChange={(e) => setUseWebSearch(e.target.checked)}
+                        <input type="checkbox" checked={useVisuals}
+                          onChange={(e) => setUseVisuals(e.target.checked)}
                           className="w-4 h-4 rounded accent-slate-800" />
-                        <Icon name="Globe" size={14} className="text-slate-600" />
-                        <span>Интернет</span>
+                        <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
+                        <span>Генерировать визуалы</span>
                       </label>
-                      {supportsVisuals ? (
-                        <>
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={useVisuals}
-                              onChange={(e) => setUseVisuals(e.target.checked)}
-                              className="w-4 h-4 rounded accent-slate-800" />
-                            <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
-                            <span>Генерировать визуалы</span>
-                          </label>
-                          {useVisuals && (
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input type="checkbox" checked={allowAiImages}
-                                onChange={(e) => setAllowAiImages(e.target.checked)}
-                                className="w-4 h-4 rounded accent-slate-800" />
-                              <Icon name="Image" size={14} className="text-slate-600" />
-                              <span>Картинки AI</span>
-                            </label>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-xs text-slate-400 flex items-center gap-1">
-                          <Icon name="Info" size={13} />
-                          {isRevise ? "Визуалы управляются в предыдущей версии" : "Визуалы доступны в типах «Подготовить презентацию» и «По образцу»"}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })()}
+                      <label className={`flex items-center gap-2 ${useVisuals ? "cursor-pointer" : "opacity-40 cursor-not-allowed"}`}>
+                        <input type="checkbox" checked={allowAiImages && useVisuals}
+                          onChange={(e) => setAllowAiImages(e.target.checked)}
+                          disabled={!useVisuals}
+                          className="w-4 h-4 rounded accent-slate-800" />
+                        <Icon name="Image" size={14} className="text-slate-600" />
+                        <span>Картинки AI</span>
+                      </label>
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-400 flex items-center gap-1.5">
+                      <Icon name="Info" size={13} />
+                      {task.task_type === "revise"
+                        ? "Визуалы доступны если дорабатывается презентация"
+                        : "Визуалы доступны для «Подготовить презентацию» и «По образцу»"}
+                    </span>
+                  )}
+                </div>
                 {genError && <p className="text-red-500 text-sm mb-3">{genError}</p>}
                 <button
                   onClick={() => handleGenerate(false)}

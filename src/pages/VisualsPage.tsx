@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { projectsApi, tasksApi, generateApi, putFileToPresignedUrl } from "@/lib/api";
+import { projectsApi, tasksApi, generateApi, documentsApi, putFileToPresignedUrl } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
 interface Project { id: number; title: string; task_count: number; }
 interface TaskItem { id: number; title: string; status: string; versions: number; }
+interface ProjectDoc { id: number; name: string; file_type: string; category?: string; }
 interface Run { id: number; version: number; status: string; summary?: string; }
 interface VisualItem {
   slide_index: number;
@@ -53,6 +54,10 @@ export default function VisualsPage() {
   const [taskId, setTaskId]         = useState<number | null>(initTask);
   const [runId, setRunId]           = useState<number | null>(initRun);
 
+  const [mode, setMode] = useState<"task" | "files">("task");
+  const [projectDocs, setProjectDocs] = useState<ProjectDoc[]>([]);
+  const [loadingDocs,  setLoadingDocs]  = useState(false);
+
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingTasks,    setLoadingTasks]    = useState(false);
   const [loadingVisuals,  setLoadingVisuals]  = useState(false);
@@ -95,6 +100,20 @@ export default function VisualsPage() {
       .catch(() => setError("Не удалось загрузить задания"))
       .finally(() => setLoadingTasks(false));
   }, [projectId]);
+
+  // Загрузка PPTX-материалов при режиме "из файлов"
+  useEffect(() => {
+    if (!projectId || mode !== "files") return;
+    setLoadingDocs(true);
+    setProjectDocs([]);
+    documentsApi.list(projectId)
+      .then((d) => {
+        const docs = (d as { documents: ProjectDoc[] }).documents || [];
+        setProjectDocs(docs.filter(doc => doc.file_type === "pptx"));
+      })
+      .catch(() => setError("Не удалось загрузить материалы"))
+      .finally(() => setLoadingDocs(false));
+  }, [projectId, mode]);
 
   // Загрузка runs при выборе задания
   useEffect(() => {
@@ -193,12 +212,20 @@ export default function VisualsPage() {
           <h1 className="text-xl font-semibold">Визуалы презентации</h1>
         </div>
 
-        {/* Объяснение как работает */}
-        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-800 space-y-1.5">
-          <p className="font-semibold flex items-center gap-2"><Icon name="Info" size={15} /> Как здесь управлять визуалами</p>
-          <p>Визуалы создаются автоматически при генерации презентации (тип «Подготовить презентацию» или «По образцу» с включённой галочкой «Генерировать визуалы»).</p>
-          <p>Здесь можно: <strong>заменить картинку своей</strong>, <strong>изменить описание</strong> и перегенерировать, или <strong>вернуть AI-версию</strong>.</p>
-          <p className="text-blue-600">Выберите проект и задание ниже — появятся слайды с визуалами.</p>
+        {/* Вкладки режима */}
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+          {([
+            { key: "task",  label: "Из задания",   icon: "Sparkles" },
+            { key: "files", label: "Из материалов", icon: "FolderOpen" },
+          ] as const).map(tab => (
+            <button key={tab.key} onClick={() => setMode(tab.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                mode === tab.key ? "bg-white shadow-sm text-slate-900" : "text-slate-500 hover:text-slate-700"
+              }`}>
+              <Icon name={tab.icon} size={14} fallback="File" />
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {error && (
@@ -231,8 +258,8 @@ export default function VisualsPage() {
           )}
         </div>
 
-        {/* Шаг 2: выбор задания */}
-        {projectId && (
+        {/* Шаг 2: режим "из задания" — выбор задания */}
+        {mode === "task" && projectId && (
           <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
             <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center font-bold">2</span>
@@ -241,14 +268,17 @@ export default function VisualsPage() {
             {loadingTasks ? (
               <div className="flex gap-2 items-center text-sm text-slate-500"><div className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />Загрузка…</div>
             ) : tasks.length === 0 ? (
-              <p className="text-sm text-slate-400">Нет заданий с готовыми версиями. <Link to={`/cabinet/project/${projectId}`} className="text-blue-600 underline">Создать задание</Link></p>
+              <div className="space-y-2">
+                <p className="text-sm text-slate-400">Нет заданий. <Link to={`/cabinet/project/${projectId}`} className="text-blue-600 underline">Создать задание</Link></p>
+                <p className="text-xs text-slate-400">Или переключитесь на вкладку <button className="text-blue-600 underline" onClick={() => setMode("files")}>«Из материалов»</button> — там можно посмотреть PPTX-файлы проекта.</p>
+              </div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {tasks.map(t => (
                   <button key={t.id} onClick={() => setTaskId(t.id)}
                     className={`px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${taskId === t.id ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 hover:border-slate-400 text-slate-700"}`}>
                     {t.title}
-                    <span className="ml-1 text-xs opacity-60">v{t.versions}</span>
+                    {t.versions > 0 && <span className="ml-1 text-xs opacity-60">v{t.versions}</span>}
                   </button>
                 ))}
               </div>
@@ -256,8 +286,66 @@ export default function VisualsPage() {
           </div>
         )}
 
+        {/* Шаг 2: режим "из материалов" — список PPTX файлов */}
+        {mode === "files" && projectId && (
+          <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
+            <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center font-bold">2</span>
+              PPTX-файлы проекта
+            </p>
+            {loadingDocs ? (
+              <div className="flex gap-2 items-center text-sm text-slate-500"><div className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />Загрузка…</div>
+            ) : projectDocs.length === 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-400">В этом проекте нет PPTX-файлов.</p>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-600 space-y-2">
+                  <p className="font-medium">Как добавить визуалы к презентации:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-500 text-xs">
+                    <li>Перейдите в проект и загрузите материалы</li>
+                    <li>Создайте задание типа «Подготовить презентацию»</li>
+                    <li>При запуске включите «Генерировать визуалы»</li>
+                    <li>После генерации вернитесь сюда — визуалы появятся на вкладке «Из задания»</li>
+                  </ol>
+                  <Link to={`/cabinet/project/${projectId}`}
+                    className="inline-flex items-center gap-1 mt-2 text-blue-600 hover:text-blue-800 text-xs">
+                    Перейти в проект <Icon name="ArrowRight" size={12} />
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500 mb-3">
+                  Визуалы привязаны к <strong>результатам заданий</strong>, а не к самим файлам.
+                  Выберите файл — откроется задание где он используется, или можно создать новое.
+                </p>
+                {projectDocs.map(doc => (
+                  <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
+                    <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center flex-shrink-0">
+                      <Icon name="Presentation" size={18} className="text-orange-500" fallback="File" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.name}</p>
+                      <p className="text-xs text-slate-400">PPTX · {doc.category || "материал"}</p>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <Link to={`/cabinet/project/${projectId}/new-task`}
+                        className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700">
+                        Создать задание
+                      </Link>
+                      <button onClick={() => { setMode("task"); }}
+                        className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700">
+                        Найти в заданиях
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Шаг 3: выбор версии */}
-        {taskId && runs.length > 1 && (
+        {mode === "task" && taskId && runs.length > 1 && (
           <div className="bg-card border border-border rounded-2xl p-5 space-y-3">
             <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center font-bold">3</span>
@@ -275,7 +363,7 @@ export default function VisualsPage() {
         )}
 
         {/* Визуалы */}
-        {runId && (
+        {mode === "task" && runId && (
           <div className="space-y-4">
             {loadingVisuals ? (
               <div className="bg-card border border-border rounded-2xl p-10 flex flex-col items-center gap-3 text-slate-500">
@@ -415,7 +503,7 @@ export default function VisualsPage() {
         )}
 
         {/* Пустое состояние — ничего не выбрано */}
-        {!projectId && !loadingProjects && projects.length > 0 && (
+        {mode === "task" && !projectId && !loadingProjects && projects.length > 0 && (
           <div className="bg-card border border-border rounded-2xl p-10 flex flex-col items-center gap-3 text-center text-slate-400">
             <Icon name="LayoutTemplate" size={40} />
             <p className="font-medium text-slate-600">Выберите проект выше</p>
