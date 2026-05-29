@@ -1,7 +1,14 @@
 // Продуктовая аналитика — лёгкий хелпер
-// Провайдер: PostHog (инициализирован в main.tsx).
+// Провайдер: Яндекс Метрика (тег уже в index.html, счётчик — window.ym).
 // Для смены провайдера — замени тело sendEvent, интерфейсы не трогать.
-import posthog from 'posthog-js';
+
+declare global {
+  interface Window {
+    ym?: (id: number, action: string, name: string, params?: Record<string, unknown>) => void;
+  }
+}
+
+const YM_ID = 101026698;
 
 type VisualsSupportsReason =
   | "presentation_task"
@@ -110,7 +117,8 @@ function sendEvent<K extends keyof AnalyticsEvents>(
   if (import.meta.env.DEV) {
     console.debug(`[analytics] ${name}`, props);
   }
-  posthog.capture(name, props);
+  // reachGoal отправляет цель с параметрами в Яндекс Метрику
+  window.ym?.(YM_ID, 'reachGoal', name, props as Record<string, unknown>);
 }
 
 // --- Публичные хелперы для каждого события ---
