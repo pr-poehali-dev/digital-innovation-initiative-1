@@ -88,6 +88,59 @@ export const projectsApi = {
     request(URLS.projects, "/", "POST", { action: "project.invite", project_id: projectId, email }),
 };
 
+export async function uploadDocumentChunked(
+  projectId: number,
+  file: File,
+  category: string,
+  onProgress?: (pct: number) => void,
+): Promise<{ id: number; filename: string; file_type: string }> {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "";
+  const CHUNK_SIZE = 512 * 1024; // 512 KB
+  onProgress?.(5);
+
+  // Шаг 1: инициализация
+  const init = await request(URLS.documents, "/", "POST", {
+    action: "document.upload_init",
+    project_id: projectId,
+    filename: file.name,
+    file_type: ext,
+    total_size: file.size,
+  }) as { session_id: string; s3_key: string };
+
+  const { session_id, s3_key } = init;
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+  // Шаг 2: отправляем чанки
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunkB64 = await readChunkAsBase64(file, start, end);
+    await request(URLS.documents, "/", "POST", {
+      action: "document.upload_chunk",
+      session_id,
+      s3_key,
+      chunk_b64: chunkB64,
+      chunk_index: i,
+    });
+    onProgress?.(10 + Math.round(((i + 1) / totalChunks) * 80));
+  }
+
+  // Шаг 3: завершаем — сервер склеивает, извлекает текст, сохраняет в БД
+  const result = await request(URLS.documents, "/", "POST", {
+    action: "document.upload_complete",
+    project_id: projectId,
+    session_id,
+    s3_key,
+    filename: file.name,
+    file_type: ext,
+    total_chunks: totalChunks,
+    category,
+  }) as { id: number; filename: string; file_type: string };
+
+  onProgress?.(100);
+  return result;
+}
+
 export const documentsApi = {
   list: (projectId: number) =>
     request(URLS.documents, "/", "POST", { action: "list_documents", project_id: projectId }),

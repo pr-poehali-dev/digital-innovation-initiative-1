@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { projectsApi, documentsApi, putFileToPresignedUrl, mediaApi, tasksApi } from "@/lib/api";
+import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -85,6 +85,7 @@ export default function ProjectPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tab, setTab] = useState<"tasks" | "docs" | "team">("tasks");
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -113,19 +114,16 @@ export default function ProjectPage() {
       return;
     }
     setUploading(true);
+    setUploadProgress(0);
     setUploadError("");
     try {
-      // Шаг 1: получаем presigned URL для прямой загрузки в S3
-      const { upload_url, s3_key } = await documentsApi.getUploadUrl(projectId, file.name, ext) as { upload_url: string; s3_key: string };
-      // Шаг 2: загружаем файл напрямую в S3 (без лимита тела функции)
-      await putFileToPresignedUrl(upload_url, file);
-      // Шаг 3: сообщаем бэкенду — он извлекает текст и сохраняет в БД
-      await documentsApi.confirmUpload(projectId, s3_key, file.name, ext, file.size, uploadCategory);
+      await uploadDocumentChunked(projectId, file, uploadCategory, setUploadProgress);
       load();
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : "Ошибка загрузки");
     } finally {
       setUploading(false);
+      setUploadProgress(0);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -474,7 +472,7 @@ export default function ProjectPage() {
                 <Icon name="Upload" size={22} className="text-slate-600" />
               </div>
               <p className="font-medium mb-1">Загрузить материал</p>
-              <p className="text-sm text-muted-foreground mb-4">PDF, DOCX или PPTX — до 20 МБ</p>
+              <p className="text-sm text-muted-foreground mb-4">PDF, DOCX или PPTX — до 100 МБ</p>
 
               <div className="max-w-xs mx-auto mb-4 text-left">
                 <label className="text-xs font-semibold text-slate-700 block mb-1.5">Тип материала</label>
@@ -538,6 +536,17 @@ export default function ProjectPage() {
                 </label>
               </div>
               <p className="text-xs text-slate-500 mt-3">Фото — распознаётся текст с доски / тетради. Аудио (OGG до 1 МБ) — расшифровывается лекция.</p>
+              {uploading && uploadProgress > 0 && (
+                <div className="mt-3 max-w-xs mx-auto">
+                  <div className="flex justify-between text-xs text-slate-500 mb-1">
+                    <span>Загружаю...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-1.5">
+                    <div className="bg-slate-800 h-1.5 rounded-full transition-all duration-200" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                </div>
+              )}
               {uploadError && <p className="text-red-500 text-sm mt-2">{uploadError}</p>}
             </div>
 

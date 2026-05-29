@@ -6,6 +6,7 @@ import json
 import os
 import base64
 import io
+import uuid
 import psycopg2
 import boto3
 
@@ -559,6 +560,132 @@ def handler(event: dict, context) -> dict:
             log_activity(cur, schema, pid, user["id"], "renamed_document", "document", doc_id, f"{old_name} → {new_name}")
             conn.commit()
             return json_response({"ok": True, "name": new_name[:255]}, origin=origin)
+
+        # document.upload_init — начать чанковую загрузку документа
+        if action == "document.upload_init":
+            project_id = body.get("project_id")
+            filename = (body.get("filename") or "file").strip()
+            file_type = (body.get("file_type") or "").lower().strip(".")
+            total_size = int(body.get("total_size") or 0)
+            if not project_id or not filename or not file_type:
+                return json_response({"error": "Нужны project_id, filename, file_type"}, 400, origin=origin)
+            project_id = int(project_id)
+
+            MAX_SIZE = 100 * 1024 * 1024  # 100 МБ для документов
+            if total_size > MAX_SIZE:
+                return json_response({"error": f"Файл слишком большой. Максимум — 100 МБ"}, 400, origin=origin)
+
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            session_id = "doc_" + uuid.uuid4().hex
+            s3_key = f"documents/{project_id}/{session_id}_{filename}"
+            return json_response({"session_id": session_id, "s3_key": s3_key}, origin=origin)
+
+        # document.upload_chunk — загрузить один чанк
+        if action == "document.upload_chunk":
+            session_id = body.get("session_id")
+            s3_key = body.get("s3_key")
+            chunk_b64 = body.get("chunk_b64", "")
+            chunk_index = int(body.get("chunk_index", 0))
+            if not session_id or not s3_key or not chunk_b64:
+                return json_response({"error": "Нужны session_id, s3_key, chunk_b64"}, 400, origin=origin)
+            try:
+                chunk_bytes = base64.b64decode(chunk_b64)
+            except Exception:
+                return json_response({"error": "Невалидный base64"}, 400, origin=origin)
+            chunk_key = f"{s3_key}.chunk.{chunk_index:04d}"
+            s3 = get_s3()
+            s3.put_object(Bucket="files", Key=chunk_key, Body=chunk_bytes)
+            return json_response({"chunk_index": chunk_index, "size": len(chunk_bytes)}, origin=origin)
+
+        # document.upload_complete — склеить чанки, извлечь текст, сохранить в БД
+        if action == "document.upload_complete":
+            project_id = body.get("project_id")
+            session_id = body.get("session_id")
+            s3_key = body.get("s3_key")
+            filename = (body.get("filename") or "file").strip()
+            file_type = (body.get("file_type") or "").lower().strip(".")
+            total_chunks = int(body.get("total_chunks") or 0)
+            category = body.get("category") or "other"
+            if not project_id or not session_id or not s3_key or not file_type or not total_chunks:
+                return json_response({"error": "Нужны project_id, session_id, s3_key, file_type, total_chunks"}, 400, origin=origin)
+            project_id = int(project_id)
+            cur.execute(
+                f"SELECT role FROM {schema}.project_members WHERE project_id = %s AND user_id = %s",
+                (project_id, user["id"]),
+            )
+            if not cur.fetchone():
+                return json_response({"error": "Нет доступа"}, 403, origin=origin)
+
+            # Склеиваем чанки
+            s3 = get_s3()
+            file_parts = []
+            for i in range(total_chunks):
+                chunk_key = f"{s3_key}.chunk.{i:04d}"
+                obj = s3.get_object(Bucket="files", Key=chunk_key)
+                file_parts.append(obj["Body"].read())
+            file_bytes = b"".join(file_parts)
+
+            # Сохраняем итоговый файл в S3
+            content_types = {
+                "pdf": "application/pdf",
+                "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            }
+            s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes,
+                          ContentType=content_types.get(file_type, "application/octet-stream"))
+
+            # Удаляем чанки
+            for i in range(total_chunks):
+                try:
+                    s3.delete_object(Bucket="files", Key=f"{s3_key}.chunk.{i:04d}")
+                except Exception:
+                    pass
+
+            # Извлекаем текст
+            extracted_text = ""
+            structure_json = None
+            chunks = []
+            page_count = None
+            if file_type == "pdf":
+                extracted_text, chunks, page_count = extract_text_from_pdf(file_bytes)
+            elif file_type == "docx":
+                extracted_text, chunks, page_count = extract_text_from_docx(file_bytes)
+            elif file_type == "pptx":
+                result = extract_from_pptx(file_bytes)
+                extracted_text = result["text"][:MAX_TEXT_LEN]
+                structure_json = json.dumps(result["structure"], ensure_ascii=False)
+                chunks = chunk_text(extracted_text)
+                page_count = len(result.get("structure", []))
+
+            cur.execute(
+                f"""INSERT INTO {schema}.documents
+                    (project_id, uploaded_by, filename, original_name, file_type, file_size, s3_key,
+                     extracted_text, structure_json, status, category, page_count, extracted_length)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'ready', %s, %s, %s)
+                    RETURNING id""",
+                (project_id, user["id"], s3_key, filename, file_type, len(file_bytes), s3_key,
+                 extracted_text, structure_json, category, page_count, len(extracted_text)),
+            )
+            doc_id = cur.fetchone()[0]
+            for ch in chunks[:500]:
+                cur.execute(
+                    f"""INSERT INTO {schema}.document_chunks (document_id, chunk_index, page_number, content, content_length)
+                        VALUES (%s, %s, %s, %s, %s)""",
+                    (doc_id, ch["index"], ch.get("page"), ch["content"], len(ch["content"])),
+                )
+            log_activity(cur, schema, project_id, user["id"], "uploaded_document", "document", doc_id, filename)
+            conn.commit()
+            return json_response({
+                "id": doc_id, "filename": filename, "file_type": file_type,
+                "file_size": len(file_bytes), "status": "ready", "category": category,
+                "page_count": page_count, "chunks_count": len(chunks), "text_length": len(extracted_text),
+            }, origin=origin)
 
         # document.get_upload_url — presigned PUT URL для прямой загрузки в S3
         if action == "document.get_upload_url":
