@@ -330,18 +330,38 @@ def handle_invite(conn, user, body, request_id, origin=None):
     if role not in ("owner", "admin"):
         return err_response("access_denied", "Только владелец может приглашать", 403, request_id, origin=origin)
 
+    # Получаем название проекта для сообщения
+    cur.execute(f"SELECT title FROM {schema}.projects WHERE id = %s", (project_id,))
+    proj_row = cur.fetchone()
+    project_title = proj_row[0] if proj_row else ""
+
     cur.execute(f"SELECT id, name FROM {schema}.users WHERE email = %s", (email,))
     invite_user = cur.fetchone()
-    if not invite_user:
-        return err_response("not_found", "Пользователь с таким email не найден", 404, request_id, origin=origin)
 
-    cur.execute(
-        f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'member') ON CONFLICT DO NOTHING",
-        (project_id, invite_user[0]),
-    )
-    log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
-    conn.commit()
-    return ok_response({"name": invite_user[1]}, request_id, origin=origin)
+    if invite_user:
+        # Пользователь найден — сразу добавляем в проект
+        cur.execute(
+            f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'member') ON CONFLICT DO NOTHING",
+            (project_id, invite_user[0]),
+        )
+        log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
+        conn.commit()
+        return ok_response({"name": invite_user[1], "pending": False}, request_id, origin=origin)
+    else:
+        # Пользователь не зарегистрирован — сохраняем pending-приглашение
+        cur.execute(
+            f"""INSERT INTO {schema}.project_invitations (project_id, invited_by, email, status)
+                VALUES (%s, %s, %s, 'pending')
+                ON CONFLICT (project_id, email) DO UPDATE SET status = 'pending', created_at = NOW()""",
+            (project_id, user["id"], email),
+        )
+        log_activity(cur, schema, project_id, user["id"], "invited_pending", "project", project_id, email)
+        conn.commit()
+        return ok_response({
+            "pending": True,
+            "email": email,
+            "message": f"Приглашение сохранено. Как только {email} зарегистрируется в DocMind AI — он автоматически получит доступ к проекту «{project_title}».",
+        }, request_id, origin=origin)
 
 
 def handler(event: dict, context) -> dict:

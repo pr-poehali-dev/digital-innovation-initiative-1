@@ -359,6 +359,22 @@ def handler(event: dict, context) -> dict:
             )
             user_id = cur.fetchone()[0]
 
+            # Принимаем pending-приглашения в проекты для этого email
+            cur.execute(
+                f"SELECT project_id FROM {schema}.project_invitations WHERE email = %s AND status = 'pending'",
+                (email,),
+            )
+            invite_rows = cur.fetchall()
+            for (inv_project_id,) in invite_rows:
+                cur.execute(
+                    f"INSERT INTO {schema}.project_members (project_id, user_id, role) VALUES (%s, %s, 'member') ON CONFLICT DO NOTHING",
+                    (inv_project_id, user_id),
+                )
+                cur.execute(
+                    f"UPDATE {schema}.project_invitations SET status = 'accepted', accepted_at = NOW() WHERE project_id = %s AND email = %s",
+                    (inv_project_id, email),
+                )
+
             sid = secrets.token_hex(32)
             expires = datetime.now() + timedelta(days=30)
             cur.execute(

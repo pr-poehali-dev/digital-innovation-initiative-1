@@ -225,10 +225,14 @@ export default function ProjectPage() {
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const d = await projectsApi.invite(projectId, inviteEmail);
-      setInviteMsg(`✓ ${d.name} добавлен в проект`);
+      const d = await projectsApi.invite(projectId, inviteEmail) as { name?: string; pending?: boolean; message?: string };
+      if (d.pending) {
+        setInviteMsg(`⏳ ${d.message || "Приглашение отправлено — участник получит доступ после регистрации"}`);
+      } else {
+        setInviteMsg(`✓ ${d.name} добавлен в проект`);
+        load();
+      }
       setInviteEmail("");
-      load();
     } catch (err: unknown) {
       setInviteMsg(err instanceof Error ? err.message : "Ошибка");
     }
