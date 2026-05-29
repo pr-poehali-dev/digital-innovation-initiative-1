@@ -211,10 +211,59 @@ def _rgb_to_tuple(rgb):
     return None
 
 
+def _parse_theme_colors(prs) -> dict:
+    """Читает цвета из XML-темы PPTX (работает даже когда нет прямых RGB на слайдах)."""
+    result = {}
+    try:
+        from lxml import etree
+        import zipfile, io as _io
+        # Сериализуем обратно в байты чтобы работать как с ZIP
+        buf = _io.BytesIO()
+        prs.save(buf)
+        buf.seek(0)
+        with zipfile.ZipFile(buf, "r") as z:
+            theme_paths = [n for n in z.namelist() if "theme/theme" in n and n.endswith(".xml")]
+            if not theme_paths:
+                return result
+            xml_data = z.read(theme_paths[0])
+        root = etree.fromstring(xml_data)
+        ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+        # Ищем цветовую схему
+        clr_scheme = root.find(".//a:clrScheme", ns)
+        if clr_scheme is None:
+            return result
+        colors = {}
+        for child in clr_scheme:
+            tag = child.tag.split("}")[-1]  # убираем namespace
+            # Ищем srgbClr или sysClr
+            for sub in child:
+                val = sub.get("val") or sub.get("lastClr")
+                if val and len(val) == 6:
+                    colors[tag] = (int(val[0:2],16), int(val[2:4],16), int(val[4:6],16))
+                    break
+        # dk1/dk2 — тёмные (текст), lt1/lt2 — светлые (фон), accent1 — акцент
+        if "lt1" in colors:
+            result["bg"] = colors["lt1"]
+        elif "dk1" in colors:
+            # Если тёмный фон — используем его
+            r,g,b = colors["dk1"]
+            result["bg"] = (r,g,b) if r+g+b < 300 else None
+        if "dk1" in colors:
+            result["title"] = colors["dk1"]
+        if "dk2" in colors:
+            result["bullet"] = colors["dk2"]
+        if "accent1" in colors:
+            result["accent"] = colors["accent1"]
+    except BaseException:
+        pass
+    return result
+
+
 def extract_style_from_template(template_bytes: bytes) -> dict:
-    """Извлекает цветовую палитру и шрифт из PPTX-образца (роль template).
-    Любая ошибка — fallback на dark_corporate."""
-    fallback = STYLE_PRESETS["dark_corporate"]
+    """Извлекает цветовую палитру и шрифт из PPTX-образца.
+    Сначала пробует прямые RGB со слайдов, затем тему XML.
+    Fallback — light_minimal (белый фон), не тёмно-синий."""
+    fallback = STYLE_PRESETS["light_minimal"]  # нейтральный белый вместо синего
     if not template_bytes:
         return fallback
 
@@ -236,7 +285,7 @@ def extract_style_from_template(template_bytes: bytes) -> dict:
         slides_iter = []
 
     for slide in slides_iter:
-        # Фон слайда
+        # Фон слайда — прямой RGB
         try:
             fill = slide.background.fill
             if bg_color is None:
@@ -246,7 +295,6 @@ def extract_style_from_template(template_bytes: bytes) -> dict:
         except BaseException:
             pass
 
-        # Текстовые рамки
         try:
             shapes = list(slide.shapes)
         except BaseException:
@@ -280,13 +328,11 @@ def extract_style_from_template(template_bytes: bytes) -> dict:
                         font = run.font
                     except BaseException:
                         continue
-                    # Шрифт
                     try:
                         if main_font is None and font.name:
                             main_font = font.name
                     except BaseException:
                         pass
-                    # Цвет
                     try:
                         rgb_t = _rgb_to_tuple(font.color.rgb)
                         if rgb_t:
@@ -301,11 +347,27 @@ def extract_style_from_template(template_bytes: bytes) -> dict:
                     except BaseException:
                         pass
 
+    # Если прямые RGB не дали результата — читаем тему из XML
+    if not bg_color or not title_color:
+        theme_colors = _parse_theme_colors(prs)
+        if not bg_color and theme_colors.get("bg"):
+            bg_color = theme_colors["bg"]
+        if not title_color and theme_colors.get("title"):
+            title_color = theme_colors["title"]
+        if not body_color and theme_colors.get("bullet"):
+            body_color = theme_colors["bullet"]
+        if theme_colors.get("accent"):
+            accent_color = theme_colors["accent"]
+        else:
+            accent_color = title_color or fallback["accent"]
+    else:
+        accent_color = title_color or fallback["accent"]
+
     return {
         "bg": bg_color or fallback["bg"],
         "title": title_color or fallback["title"],
         "bullet": body_color or fallback["bullet"],
-        "accent": title_color or fallback["accent"],
+        "accent": accent_color,
         "num": fallback["num"],
         "font": main_font or fallback["font"],
     }
@@ -800,18 +862,27 @@ def handler(event: dict, context) -> dict:
         effective_preset = style_preset or "from_template"
 
         if effective_preset == "from_template":
-            # Ищем документ с ролью template в задании
+            # Ищем PPTX-документ с ролью template/reference/material — любой PPTX в задании
             cur.execute(
-                f"""SELECT d.s3_key, d.file_type, d.original_name
+                f"""SELECT d.s3_key, d.file_type, d.original_name, td.role
                     FROM {schema}.task_documents td
                     JOIN {schema}.documents d ON d.id = td.document_id
-                    WHERE td.task_id = %s AND td.role = 'template' AND d.archived_at IS NULL
-                    ORDER BY td.priority DESC
+                    WHERE td.task_id = %s
+                      AND d.archived_at IS NULL
+                      AND d.file_type = 'pptx'
+                    ORDER BY
+                      CASE td.role
+                        WHEN 'template' THEN 1
+                        WHEN 'reference' THEN 2
+                        WHEN 'standard' THEN 3
+                        ELSE 4
+                      END,
+                      td.priority DESC
                     LIMIT 1""",
                 (task_id,),
             )
             tpl_row = cur.fetchone()
-            if tpl_row and tpl_row[0] and "pptx" in (tpl_row[1] or "").lower():
+            if tpl_row and tpl_row[0]:
                 try:
                     s3 = boto3.client(
                         "s3",
@@ -823,9 +894,9 @@ def handler(event: dict, context) -> dict:
                     template_bytes = obj["Body"].read()
                 except Exception:
                     template_bytes = None
-            # Если не нашли шаблон — fallback на dark_corporate
+            # Если шаблон не найден — light_minimal (нейтральный белый)
             if not template_bytes:
-                effective_preset = "dark_corporate"
+                effective_preset = "light_minimal"
 
         style = resolve_style(effective_preset, template_bytes)
 
