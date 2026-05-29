@@ -427,8 +427,8 @@ export default function SoftwareDevelopmentWebsite() {
                   iconBg: "bg-pink-100",
                   title: "Добавить визуалы",
                   desc: "Схемы, диаграммы, таймлайны — AI вставит их прямо в слайды",
-                  cta: "Узнать →",
-                  link: "/cabinet",
+                  cta: "Открыть →",
+                  link: "/cabinet/visuals",
                   ctaCls: "bg-pink-600 hover:bg-pink-700 text-white",
                 },
                 {
