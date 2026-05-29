@@ -135,13 +135,15 @@ export default function TaskPage() {
     setGenerating(true);
     setGenError("");
     try {
+      const visualTypes = ["prepare_presentation", "presentation_by_reference"];
+      const supportsVisuals = visualTypes.includes(task.task_type);
       const result = await generateApi.run(
         tId,
         isRevision ? revision : prompt || undefined,
         isRevision && activeRun ? activeRun.id : undefined,
         useWebSearch,
-        useVisuals,
-        allowAiImages,
+        supportsVisuals ? useVisuals : false,
+        supportsVisuals ? allowAiImages : false,
       );
       setActiveRun({
         id: result.run_id || result.id,
@@ -436,31 +438,47 @@ export default function TaskPage() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
-                <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4 text-sm">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={useWebSearch}
-                      onChange={(e) => setUseWebSearch(e.target.checked)}
-                      className="w-4 h-4 rounded accent-slate-800" />
-                    <Icon name="Globe" size={14} className="text-slate-600" />
-                    <span>Интернет</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={useVisuals}
-                      onChange={(e) => setUseVisuals(e.target.checked)}
-                      className="w-4 h-4 rounded accent-slate-800" />
-                    <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
-                    <span>Генерировать визуалы</span>
-                  </label>
-                  {useVisuals && (
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={allowAiImages}
-                        onChange={(e) => setAllowAiImages(e.target.checked)}
-                        className="w-4 h-4 rounded accent-slate-800" />
-                      <Icon name="Image" size={14} className="text-slate-600" />
-                      <span>Картинки AI</span>
-                    </label>
-                  )}
-                </div>
+                {(() => {
+                  const visualTypes = ["prepare_presentation", "presentation_by_reference"];
+                  const supportsVisuals = visualTypes.includes(task.task_type);
+                  const isRevise = task.task_type === "revise";
+                  return (
+                    <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4 text-sm">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={useWebSearch}
+                          onChange={(e) => setUseWebSearch(e.target.checked)}
+                          className="w-4 h-4 rounded accent-slate-800" />
+                        <Icon name="Globe" size={14} className="text-slate-600" />
+                        <span>Интернет</span>
+                      </label>
+                      {supportsVisuals ? (
+                        <>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={useVisuals}
+                              onChange={(e) => setUseVisuals(e.target.checked)}
+                              className="w-4 h-4 rounded accent-slate-800" />
+                            <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
+                            <span>Генерировать визуалы</span>
+                          </label>
+                          {useVisuals && (
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input type="checkbox" checked={allowAiImages}
+                                onChange={(e) => setAllowAiImages(e.target.checked)}
+                                className="w-4 h-4 rounded accent-slate-800" />
+                              <Icon name="Image" size={14} className="text-slate-600" />
+                              <span>Картинки AI</span>
+                            </label>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                          <Icon name="Info" size={13} />
+                          {isRevise ? "Визуалы управляются в предыдущей версии" : "Визуалы доступны в типах «Подготовить презентацию» и «По образцу»"}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
                 {genError && <p className="text-red-500 text-sm mb-3">{genError}</p>}
                 <button
                   onClick={() => handleGenerate(false)}

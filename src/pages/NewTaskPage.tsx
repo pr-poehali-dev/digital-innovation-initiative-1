@@ -224,6 +224,15 @@ export default function NewTaskPage() {
                 </button>
               ))}
             </div>
+            {(taskType === "prepare_presentation" || taskType === "presentation_by_reference") && (
+              <div className="mt-3 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 text-xs text-blue-700">
+                <Icon name="Sparkles" size={14} className="mt-0.5 flex-shrink-0 text-blue-500" />
+                <span>
+                  Для этого типа доступны <strong>визуалы и AI-картинки</strong> — диаграммы, схемы, таймлайны.
+                  После создания задания включите галочку «Генерировать визуалы» перед запуском.
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">

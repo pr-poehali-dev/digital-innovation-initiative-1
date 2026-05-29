@@ -91,7 +91,7 @@ export default function VisualsPage() {
     setLoadingTasks(true);
     setTasks([]); setTaskId(null); setRunId(null); setVisuals([]);
     tasksApi.list(projectId)
-      .then((d) => setTasks(((d as { tasks: TaskItem[] }).tasks || []).filter(t => t.versions > 0)))
+      .then((d) => setTasks((d as { tasks: TaskItem[] }).tasks || []))
       .catch(() => setError("Не удалось загрузить задания"))
       .finally(() => setLoadingTasks(false));
   }, [projectId]);
@@ -193,6 +193,14 @@ export default function VisualsPage() {
           <h1 className="text-xl font-semibold">Визуалы презентации</h1>
         </div>
 
+        {/* Объяснение как работает */}
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-sm text-blue-800 space-y-1.5">
+          <p className="font-semibold flex items-center gap-2"><Icon name="Info" size={15} /> Как здесь управлять визуалами</p>
+          <p>Визуалы создаются автоматически при генерации презентации (тип «Подготовить презентацию» или «По образцу» с включённой галочкой «Генерировать визуалы»).</p>
+          <p>Здесь можно: <strong>заменить картинку своей</strong>, <strong>изменить описание</strong> и перегенерировать, или <strong>вернуть AI-версию</strong>.</p>
+          <p className="text-blue-600">Выберите проект и задание ниже — появятся слайды с визуалами.</p>
+        </div>
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-2 text-sm text-red-700">
             <Icon name="AlertCircle" size={16} />
@@ -275,15 +283,20 @@ export default function VisualsPage() {
                 <p className="text-sm">Загрузка визуалов…</p>
               </div>
             ) : visuals.length === 0 ? (
-              <div className="bg-card border border-border rounded-2xl p-10 flex flex-col items-center gap-3 text-center">
+              <div className="bg-card border border-border rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
                 <Icon name="Image" size={36} className="text-slate-300" />
-                <p className="font-medium text-slate-600">Визуалов нет</p>
-                <p className="text-sm text-slate-400 max-w-xs">В этом задании не было запланировано визуалов. Создайте новую версию с инструкцией добавить схемы или диаграммы.</p>
-                {taskId && (
-                  <Link to={`/cabinet/project/${projectId}/task/${taskId}`}
-                    className="mt-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors">
-                    Открыть задание
-                  </Link>
+                <p className="font-medium text-slate-600">Визуалов нет в этой версии</p>
+                <p className="text-sm text-slate-400 max-w-sm">
+                  Визуалы создаются при запуске генерации с галочкой <strong>«Генерировать визуалы»</strong>.
+                  Она работает для типов «Подготовить презентацию» и «По образцу».
+                </p>
+                {taskId && projectId && (
+                  <div className="flex gap-2 mt-2 flex-wrap justify-center">
+                    <Link to={`/cabinet/project/${projectId}/task/${taskId}`}
+                      className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors">
+                      Открыть задание и перегенерировать
+                    </Link>
+                  </div>
                 )}
               </div>
             ) : (
