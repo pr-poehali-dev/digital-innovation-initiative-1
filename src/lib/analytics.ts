@@ -1,7 +1,7 @@
 // Продуктовая аналитика — лёгкий хелпер
-// Сейчас пишет в console.debug (не мусорит в prod).
-// Для подключения провайдера (PostHog, Mixpanel и т.д.) —
-// замени тело функции `sendEvent` ниже, интерфейсы менять не нужно.
+// Провайдер: PostHog (инициализирован в main.tsx).
+// Для смены провайдера — замени тело sendEvent, интерфейсы не трогать.
+import posthog from 'posthog-js';
 
 type VisualsSupportsReason =
   | "presentation_task"
@@ -107,15 +107,10 @@ function sendEvent<K extends keyof AnalyticsEvents>(
   name: K,
   props: AnalyticsEvents[K],
 ): void {
-  // В dev — видно в консоли, в prod — тихо
   if (import.meta.env.DEV) {
     console.debug(`[analytics] ${name}`, props);
   }
-
-  // Точка подключения провайдера:
-  // window.posthog?.capture(name, props);
-  // window.mixpanel?.track(name, props);
-  // window.amplitude?.track(name, props);
+  posthog.capture(name, props);
 }
 
 // --- Публичные хелперы для каждого события ---
