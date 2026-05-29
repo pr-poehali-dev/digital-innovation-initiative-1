@@ -134,8 +134,12 @@ export default function TaskPage() {
   // Определяем поддержку визуалов по контексту:
   // — прямые презентационные типы
   // — revise, если активный run содержит visual_plan (дорабатывается презентация)
+  // — fallback для revise: если нет activeRun но task_type=revise — не скрываем, даём пользователю выбор
   const VISUAL_TASK_TYPES = ["prepare_presentation", "presentation_by_reference"];
-  const isReviseOfPresentation = task?.task_type === "revise" && (activeRun?.visual_plan?.length ?? 0) > 0;
+  const isReviseOfPresentation =
+    task?.task_type === "revise" &&
+    ((activeRun?.visual_plan?.length ?? 0) > 0 ||
+      (!activeRun && task.task_type === "revise")); // нет run — не блокируем
   const supportsVisuals = task ? (VISUAL_TASK_TYPES.includes(task.task_type) || isReviseOfPresentation) : false;
 
   const handleGenerate = async (isRevision = false) => {
@@ -163,21 +167,28 @@ export default function TaskPage() {
       loadTask();
       setTimeout(() => contentRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (err: unknown) {
-      // Разбираем ошибку на конкретные сообщения
-      const raw = err instanceof Error ? err.message : "Ошибка генерации";
-      let friendly = raw;
+      const raw = err instanceof Error ? err.message : String(err);
+      // Логируем техническую причину для диагностики
+      console.error("[generate] error:", raw, { taskId: tId, taskType: task?.task_type });
+      let friendly: string;
       if (raw.includes("timeout") || raw.includes("Execution timeout") || raw.includes("504")) {
         friendly = "Генерация заняла слишком много времени. Попробуйте отключить «Картинки AI» или уменьшить число слайдов.";
       } else if (raw.includes("обязательн") && raw.includes("документ")) {
         friendly = raw; // уже человекочитаемое из бэкенда
-      } else if (raw.includes("rate") || raw.includes("429")) {
+      } else if (raw.includes("429") || raw.includes("rate") || raw.includes("лимит")) {
         friendly = "Слишком много запросов подряд. Подождите минуту и попробуйте снова.";
-      } else if (raw.includes("не найдено") || raw.includes("404")) {
+      } else if (raw.includes("422") || raw.includes("validation") || raw.includes("Нужен")) {
+        friendly = "Не заполнены обязательные поля задания. Откройте настройки и укажите тему.";
+      } else if (raw.includes("404") || raw.includes("не найдено")) {
         friendly = "Задание не найдено. Обновите страницу.";
-      } else if (raw.includes("доступ") || raw.includes("403")) {
+      } else if (raw.includes("403") || raw.includes("доступ")) {
         friendly = "Нет доступа к этому заданию.";
-      } else if (raw.includes("GPT") || raw.includes("AI") || raw.includes("YandexGPT") || raw.includes("500")) {
-        friendly = "Сервис генерации временно недоступен. Попробуйте через минуту.";
+      } else if (raw.includes("502") || raw.includes("503")) {
+        friendly = "Сервис временно недоступен. Попробуйте через 1–2 минуты.";
+      } else if (raw.includes("500") || raw.includes("GPT") || raw.includes("YandexGPT")) {
+        friendly = "Ошибка на стороне сервиса генерации. Попробуйте через минуту.";
+      } else {
+        friendly = raw || "Неизвестная ошибка генерации.";
       }
       setGenError(friendly);
     } finally {

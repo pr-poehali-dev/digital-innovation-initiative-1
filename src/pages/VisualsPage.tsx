@@ -57,6 +57,7 @@ export default function VisualsPage() {
   const [mode, setMode] = useState<"task" | "files">("task");
   const [projectDocs, setProjectDocs] = useState<ProjectDoc[]>([]);
   const [loadingDocs,  setLoadingDocs]  = useState(false);
+  const [findingDocId, setFindingDocId] = useState<number | null>(null);
 
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [loadingTasks,    setLoadingTasks]    = useState(false);
@@ -95,11 +96,18 @@ export default function VisualsPage() {
     if (!projectId) return;
     setLoadingTasks(true);
     setTasks([]); setTaskId(null); setRunId(null); setVisuals([]);
+    setError("");
     tasksApi.list(projectId)
       .then((d) => setTasks((d as { tasks: TaskItem[] }).tasks || []))
       .catch(() => setError("Не удалось загрузить задания"))
       .finally(() => setLoadingTasks(false));
   }, [projectId]);
+
+  // Сброс state при смене вкладки
+  useEffect(() => {
+    setTaskId(null); setRunId(null); setVisuals([]);
+    setProjectDocs([]); setError(""); setEditingIdx(null);
+  }, [mode]);
 
   // Загрузка PPTX-материалов при режиме "из файлов"
   useEffect(() => {
@@ -109,7 +117,8 @@ export default function VisualsPage() {
     documentsApi.list(projectId)
       .then((d) => {
         const docs = (d as { documents: ProjectDoc[] }).documents || [];
-        setProjectDocs(docs.filter(doc => doc.file_type === "pptx"));
+        const PPTX_TYPES = ["pptx", "ppt", "pptm"];
+        setProjectDocs(docs.filter(doc => PPTX_TYPES.includes(doc.file_type?.toLowerCase())));
       })
       .catch(() => setError("Не удалось загрузить материалы"))
       .finally(() => setLoadingDocs(false));
@@ -144,6 +153,33 @@ export default function VisualsPage() {
 
   const updateVisual = (slideIndex: number, patch: Partial<VisualItem>) =>
     setVisuals(prev => prev.map(v => v.slide_index === slideIndex ? { ...v, ...patch } : v));
+
+  // Найти задание, в котором используется документ с данным id
+  const handleFindTaskByDoc = async (docId: number) => {
+    if (!projectId) return;
+    setFindingDocId(docId);
+    setError("");
+    try {
+      const d = await tasksApi.list(projectId) as { tasks: (TaskItem & { document_ids?: number[] })[] };
+      const allTasks = d.tasks || [];
+      // Загружаем детали заданий параллельно (ограничиваем 10 первыми для скорости)
+      const sample = allTasks.slice(0, 10);
+      const details = await Promise.all(
+        sample.map(t => tasksApi.get(t.id).then(r => r as { id: number; documents: { document_id: number }[] }).catch(() => null))
+      );
+      const found = details.find(r => r && r.documents?.some(d => d.document_id === docId));
+      if (found) {
+        setMode("task");
+        setTaskId(found.id);
+      } else {
+        setError("Этот файл не прикреплён ни к одному заданию. Создайте новое задание.");
+      }
+    } catch {
+      setError("Не удалось выполнить поиск. Попробуйте вручную.");
+    } finally {
+      setFindingDocId(null);
+    }
+  };
 
   const handleRerender = async (slideIndex: number) => {
     if (!runId) return;
@@ -215,8 +251,8 @@ export default function VisualsPage() {
         {/* Вкладки режима */}
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
           {([
-            { key: "task",  label: "Из задания",   icon: "Sparkles" },
-            { key: "files", label: "Из материалов", icon: "FolderOpen" },
+            { key: "task",  label: "Из задания",        icon: "Sparkles" },
+            { key: "files", label: "По файлам проекта", icon: "FolderOpen" },
           ] as const).map(tab => (
             <button key={tab.key} onClick={() => setMode(tab.key)}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -291,7 +327,7 @@ export default function VisualsPage() {
           <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
             <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs flex items-center justify-center font-bold">2</span>
-              PPTX-файлы проекта
+              Презентации в материалах
             </p>
             {loadingDocs ? (
               <div className="flex gap-2 items-center text-sm text-slate-500"><div className="w-4 h-4 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />Загрузка…</div>
@@ -314,10 +350,14 @@ export default function VisualsPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-xs text-slate-500 mb-3">
-                  Визуалы привязаны к <strong>результатам заданий</strong>, а не к самим файлам.
-                  Выберите файл — откроется задание где он используется, или можно создать новое.
-                </p>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs text-amber-700 flex items-start gap-2 mb-3">
+                  <Icon name="Info" size={14} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    Визуалы привязаны к <strong>результатам заданий</strong>, а не к самим файлам.
+                    Найдите задание где используется файл — или создайте новое.
+                    Для генерации визуалов включите галочку «Генерировать визуалы» перед запуском.
+                  </span>
+                </div>
                 {projectDocs.map(doc => (
                   <div key={doc.id} className="flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
                     <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center flex-shrink-0">
@@ -325,16 +365,20 @@ export default function VisualsPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{doc.name}</p>
-                      <p className="text-xs text-slate-400">PPTX · {doc.category || "материал"}</p>
+                      <p className="text-xs text-slate-400">{doc.file_type?.toUpperCase()} · {doc.category || "материал"}</p>
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       <Link to={`/cabinet/project/${projectId}/new-task`}
                         className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700">
                         Создать задание
                       </Link>
-                      <button onClick={() => { setMode("task"); }}
-                        className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700">
-                        Найти в заданиях
+                      <button
+                        onClick={() => handleFindTaskByDoc(doc.id)}
+                        disabled={findingDocId === doc.id}
+                        className="text-xs border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors text-slate-700 disabled:opacity-50 flex items-center gap-1">
+                        {findingDocId === doc.id
+                          ? <><div className="w-3 h-3 border border-slate-400 border-t-slate-800 rounded-full animate-spin" />Ищу…</>
+                          : "Найти в заданиях"}
                       </button>
                     </div>
                   </div>
