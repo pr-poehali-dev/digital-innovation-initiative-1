@@ -637,30 +637,14 @@ export default function SoftwareDevelopmentWebsite() {
 
       <footer className="bg-background border-t border-slate-200">
         <div className="mx-auto max-w-7xl py-16 px-6 lg:px-8">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
+
             {/* Company Info */}
             <div className="space-y-4 sm:col-span-2 lg:col-span-1">
               <Logo />
               <p className="text-sm text-muted-foreground max-w-xs">
                 Умный кабинет студента: база знаний, AI-ассистент и инструменты для подготовки любых учебных работ.
               </p>
-              <div className="flex space-x-4">
-                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-                  </svg>
-                </a>
-                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678c-3.405 0-6.162 2.76-6.162 6.162 0 3.405 2.76 6.162 6.162 6.162 3.405 0 6.162-2.76 6.162-6.162 0-3.405-2.76-6.162-6.162-6.162zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405c0 .795-.646 1.44-1.44 1.44-.795 0-1.44-.646-1.44-1.44 0-.794.646-1.439 1.44-1.439.793-.001 1.44.645 1.44 1.439z"/>
-                  </svg>
-                </a>
-                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                  <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M15.402 21v-6.966h2.333l.349-2.708h-2.682V9.598c0-.784.218-1.319 1.342-1.319h1.434V5.857a19.188 19.188 0 0 0-2.09-.107c-2.067 0-3.482 1.262-3.482 3.58v1.996h-2.338v2.708h2.338V21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-4.598z"/>
-                  </svg>
-                </a>
-              </div>
             </div>
 
             {/* Навигация */}
@@ -678,11 +662,6 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
                 </li>
                 <li>
-                  <a href="#about" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Для кого
-                  </a>
-                </li>
-                <li>
                   <Link to="/login" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Войти
                   </Link>
@@ -695,44 +674,71 @@ export default function SoftwareDevelopmentWebsite() {
               </ul>
             </div>
 
+            {/* Юридическая информация */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-foreground">Юридическая информация</h3>
+              <ul className="space-y-2 text-sm">
+                <li>
+                  <a href="/docs/privacy" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Политика конфиденциальности
+                  </a>
+                </li>
+                <li>
+                  <a href="/docs/terms" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Пользовательское соглашение
+                  </a>
+                </li>
+                <li>
+                  <a href="/docs/offer" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Оферта
+                  </a>
+                </li>
+                <li>
+                  <a href="/docs/refund" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Возврат средств
+                  </a>
+                </li>
+                <li>
+                  <a href="/docs/install" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Руководство по установке
+                  </a>
+                </li>
+              </ul>
+              <div className="pt-2 text-xs text-muted-foreground space-y-0.5 border-t border-slate-100">
+                <p>ИП Кузьменко А.В.</p>
+                <p>ОГРНИП: 325774600908955</p>
+                <p>ИНН: 231805728780</p>
+              </div>
+            </div>
+
             {/* Контакты */}
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-foreground">Контакты</h3>
               <ul className="space-y-3 text-sm text-muted-foreground">
-                <li className="flex items-center space-x-2">
-                  <svg className="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                    />
+                <li className="flex items-start gap-2">
+                  <svg className="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
-                  <a href="mailto:kuzmenkoav1982@yandex.ru" className="break-all hover:text-slate-900 transition-colors">
-                    kuzmenkoav1982@yandex.ru
-                  </a>
+                  <div>
+                    <p className="text-xs text-muted-foreground/70 mb-0.5">Поддержка</p>
+                    <a href="mailto:support@nasha-semiya.ru" className="break-all hover:text-slate-900 transition-colors">
+                      support@nasha-semiya.ru
+                    </a>
+                  </div>
                 </li>
               </ul>
-              <p className="text-xs text-muted-foreground pt-2">
-                Связь: напишите на email — отвечу в течение дня.
+              <p className="text-xs text-muted-foreground pt-1">
+                Отвечаем в течение рабочего дня.
               </p>
             </div>
           </div>
 
           {/* Bottom section */}
           <div className="mt-12 pt-8 border-t border-slate-200">
-            <div className="flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
-              <div className="text-sm text-muted-foreground">2026 DocMind AI. Все права защищены.</div>
-              <div className="flex flex-wrap justify-center sm:justify-end gap-x-6 gap-y-2 text-sm">
-                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                  Политика конфиденциальности
-                </a>
-                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                  Условия использования
-                </a>
-                <a href="#" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                  Политика cookies
-                </a>
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+              <div className="text-sm text-muted-foreground">© 2026 DocMind AI. Все права защищены.</div>
+              <div className="text-xs text-muted-foreground">
+                Безопасная оплата через ЮKassa
               </div>
             </div>
           </div>

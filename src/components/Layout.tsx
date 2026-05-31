@@ -45,6 +45,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <Icon name="FolderOpen" size={16} />
               Проекты
             </Link>
+            <Link
+              to="/cabinet/wallet"
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                location.pathname === "/cabinet/wallet"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <Icon name="Wallet" size={16} />
+              Кошелёк
+            </Link>
           </nav>
 
           <div className="flex items-center gap-3">
