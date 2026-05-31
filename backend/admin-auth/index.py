@@ -70,7 +70,7 @@ def cors_headers(origin: str = None) -> dict:
     return {
         "Access-Control-Allow-Origin": allowed,
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, X-Cookie",
+        "Access-Control-Allow-Headers": "Content-Type, X-Cookie, X-Admin-Token",
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
@@ -114,8 +114,13 @@ def check_origin(event: dict) -> bool:
 
 
 def get_session_token(event: dict) -> str:
-    """Читаем токен из X-Cookie (проксируется из Cookie браузера)."""
+    """Читаем токен из заголовка X-Admin-Token или из X-Cookie."""
     headers = event.get("headers") or {}
+    # Приоритет: заголовок X-Admin-Token
+    token = headers.get("X-Admin-Token") or headers.get("x-admin-token") or ""
+    if token:
+        return token
+    # Fallback: cookie
     cookie_str = headers.get("X-Cookie") or headers.get("x-cookie") or ""
     for part in cookie_str.split(";"):
         part = part.strip()
@@ -239,7 +244,7 @@ def action_login(event: dict) -> dict:
             f"Path=/; Max-Age={SESSION_TTL_HOURS * 3600}"
         )
         return resp(
-            {"ok": True, "actor_email": email, "actor_role": "super_admin"},
+            {"ok": True, "actor_email": email, "actor_role": "super_admin", "token": token},
             200,
             extra_headers={"X-Set-Cookie": cookie},
             origin=origin,

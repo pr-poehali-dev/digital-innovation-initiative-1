@@ -11,7 +11,6 @@ interface AdminContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
-  refresh: () => Promise<void>;
 }
 
 const AdminContext = createContext<AdminContextType | null>(null);
@@ -20,23 +19,18 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refresh = async () => {
-    const { ok, data } = await adminApi.me();
-    if (ok && data.actor_email) {
-      setSession({ actor_email: data.actor_email, actor_role: data.actor_role });
-    } else {
-      setSession(null);
-    }
-  };
-
   useEffect(() => {
-    refresh().finally(() => setLoading(false));
+    adminApi.me().then(({ ok, data }) => {
+      if (ok && data.actor_email) {
+        setSession({ actor_email: data.actor_email, actor_role: data.actor_role });
+      }
+    }).finally(() => setLoading(false));
   }, []);
 
   const login = async (email: string, password: string) => {
     const { ok, data } = await adminApi.login(email, password);
     if (ok && data.ok) {
-      await refresh();
+      setSession({ actor_email: data.actor_email, actor_role: data.actor_role });
       return { ok: true };
     }
     if (data.error === "too_many_attempts") return { ok: false, error: "Слишком много попыток. Подождите 10 минут." };
@@ -49,7 +43,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AdminContext.Provider value={{ session, loading, login, logout, refresh }}>
+    <AdminContext.Provider value={{ session, loading, login, logout }}>
       {children}
     </AdminContext.Provider>
   );
