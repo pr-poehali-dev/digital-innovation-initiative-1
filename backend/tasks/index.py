@@ -6,10 +6,34 @@ import os
 import psycopg2
 
 
+INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
+
+
 def get_db():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = False
     return conn
+
+
+def notify_indexer(action: str, entity_type: str = None, entity_id: int = None):
+    if not INDEXER_URL:
+        return
+    try:
+        import urllib.request
+        body = {}
+        if entity_type:
+            body["entity_type"] = entity_type
+        if entity_id:
+            body["entity_id"] = entity_id
+        req = urllib.request.Request(
+            f"{INDEXER_URL}?action={action}",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=3)
+    except Exception:
+        pass
 
 
 def get_schema():
@@ -209,6 +233,7 @@ def handler(event: dict, context) -> dict:
 
             log_activity(cur, schema, project_id, user["id"], "created_task", "task", task_id, title)
             conn.commit()
+            notify_indexer("upsert", "task", task_id)
             return json_response({"id": task_id, "title": title, "task_type": task_type}, origin=origin)
 
         # GET /{id} — детали задания
@@ -347,6 +372,7 @@ def handler(event: dict, context) -> dict:
                 )
                 log_activity(cur, schema, tr[0], user["id"], "updated_task_settings", "task", task_id, None)
                 conn.commit()
+                notify_indexer("upsert", "task", task_id)
             return json_response({"ok": True, "updated_fields": [f for f in allowed if f in body]}, origin=origin)
 
         # action=set_doc_role — изменить роль/инструкцию одного документа в задании

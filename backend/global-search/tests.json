@@ -1,0 +1,20 @@
+{
+  "tests": [
+    {
+      "name": "Поиск без сессии — 401",
+      "method": "GET",
+      "path": "/?q=тест",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Пустой запрос — пустые результаты",
+      "method": "GET",
+      "path": "/?q=",
+      "expectedStatus": 200,
+      "expectedBody": {"total": 0},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

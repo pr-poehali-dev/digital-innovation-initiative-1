@@ -11,6 +11,9 @@ import psycopg2
 import boto3
 
 
+INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
+
+
 def get_db():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = False
@@ -19,6 +22,27 @@ def get_db():
 
 def get_schema():
     return os.environ.get("MAIN_DB_SCHEMA", "public")
+
+
+def notify_indexer(action: str, entity_type: str = None, entity_id: int = None):
+    if not INDEXER_URL:
+        return
+    try:
+        import urllib.request
+        body = {}
+        if entity_type:
+            body["entity_type"] = entity_type
+        if entity_id:
+            body["entity_id"] = entity_id
+        req = urllib.request.Request(
+            f"{INDEXER_URL}?action={action}",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=3)
+    except Exception:
+        pass
 
 
 ALLOWED_ORIGINS = {
@@ -320,6 +344,7 @@ def handler(event: dict, context) -> dict:
 
             log_activity(cur, schema, project_id, user["id"], "uploaded_document", "document", doc_id, filename)
             conn.commit()
+            notify_indexer("upsert", "document", doc_id)
 
             return json_response({
                 "id": doc_id,
@@ -399,6 +424,7 @@ def handler(event: dict, context) -> dict:
                 (new_cat, doc_id),
             )
             conn.commit()
+            notify_indexer("upsert", "document", doc_id)
             return json_response({"ok": True, "category": new_cat}, origin=origin)
 
         # GET /{id}/text — получить извлечённый текст документа
@@ -502,6 +528,7 @@ def handler(event: dict, context) -> dict:
             )
             log_activity(cur, schema, pid, user["id"], "archived_document", "document", doc_id, orig_name)
             conn.commit()
+            notify_indexer("delete", "document", doc_id)
             return json_response({"ok": True, "archived": True, "can_restore": True}, origin=origin)
 
         # document.restore — восстановить из архива
@@ -530,6 +557,7 @@ def handler(event: dict, context) -> dict:
             )
             log_activity(cur, schema, pid, user["id"], "restored_document", "document", doc_id, orig_name)
             conn.commit()
+            notify_indexer("upsert", "document", doc_id)
             return json_response({"ok": True}, origin=origin)
 
         # document.rename — переименовать
@@ -559,6 +587,7 @@ def handler(event: dict, context) -> dict:
             )
             log_activity(cur, schema, pid, user["id"], "renamed_document", "document", doc_id, f"{old_name} → {new_name}")
             conn.commit()
+            notify_indexer("upsert", "document", doc_id)
             return json_response({"ok": True, "name": new_name[:255]}, origin=origin)
 
         # document.upload_init — начать чанковую загрузку документа

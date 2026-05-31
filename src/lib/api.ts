@@ -1,5 +1,7 @@
 const URLS = {
   auth: "https://functions.poehali.dev/be0bd4a6-9b46-46f0-ae8e-bee273a46b38",
+  globalSearch: "https://functions.poehali.dev/9a05cfc9-9a18-4ac0-8dfb-02924fe1b7b1",
+  searchIndexer: "https://functions.poehali.dev/a671ae90-49e6-47a9-889e-ffe10ff53191",
   projects: "https://functions.poehali.dev/d439f270-aaa6-4a75-9c30-6ef538ff5bdd",
   documents: "https://functions.poehali.dev/94029017-e75a-4ce2-a3b7-17adc33fa8a1",
   tasks: "https://functions.poehali.dev/363a1c77-0e9a-41a6-a862-b1cf2a632688",

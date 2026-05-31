@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
+import GlobalSearchDialog from "@/components/GlobalSearchDialog";
 
 
 const NAV_ITEMS = [
@@ -76,6 +77,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Хоткей Ctrl+K / Cmd+K
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(v => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const canGoBack = location.pathname !== "/cabinet" && location.pathname !== "/";
 
@@ -185,13 +199,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
             {/* Поиск */}
             <div className="flex-1 max-w-xs hidden md:block">
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-400 cursor-pointer hover:bg-slate-100 transition-colors">
+              <button
+                onClick={() => setSearchOpen(true)}
+                className="w-full flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-400 cursor-pointer hover:bg-slate-100 transition-colors"
+              >
                 <Icon name="Search" size={15} />
-                <span>Поиск...</span>
-              </div>
+                <span className="flex-1 text-left">Поиск...</span>
+                <kbd className="hidden lg:flex items-center gap-0.5 text-[10px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded font-mono">⌘K</kbd>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Поиск на мобильных */}
+              <button
+                onClick={() => setSearchOpen(true)}
+                className="md:hidden w-8 h-8 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors"
+              >
+                <Icon name="Search" size={18} />
+              </button>
               <button className="relative w-8 h-8 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors">
                 <Icon name="Bell" size={18} />
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-orange-500 rounded-full" />
@@ -247,6 +272,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           })}
         </div>
       </nav>
+
+      {/* Global Search Dialog */}
+      <GlobalSearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }

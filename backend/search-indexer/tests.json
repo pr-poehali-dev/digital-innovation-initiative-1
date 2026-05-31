@@ -1,0 +1,21 @@
+{
+  "tests": [
+    {
+      "name": "Неверный токен — 403",
+      "method": "POST",
+      "path": "/?action=index_all",
+      "headers": {"X-Internal-Token": "wrong_token"},
+      "expectedStatus": 200,
+      "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Неизвестное действие — 400",
+      "method": "POST",
+      "path": "/?action=unknown",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "unknown action. Use: index_all, upsert, delete, rebuild_acl"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -45,10 +45,32 @@ KIND_GROUPS = {
 }
 
 
+INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
+
+
 def get_db():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = False
     return conn
+
+
+def notify_indexer(action: str, entity_id: int = None):
+    if not INDEXER_URL:
+        return
+    try:
+        import urllib.request
+        body = {"entity_type": "education"}
+        if entity_id:
+            body["entity_id"] = entity_id
+        req = urllib.request.Request(
+            f"{INDEXER_URL}?action={action}",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=3)
+    except Exception:
+        pass
 
 
 def get_schema():
@@ -480,6 +502,7 @@ def handle_create(conn, user, body, request_id, origin):
     )
     new_id = cur.fetchone()[0]
     conn.commit()
+    notify_indexer("upsert", new_id)
     return ok_response({"id": new_id, "title": title, "kind": kind}, request_id, origin)
 
 
@@ -513,6 +536,7 @@ def handle_update(conn, user, body, request_id, origin):
         params.append(int(item_id))
         cur.execute(f"UPDATE {schema}.education_items SET {', '.join(sets)} WHERE id = %s", tuple(params))
         conn.commit()
+        notify_indexer("upsert", int(item_id))
     return ok_response({"ok": True}, request_id, origin)
 
 
@@ -530,6 +554,7 @@ def handle_archive(conn, user, body, request_id, origin):
         return err_response("access_denied", "Нет доступа", 403, request_id, origin)
     cur.execute(f"UPDATE {schema}.education_items SET archived_at = NOW() WHERE id = %s", (int(item_id),))
     conn.commit()
+    notify_indexer("delete", int(item_id))
     return ok_response({"ok": True, "archived": True}, request_id, origin)
 
 
@@ -672,6 +697,7 @@ def handle_confirm(conn, user, body, request_id, origin):
     params.append(int(item_id))
     cur.execute(f"UPDATE {schema}.education_items SET {', '.join(sets)} WHERE id = %s", tuple(params))
     conn.commit()
+    notify_indexer("upsert", int(item_id))
     return ok_response({"ok": True, "confirmed": True}, request_id, origin)
 
 

@@ -34,6 +34,9 @@ ALLOWED_ACTIONS = {
 }
 
 
+INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
+
+
 def get_db():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     conn.autocommit = False
@@ -42,6 +45,30 @@ def get_db():
 
 def get_schema():
     return os.environ.get("MAIN_DB_SCHEMA", "public")
+
+
+def notify_indexer(action: str, entity_type: str = None, entity_id: int = None, project_id: int = None):
+    """Асинхронно уведомляет индексатор поиска. Ошибки не блокируют основной запрос."""
+    if not INDEXER_URL:
+        return
+    try:
+        import urllib.request
+        body = {}
+        if entity_type:
+            body["entity_type"] = entity_type
+        if entity_id:
+            body["entity_id"] = entity_id
+        if project_id:
+            body["project_id"] = project_id
+        req = urllib.request.Request(
+            f"{INDEXER_URL}?action={action}",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=3)
+    except Exception:
+        pass
 
 
 ALLOWED_ORIGINS = {
@@ -226,6 +253,7 @@ def handle_create(conn, user, body, request_id, origin=None):
     )
     log_activity(cur, schema, project_id, user["id"], "created_project", "project", project_id, title)
     conn.commit()
+    notify_indexer("upsert", "project", project_id)
     return ok_response({"id": project_id, "title": title, "description": description}, request_id, origin=origin)
 
 
@@ -251,6 +279,7 @@ def handle_update(conn, user, body, request_id, origin=None):
     )
     log_activity(cur, schema, project_id, user["id"], "updated_project", "project", project_id)
     conn.commit()
+    notify_indexer("upsert", "project", project_id)
     return ok_response({"ok": True}, request_id, origin=origin)
 
 
@@ -285,6 +314,7 @@ def handle_archive(conn, user, body, request_id, origin=None):
     )
     log_activity(cur, schema, project_id, user["id"], "archived_project", "project", project_id, row[0])
     conn.commit()
+    notify_indexer("delete", "project", project_id)
     return ok_response({"ok": True, "archived": True, "can_restore": True}, request_id, origin=origin)
 
 
@@ -346,6 +376,7 @@ def handle_invite(conn, user, body, request_id, origin=None):
         )
         log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
         conn.commit()
+        notify_indexer("rebuild_acl", project_id=project_id)
         return ok_response({"name": invite_user[1], "pending": False}, request_id, origin=origin)
     else:
         # Пользователь не зарегистрирован — сохраняем pending-приглашение

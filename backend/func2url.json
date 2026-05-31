@@ -1,4 +1,6 @@
 {
+  "global-search": "https://functions.poehali.dev/9a05cfc9-9a18-4ac0-8dfb-02924fe1b7b1",
+  "search-indexer": "https://functions.poehali.dev/a671ae90-49e6-47a9-889e-ffe10ff53191",
   "admin-auth": "https://functions.poehali.dev/e3e85012-90f7-4ae1-bb12-b829a56fa72b",
   "wallet": "https://functions.poehali.dev/72142b3b-2b3e-4f59-9d16-7008e7cea33d",
   "yookassa_webhook": "https://functions.poehali.dev/1b873e29-8d8e-4bcf-a8b5-89618ef8ecda",
