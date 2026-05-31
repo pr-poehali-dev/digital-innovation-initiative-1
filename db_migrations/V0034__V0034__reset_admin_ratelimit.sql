@@ -1,0 +1,1 @@
+UPDATE admin_login_attempts SET attempted_at = now() - interval '20 minutes' WHERE email = 'kuzmenkoav1982@yandex.ru' AND success = false;
