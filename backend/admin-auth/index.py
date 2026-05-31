@@ -1,5 +1,5 @@
 """
-Супер-админ аутентификация: login / logout / check session.
+Супер-админ аутентификация: login / logout / check session. v2
 Защита: bcrypt-пароль, SHA-256 токен в БД, brute-force (5 попыток / 10 мин),
 httpOnly cookie через X-Set-Cookie прокси, Origin/Referer check для state-changing запросов.
 """
@@ -16,7 +16,8 @@ SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")
 COOKIE_NAME = os.environ.get("ADMIN_COOKIE_NAME", "trajectory_admin_session")
-SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "12"))
+_ttl_raw = os.environ.get("ADMIN_SESSION_TTL_HOURS", "12")
+SESSION_TTL_HOURS = int(_ttl_raw) if _ttl_raw.isdigit() else 12
 MAX_ATTEMPTS = 5
 ATTEMPT_WINDOW_MINUTES = 10
 
@@ -26,6 +27,11 @@ ALLOWED_ORIGINS = {
     "http://localhost:5173",
     "http://localhost:3000",
 }
+
+ALLOWED_ORIGIN_SUFFIXES = (
+    ".poehali.dev",
+    "poehali.dev",
+)
 
 
 def get_db():
@@ -46,8 +52,21 @@ def verify_bcrypt(password: str, stored_hash: str) -> bool:
         return False
 
 
+def _is_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(origin).hostname or "").lower()
+        return host == "poehali.dev" or host.endswith(".poehali.dev")
+    except Exception:
+        return False
+
+
 def cors_headers(origin: str = None) -> dict:
-    allowed = origin if origin in ALLOWED_ORIGINS else "*"
+    allowed = origin if _is_allowed(origin) else "*"
     return {
         "Access-Control-Allow-Origin": allowed,
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -78,12 +97,19 @@ def check_origin(event: dict) -> bool:
     headers = event.get("headers") or {}
     origin = headers.get("origin") or headers.get("Origin") or ""
     referer = headers.get("referer") or headers.get("Referer") or ""
-    if origin and origin in ALLOWED_ORIGINS:
+    if origin and _is_allowed(origin):
         return True
     if referer:
-        for o in ALLOWED_ORIGINS:
-            if referer.startswith(o):
+        try:
+            from urllib.parse import urlparse
+            host = (urlparse(referer).hostname or "").lower()
+            if host == "poehali.dev" or host.endswith(".poehali.dev"):
                 return True
+            for o in ALLOWED_ORIGINS:
+                if referer.startswith(o):
+                    return True
+        except Exception:
+            pass
     return False
 
 
