@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
 import CabinetPage from "./pages/CabinetPage";
+import GrowthDashboard from "./pages/GrowthDashboard";
 import ProjectPage from "./pages/ProjectPage";
 import NewTaskPage from "./pages/NewTaskPage";
 import TaskPage from "./pages/TaskPage";
@@ -43,7 +44,8 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/login" element={<AuthPage />} />
-            <Route path="/cabinet" element={<ProtectedRoute><CabinetPage /></ProtectedRoute>} />
+            <Route path="/cabinet" element={<ProtectedRoute><GrowthDashboard /></ProtectedRoute>} />
+            <Route path="/cabinet/projects" element={<ProtectedRoute><CabinetPage /></ProtectedRoute>} />
             <Route path="/cabinet/project/:id" element={<ProtectedRoute><ProjectPage /></ProtectedRoute>} />
             <Route path="/cabinet/project/:id/new-task" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
             <Route path="/cabinet/project/:id/task/:taskId" element={<ProtectedRoute><TaskPage /></ProtectedRoute>} />
