@@ -679,29 +679,29 @@ export default function SoftwareDevelopmentWebsite() {
               <h3 className="text-sm font-semibold text-foreground">Юридическая информация</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="/docs/privacy" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                  <Link to="/legal/privacy" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Политика конфиденциальности
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="/docs/terms" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                  <Link to="/legal/terms" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Пользовательское соглашение
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="/docs/offer" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                  <Link to="/legal/offer" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Оферта
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="/docs/refund" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                  <Link to="/legal/refund" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Возврат средств
-                  </a>
+                  </Link>
                 </li>
                 <li>
-                  <a href="/docs/install" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Руководство по установке
-                  </a>
+                  <Link to="/legal/consent" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Согласие на обработку ПДн
+                  </Link>
                 </li>
               </ul>
               <div className="pt-2 text-xs text-muted-foreground space-y-0.5 border-t border-slate-100">
@@ -721,8 +721,8 @@ export default function SoftwareDevelopmentWebsite() {
                   </svg>
                   <div>
                     <p className="text-xs text-muted-foreground/70 mb-0.5">Поддержка</p>
-                    <a href="mailto:support@nasha-semiya.ru" className="break-all hover:text-slate-900 transition-colors">
-                      support@nasha-semiya.ru
+                    <a href="mailto:ip.kuzmenkoav@yandex.ru" className="break-all hover:text-slate-900 transition-colors">
+                      ip.kuzmenkoav@yandex.ru
                     </a>
                   </div>
                 </li>

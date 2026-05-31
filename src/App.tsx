@@ -18,6 +18,11 @@ import EducationalPassportPage from "./pages/EducationalPassportPage";
 import AuditPage from "./pages/AuditPage";
 import VisualsPage from "./pages/VisualsPage";
 import WalletPage from "./pages/WalletPage";
+import PrivacyPage from "./pages/legal/PrivacyPage";
+import TermsPage from "./pages/legal/TermsPage";
+import OfferPage from "./pages/legal/OfferPage";
+import RefundPage from "./pages/legal/RefundPage";
+import ConsentPage from "./pages/legal/ConsentPage";
 
 const queryClient = new QueryClient();
 
@@ -48,6 +53,11 @@ const App = () => (
             <Route path="/cabinet/project/:id/audit" element={<ProtectedRoute><AuditPage /></ProtectedRoute>} />
             <Route path="/cabinet/visuals" element={<ProtectedRoute><VisualsPage /></ProtectedRoute>} />
             <Route path="/cabinet/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
+            <Route path="/legal/privacy" element={<PrivacyPage />} />
+            <Route path="/legal/terms" element={<TermsPage />} />
+            <Route path="/legal/offer" element={<OfferPage />} />
+            <Route path="/legal/refund" element={<RefundPage />} />
+            <Route path="/legal/consent" element={<ConsentPage />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
