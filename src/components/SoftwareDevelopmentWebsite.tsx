@@ -868,8 +868,13 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="mt-12 pt-8 border-t border-slate-200">
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
               <div className="text-sm text-muted-foreground">© 2026 Траектория. Все права защищены.</div>
-              <div className="text-xs text-muted-foreground">
-                Безопасная оплата через ЮKassa
+              <div className="flex items-center gap-4">
+                <div className="text-xs text-muted-foreground">
+                  Безопасная оплата через ЮKassa
+                </div>
+                <Link to="/admin/login" className="text-xs text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors select-none">
+                  ·
+                </Link>
               </div>
             </div>
           </div>
