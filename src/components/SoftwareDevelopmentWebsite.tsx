@@ -1,11 +1,12 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
-import { ArrowRight, ChevronRight, Menu, X, Brain, Zap, FileText, Sparkles, Upload, BookOpen, Layers } from "lucide-react"
+import { ArrowRight, ChevronRight, Menu, X, Brain, Zap, FileText, Sparkles, Upload, BookOpen, Layers, GraduationCap, Map, Target, Users, Briefcase, Clock } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
 import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
+import { useAuth } from "@/lib/auth-context"
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
@@ -127,7 +128,7 @@ const transitionVariants = {
 
 const menuItems = [
   { name: "Возможности", href: "#services" },
-  { name: "Как это работает", href: "#solutions" },
+  { name: "Как это работает", href: "#how-it-works" },
   { name: "Для кого", href: "#about" },
   { name: "Контакты", href: "#contact" },
 ]
@@ -135,6 +136,7 @@ const menuItems = [
 const HeroHeader = () => {
   const [menuState, setMenuState] = React.useState(false)
   const [isScrolled, setIsScrolled] = React.useState(false)
+  const { user } = useAuth()
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
@@ -202,23 +204,33 @@ const HeroHeader = () => {
                 </ul>
               </div>
               <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
-                <Link to="/login">
-                  <Button variant="outline" size="sm" className={cn(isScrolled && "lg:hidden")}>
-                    <span>Войти</span>
-                  </Button>
-                </Link>
-                <Link to="/cabinet">
-                  <Button
-                    size="sm"
-                    className={cn(
-                      isScrolled
-                        ? "lg:inline-flex bg-slate-800 hover:bg-slate-700"
-                        : "hidden bg-slate-800 hover:bg-slate-700",
-                    )}
-                  >
-                    <span>Открыть кабинет</span>
-                  </Button>
-                </Link>
+                {user ? (
+                  <Link to="/cabinet">
+                    <Button size="sm" className="bg-slate-800 hover:bg-slate-700">
+                      <span>Мой кабинет</span>
+                    </Button>
+                  </Link>
+                ) : (
+                  <>
+                    <Link to="/login">
+                      <Button variant="outline" size="sm" className={cn(isScrolled && "lg:hidden")}>
+                        <span>Войти</span>
+                      </Button>
+                    </Link>
+                    <Link to="/login">
+                      <Button
+                        size="sm"
+                        className={cn(
+                          isScrolled
+                            ? "lg:inline-flex bg-slate-800 hover:bg-slate-700"
+                            : "hidden bg-slate-800 hover:bg-slate-700",
+                        )}
+                      >
+                        <span>Войти в кабинет</span>
+                      </Button>
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -288,7 +300,7 @@ export default function SoftwareDevelopmentWebsite() {
                     href="#services"
                     className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
                   >
-                    <span className="text-foreground text-sm">Умный учебный кабинет с AI-ассистентом</span>
+                    <span className="text-foreground text-sm">Платформа развития человека с AI-помощником</span>
                     <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                     <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
@@ -304,13 +316,13 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
 
                   <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
-                    Создавайте презентации{" "}
+                    Ваш личный кабинет{" "}
                     <span className="inline-block text-slate-600">
-                      по вашим материалам
+                      роста и развития
                     </span>
                   </h1>
                   <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Загрузите конспекты, стандарты и шаблоны — AI соберёт готовую презентацию, учтёт все требования и вставит схемы. Проверит соответствие и предложит правки.
+                    Учитесь, накапливайте знания, стройте карьерный план — AI помогает на каждом шаге. Уже сейчас работает модуль учебных проектов и презентаций.
                   </p>
                 </AnimatedGroup>
 
@@ -326,18 +338,18 @@ export default function SoftwareDevelopmentWebsite() {
                   className="mt-10 flex flex-col items-center justify-center gap-3 md:flex-row"
                 >
                   <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
-                    <Link to="/cabinet">
+                    <Link to="/login">
                       <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
                         <Sparkles className="mr-2 h-4 w-4" />
-                        <span className="text-nowrap">Создать презентацию</span>
+                        <span className="text-nowrap">Открыть кабинет</span>
                       </Button>
                     </Link>
                   </div>
-                  <Link to="/login" key={2}>
+                  <a href="#about" key={2}>
                     <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
-                      <span className="text-nowrap">Войти в кабинет</span>
+                      <span className="text-nowrap">Узнать подробнее</span>
                     </Button>
-                  </Link>
+                  </a>
                 </AnimatedGroup>
               </div>
             </div>
@@ -372,7 +384,7 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
 
         {/* ── Блок сценариев ── */}
-        <section className="py-16 md:py-24 bg-background">
+        <section id="services" className="py-16 md:py-24 bg-background">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">С чего начать</span>
@@ -461,7 +473,7 @@ export default function SoftwareDevelopmentWebsite() {
           </div>
         </section>
 
-        <section className="bg-muted/50 py-16 md:py-32 dark:bg-transparent">
+        <section id="solutions" className="bg-muted/50 py-16 md:py-32 dark:bg-transparent">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center">
               <h2 className="text-balance text-4xl font-semibold lg:text-5xl">
@@ -524,7 +536,7 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
 
         {/* Секция: пример промпта */}
-        <section className="py-16 md:py-24 bg-background">
+        <section id="how-it-works" className="py-16 md:py-24 bg-background">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Как это работает</span>
@@ -633,9 +645,128 @@ export default function SoftwareDevelopmentWebsite() {
             </div>
           </div>
         </section>
+        {/* ── Блок «Для кого» ── */}
+        <section id="about" className="py-16 md:py-24 bg-muted/30">
+          <div className="mx-auto max-w-5xl px-6">
+            <div className="text-center mb-12">
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Для кого</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Кабинет для каждого,{" "}
+                <span className="text-slate-600">кто развивается</span>
+              </h2>
+              <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
+                Неважно — студент вы, преподаватель или специалист. AI-кабинет адаптируется под ваши цели.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {[
+                {
+                  icon: <GraduationCap className="h-6 w-6 text-blue-600" />,
+                  bg: "bg-blue-50",
+                  title: "Студенты",
+                  desc: "Загружайте конспекты и стандарты, создавайте дипломы и презентации с AI, поддерживайте знания тестами.",
+                },
+                {
+                  icon: <BookOpen className="h-6 w-6 text-violet-600" />,
+                  bg: "bg-violet-50",
+                  title: "Преподаватели",
+                  desc: "Формируйте учебные материалы, создавайте задания и методические презентации по своим стандартам.",
+                },
+                {
+                  icon: <Target className="h-6 w-6 text-green-600" />,
+                  bg: "bg-green-50",
+                  title: "Методисты",
+                  desc: "Выстраивайте образовательные треки, собирайте базы знаний и проверяйте соответствие требованиям.",
+                },
+                {
+                  icon: <Briefcase className="h-6 w-6 text-orange-600" />,
+                  bg: "bg-orange-50",
+                  title: "Специалисты",
+                  desc: "Развивайте компетенции, планируйте карьерный рост и собирайте подтверждения своей квалификации.",
+                },
+              ].map((item) => (
+                <div key={item.title} className="bg-background rounded-2xl border border-slate-200 p-6 flex flex-col gap-4">
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${item.bg}`}>
+                    {item.icon}
+                  </div>
+                  <h3 className="font-semibold text-slate-800">{item.title}</h3>
+                  <p className="text-sm text-slate-600 leading-relaxed flex-1">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Роадмап: доступно сейчас / в разработке ── */}
+        <section className="py-16 md:py-24 bg-background">
+          <div className="mx-auto max-w-5xl px-6">
+            <div className="text-center mb-12">
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Платформа</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Один кабинет —{" "}
+                <span className="text-slate-600">весь путь развития</span>
+              </h2>
+              <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
+                Сейчас уже работает модуль учебных проектов. Остальные модули открываются постепенно.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Доступно сейчас */}
+              <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-6">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                  <span className="text-sm font-semibold text-green-700">Доступно сейчас</span>
+                </div>
+                <ul className="space-y-3">
+                  {[
+                    { icon: <FileText className="h-4 w-4" />, text: "Учебные проекты и презентации" },
+                    { icon: <Upload className="h-4 w-4" />, text: "Загрузка материалов и документов" },
+                    { icon: <Sparkles className="h-4 w-4" />, text: "AI-генерация по вашим материалам" },
+                    { icon: <Layers className="h-4 w-4" />, text: "Визуалы: схемы, диаграммы, таймлайны" },
+                    { icon: <Zap className="h-4 w-4" />, text: "Аудит и проверка презентаций" },
+                    { icon: <BookOpen className="h-4 w-4" />, text: "Чат с документом по вашим файлам" },
+                  ].map((item) => (
+                    <li key={item.text} className="flex items-center gap-3 text-sm text-slate-700">
+                      <span className="text-green-600 flex-shrink-0">{item.icon}</span>
+                      {item.text}
+                    </li>
+                  ))}
+                </ul>
+                <Link to="/login" className="mt-6 inline-block">
+                  <button className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors">
+                    Открыть кабинет →
+                  </button>
+                </Link>
+              </div>
+
+              {/* В разработке */}
+              <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-6">
+                <div className="flex items-center gap-2 mb-5">
+                  <Clock className="h-4 w-4 text-slate-400" />
+                  <span className="text-sm font-semibold text-slate-500">Готовится к запуску</span>
+                </div>
+                <ul className="space-y-3">
+                  {[
+                    { icon: <GraduationCap className="h-4 w-4" />, text: "Дипломы и сертификаты — хранение и учёт" },
+                    { icon: <Brain className="h-4 w-4" />, text: "Тесты для поддержания знаний" },
+                    { icon: <Map className="h-4 w-4" />, text: "Карта компетенций" },
+                    { icon: <Target className="h-4 w-4" />, text: "План развития и карьерный трек" },
+                    { icon: <Users className="h-4 w-4" />, text: "Профессиональный профиль" },
+                    { icon: <Briefcase className="h-4 w-4" />, text: "Взаимодействие с работодателями" },
+                  ].map((item) => (
+                    <li key={item.text} className="flex items-center gap-3 text-sm text-slate-500">
+                      <span className="text-slate-400 flex-shrink-0">{item.icon}</span>
+                      {item.text}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-6 text-xs text-slate-400">Следите за обновлениями — мы расширяем платформу каждый месяц.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
       </main>
 
-      <footer className="bg-background border-t border-slate-200">
+      <footer id="contact" className="bg-background border-t border-slate-200">
         <div className="mx-auto max-w-7xl py-16 px-6 lg:px-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
 
@@ -643,7 +774,7 @@ export default function SoftwareDevelopmentWebsite() {
             <div className="space-y-4 sm:col-span-2 lg:col-span-1">
               <Logo />
               <p className="text-sm text-muted-foreground max-w-xs">
-                Умный кабинет студента: база знаний, AI-ассистент и инструменты для подготовки любых учебных работ.
+                Личный AI-кабинет развития: учёба, компетенции, карьерный план и учебные проекты — всё в одном месте.
               </p>
             </div>
 
@@ -657,18 +788,18 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
                 </li>
                 <li>
-                  <a href="#solutions" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                  <a href="#how-it-works" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Как это работает
                   </a>
                 </li>
                 <li>
-                  <Link to="/login" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Войти
-                  </Link>
+                  <a href="#about" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Для кого
+                  </a>
                 </li>
                 <li>
-                  <Link to="/cabinet" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Открыть кабинет
+                  <Link to="/login" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    Войти в кабинет
                   </Link>
                 </li>
               </ul>
