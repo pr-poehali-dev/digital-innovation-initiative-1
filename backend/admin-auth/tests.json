@@ -1,0 +1,40 @@
+{
+  "tests": [
+    {
+      "name": "me без сессии — 401",
+      "method": "GET",
+      "path": "/?action=me",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "login с неверными данными — 401",
+      "method": "POST",
+      "path": "/?action=login",
+      "headers": {"Origin": "https://raven.moscow"},
+      "body": {"email": "wrong@example.com", "password": "wrongpassword"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "login без Origin — 403",
+      "method": "POST",
+      "path": "/?action=login",
+      "body": {"email": "test@example.com", "password": "test"},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "forbidden"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "logout без сессии — ok",
+      "method": "POST",
+      "path": "/?action=logout",
+      "headers": {"Origin": "https://raven.moscow"},
+      "expectedStatus": 200,
+      "expectedBody": {"ok": true},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
