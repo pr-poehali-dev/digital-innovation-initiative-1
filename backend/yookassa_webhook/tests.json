@@ -1,0 +1,25 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "GET returns 405",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 405
+    },
+    {
+      "name": "POST invalid json returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": "not-json",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "invalid_json"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

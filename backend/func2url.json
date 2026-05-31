@@ -1,4 +1,6 @@
 {
+  "wallet": "https://functions.poehali.dev/72142b3b-2b3e-4f59-9d16-7008e7cea33d",
+  "yookassa_webhook": "https://functions.poehali.dev/1b873e29-8d8e-4bcf-a8b5-89618ef8ecda",
   "audit": "https://functions.poehali.dev/0ac33ef6-6473-4be1-a1e6-a9565e6289a7",
   "education": "https://functions.poehali.dev/54faac64-7c7d-43d5-8590-e64e08067d56",
   "media_upload": "https://functions.poehali.dev/c3f6a32b-87f2-4ebb-8954-ccbae46e81a3",

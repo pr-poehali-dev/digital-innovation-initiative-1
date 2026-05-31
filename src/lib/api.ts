@@ -11,6 +11,7 @@ const URLS = {
   mediaUpload: "https://functions.poehali.dev/c3f6a32b-87f2-4ebb-8954-ccbae46e81a3",
   education: "https://functions.poehali.dev/54faac64-7c7d-43d5-8590-e64e08067d56",
   audit: "https://functions.poehali.dev/0ac33ef6-6473-4be1-a1e6-a9565e6289a7",
+  wallet: "https://functions.poehali.dev/72142b3b-2b3e-4f59-9d16-7008e7cea33d",
 };
 
 function getSession(): string {
@@ -467,3 +468,14 @@ export function fileToBase64(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+export const walletApi = {
+  getBalance: () =>
+    request(URLS.wallet, "/", "POST", { action: "wallet.get_balance" }),
+  getTransactions: (limit = 20, offset = 0) =>
+    request(URLS.wallet, "/", "POST", { action: "wallet.get_transactions", limit, offset }),
+  createTopup: (amount_rub: number) =>
+    request(URLS.wallet, "/", "POST", { action: "wallet.create_topup", amount_rub }),
+  getPaymentStatus: (payment_id: number) =>
+    request(URLS.wallet, "/", "POST", { action: "wallet.get_payment_status", payment_id }),
+};

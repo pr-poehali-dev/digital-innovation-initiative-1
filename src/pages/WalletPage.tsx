@@ -1,111 +1,166 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import { walletApi } from "@/lib/api";
 
-const TARIFFS = [
-  { icon: "FileText", label: "Генерация презентации", price: 25, color: "text-orange-500", bg: "bg-orange-50" },
-  { icon: "Sparkles", label: "AI-анализ документа", price: 15, color: "text-purple-500", bg: "bg-purple-50" },
-  { icon: "Image", label: "Создание обложки", price: 10, color: "text-blue-500", bg: "bg-blue-50" },
-  { icon: "MessageSquare", label: "Чат с документом", price: 5, color: "text-green-500", bg: "bg-green-50" },
-  { icon: "Search", label: "Поиск по документам", price: 3, color: "text-teal-500", bg: "bg-teal-50" },
-  { icon: "ListChecks", label: "Краткое содержание", price: 7, color: "text-indigo-500", bg: "bg-indigo-50" },
-  { icon: "BarChart2", label: "Аудит структуры", price: 8, color: "text-rose-500", bg: "bg-rose-50" },
-  { icon: "Lightbulb", label: "AI-рекомендации", price: 4, color: "text-yellow-500", bg: "bg-yellow-50" },
-  { icon: "Wand2", label: "Доработка слайда", price: 6, color: "text-pink-500", bg: "bg-pink-50" },
-];
+const PRESETS = [500, 1000, 3000, 5000];
 
-const QUICK_AMOUNTS = [100, 300, 500, 1000, 3000];
+type Transaction = {
+  id: number;
+  amount_kopecks: number;
+  amount_rub: number;
+  type: "topup" | "debit" | "refund" | "adjustment";
+  status: string;
+  source: string | null;
+  description: string | null;
+  created_at: string;
+};
 
-const MOCK_TRANSACTIONS = [
-  { id: 1, icon: "FileText", label: "Генерация презентации", date: "26 мая, 14:32", amount: -25 },
-  { id: 2, icon: "MessageSquare", label: "Чат с документом", date: "26 мая, 13:10", amount: -5 },
-  { id: 3, icon: "Wallet", label: "Пополнение баланса", date: "25 мая, 10:00", amount: 500 },
-  { id: 4, icon: "Sparkles", label: "AI-анализ документа", date: "24 мая, 18:45", amount: -15 },
-  { id: 5, icon: "Image", label: "Создание обложки", date: "24 мая, 18:30", amount: -10 },
-  { id: 6, icon: "BarChart2", label: "Аудит структуры", date: "23 мая, 09:12", amount: -8 },
-  { id: 7, icon: "Wallet", label: "Пополнение баланса", date: "20 мая, 11:00", amount: 300 },
-];
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+  });
+}
 
-const MOCK_BALANCE = 309;
+function TxRow({ tx }: { tx: Transaction }) {
+  const isTopup = tx.type === "topup" || tx.type === "refund";
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-slate-100 last:border-0">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isTopup ? "bg-emerald-50" : "bg-violet-50"}`}>
+        <Icon name={isTopup ? "ArrowDownLeft" : "Sparkles"} size={16} className={isTopup ? "text-emerald-500" : "text-violet-500"} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-slate-800 truncate">
+          {tx.description || (isTopup ? "Пополнение" : "Списание")}
+        </div>
+        <div className="text-xs text-slate-400">{formatDate(tx.created_at)}</div>
+      </div>
+      <div className={`text-sm font-semibold tabular-nums flex-shrink-0 ${isTopup ? "text-emerald-600" : "text-slate-700"}`}>
+        {isTopup ? "+" : "−"}{Math.abs(tx.amount_rub).toFixed(0)} ₽
+      </div>
+    </div>
+  );
+}
 
 export default function WalletPage() {
-  const [balance] = useState(MOCK_BALANCE);
+  const [searchParams] = useSearchParams();
+
+  const [balance, setBalance] = useState<number | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showTopUp, setShowTopUp] = useState(false);
-  const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [amount, setAmount] = useState("500");
-  const [payMethod, setPayMethod] = useState<"card" | "sbp">("card");
+  const [paying, setPaying] = useState(false);
+  const [payError, setPayError] = useState("");
 
-  const totalTopUp = MOCK_TRANSACTIONS.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const totalSpent = Math.abs(MOCK_TRANSACTIONS.filter(t => t.amount < 0).reduce((s, t) => s + t.amount, 0));
-  const totalOps = MOCK_TRANSACTIONS.filter(t => t.amount < 0).length;
+  // Polling статуса платежа после возврата с ЮKassa
+  const [pollingPaymentId, setPollingPaymentId] = useState<number | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<"pending" | "succeeded" | "failed" | null>(null);
 
-  // Расходы по категориям
-  const categoryTotals = TARIFFS.map(t => ({
-    ...t,
-    total: MOCK_TRANSACTIONS.filter(tx => tx.label === t.label && tx.amount < 0).reduce((s, tx) => s + Math.abs(tx.amount), 0),
-  })).filter(t => t.total > 0).sort((a, b) => b.total - a.total);
+  const loadData = useCallback(async () => {
+    try {
+      const [bal, txs] = await Promise.all([
+        walletApi.getBalance(),
+        walletApi.getTransactions(20, 0),
+      ]);
+      setBalance((bal as { balance_rub: number }).balance_rub);
+      setTransactions((txs as { transactions: Transaction[] }).transactions || []);
+    } catch {
+      setBalance(0);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const maxTotal = Math.max(...categoryTotals.map(c => c.total), 1);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Обработка возврата с ЮKassa (return_url содержит payment_id)
+  useEffect(() => {
+    const pid = searchParams.get("payment_id");
+    if (pid) {
+      setPollingPaymentId(Number(pid));
+      setPaymentStatus("pending");
+    }
+  }, [searchParams]);
+
+  // Polling статуса платежа (каждые 3 сек, не более 20 попыток)
+  useEffect(() => {
+    if (!pollingPaymentId || paymentStatus !== "pending") return;
+    let attempts = 0;
+    const timer = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await walletApi.getPaymentStatus(pollingPaymentId) as { status: string; webhook_processed: boolean };
+        if (res.status === "succeeded" && res.webhook_processed) {
+          setPaymentStatus("succeeded");
+          clearInterval(timer);
+          loadData();
+        } else if (res.status === "cancelled" || res.status === "failed") {
+          setPaymentStatus("failed");
+          clearInterval(timer);
+        }
+      } catch { /* ignore */ }
+      if (attempts >= 20) clearInterval(timer);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [pollingPaymentId, paymentStatus, loadData]);
+
+  const handleTopup = async () => {
+    const rub = parseInt(amount, 10);
+    if (isNaN(rub) || rub < 10) { setPayError("Минимальная сумма — 10 ₽"); return; }
+    if (rub > 100000) { setPayError("Максимальная сумма — 100 000 ₽"); return; }
+    setPaying(true);
+    setPayError("");
+    try {
+      const res = await walletApi.createTopup(rub) as { confirmation_url: string; payment_id: number };
+      if (res.confirmation_url) {
+        window.location.href = res.confirmation_url;
+      }
+    } catch (e: unknown) {
+      setPayError(e instanceof Error ? e.message : "Ошибка при создании платежа");
+      setPaying(false);
+    }
+  };
 
   return (
     <Layout>
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
 
-        {/* Как работает кошелёк */}
-        <div className="rounded-2xl border bg-card overflow-hidden">
-          <button
-            onClick={() => setShowHowItWorks(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
-          >
-            <div className="flex items-center gap-2 text-emerald-600 font-medium">
-              <Icon name="Wallet" size={18} />
-              Как работает кошелёк
-            </div>
-            <Icon name={showHowItWorks ? "ChevronUp" : "ChevronDown"} size={18} className="text-muted-foreground" />
-          </button>
-
-          {showHowItWorks && (
-            <div className="px-4 pb-4 space-y-4 border-t pt-4">
-              <div>
-                <p className="font-semibold text-base mb-1">Для чего нужен кошелёк?</p>
-                <p className="text-sm text-muted-foreground">Кошелёк — единый баланс для всех AI-функций DocMind AI. Пополняете один раз, а средства списываются автоматически при использовании AI-инструментов.</p>
-              </div>
-
-              <div>
-                <p className="font-semibold text-base mb-2">На что тратятся средства?</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {TARIFFS.map(t => (
-                    <div key={t.label} className="flex items-center gap-2 text-sm py-1 border-b border-dashed border-muted">
-                      <span className={`${t.color} ${t.bg} p-1 rounded`}>
-                        <Icon name={t.icon} size={13} />
-                      </span>
-                      <span className="text-muted-foreground flex-1">{t.label}</span>
-                      <span className="font-medium whitespace-nowrap">{t.price} руб</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="font-semibold text-base mb-2">Как пополнить?</p>
-                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                  <li>Нажмите «Пополнить» на карточке баланса</li>
-                  <li>Введите сумму (от 50 руб)</li>
-                  <li>Выберите способ: банковская карта или СБП</li>
-                  <li>Оплатите — средства зачислятся автоматически</li>
-                </ol>
-                <p className="text-sm text-muted-foreground mt-2">Баланс личный — вы сами управляете своими AI-запросами.</p>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* Уведомление о статусе платежа */}
+        {paymentStatus === "pending" && pollingPaymentId && (
+          <div className="rounded-2xl bg-violet-50 border border-violet-200 px-4 py-3 flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <div className="text-sm text-violet-700 font-medium">Ожидаем подтверждения платежа от банка…</div>
+          </div>
+        )}
+        {paymentStatus === "succeeded" && (
+          <div className="rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-center gap-3">
+            <Icon name="CheckCircle" size={18} className="text-emerald-500 flex-shrink-0" />
+            <div className="text-sm text-emerald-700 font-medium">Баланс успешно пополнен!</div>
+          </div>
+        )}
+        {paymentStatus === "failed" && (
+          <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 flex items-center gap-3">
+            <Icon name="XCircle" size={18} className="text-red-500 flex-shrink-0" />
+            <div className="text-sm text-red-700 font-medium">Платёж не был завершён.</div>
+          </div>
+        )}
 
         {/* Карточка баланса */}
         <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-400 text-white p-5 relative overflow-hidden">
           <div className="absolute right-0 top-0 w-32 h-32 rounded-full bg-white/10 translate-x-8 -translate-y-8" />
           <div className="absolute right-8 bottom-0 w-20 h-20 rounded-full bg-white/10 translate-y-6" />
           <p className="text-emerald-100 text-sm mb-1">Текущий баланс</p>
-          <p className="text-4xl font-bold mb-4">{balance.toFixed(2)} <span className="text-2xl font-medium">руб</span></p>
+          {loading ? (
+            <div className="h-10 w-32 bg-white/20 rounded-xl animate-pulse mb-4" />
+          ) : (
+            <p className="text-4xl font-bold mb-4">
+              {(balance ?? 0).toFixed(2)} <span className="text-2xl font-medium">₽</span>
+            </p>
+          )}
           <div className="flex gap-2">
             <button
               onClick={() => setShowTopUp(v => !v)}
@@ -114,177 +169,113 @@ export default function WalletPage() {
               <Icon name="Plus" size={16} />
               Пополнить
             </button>
-            <button className="flex items-center gap-2 bg-white/20 text-white font-semibold px-4 py-2 rounded-xl text-sm hover:bg-white/30 transition-colors">
-              <Icon name="History" size={16} />
-              История
-            </button>
           </div>
         </div>
 
         {/* Форма пополнения */}
         {showTopUp && (
-          <div className="rounded-2xl border bg-card p-4 space-y-4">
-            <div className="flex items-center gap-2 font-semibold">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4">
+            <div className="flex items-center gap-2 font-semibold text-slate-800">
               <Icon name="ArrowUpCircle" size={18} className="text-emerald-500" />
               Пополнить баланс
             </div>
 
-            <div>
-              <label className="text-sm text-muted-foreground mb-1 block">Сумма (руб), минимум 50</label>
-              <input
-                type="number"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                placeholder="500"
-                className="w-full border rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-emerald-400"
-              />
-            </div>
-
             <div className="flex flex-wrap gap-2">
-              {QUICK_AMOUNTS.map(a => (
+              {PRESETS.map(a => (
                 <button
                   key={a}
                   onClick={() => setAmount(String(a))}
                   className={`px-3 py-1.5 rounded-full border text-sm font-medium transition-colors ${
                     amount === String(a)
                       ? "bg-emerald-500 text-white border-emerald-500"
-                      : "hover:border-emerald-400 hover:text-emerald-600"
+                      : "border-slate-200 text-slate-600 hover:border-emerald-400 hover:text-emerald-600"
                   }`}
                 >
-                  {a} руб
+                  {a} ₽
                 </button>
               ))}
             </div>
 
             <div>
-              <p className="text-sm text-muted-foreground mb-2">Способ оплаты</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPayMethod("card")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                    payMethod === "card"
-                      ? "bg-emerald-500 text-white border-emerald-500"
-                      : "hover:border-emerald-400"
-                  }`}
-                >
-                  <Icon name="CreditCard" size={16} />
-                  Картой
-                </button>
-                <button
-                  onClick={() => setPayMethod("sbp")}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-colors ${
-                    payMethod === "sbp"
-                      ? "bg-emerald-500 text-white border-emerald-500"
-                      : "hover:border-emerald-400"
-                  }`}
-                >
-                  <Icon name="Smartphone" size={16} />
-                  СБП
-                </button>
-              </div>
+              <label className="text-sm text-slate-500 mb-1 block">Или введите сумму (от 10 ₽)</label>
+              <input
+                type="number"
+                value={amount}
+                onChange={e => { setAmount(e.target.value); setPayError(""); }}
+                min={10}
+                max={100000}
+                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-emerald-400"
+              />
             </div>
 
-            <div className="flex gap-2">
-              <button className="flex-1 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2.5 rounded-xl transition-colors">
-                <Icon name="Lock" size={16} />
-                Оплатить
-              </button>
-              <button
-                onClick={() => setShowTopUp(false)}
-                className="px-4 py-2.5 rounded-xl border font-medium text-muted-foreground hover:bg-muted transition-colors"
-              >
-                Отмена
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground text-center">Безопасная оплата через ЮKassa. После оплаты средства поступят автоматически.</p>
+            {payError && (
+              <p className="text-sm text-red-500">{payError}</p>
+            )}
+
+            <button
+              onClick={handleTopup}
+              disabled={paying}
+              className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {paying ? (
+                <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Переход к оплате…</>
+              ) : (
+                <><Icon name="CreditCard" size={16} /> Оплатить {amount ? `${amount} ₽` : ""} через ЮKassa</>
+              )}
+            </button>
+
+            <p className="text-xs text-slate-400 text-center">
+              Оплата через ЮKassa · Банковские карты · Безопасная передача данных
+            </p>
           </div>
         )}
 
-        {/* На что тратится баланс */}
-        <div className="rounded-2xl border bg-card p-4 space-y-3">
-          <div className="flex items-center gap-2 font-semibold">
-            <Icon name="Zap" size={18} className="text-yellow-500" />
-            На что тратится баланс?
+        {/* Тарифы на AI */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Icon name="Sparkles" size={16} className="text-violet-500" />
+            <span className="font-semibold text-slate-800 text-sm">На что тратится баланс</span>
           </div>
-          <div className="divide-y">
-            {TARIFFS.map(t => (
-              <div key={t.label} className="flex items-center gap-3 py-2.5">
-                <span className={`${t.bg} ${t.color} p-2 rounded-xl`}>
-                  <Icon name={t.icon} size={18} />
-                </span>
-                <span className="flex-1 text-sm">{t.label}</span>
-                <span className="text-sm font-semibold bg-muted px-2.5 py-1 rounded-full">{t.price} руб</span>
+          <div className="space-y-2">
+            {[
+              { label: "Генерация презентации", price: 25, icon: "FileText" },
+              { label: "AI-анализ документа", price: 15, icon: "Sparkles" },
+              { label: "Доработка слайда", price: 6, icon: "Wand2" },
+              { label: "Аудит структуры", price: 8, icon: "BarChart2" },
+              { label: "Чат с документом", price: 5, icon: "MessageSquare" },
+            ].map(t => (
+              <div key={t.label} className="flex items-center gap-2 text-sm">
+                <Icon name={t.icon} size={14} className="text-slate-400 flex-shrink-0" />
+                <span className="text-slate-600 flex-1">{t.label}</span>
+                <span className="font-medium text-slate-800">{t.price} ₽</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Статистика */}
-        <div className="rounded-2xl border bg-card p-4 space-y-4">
-          <div className="flex items-center gap-2 font-semibold">
-            <Icon name="BarChart2" size={18} className="text-blue-500" />
-            Статистика
+        {/* История транзакций */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Icon name="History" size={16} className="text-slate-500" />
+            <span className="font-semibold text-slate-800 text-sm">История операций</span>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-green-50 rounded-xl p-3 text-center">
-              <p className="text-green-600 font-bold text-xl">+{totalTopUp}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">пополнено</p>
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="h-12 bg-slate-100 rounded-xl animate-pulse" />
+              ))}
             </div>
-            <div className="bg-red-50 rounded-xl p-3 text-center">
-              <p className="text-red-500 font-bold text-xl">-{totalSpent}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">потрачено</p>
+          ) : transactions.length === 0 ? (
+            <div className="text-center py-8">
+              <Icon name="ReceiptText" size={32} className="text-slate-200 mx-auto mb-2" />
+              <p className="text-sm text-slate-400">Операций пока нет</p>
+              <p className="text-xs text-slate-300 mt-1">Пополните баланс, чтобы начать пользоваться AI</p>
             </div>
-            <div className="bg-blue-50 rounded-xl p-3 text-center">
-              <p className="text-blue-600 font-bold text-xl">{totalOps}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">операций</p>
-            </div>
-          </div>
-
-          {categoryTotals.length > 0 && (
+          ) : (
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Расходы по категориям</p>
-              <div className="space-y-2">
-                {categoryTotals.map(c => (
-                  <div key={c.label} className="flex items-center gap-2 text-sm">
-                    <span className="w-36 truncate text-muted-foreground">{c.label}</span>
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-red-400 rounded-full"
-                        style={{ width: `${(c.total / maxTotal) * 100}%` }}
-                      />
-                    </div>
-                    <span className="w-14 text-right font-medium">{c.total} руб</span>
-                  </div>
-                ))}
-              </div>
+              {transactions.map(tx => <TxRow key={tx.id} tx={tx} />)}
             </div>
           )}
-        </div>
-
-        {/* Последние операции */}
-        <div className="rounded-2xl border bg-card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="font-semibold">Последние операции</p>
-            <button className="text-sm text-emerald-600 hover:underline flex items-center gap-1">
-              Все <Icon name="ChevronRight" size={14} />
-            </button>
-          </div>
-          <div className="divide-y">
-            {MOCK_TRANSACTIONS.map(tx => (
-              <div key={tx.id} className="flex items-center gap-3 py-3">
-                <span className={`p-2 rounded-xl ${tx.amount > 0 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
-                  <Icon name={tx.icon} size={18} />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{tx.label}</p>
-                  <p className="text-xs text-muted-foreground">{tx.date}</p>
-                </div>
-                <span className={`font-semibold text-sm ${tx.amount > 0 ? "text-green-600" : "text-red-500"}`}>
-                  {tx.amount > 0 ? "+" : ""}{tx.amount} руб
-                </span>
-              </div>
-            ))}
-          </div>
         </div>
 
       </div>
