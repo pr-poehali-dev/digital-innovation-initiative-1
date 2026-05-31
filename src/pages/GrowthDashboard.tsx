@@ -87,31 +87,113 @@ function RadarChart({ size = 160 }: { size?: number }) {
   );
 }
 
-function CircleProgress({ value, label, sublabel, color = "#6366f1", size = 88 }: {
-  value: number; label: string; sublabel?: string; color?: string; size?: number;
-}) {
-  const r = (size - 12) / 2;
+function AiBrainProgress({ value = 68 }: { value?: number }) {
+  const size = 140;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = 58;
   const c = 2 * Math.PI * r;
   const offset = c - (value / 100) * c;
+  const id = "brain-grad";
+
   return (
-    <div className="flex items-center gap-3">
-      <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="-rotate-90">
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth="8" />
+    <div className="flex flex-col items-center">
+      {/* Кольцо + мозг */}
+      <div className="relative" style={{ width: size, height: size }}>
+        {/* Градиентное кольцо */}
+        <svg width={size} height={size} className="absolute inset-0 -rotate-90">
+          <defs>
+            <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#a78bfa" />
+              <stop offset="50%" stopColor="#6366f1" />
+              <stop offset="100%" stopColor="#06b6d4" />
+            </linearGradient>
+          </defs>
+          {/* Track */}
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="9" />
+          {/* Progress */}
           <circle
-            cx={size / 2} cy={size / 2} r={r}
-            fill="none" stroke={color} strokeWidth="8"
-            strokeDasharray={c} strokeDashoffset={offset}
+            cx={cx} cy={cy} r={r}
+            fill="none"
+            stroke={`url(#${id})`}
+            strokeWidth="9"
+            strokeDasharray={c}
+            strokeDashoffset={offset}
             strokeLinecap="round"
           />
         </svg>
+
+        {/* Мозг внутри */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold text-slate-800">{value}%</span>
+          <svg width="62" height="62" viewBox="0 0 64 64" fill="none">
+            <defs>
+              <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.35" />
+                <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
+              </radialGradient>
+              <linearGradient id="brainG" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#c4b5fd" />
+                <stop offset="50%" stopColor="#818cf8" />
+                <stop offset="100%" stopColor="#38bdf8" />
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+            </defs>
+            {/* Фоновое свечение */}
+            <circle cx="32" cy="32" r="30" fill="url(#bgGlow)" />
+            {/* Мозг — упрощённые пути */}
+            <g filter="url(#glow)" stroke="url(#brainG)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none">
+              {/* Левое полушарие */}
+              <path d="M32 20 C24 18 15 22 14 30 C13 37 17 43 22 44 C25 45 28 43 30 41 L30 22 Z" />
+              {/* Правое полушарие */}
+              <path d="M32 20 C40 18 49 22 50 30 C51 37 47 43 42 44 C39 45 36 43 34 41 L34 22 Z" />
+              {/* Центральная борозда */}
+              <line x1="32" y1="20" x2="32" y2="44" />
+              {/* Извилины левые */}
+              <path d="M18 27 C20 25 24 26 25 29" />
+              <path d="M16 33 C18 31 23 32 24 35" />
+              <path d="M18 39 C20 37 24 38 25 41" />
+              {/* Извилины правые */}
+              <path d="M46 27 C44 25 40 26 39 29" />
+              <path d="M48 33 C46 31 41 32 40 35" />
+              <path d="M46 39 C44 37 40 38 39 41" />
+              {/* Горизонталь */}
+              <path d="M20 30 C24 29 28 30 30 31" />
+              <path d="M44 30 C40 29 36 30 34 31" />
+            </g>
+            {/* Светящиеся точки-нейроны */}
+            {[
+              [22, 27], [25, 35], [20, 40],
+              [42, 27], [39, 35], [44, 40],
+              [32, 24], [32, 34],
+            ].map(([bx, by], i) => (
+              <circle key={i} cx={bx} cy={by} r="1.8" fill="#a5b4fc" opacity="0.9">
+                <animate attributeName="opacity" values="0.9;0.3;0.9" dur={`${1.5 + i * 0.3}s`} repeatCount="indefinite" />
+              </circle>
+            ))}
+            {/* Линии-связи */}
+            {[
+              [22, 27, 32, 24], [42, 27, 32, 24],
+              [25, 35, 32, 34], [39, 35, 32, 34],
+            ].map(([x1, y1, x2, y2], i) => (
+              <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
+                stroke="#818cf8" strokeWidth="0.8" opacity="0.5">
+                <animate attributeName="opacity" values="0.5;0.1;0.5" dur={`${2 + i * 0.4}s`} repeatCount="indefinite" />
+              </line>
+            ))}
+          </svg>
         </div>
       </div>
-      <div>
-        <div className="text-sm font-semibold text-slate-800">{label}</div>
-        {sublabel && <div className="text-xs text-slate-500 mt-0.5">{sublabel}</div>}
+
+      {/* Текст под кольцом */}
+      <div className="text-center mt-2">
+        <div className="flex items-end justify-center gap-1">
+          <span className="text-3xl font-bold text-white leading-none">{value}%</span>
+          <span className="text-emerald-400 text-sm font-semibold mb-0.5">↑</span>
+        </div>
+        <div className="text-xs text-slate-400 mt-0.5">Evolution Score</div>
       </div>
     </div>
   );
@@ -189,16 +271,40 @@ export default function GrowthDashboard() {
 
         {/* ── Прогресс / Компетенции / Ближайшие шаги ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Прогресс развития */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-800">Прогресс развития</h3>
-              <span className="text-xs text-slate-400">Всего пройдено</span>
+          {/* Прогресс развития — тёмная карточка с AI-мозгом */}
+          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+            {/* Фоновое свечение */}
+            <div className="absolute -top-10 -right-10 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute -bottom-8 -left-8 w-28 h-28 bg-violet-500/10 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="relative flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white">Прогресс развития</h3>
+              <span className="text-[10px] text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-full font-medium">AI Score</span>
             </div>
-            <CircleProgress value={68} label="к целям" sublabel="Обучение: 75% · Проекты: 50%" color="#6366f1" />
-            <div className="mt-4 flex items-center gap-4 text-xs text-slate-500">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" /> Обучение 75%</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Карьера 80%</span>
+
+            <div className="relative flex justify-center">
+              <AiBrainProgress value={68} />
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {[
+                { label: "Обучение", value: 75, color: "from-violet-500 to-indigo-500" },
+                { label: "Проекты", value: 50, color: "from-cyan-500 to-blue-500" },
+                { label: "Карьера", value: 80, color: "from-emerald-500 to-teal-500" },
+              ].map(s => (
+                <div key={s.label}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-400">{s.label}</span>
+                    <span className="text-slate-300 font-medium">{s.value}%</span>
+                  </div>
+                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className={`h-1.5 bg-gradient-to-r ${s.color} rounded-full`}
+                      style={{ width: `${s.value}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
