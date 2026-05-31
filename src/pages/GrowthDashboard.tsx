@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { projectsApi } from "@/lib/api";
 import Layout from "@/components/Layout";
@@ -8,37 +8,20 @@ import Icon from "@/components/ui/icon";
 function getGreeting(name: string) {
   const h = new Date().getHours();
   const greet = h < 12 ? "Доброе утро" : h < 18 ? "Добрый день" : "Добрый вечер";
-  const first = name?.split(" ")[0] ?? name;
+  const first = name?.trim().split(" ")[0] ?? name;
   return `${greet}, ${first}`;
 }
 
-const SKILLS = [
-  { label: "Soft Skills", pct: 0.85, color: "#8b5cf6" },
-  { label: "Tech Skills", pct: 0.72, color: "#0ea5e9" },
-  { label: "Аналитика", pct: 0.60, color: "#10b981" },
-  { label: "Лидерство", pct: 0.68, color: "#f59e0b" },
-  { label: "Коммуникация", pct: 0.78, color: "#ec4899" },
-];
+type Project = {
+  id: number;
+  name: string;
+  description?: string;
+  created_at?: string;
+};
 
-const QUICK_ACTIONS = [
-  { label: "Загрузить материалы", icon: "Upload", href: "/cabinet/projects", color: "bg-blue-50 text-blue-600 hover:bg-blue-100 border-blue-100", active: true },
-  { label: "Создать проект", icon: "Plus", href: "/cabinet/projects", color: "bg-violet-50 text-violet-600 hover:bg-violet-100 border-violet-100", active: true },
-  { label: "Пройти тест", icon: "ClipboardCheck", href: "#", color: "bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-100", active: false },
-  { label: "План развития", icon: "Target", href: "#", color: "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100", active: false },
-];
-
-const UPCOMING = [
-  { label: "Дипломы и сертификаты", icon: "Award", color: "text-amber-500 bg-amber-50" },
-  { label: "Тесты и повторение", icon: "ClipboardCheck", color: "text-blue-500 bg-blue-50" },
-  { label: "Карта компетенций", icon: "Map", color: "text-violet-500 bg-violet-50" },
-  { label: "План развития", icon: "Target", color: "text-emerald-500 bg-emerald-50" },
-  { label: "Карьерная траектория", icon: "TrendingUp", color: "text-indigo-500 bg-indigo-50" },
-  { label: "Профессиональный профиль", icon: "UserCircle", color: "text-pink-500 bg-pink-50" },
-];
-
-function ProgressArc({ value = 68 }: { value?: number }) {
-  const size = 180;
-  const strokeW = 12;
+function ProgressArc({ value, total }: { value: number; total: number }) {
+  const size = 176;
+  const strokeW = 11;
   const r = (size - strokeW) / 2;
   const cx = size / 2;
   const cy = size / 2;
@@ -49,7 +32,6 @@ function ProgressArc({ value = 68 }: { value?: number }) {
     const rad = (angleDeg * Math.PI) / 180;
     return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
   }
-
   function arc(startDeg: number, endDeg: number, rad: number) {
     const s = polar(startDeg, rad);
     const e = polar(endDeg, rad);
@@ -58,8 +40,8 @@ function ProgressArc({ value = 68 }: { value?: number }) {
   }
 
   const trackPath = arc(startAngle, startAngle + sweepAngle, r);
-  const valueSweep = (value / 100) * sweepAngle;
-  const valuePath = arc(startAngle, startAngle + valueSweep, r);
+  const pct = total > 0 ? value / total : 0;
+  const valuePath = pct > 0 ? arc(startAngle, startAngle + pct * sweepAngle, r) : null;
 
   return (
     <div className="flex flex-col items-center">
@@ -73,88 +55,78 @@ function ProgressArc({ value = 68 }: { value?: number }) {
             </linearGradient>
           </defs>
           <path d={trackPath} fill="none" stroke="#e2e8f0" strokeWidth={strokeW} strokeLinecap="round" />
-          <path d={valuePath} fill="none" stroke="url(#arcGrad)" strokeWidth={strokeW} strokeLinecap="round" />
+          {valuePath && (
+            <path d={valuePath} fill="none" stroke="url(#arcGrad)" strokeWidth={strokeW} strokeLinecap="round" />
+          )}
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ paddingBottom: "14px" }}>
-          <span className="text-4xl font-bold text-slate-900 leading-none">{value}</span>
-          <span className="text-xs text-slate-400 mt-1 font-medium">из 100</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ paddingBottom: "12px" }}>
+          {total > 0 ? (
+            <>
+              <span className="text-4xl font-bold text-slate-900 leading-none">{value}</span>
+              <span className="text-xs text-slate-400 mt-1 font-medium">из {total}</span>
+            </>
+          ) : (
+            <span className="text-xs text-slate-400 text-center px-4 leading-relaxed">Нет данных</span>
+          )}
         </div>
       </div>
       <div className="text-center -mt-4">
         <div className="text-sm font-semibold text-slate-800">Индекс развития</div>
-        <div className="flex items-center justify-center gap-1 mt-1">
-          <span className="text-xs text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <Icon name="TrendingUp" size={11} /> +4 за месяц
-          </span>
-        </div>
+        {total > 0 ? (
+          <div className="text-xs text-slate-500 mt-1">{value} завершённых шагов</div>
+        ) : (
+          <div className="text-xs text-slate-400 mt-1">Появится после первых шагов</div>
+        )}
       </div>
     </div>
   );
 }
 
-function RadarChart({ size = 164 }: { size?: number }) {
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = (size / 2) * 0.72;
-  const n = SKILLS.length;
-
-  function pt(i: number, pct: number) {
-    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    return { x: cx + r * pct * Math.cos(angle), y: cy + r * pct * Math.sin(angle) };
-  }
-
-  const polygon = SKILLS.map((s, i) => pt(i, s.pct));
-  const grid = [0.25, 0.5, 0.75, 1.0];
-
-  return (
-    <svg width={size} height={size} className="mx-auto">
-      {grid.map(g => (
-        <polygon
-          key={g}
-          points={Array.from({ length: n }, (_, i) => {
-            const p = pt(i, g);
-            return `${p.x},${p.y}`;
-          }).join(" ")}
-          fill="none"
-          stroke="#e2e8f0"
-          strokeWidth="1"
-        />
-      ))}
-      {Array.from({ length: n }, (_, i) => {
-        const p = pt(i, 1);
-        return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e2e8f0" strokeWidth="1" />;
-      })}
-      <polygon
-        points={polygon.map(p => `${p.x},${p.y}`).join(" ")}
-        fill="rgba(99,102,241,0.12)"
-        stroke="#6366f1"
-        strokeWidth="1.5"
-      />
-      {polygon.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3" fill={SKILLS[i].color} />
-      ))}
-    </svg>
-  );
-}
-
 export default function GrowthDashboard() {
   const { user } = useAuth();
-  const [projects, setProjects] = useState<{ id: number; name: string; description?: string }[]>([]);
+  const navigate = useNavigate();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(true);
 
   useEffect(() => {
-    projectsApi.list().then((d: { projects?: { id: number; name: string; description?: string }[] }) => {
-      setProjects(d.projects?.slice(0, 3) ?? []);
-    }).catch(() => {});
+    setLoadingProjects(true);
+    projectsApi.list()
+      .then((d: { projects?: Project[] }) => setProjects(d.projects ?? []))
+      .catch(() => setProjects([]))
+      .finally(() => setLoadingProjects(false));
   }, []);
+
+  const activeProjects = projects.slice(0, 3);
+  const projectCount = projects.length;
+
+  // Индекс развития: реальные шаги
+  const devValue = Math.min(1 + Math.min(projectCount, 5), 10);
+  const devTotal = 10;
+
+  // Ближайшие шаги: привязаны к реальному состоянию
+  const nextSteps = [
+    { done: true, label: "Создать аккаунт" },
+    { done: projectCount > 0, label: "Создать первый проект", href: "/cabinet/projects", disabled: false, coming: false },
+    { done: false, label: "Загрузить материалы в проект", href: "/cabinet/projects", disabled: projectCount === 0, coming: false },
+    { done: false, label: "Запустить AI-задание", href: "/cabinet/projects", disabled: projectCount === 0, coming: false },
+    { done: false, label: "Заполнить карту компетенций", href: "#", disabled: false, coming: true },
+  ];
+
+  // AI-инсайт: rule-based по реальным данным
+  const aiInsight = projectCount === 0
+    ? "Создайте первый проект — это первый шаг вашей траектории развития."
+    : projectCount < 3
+    ? "Вы уже начали! Загрузите материалы в проект, чтобы AI смог помочь вам продуктивнее."
+    : `У вас ${projectCount} ${projectCount < 5 ? "проекта" : "проектов"} — самое время завершить один из них.`;
 
   return (
     <Layout>
       <div className="px-4 lg:px-6 py-6 max-w-7xl mx-auto space-y-5">
 
-        {/* ── Ряд 1: Приветствие + AI-инсайт + Мои цели ── */}
+        {/* ── Ряд 1: Приветствие + Мои цели ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-          {/* Приветствие */}
+          {/* Приветствие + AI-инсайт */}
           <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-violet-50 to-transparent rounded-2xl pointer-events-none" />
             <div className="relative">
@@ -162,16 +134,18 @@ export default function GrowthDashboard() {
                 <div>
                   <p className="text-xs text-slate-400 font-medium mb-0.5">Траектория · Кабинет развития</p>
                   <h1 className="text-xl font-bold text-slate-900">{getGreeting(user?.name ?? "")}</h1>
-                  <p className="text-sm text-slate-500 mt-1">Ваше развитие продолжается. Сегодня хороший день для нового шага.</p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {projectCount > 0
+                      ? `У вас ${projectCount} ${projectCount === 1 ? "проект" : projectCount < 5 ? "проекта" : "проектов"}. Продолжайте развиваться!`
+                      : "Начните своё развитие — создайте первый проект."}
+                  </p>
                 </div>
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0 ml-4">
                   <span className="text-white font-bold text-base">
-                    {user?.name?.charAt(0)?.toUpperCase() ?? "Я"}
+                    {user?.name?.trim().charAt(0)?.toUpperCase() ?? "Я"}
                   </span>
                 </div>
               </div>
-
-              {/* AI-инсайт дня */}
               <div className="mt-4 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-100">
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
@@ -179,67 +153,67 @@ export default function GrowthDashboard() {
                   </div>
                   <div>
                     <div className="text-xs font-semibold text-violet-700 mb-1 uppercase tracking-wide">AI-инсайт дня</div>
-                    <p className="text-sm text-slate-700 leading-relaxed">
-                      Фокус на учебных проектах ускоряет ваш рост на 20%. Рекомендую завершить активный проект и загрузить новые материалы.
-                    </p>
+                    <p className="text-sm text-slate-700 leading-relaxed">{aiInsight}</p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Мои цели */}
+          {/* Мои цели — модуль в разработке */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Мои цели</h3>
-              <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">Скоро</span>
+              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Скоро</span>
             </div>
-            <div className="space-y-3.5">
-              {[
-                { label: "Освоить новые компетенции", value: 25, color: "bg-gradient-to-r from-violet-400 to-indigo-500" },
-                { label: "Завершить 3 проекта", value: 67, color: "bg-gradient-to-r from-blue-400 to-cyan-500" },
-                { label: "Пройти 5 тестов", value: 20, color: "bg-gradient-to-r from-emerald-400 to-teal-500" },
-              ].map(g => (
-                <div key={g.label}>
-                  <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-slate-600 font-medium">{g.label}</span>
-                    <span className="text-slate-500 font-semibold">{g.value}%</span>
-                  </div>
-                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-1.5 ${g.color} rounded-full transition-all`} style={{ width: `${g.value}%` }} />
-                  </div>
-                </div>
-              ))}
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-3">
+                <Icon name="Target" size={22} className="text-slate-300" />
+              </div>
+              <p className="text-sm font-medium text-slate-500">Цели ещё не добавлены</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Модуль постановки целей откроется в ближайшее время</p>
             </div>
-            <div className="mt-4 pt-3 border-t border-slate-100">
-              <button className="w-full text-xs text-violet-600 font-semibold hover:text-violet-800 transition-colors flex items-center justify-center gap-1">
-                <Icon name="Plus" size={12} /> Добавить цель
-              </button>
+            <div className="mt-2 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
+              <Icon name="Clock" size={12} />
+              <span>В разработке</span>
             </div>
           </div>
         </div>
 
-        {/* ── Ряд 2: Индекс развития + Карта компетенций + Ближайшие шаги ── */}
+        {/* ── Ряд 2: Индекс развития + Карта компетенций + Шаги ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 
-          {/* Индекс развития */}
+          {/* Индекс развития — из реальных данных */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-slate-800">Прогресс развития</h3>
-            </div>
+            <h3 className="text-sm font-semibold text-slate-800 mb-2">Прогресс развития</h3>
             <div className="flex justify-center">
-              <ProgressArc value={68} />
+              <ProgressArc value={devValue} total={devTotal} />
             </div>
             <div className="mt-3 space-y-2">
               {[
-                { label: "Обучение", value: 75, color: "from-violet-400 to-indigo-500" },
-                { label: "Проекты", value: 50, color: "from-blue-400 to-cyan-500" },
-                { label: "Карьера", value: 80, color: "from-emerald-400 to-teal-500" },
+                {
+                  label: "Проекты",
+                  value: Math.min(projectCount * 20, 100),
+                  hint: projectCount > 0 ? `${projectCount} создано` : "Нет проектов",
+                  color: "from-violet-400 to-indigo-500",
+                },
+                {
+                  label: "Материалы",
+                  value: 0,
+                  hint: "Загрузите первый файл",
+                  color: "from-blue-400 to-cyan-500",
+                },
+                {
+                  label: "Компетенции",
+                  value: 0,
+                  hint: "В разработке",
+                  color: "from-emerald-400 to-teal-500",
+                },
               ].map(s => (
                 <div key={s.label}>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-slate-500">{s.label}</span>
-                    <span className="text-slate-700 font-semibold">{s.value}%</span>
+                    <span className="text-slate-400">{s.hint}</span>
                   </div>
                   <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
                     <div className={`h-1 bg-gradient-to-r ${s.color} rounded-full`} style={{ width: `${s.value}%` }} />
@@ -249,80 +223,99 @@ export default function GrowthDashboard() {
             </div>
           </div>
 
-          {/* Карта компетенций */}
+          {/* Карта компетенций — честный empty state */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-800">Карта компетенций</h3>
-              <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">Скоро</span>
+              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">В разработке</span>
             </div>
-            <RadarChart size={164} />
-            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5">
-              {SKILLS.map(s => (
-                <div key={s.label} className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-                  <span className="text-xs text-slate-600 truncate">{s.label}</span>
-                  <span className="text-xs font-semibold text-slate-800 ml-auto">{Math.round(s.pct * 10)}</span>
-                </div>
-              ))}
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-3">
+                <Icon name="Map" size={26} className="text-slate-300" />
+              </div>
+              <p className="text-sm font-medium text-slate-500">Карта появится после первой диагностики</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Модуль диагностики компетенций готовится к запуску</p>
             </div>
           </div>
 
-          {/* Ближайшие шаги */}
+          {/* Ближайшие шаги — реальные, кликабельные */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
-              <span className="text-xs text-slate-400">4 задачи</span>
+              <span className="text-xs text-slate-400">{nextSteps.filter(s => s.done).length}/{nextSteps.length}</span>
             </div>
-            <div className="space-y-2.5">
-              {[
-                { done: true,  label: "Загрузить учебные материалы" },
-                { done: true,  label: "Создать проект презентации" },
-                { done: false, label: "Пройти микро-тест по теме" },
-                { done: false, label: "Обновить план развития" },
-                { done: false, label: "Заполнить карту компетенций" },
-              ].map((s, i) => (
-                <div key={i} className="flex items-start gap-2.5">
-                  <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors ${
-                    s.done ? "bg-indigo-600 border-indigo-600" : "border-slate-300 hover:border-indigo-400"
+            <div className="space-y-1.5">
+              {nextSteps.map((s, i) => (
+                <div
+                  key={i}
+                  className={`flex items-start gap-2.5 p-2 rounded-lg transition-colors ${
+                    !s.done && !s.coming && !s.disabled && s.href
+                      ? "hover:bg-slate-50 cursor-pointer"
+                      : ""
+                  }`}
+                  onClick={() => {
+                    if (!s.done && !s.coming && !s.disabled && s.href) navigate(s.href);
+                  }}
+                >
+                  <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border ${
+                    s.done
+                      ? "bg-indigo-600 border-indigo-600"
+                      : s.coming
+                      ? "border-slate-200 bg-slate-50"
+                      : "border-slate-300"
                   }`}>
                     {s.done && <Icon name="Check" size={10} className="text-white" />}
+                    {s.coming && <Icon name="Clock" size={9} className="text-slate-300" />}
                   </div>
-                  <span className={`text-sm leading-tight ${s.done ? "text-slate-400 line-through" : "text-slate-700"}`}>
-                    {s.label}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-sm leading-tight block ${
+                      s.done ? "text-slate-400 line-through" : s.disabled || s.coming ? "text-slate-400" : "text-slate-700"
+                    }`}>
+                      {s.label}
+                    </span>
+                    {s.coming && <span className="text-[10px] text-slate-400">Скоро</span>}
+                    {s.disabled && !s.coming && <span className="text-[10px] text-slate-400">Сначала создайте проект</span>}
+                  </div>
+                  {!s.done && !s.coming && !s.disabled && s.href && (
+                    <Icon name="ChevronRight" size={14} className="text-slate-300 flex-shrink-0 mt-0.5" />
+                  )}
                 </div>
               ))}
             </div>
-            <button className="mt-4 w-full text-xs font-semibold text-slate-600 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 rounded-xl py-2.5 transition-all hover:bg-indigo-50">
-              Обновить план развития
-            </button>
           </div>
         </div>
 
-        {/* ── Ряд 3: Активные проекты + Быстрые действия ── */}
+        {/* ── Ряд 3: Проекты + Быстрые действия ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-          {/* Активные проекты */}
+          {/* Проекты — реальные данные из API */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Проекты и презентации</h3>
               <Link to="/cabinet/projects" className="text-xs text-slate-400 hover:text-indigo-600 flex items-center gap-0.5 transition-colors">
-                Все <Icon name="ChevronRight" size={13} />
+                {projectCount > 0 ? `Все (${projectCount})` : "Открыть"} <Icon name="ChevronRight" size={13} />
               </Link>
             </div>
-            {projects.length === 0 ? (
+
+            {loadingProjects ? (
+              <div className="space-y-2.5">
+                {[1, 2].map(i => (
+                  <div key={i} className="h-14 bg-slate-100 rounded-xl animate-pulse" />
+                ))}
+              </div>
+            ) : activeProjects.length === 0 ? (
               <div className="text-center py-8">
                 <div className="w-12 h-12 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-3">
                   <Icon name="FolderOpen" size={22} className="text-slate-300" />
                 </div>
-                <p className="text-sm text-slate-500 mb-3">Пока нет активных проектов</p>
+                <p className="text-sm text-slate-500 mb-3">Пока нет проектов</p>
                 <Link to="/cabinet/projects" className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-xl transition-colors">
                   <Icon name="Plus" size={13} /> Создать первый проект
                 </Link>
               </div>
             ) : (
               <div className="space-y-2.5">
-                {projects.map((p, idx) => (
+                {activeProjects.map((p, idx) => (
                   <Link
                     key={p.id}
                     to={`/cabinet/project/${p.id}`}
@@ -337,16 +330,17 @@ export default function GrowthDashboard() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-700 transition-colors">{p.name}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Презентация · В работе</div>
+                      <div className="text-xs text-slate-400 mt-0.5">Проект · Открыть</div>
                     </div>
-                    <div className="flex-shrink-0 text-right">
-                      <div className="text-xs font-bold text-slate-700">50%</div>
-                      <div className="w-16 h-1 bg-slate-100 rounded-full mt-1">
-                        <div className="w-1/2 h-1 bg-indigo-400 rounded-full" />
-                      </div>
-                    </div>
+                    <Icon name="ChevronRight" size={15} className="text-slate-300 group-hover:text-indigo-400 transition-colors flex-shrink-0" />
                   </Link>
                 ))}
+                {projects.length > 3 && (
+                  <Link to="/cabinet/projects" className="flex items-center gap-2 p-2 text-xs text-slate-500 hover:text-indigo-600 transition-colors">
+                    <Icon name="MoreHorizontal" size={15} />
+                    Ещё {projects.length - 3} {projects.length - 3 < 5 ? "проекта" : "проектов"}
+                  </Link>
+                )}
                 <Link
                   to="/cabinet/projects"
                   className="flex items-center gap-3 p-3 rounded-xl border border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 transition-all text-slate-400 hover:text-indigo-600"
@@ -364,7 +358,12 @@ export default function GrowthDashboard() {
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <h3 className="text-sm font-semibold text-slate-800 mb-4">Быстрые действия</h3>
             <div className="grid grid-cols-2 gap-2.5">
-              {QUICK_ACTIONS.map(a => (
+              {[
+                { label: "Загрузить материалы", icon: "Upload", href: "/cabinet/projects", color: "bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100", active: true },
+                { label: "Создать проект", icon: "Plus", href: "/cabinet/projects", color: "bg-violet-50 text-violet-700 border-violet-100 hover:bg-violet-100", active: true },
+                { label: "Пройти тест", icon: "ClipboardCheck", href: "#", color: "", active: false, coming: true },
+                { label: "Карта компетенций", icon: "Map", href: "#", color: "", active: false, coming: true },
+              ].map(a => (
                 <Link
                   key={a.label}
                   to={a.active ? a.href : "#"}
@@ -372,38 +371,48 @@ export default function GrowthDashboard() {
                   className={`flex items-center gap-2.5 p-3.5 rounded-xl border transition-all ${
                     a.active
                       ? `${a.color} hover:shadow-sm cursor-pointer`
-                      : "border-slate-100 bg-slate-50 text-slate-400 opacity-60 cursor-default"
+                      : "border-slate-100 bg-slate-50 text-slate-400 cursor-default"
                   }`}
                 >
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${a.active ? "bg-white/70" : "bg-white"}`}>
                     <Icon name={a.icon} size={16} />
                   </div>
-                  <span className="text-xs font-semibold leading-tight">{a.label}</span>
-                  {!a.active && (
-                    <span className="ml-auto text-[9px] font-bold text-slate-400">Скоро</span>
-                  )}
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold leading-tight">{a.label}</div>
+                    {a.coming && <div className="text-[10px] text-slate-400 mt-0.5">Скоро</div>}
+                  </div>
                 </Link>
               ))}
             </div>
 
-            {/* Напоминание — тест */}
-            <div className="mt-3 p-3.5 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-3">
+            <Link to="/cabinet/wallet" className="mt-3 flex items-center gap-3 p-3.5 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all group">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                <Icon name="Wallet" size={16} className="text-indigo-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-slate-700">Кошелёк</div>
+                <div className="text-xs text-slate-400">Пополнить баланс</div>
+              </div>
+              <Icon name="ChevronRight" size={15} className="text-slate-300 group-hover:text-indigo-400 flex-shrink-0" />
+            </Link>
+
+            <div className="mt-2.5 p-3.5 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
                 <Icon name="Clock" size={15} className="text-amber-600" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-800">Напоминание · Тесты и повторение</div>
-                <div className="text-xs text-amber-600 mt-0.5">Раздел откроется в ближайшее время</div>
+                <div className="text-xs font-semibold text-amber-800">Тесты и повторение</div>
+                <div className="text-xs text-amber-600 mt-0.5">Откроется в ближайшее время</div>
               </div>
-              <span className="text-[9px] font-bold text-amber-500 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0">Скоро</span>
+              <span className="text-[9px] font-bold text-amber-500 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5">Скоро</span>
             </div>
           </div>
         </div>
 
-        {/* ── Ряд 4: Материалы + Карьерный вектор + AI-рекомендации + Кошелёк ── */}
+        {/* ── Ряд 4: Материалы + Карьера + AI-рекомендации + Кошелёк ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
 
-          {/* Материалы и документы */}
+          {/* Материалы — рабочий (загрузка через проекты) */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-800">Материалы</h3>
@@ -411,53 +420,48 @@ export default function GrowthDashboard() {
                 <Icon name="ChevronRight" size={14} />
               </Link>
             </div>
-            <div className="space-y-2">
-              {[
-                { icon: "FileText", label: "Документы", count: "—", color: "bg-blue-50 text-blue-500" },
-                { icon: "Image", label: "Изображения", count: "—", color: "bg-pink-50 text-pink-500" },
-                { icon: "Video", label: "Видео", count: "—", color: "bg-orange-50 text-orange-500" },
-              ].map(m => (
-                <div key={m.label} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition-colors">
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${m.color}`}>
-                    <Icon name={m.icon} size={14} />
-                  </div>
-                  <span className="text-xs text-slate-700 font-medium flex-1">{m.label}</span>
-                  <span className="text-xs text-slate-400">{m.count}</span>
-                </div>
-              ))}
-            </div>
-            <Link to="/cabinet/projects" className="mt-3 block w-full text-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 py-2 rounded-xl transition-colors">
+            {projectCount === 0 ? (
+              <div className="text-center py-4">
+                <Icon name="FileText" size={28} className="text-slate-200 mx-auto mb-2" />
+                <p className="text-xs text-slate-400 leading-relaxed">Создайте проект и загрузите материалы</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {[
+                  { icon: "FileText", label: "Документы", color: "bg-blue-50 text-blue-500" },
+                  { icon: "Image", label: "Изображения", color: "bg-pink-50 text-pink-500" },
+                  { icon: "Film", label: "Видео", color: "bg-orange-50 text-orange-500" },
+                ].map(m => (
+                  <Link key={m.label} to="/cabinet/projects" className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition-colors">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${m.color}`}>
+                      <Icon name={m.icon} size={14} />
+                    </div>
+                    <span className="text-xs text-slate-700 font-medium flex-1">{m.label}</span>
+                    <Icon name="ChevronRight" size={13} className="text-slate-300" />
+                  </Link>
+                ))}
+              </div>
+            )}
+            <Link to="/cabinet/projects" className="mt-3 block w-full text-center text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2 rounded-xl transition-colors">
               Загрузить материал
             </Link>
           </div>
 
-          {/* Карьерный вектор */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative">
-            <div className="absolute top-4 right-4">
-              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Скоро</span>
+          {/* Карьерная траектория — честный empty state */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-800">Карьерная траектория</h3>
+              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">В разработке</span>
             </div>
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">Карьерная траектория</h3>
-            <div className="space-y-2.5">
-              {[
-                { label: "Специалист", done: true, pct: 100 },
-                { label: "Старший специалист", done: false, pct: 40 },
-                { label: "Руководитель", done: false, pct: 0 },
-              ].map((s, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.done ? "bg-indigo-500" : "bg-slate-200"}`} />
-                  <div className="flex-1">
-                    <div className="text-xs text-slate-600 mb-1">{s.label}</div>
-                    <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-1 bg-gradient-to-r from-indigo-400 to-violet-500 rounded-full" style={{ width: `${s.pct}%` }} />
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="flex flex-col items-center justify-center py-5 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-3">
+                <Icon name="TrendingUp" size={22} className="text-slate-300" />
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">Карьерный трек сформируется после заполнения профиля и компетенций</p>
             </div>
-            <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">Трек формируется на основе ваших компетенций и целей</p>
           </div>
 
-          {/* AI-рекомендации */}
+          {/* AI-рекомендации — rule-based, реальные */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center">
@@ -466,25 +470,37 @@ export default function GrowthDashboard() {
               <h3 className="text-sm font-semibold text-slate-800">Рекомендации AI</h3>
             </div>
             <div className="space-y-2.5">
-              {[
-                { type: "Курс", title: "Эмоциональный интеллект для лидеров", icon: "BookOpen", color: "bg-violet-50 text-violet-600" },
-                { type: "Статья", title: "Тренды AI и обучение в 2026", icon: "FileText", color: "bg-blue-50 text-blue-600" },
-                { type: "Практика", title: "Завершить проект до конца недели", icon: "Target", color: "bg-emerald-50 text-emerald-600" },
-              ].map((r, i) => (
-                <div key={i} className="flex items-start gap-2.5 p-2.5 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer">
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${r.color}`}>
-                    <Icon name={r.icon} size={13} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">{r.type}</div>
-                    <div className="text-xs font-medium text-slate-700 leading-snug mt-0.5">{r.title}</div>
-                  </div>
+              {projectCount === 0 ? (
+                <div className="p-3 bg-violet-50 rounded-xl">
+                  <div className="text-[10px] text-violet-500 font-semibold uppercase tracking-wide mb-1">Первый шаг</div>
+                  <div className="text-xs font-medium text-slate-700">Создайте проект и загрузите учебные материалы</div>
                 </div>
-              ))}
+              ) : (
+                <>
+                  <div className="flex items-start gap-2.5 p-2.5 bg-violet-50 rounded-xl">
+                    <div className="w-7 h-7 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0 text-violet-600">
+                      <Icon name="BookOpen" size={13} />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase">Действие</div>
+                      <div className="text-xs font-medium text-slate-700 mt-0.5">Загрузите материалы в ваши проекты</div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2.5 p-2.5 bg-blue-50 rounded-xl">
+                    <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 text-blue-600">
+                      <Icon name="Zap" size={13} />
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-400 font-semibold uppercase">Совет</div>
+                      <div className="text-xs font-medium text-slate-700 mt-0.5">Запустите AI-задание для быстрого результата</div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Кошелёк */}
+          {/* Кошелёк — реальный */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-800">Кошелёк</h3>
@@ -497,16 +513,13 @@ export default function GrowthDashboard() {
               <div className="text-2xl font-bold">0 ₽</div>
               <div className="text-xs text-indigo-200 mt-1">AI-кредиты</div>
             </div>
-            <Link
-              to="/cabinet/wallet"
-              className="block w-full text-center text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-xl transition-colors"
-            >
+            <Link to="/cabinet/wallet" className="block w-full text-center text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-xl transition-colors">
               Пополнить баланс
             </Link>
           </div>
         </div>
 
-        {/* ── Ряд 5: В разработке (честный план-раздел) ── */}
+        {/* ── Ряд 5: Модули в разработке ── */}
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center">
@@ -516,7 +529,14 @@ export default function GrowthDashboard() {
             <span className="ml-auto text-xs text-slate-400 font-medium">В разработке</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {UPCOMING.map(m => (
+            {[
+              { label: "Дипломы и сертификаты", icon: "Award", color: "text-amber-500 bg-amber-50" },
+              { label: "Тесты и повторение", icon: "ClipboardCheck", color: "text-blue-500 bg-blue-50" },
+              { label: "Карта компетенций", icon: "Map", color: "text-violet-500 bg-violet-50" },
+              { label: "План развития", icon: "Target", color: "text-emerald-500 bg-emerald-50" },
+              { label: "Карьерная траектория", icon: "TrendingUp", color: "text-indigo-500 bg-indigo-50" },
+              { label: "Профессиональный профиль", icon: "UserCircle", color: "text-pink-500 bg-pink-50" },
+            ].map(m => (
               <div key={m.label} className="flex flex-col items-center gap-2 p-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-center opacity-70">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${m.color}`}>
                   <Icon name={m.icon} size={17} />

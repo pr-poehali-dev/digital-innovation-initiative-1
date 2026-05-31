@@ -45,7 +45,7 @@ function SidebarLink({ item, collapsed }: { item: typeof NAV_ITEMS[0]; collapsed
       onClick={e => !item.active && e.preventDefault()}
       title={collapsed ? item.label : undefined}
       className={`
-        group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 relative
+        group flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 relative
         ${active
           ? "bg-slate-800 text-white shadow-sm"
           : item.active
@@ -57,16 +57,16 @@ function SidebarLink({ item, collapsed }: { item: typeof NAV_ITEMS[0]; collapsed
     >
       <Icon
         name={item.icon}
-        size={18}
+        size={16}
         className={`flex-shrink-0 ${active ? "text-white" : item.active ? "text-slate-500 group-hover:text-slate-700" : "text-slate-300"}`}
       />
       {!collapsed && (
-        <span className="truncate leading-tight">{item.label}</span>
-      )}
-      {!collapsed && !item.active && (
-        <span className="ml-auto text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md flex-shrink-0">
-          Скоро
-        </span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] leading-snug">{item.label}</div>
+          {!item.active && (
+            <div className="text-[10px] font-semibold text-slate-400 mt-0.5">Скоро</div>
+          )}
+        </div>
       )}
     </Link>
   );
@@ -85,7 +85,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* ── Sidebar (desktop) ── */}
       <aside
         className={`hidden lg:flex flex-col fixed top-0 left-0 h-screen bg-white border-r border-slate-200 transition-all duration-200 z-20 ${
-          collapsed ? "w-16" : "w-60"
+          collapsed ? "w-16" : "w-64"
         }`}
       >
         {/* Logo */}
@@ -160,7 +160,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* ── Main content ── */}
-      <div className={`flex-1 flex flex-col min-h-screen transition-all duration-200 ${collapsed ? "lg:ml-16" : "lg:ml-60"}`}>
+      <div className={`flex-1 flex flex-col min-h-screen transition-all duration-200 ${collapsed ? "lg:ml-16" : "lg:ml-64"}`}>
         {/* Top bar */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10 h-14">
           <div className="px-4 lg:px-6 h-full flex items-center justify-between gap-3">
@@ -200,7 +200,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
               <button className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity">
                 <Icon name="Sparkles" size={13} />
-                AI Assistant
+                AI-помощник
               </button>
 
               <div className="hidden sm:flex items-center gap-2 pl-1">
