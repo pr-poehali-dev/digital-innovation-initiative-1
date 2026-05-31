@@ -9,54 +9,106 @@ function getGreeting(name: string) {
   const h = new Date().getHours();
   const greet = h < 12 ? "Доброе утро" : h < 18 ? "Добрый день" : "Добрый вечер";
   const first = name?.split(" ")[0] ?? name;
-  return `${greet}, ${first}!`;
+  return `${greet}, ${first}`;
 }
 
-const COMPETENCIES = [
-  { name: "Soft Skills", score: 8.5, color: "#6366f1", max: 10 },
-  { name: "Tech Skills", score: 7.2, color: "#0ea5e9", max: 10 },
-  { name: "Leadership", score: 6.8, color: "#10b981", max: 10 },
+const SKILLS = [
+  { label: "Soft Skills", pct: 0.85, color: "#8b5cf6" },
+  { label: "Tech Skills", pct: 0.72, color: "#0ea5e9" },
+  { label: "Аналитика", pct: 0.60, color: "#10b981" },
+  { label: "Лидерство", pct: 0.68, color: "#f59e0b" },
+  { label: "Коммуникация", pct: 0.78, color: "#ec4899" },
 ];
 
 const QUICK_ACTIONS = [
-  { label: "Загрузить материалы", icon: "Upload", href: "/cabinet", color: "bg-blue-50 text-blue-600 hover:bg-blue-100", active: true },
-  { label: "Создать проект", icon: "Plus", href: "/cabinet", color: "bg-orange-50 text-orange-600 hover:bg-orange-100", active: true },
-  { label: "Пройти тест", icon: "ClipboardCheck", href: "#", color: "bg-violet-50 text-violet-600 hover:bg-violet-100", active: false },
-  { label: "Открыть план развития", icon: "Target", href: "#", color: "bg-green-50 text-green-600 hover:bg-green-100", active: false },
+  { label: "Загрузить материалы", icon: "Upload", href: "/cabinet/projects", color: "bg-blue-50 text-blue-600 hover:bg-blue-100 border-blue-100", active: true },
+  { label: "Создать проект", icon: "Plus", href: "/cabinet/projects", color: "bg-violet-50 text-violet-600 hover:bg-violet-100 border-violet-100", active: true },
+  { label: "Пройти тест", icon: "ClipboardCheck", href: "#", color: "bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-100", active: false },
+  { label: "План развития", icon: "Target", href: "#", color: "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border-emerald-100", active: false },
 ];
 
-const UPCOMING_MODULES = [
-  { label: "Дипломы и сертификаты", icon: "Award", desc: "Загрузка и хранение документов об образовании" },
-  { label: "Тесты и повторение", icon: "ClipboardCheck", desc: "AI-тесты для поддержания знаний" },
-  { label: "Карта компетенций", icon: "Map", desc: "Визуализация ваших навыков и роста" },
-  { label: "План развития", icon: "Target", desc: "Персональный трек обучения с AI" },
-  { label: "Карьерная траектория", icon: "TrendingUp", desc: "Путь к желаемой профессии" },
-  { label: "Профессиональный профиль", icon: "UserCircle", desc: "Ваш публичный профиль для работодателей" },
+const UPCOMING = [
+  { label: "Дипломы и сертификаты", icon: "Award", color: "text-amber-500 bg-amber-50" },
+  { label: "Тесты и повторение", icon: "ClipboardCheck", color: "text-blue-500 bg-blue-50" },
+  { label: "Карта компетенций", icon: "Map", color: "text-violet-500 bg-violet-50" },
+  { label: "План развития", icon: "Target", color: "text-emerald-500 bg-emerald-50" },
+  { label: "Карьерная траектория", icon: "TrendingUp", color: "text-indigo-500 bg-indigo-50" },
+  { label: "Профессиональный профиль", icon: "UserCircle", color: "text-pink-500 bg-pink-50" },
 ];
 
-function RadarChart({ size = 160 }: { size?: number }) {
+function ProgressArc({ value = 68 }: { value?: number }) {
+  const size = 180;
+  const strokeW = 12;
+  const r = (size - strokeW) / 2;
   const cx = size / 2;
   const cy = size / 2;
-  const r = (size / 2) * 0.78;
-  const skills = [
-    { label: "Leadership", pct: 0.68 },
-    { label: "Tech\nskills", pct: 0.72 },
-    { label: "Soft\nskills", pct: 0.85 },
-    { label: "Soft\nskills", pct: 0.60 },
-    { label: "Soft\nskills", pct: 0.75 },
-  ];
-  const n = skills.length;
+  const startAngle = -210;
+  const sweepAngle = 240;
+
+  function polar(angleDeg: number, radius: number) {
+    const rad = (angleDeg * Math.PI) / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  }
+
+  function arc(startDeg: number, endDeg: number, rad: number) {
+    const s = polar(startDeg, rad);
+    const e = polar(endDeg, rad);
+    const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0;
+    return `M ${s.x} ${s.y} A ${rad} ${rad} 0 ${large} 1 ${e.x} ${e.y}`;
+  }
+
+  const trackPath = arc(startAngle, startAngle + sweepAngle, r);
+  const valueSweep = (value / 100) * sweepAngle;
+  const valuePath = arc(startAngle, startAngle + valueSweep, r);
+
+  return (
+    <div className="flex flex-col items-center">
+      <div className="relative" style={{ width: size, height: size }}>
+        <svg width={size} height={size}>
+          <defs>
+            <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#a78bfa" />
+              <stop offset="50%" stopColor="#6366f1" />
+              <stop offset="100%" stopColor="#06b6d4" />
+            </linearGradient>
+          </defs>
+          <path d={trackPath} fill="none" stroke="#e2e8f0" strokeWidth={strokeW} strokeLinecap="round" />
+          <path d={valuePath} fill="none" stroke="url(#arcGrad)" strokeWidth={strokeW} strokeLinecap="round" />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ paddingBottom: "14px" }}>
+          <span className="text-4xl font-bold text-slate-900 leading-none">{value}</span>
+          <span className="text-xs text-slate-400 mt-1 font-medium">из 100</span>
+        </div>
+      </div>
+      <div className="text-center -mt-4">
+        <div className="text-sm font-semibold text-slate-800">Индекс развития</div>
+        <div className="flex items-center justify-center gap-1 mt-1">
+          <span className="text-xs text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <Icon name="TrendingUp" size={11} /> +4 за месяц
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RadarChart({ size = 164 }: { size?: number }) {
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = (size / 2) * 0.72;
+  const n = SKILLS.length;
+
   function pt(i: number, pct: number) {
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
     return { x: cx + r * pct * Math.cos(angle), y: cy + r * pct * Math.sin(angle) };
   }
-  const polygon = skills.map((s, i) => pt(i, s.pct));
+
+  const polygon = SKILLS.map((s, i) => pt(i, s.pct));
   const grid = [0.25, 0.5, 0.75, 1.0];
 
   return (
     <svg width={size} height={size} className="mx-auto">
-      {/* grid */}
-      {grid.map(g =>
+      {grid.map(g => (
         <polygon
           key={g}
           points={Array.from({ length: n }, (_, i) => {
@@ -67,135 +119,21 @@ function RadarChart({ size = 160 }: { size?: number }) {
           stroke="#e2e8f0"
           strokeWidth="1"
         />
-      )}
-      {/* axes */}
+      ))}
       {Array.from({ length: n }, (_, i) => {
         const p = pt(i, 1);
         return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e2e8f0" strokeWidth="1" />;
       })}
-      {/* data */}
       <polygon
         points={polygon.map(p => `${p.x},${p.y}`).join(" ")}
-        fill="rgba(99,102,241,0.18)"
+        fill="rgba(99,102,241,0.12)"
         stroke="#6366f1"
-        strokeWidth="2"
+        strokeWidth="1.5"
       />
       {polygon.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r="3.5" fill="#6366f1" />
+        <circle key={i} cx={p.x} cy={p.y} r="3" fill={SKILLS[i].color} />
       ))}
     </svg>
-  );
-}
-
-function AiBrainProgress({ value = 68 }: { value?: number }) {
-  const size = 140;
-  const cx = size / 2;
-  const cy = size / 2;
-  const r = 58;
-  const c = 2 * Math.PI * r;
-  const offset = c - (value / 100) * c;
-  const id = "brain-grad";
-
-  return (
-    <div className="flex flex-col items-center">
-      {/* Кольцо + мозг */}
-      <div className="relative" style={{ width: size, height: size }}>
-        {/* Градиентное кольцо */}
-        <svg width={size} height={size} className="absolute inset-0 -rotate-90">
-          <defs>
-            <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#a78bfa" />
-              <stop offset="50%" stopColor="#6366f1" />
-              <stop offset="100%" stopColor="#06b6d4" />
-            </linearGradient>
-          </defs>
-          {/* Track */}
-          <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="9" />
-          {/* Progress */}
-          <circle
-            cx={cx} cy={cy} r={r}
-            fill="none"
-            stroke={`url(#${id})`}
-            strokeWidth="9"
-            strokeDasharray={c}
-            strokeDashoffset={offset}
-            strokeLinecap="round"
-          />
-        </svg>
-
-        {/* Мозг внутри */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <svg width="62" height="62" viewBox="0 0 64 64" fill="none">
-            <defs>
-              <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
-              </radialGradient>
-              <linearGradient id="brainG" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor="#c4b5fd" />
-                <stop offset="50%" stopColor="#818cf8" />
-                <stop offset="100%" stopColor="#38bdf8" />
-              </linearGradient>
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="2.5" result="blur" />
-                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-            </defs>
-            {/* Фоновое свечение */}
-            <circle cx="32" cy="32" r="30" fill="url(#bgGlow)" />
-            {/* Мозг — упрощённые пути */}
-            <g filter="url(#glow)" stroke="url(#brainG)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none">
-              {/* Левое полушарие */}
-              <path d="M32 20 C24 18 15 22 14 30 C13 37 17 43 22 44 C25 45 28 43 30 41 L30 22 Z" />
-              {/* Правое полушарие */}
-              <path d="M32 20 C40 18 49 22 50 30 C51 37 47 43 42 44 C39 45 36 43 34 41 L34 22 Z" />
-              {/* Центральная борозда */}
-              <line x1="32" y1="20" x2="32" y2="44" />
-              {/* Извилины левые */}
-              <path d="M18 27 C20 25 24 26 25 29" />
-              <path d="M16 33 C18 31 23 32 24 35" />
-              <path d="M18 39 C20 37 24 38 25 41" />
-              {/* Извилины правые */}
-              <path d="M46 27 C44 25 40 26 39 29" />
-              <path d="M48 33 C46 31 41 32 40 35" />
-              <path d="M46 39 C44 37 40 38 39 41" />
-              {/* Горизонталь */}
-              <path d="M20 30 C24 29 28 30 30 31" />
-              <path d="M44 30 C40 29 36 30 34 31" />
-            </g>
-            {/* Светящиеся точки-нейроны */}
-            {[
-              [22, 27], [25, 35], [20, 40],
-              [42, 27], [39, 35], [44, 40],
-              [32, 24], [32, 34],
-            ].map(([bx, by], i) => (
-              <circle key={i} cx={bx} cy={by} r="1.8" fill="#a5b4fc" opacity="0.9">
-                <animate attributeName="opacity" values="0.9;0.3;0.9" dur={`${1.5 + i * 0.3}s`} repeatCount="indefinite" />
-              </circle>
-            ))}
-            {/* Линии-связи */}
-            {[
-              [22, 27, 32, 24], [42, 27, 32, 24],
-              [25, 35, 32, 34], [39, 35, 32, 34],
-            ].map(([x1, y1, x2, y2], i) => (
-              <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
-                stroke="#818cf8" strokeWidth="0.8" opacity="0.5">
-                <animate attributeName="opacity" values="0.5;0.1;0.5" dur={`${2 + i * 0.4}s`} repeatCount="indefinite" />
-              </line>
-            ))}
-          </svg>
-        </div>
-      </div>
-
-      {/* Текст под кольцом */}
-      <div className="text-center mt-2">
-        <div className="flex items-end justify-center gap-1">
-          <span className="text-3xl font-bold text-white leading-none">{value}%</span>
-          <span className="text-emerald-400 text-sm font-semibold mb-0.5">↑</span>
-        </div>
-        <div className="text-xs text-slate-400 mt-0.5">Evolution Score</div>
-      </div>
-    </div>
   );
 }
 
@@ -205,103 +143,106 @@ export default function GrowthDashboard() {
 
   useEffect(() => {
     projectsApi.list().then((d: { projects?: { id: number; name: string; description?: string }[] }) => {
-      setProjects(d.projects?.slice(0, 2) ?? []);
+      setProjects(d.projects?.slice(0, 3) ?? []);
     }).catch(() => {});
   }, []);
 
   return (
     <Layout>
-      <div className="px-4 lg:px-6 py-6 max-w-7xl mx-auto space-y-6">
+      <div className="px-4 lg:px-6 py-6 max-w-7xl mx-auto space-y-5">
 
-        {/* ── Приветственный блок + AI инсайт ── */}
+        {/* ── Ряд 1: Приветствие + AI-инсайт + Мои цели ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 text-white relative overflow-hidden">
-            <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/5 rounded-full" />
-            <div className="absolute -bottom-10 -right-4 w-28 h-28 bg-white/5 rounded-full" />
+
+          {/* Приветствие */}
+          <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-violet-50 to-transparent rounded-2xl pointer-events-none" />
             <div className="relative">
-              <div className="flex items-start justify-between mb-1">
-                <h1 className="text-xl font-bold">{getGreeting(user?.name ?? "")}</h1>
-                <div className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                  <Icon name="User" size={20} className="text-white/80" />
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <p className="text-xs text-slate-400 font-medium mb-0.5">Траектория · Кабинет развития</p>
+                  <h1 className="text-xl font-bold text-slate-900">{getGreeting(user?.name ?? "")}</h1>
+                  <p className="text-sm text-slate-500 mt-1">Ваше развитие продолжается. Сегодня хороший день для нового шага.</p>
+                </div>
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0 ml-4">
+                  <span className="text-white font-bold text-base">
+                    {user?.name?.charAt(0)?.toUpperCase() ?? "Я"}
+                  </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 mb-4">
-                <span className="inline-flex items-center gap-1.5 text-xs bg-violet-500/30 text-violet-200 px-2.5 py-1 rounded-full font-medium">
-                  <Icon name="Sparkles" size={11} />
-                  AI-инсайт дня
-                </span>
+
+              {/* AI-инсайт дня */}
+              <div className="mt-4 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-100">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Sparkles" size={15} className="text-white" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-violet-700 mb-1 uppercase tracking-wide">AI-инсайт дня</div>
+                    <p className="text-sm text-slate-700 leading-relaxed">
+                      Фокус на учебных проектах ускоряет ваш рост на 20%. Рекомендую завершить активный проект и загрузить новые материалы.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <p className="text-sm text-white/80 leading-relaxed max-w-md">
-                Фокус на учебных проектах ускоряет ваш рост на 20%. Рекомендую сегодня завершить активный проект и загрузить новые материалы.
-              </p>
             </div>
           </div>
 
+          {/* Мои цели */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Мои цели</h3>
-              <Link to="/cabinet/development" className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
-                Все <Icon name="ChevronRight" size={13} />
-              </Link>
+              <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">Скоро</span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               {[
-                { label: "Компетенции", value: 25, delta: "+10%", color: "bg-indigo-500" },
-                { label: "Мои цели", value: 15, delta: "15%", color: "bg-emerald-500" },
+                { label: "Освоить новые компетенции", value: 25, color: "bg-gradient-to-r from-violet-400 to-indigo-500" },
+                { label: "Завершить 3 проекта", value: 67, color: "bg-gradient-to-r from-blue-400 to-cyan-500" },
+                { label: "Пройти 5 тестов", value: 20, color: "bg-gradient-to-r from-emerald-400 to-teal-500" },
               ].map(g => (
                 <div key={g.label}>
                   <div className="flex justify-between text-xs mb-1.5">
                     <span className="text-slate-600 font-medium">{g.label}</span>
-                    <span className="text-slate-500">{g.delta}</span>
+                    <span className="text-slate-500 font-semibold">{g.value}%</span>
                   </div>
-                  <div className="h-2 bg-slate-100 rounded-full">
-                    <div className={`h-2 ${g.color} rounded-full transition-all`} style={{ width: `${g.value}%` }} />
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-1.5 ${g.color} rounded-full transition-all`} style={{ width: `${g.value}%` }} />
                   </div>
                 </div>
               ))}
             </div>
             <div className="mt-4 pt-3 border-t border-slate-100">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <Icon name="TrendingUp" size={13} className="text-emerald-500" />
-                <span>Прогресс развития растёт</span>
-              </div>
+              <button className="w-full text-xs text-violet-600 font-semibold hover:text-violet-800 transition-colors flex items-center justify-center gap-1">
+                <Icon name="Plus" size={12} /> Добавить цель
+              </button>
             </div>
           </div>
         </div>
 
-        {/* ── Прогресс / Компетенции / Ближайшие шаги ── */}
+        {/* ── Ряд 2: Индекс развития + Карта компетенций + Ближайшие шаги ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Прогресс развития — тёмная карточка с AI-мозгом */}
-          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-5 shadow-xl relative overflow-hidden">
-            {/* Фоновое свечение */}
-            <div className="absolute -top-10 -right-10 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
-            <div className="absolute -bottom-8 -left-8 w-28 h-28 bg-violet-500/10 rounded-full blur-2xl pointer-events-none" />
 
-            <div className="relative flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-white">Прогресс развития</h3>
-              <span className="text-[10px] text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded-full font-medium">AI Score</span>
+          {/* Индекс развития */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-slate-800">Прогресс развития</h3>
             </div>
-
-            <div className="relative flex justify-center">
-              <AiBrainProgress value={68} />
+            <div className="flex justify-center">
+              <ProgressArc value={68} />
             </div>
-
-            <div className="mt-4 space-y-2">
+            <div className="mt-3 space-y-2">
               {[
-                { label: "Обучение", value: 75, color: "from-violet-500 to-indigo-500" },
-                { label: "Проекты", value: 50, color: "from-cyan-500 to-blue-500" },
-                { label: "Карьера", value: 80, color: "from-emerald-500 to-teal-500" },
+                { label: "Обучение", value: 75, color: "from-violet-400 to-indigo-500" },
+                { label: "Проекты", value: 50, color: "from-blue-400 to-cyan-500" },
+                { label: "Карьера", value: 80, color: "from-emerald-400 to-teal-500" },
               ].map(s => (
                 <div key={s.label}>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-400">{s.label}</span>
-                    <span className="text-slate-300 font-medium">{s.value}%</span>
+                    <span className="text-slate-500">{s.label}</span>
+                    <span className="text-slate-700 font-semibold">{s.value}%</span>
                   </div>
-                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <div
-                      className={`h-1.5 bg-gradient-to-r ${s.color} rounded-full`}
-                      style={{ width: `${s.value}%` }}
-                    />
+                  <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-1 bg-gradient-to-r ${s.color} rounded-full`} style={{ width: `${s.value}%` }} />
                   </div>
                 </div>
               ))}
@@ -309,17 +250,18 @@ export default function GrowthDashboard() {
           </div>
 
           {/* Карта компетенций */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative">
-            <div className="absolute top-4 right-4 text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">Скоро</div>
-            <div className="flex items-center justify-between mb-2">
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-slate-800">Карта компетенций</h3>
+              <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full font-medium">Скоро</span>
             </div>
-            <RadarChart size={150} />
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              {COMPETENCIES.map(c => (
-                <div key={c.name} className="text-center">
-                  <div className="text-xs font-semibold text-slate-700">{c.score}</div>
-                  <div className="text-[10px] text-slate-400">{c.name}</div>
+            <RadarChart size={164} />
+            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5">
+              {SKILLS.map(s => (
+                <div key={s.label} className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
+                  <span className="text-xs text-slate-600 truncate">{s.label}</span>
+                  <span className="text-xs font-semibold text-slate-800 ml-auto">{Math.round(s.pct * 10)}</span>
                 </div>
               ))}
             </div>
@@ -329,83 +271,88 @@ export default function GrowthDashboard() {
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
-              <Link to="/cabinet/development" className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
-                <Icon name="ChevronRight" size={13} />
-              </Link>
+              <span className="text-xs text-slate-400">4 задачи</span>
             </div>
             <div className="space-y-2.5">
               {[
-                { done: true, label: "Загрузить учебные материалы" },
-                { done: true, label: "Создать проект презентации" },
+                { done: true,  label: "Загрузить учебные материалы" },
+                { done: true,  label: "Создать проект презентации" },
                 { done: false, label: "Пройти микро-тест по теме" },
                 { done: false, label: "Обновить план развития" },
+                { done: false, label: "Заполнить карту компетенций" },
               ].map((s, i) => (
                 <div key={i} className="flex items-start gap-2.5">
-                  <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border ${s.done ? "bg-slate-800 border-slate-800" : "border-slate-300"}`}>
+                  <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border transition-colors ${
+                    s.done ? "bg-indigo-600 border-indigo-600" : "border-slate-300 hover:border-indigo-400"
+                  }`}>
                     {s.done && <Icon name="Check" size={10} className="text-white" />}
                   </div>
-                  <span className={`text-sm leading-tight ${s.done ? "text-slate-400 line-through" : "text-slate-700"}`}>{s.label}</span>
+                  <span className={`text-sm leading-tight ${s.done ? "text-slate-400 line-through" : "text-slate-700"}`}>
+                    {s.label}
+                  </span>
                 </div>
               ))}
             </div>
-            <button className="mt-4 w-full text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-200 rounded-xl py-2 transition-colors hover:bg-slate-50">
+            <button className="mt-4 w-full text-xs font-semibold text-slate-600 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 rounded-xl py-2.5 transition-all hover:bg-indigo-50">
               Обновить план развития
             </button>
           </div>
         </div>
 
-        {/* ── Активные проекты + Быстрые действия ── */}
+        {/* ── Ряд 3: Активные проекты + Быстрые действия ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
           {/* Активные проекты */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-800">Активные проекты</h3>
-              <Link to="/cabinet" className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+              <h3 className="text-sm font-semibold text-slate-800">Проекты и презентации</h3>
+              <Link to="/cabinet/projects" className="text-xs text-slate-400 hover:text-indigo-600 flex items-center gap-0.5 transition-colors">
                 Все <Icon name="ChevronRight" size={13} />
               </Link>
             </div>
             {projects.length === 0 ? (
-              <div className="text-center py-6">
-                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                  <Icon name="FolderOpen" size={22} className="text-slate-400" />
+              <div className="text-center py-8">
+                <div className="w-12 h-12 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                  <Icon name="FolderOpen" size={22} className="text-slate-300" />
                 </div>
-                <p className="text-sm text-slate-500">Нет активных проектов</p>
-                <Link to="/cabinet" className="mt-3 inline-block text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-xl transition-colors">
-                  Создать первый проект
+                <p className="text-sm text-slate-500 mb-3">Пока нет активных проектов</p>
+                <Link to="/cabinet/projects" className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-xl transition-colors">
+                  <Icon name="Plus" size={13} /> Создать первый проект
                 </Link>
               </div>
             ) : (
-              <div className="space-y-3">
-                {projects.map(p => (
+              <div className="space-y-2.5">
+                {projects.map((p, idx) => (
                   <Link
                     key={p.id}
                     to={`/cabinet/project/${p.id}`}
-                    className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-300 transition-all group"
+                    className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:bg-indigo-50/30 transition-all group"
                   >
-                    <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center flex-shrink-0">
-                      <Icon name="FileText" size={17} className="text-orange-500" />
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                      idx % 3 === 0 ? "bg-orange-50" : idx % 3 === 1 ? "bg-blue-50" : "bg-violet-50"
+                    }`}>
+                      <Icon name="FileText" size={17} className={
+                        idx % 3 === 0 ? "text-orange-500" : idx % 3 === 1 ? "text-blue-500" : "text-violet-500"
+                      } />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-slate-800 truncate">{p.name}</div>
-                      <div className="text-xs text-slate-400">Презентация</div>
+                      <div className="text-sm font-semibold text-slate-800 truncate group-hover:text-indigo-700 transition-colors">{p.name}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">Презентация · В работе</div>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <div className="w-8 h-8 relative flex-shrink-0">
-                        <svg width="32" height="32" className="-rotate-90">
-                          <circle cx="16" cy="16" r="12" fill="none" stroke="#f1f5f9" strokeWidth="4" />
-                          <circle cx="16" cy="16" r="12" fill="none" stroke="#6366f1" strokeWidth="4" strokeDasharray="75.4" strokeDashoffset="37.7" strokeLinecap="round" />
-                        </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-slate-700">50%</span>
+                    <div className="flex-shrink-0 text-right">
+                      <div className="text-xs font-bold text-slate-700">50%</div>
+                      <div className="w-16 h-1 bg-slate-100 rounded-full mt-1">
+                        <div className="w-1/2 h-1 bg-indigo-400 rounded-full" />
                       </div>
                     </div>
                   </Link>
                 ))}
                 <Link
-                  to="/cabinet"
-                  className="flex items-center gap-3 p-3 rounded-xl border border-dashed border-slate-200 hover:border-slate-400 hover:bg-slate-50 transition-all text-slate-500 hover:text-slate-700"
+                  to="/cabinet/projects"
+                  className="flex items-center gap-3 p-3 rounded-xl border border-dashed border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 transition-all text-slate-400 hover:text-indigo-600"
                 >
-                  <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center">
-                    <Icon name="Plus" size={16} className="text-slate-400" />
+                  <div className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center">
+                    <Icon name="Plus" size={16} className="text-slate-300" />
                   </div>
                   <span className="text-sm">Создать новый проект</span>
                 </Link>
@@ -416,120 +363,166 @@ export default function GrowthDashboard() {
           {/* Быстрые действия */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <h3 className="text-sm font-semibold text-slate-800 mb-4">Быстрые действия</h3>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2.5">
               {QUICK_ACTIONS.map(a => (
                 <Link
                   key={a.label}
                   to={a.active ? a.href : "#"}
                   onClick={e => !a.active && e.preventDefault()}
-                  className={`flex items-center gap-3 p-3.5 rounded-xl border border-slate-100 transition-all ${
-                    a.active ? "hover:border-slate-300 hover:shadow-sm cursor-pointer" : "opacity-50 cursor-default"
+                  className={`flex items-center gap-2.5 p-3.5 rounded-xl border transition-all ${
+                    a.active
+                      ? `${a.color} hover:shadow-sm cursor-pointer`
+                      : "border-slate-100 bg-slate-50 text-slate-400 opacity-60 cursor-default"
                   }`}
                 >
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${a.color}`}>
-                    <Icon name={a.icon} size={17} />
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${a.active ? "bg-white/70" : "bg-white"}`}>
+                    <Icon name={a.icon} size={16} />
                   </div>
-                  <span className="text-xs font-medium text-slate-700 leading-tight">{a.label}</span>
+                  <span className="text-xs font-semibold leading-tight">{a.label}</span>
+                  {!a.active && (
+                    <span className="ml-auto text-[9px] font-bold text-slate-400">Скоро</span>
+                  )}
                 </Link>
               ))}
             </div>
 
-            {/* Ближайший тест */}
-            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
-              <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <Icon name="Clock" size={16} className="text-amber-600" />
+            {/* Напоминание — тест */}
+            <div className="mt-3 p-3.5 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <Icon name="Clock" size={15} className="text-amber-600" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-amber-800">Ближайший тест</div>
-                <div className="text-xs text-amber-700 mt-0.5">Раздел тестирования откроется в ближайшее время</div>
+                <div className="text-xs font-semibold text-amber-800">Напоминание · Тесты и повторение</div>
+                <div className="text-xs text-amber-600 mt-0.5">Раздел откроется в ближайшее время</div>
               </div>
-              <span className="text-[10px] font-semibold text-amber-500 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0">Скоро</span>
+              <span className="text-[9px] font-bold text-amber-500 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0">Скоро</span>
             </div>
           </div>
         </div>
 
-        {/* ── Карьерный вектор + Рекомендации AI + Баланс ── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Карьерный вектор */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative">
-            <div className="absolute top-4 right-4 text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">Скоро</div>
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">Карьерный вектор</h3>
-            <div className="space-y-3">
-              {[
-                { label: "Тренер", active: true },
-                { label: "Milestones", active: false },
-                { label: "Milestone", active: false },
-              ].map((s, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${s.active ? "bg-slate-800" : "bg-slate-200"}`} />
-                  <div className="flex-1 h-1.5 bg-slate-100 rounded-full">
-                    <div className={`h-1.5 rounded-full ${s.active ? "bg-slate-800 w-1/3" : "w-0"}`} />
-                  </div>
-                  <span className="text-xs text-slate-500">{s.label}</span>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-slate-400 mt-4">Ваш карьерный трек формируется на основе компетенций и целей</p>
-          </div>
+        {/* ── Ряд 4: Материалы + Карьерный вектор + AI-рекомендации + Кошелёк ── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
 
-          {/* Рекомендации AI */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-            <h3 className="text-sm font-semibold text-slate-800 mb-3">Рекомендации AI</h3>
-            <div className="space-y-3">
-              {[
-                { type: "Курс", title: "Эмоциональный интеллект для лидеров", icon: "BookOpen", color: "bg-violet-50 text-violet-600" },
-                { type: "Статья", title: "Тренды AI 2026", icon: "FileText", color: "bg-blue-50 text-blue-600" },
-              ].map((r, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${r.color}`}>
-                    <Icon name={r.icon} size={15} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">{r.type}</div>
-                    <div className="text-xs font-semibold text-slate-700 leading-snug mt-0.5">{r.title}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Баланс */}
+          {/* Материалы и документы */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-slate-800">Кошелёк / Баланс</h3>
-              <Link to="/cabinet/wallet">
-                <Icon name="ChevronRight" size={16} className="text-slate-400 hover:text-slate-700" />
+              <h3 className="text-sm font-semibold text-slate-800">Материалы</h3>
+              <Link to="/cabinet/projects" className="text-xs text-slate-400 hover:text-indigo-600 transition-colors">
+                <Icon name="ChevronRight" size={14} />
               </Link>
             </div>
-            <div className="bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-xl p-4 text-white">
-              <div className="text-xs font-medium text-emerald-100 mb-1">Текущий баланс</div>
+            <div className="space-y-2">
+              {[
+                { icon: "FileText", label: "Документы", count: "—", color: "bg-blue-50 text-blue-500" },
+                { icon: "Image", label: "Изображения", count: "—", color: "bg-pink-50 text-pink-500" },
+                { icon: "Video", label: "Видео", count: "—", color: "bg-orange-50 text-orange-500" },
+              ].map(m => (
+                <div key={m.label} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50 transition-colors">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${m.color}`}>
+                    <Icon name={m.icon} size={14} />
+                  </div>
+                  <span className="text-xs text-slate-700 font-medium flex-1">{m.label}</span>
+                  <span className="text-xs text-slate-400">{m.count}</span>
+                </div>
+              ))}
+            </div>
+            <Link to="/cabinet/projects" className="mt-3 block w-full text-center text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 py-2 rounded-xl transition-colors">
+              Загрузить материал
+            </Link>
+          </div>
+
+          {/* Карьерный вектор */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative">
+            <div className="absolute top-4 right-4">
+              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Скоро</span>
+            </div>
+            <h3 className="text-sm font-semibold text-slate-800 mb-3">Карьерная траектория</h3>
+            <div className="space-y-2.5">
+              {[
+                { label: "Специалист", done: true, pct: 100 },
+                { label: "Старший специалист", done: false, pct: 40 },
+                { label: "Руководитель", done: false, pct: 0 },
+              ].map((s, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.done ? "bg-indigo-500" : "bg-slate-200"}`} />
+                  <div className="flex-1">
+                    <div className="text-xs text-slate-600 mb-1">{s.label}</div>
+                    <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-1 bg-gradient-to-r from-indigo-400 to-violet-500 rounded-full" style={{ width: `${s.pct}%` }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">Трек формируется на основе ваших компетенций и целей</p>
+          </div>
+
+          {/* AI-рекомендации */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center">
+                <Icon name="Sparkles" size={12} className="text-white" />
+              </div>
+              <h3 className="text-sm font-semibold text-slate-800">Рекомендации AI</h3>
+            </div>
+            <div className="space-y-2.5">
+              {[
+                { type: "Курс", title: "Эмоциональный интеллект для лидеров", icon: "BookOpen", color: "bg-violet-50 text-violet-600" },
+                { type: "Статья", title: "Тренды AI и обучение в 2026", icon: "FileText", color: "bg-blue-50 text-blue-600" },
+                { type: "Практика", title: "Завершить проект до конца недели", icon: "Target", color: "bg-emerald-50 text-emerald-600" },
+              ].map((r, i) => (
+                <div key={i} className="flex items-start gap-2.5 p-2.5 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer">
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${r.color}`}>
+                    <Icon name={r.icon} size={13} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">{r.type}</div>
+                    <div className="text-xs font-medium text-slate-700 leading-snug mt-0.5">{r.title}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Кошелёк */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-800">Кошелёк</h3>
+              <Link to="/cabinet/wallet">
+                <Icon name="ChevronRight" size={15} className="text-slate-400 hover:text-indigo-600 transition-colors" />
+              </Link>
+            </div>
+            <div className="bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl p-4 text-white mb-3">
+              <div className="text-xs font-medium text-indigo-200 mb-1">Текущий баланс</div>
               <div className="text-2xl font-bold">0 ₽</div>
-              <div className="text-xs text-emerald-200 mt-1">Пополните для работы с AI</div>
+              <div className="text-xs text-indigo-200 mt-1">AI-кредиты</div>
             </div>
             <Link
               to="/cabinet/wallet"
-              className="mt-3 w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition-colors"
+              className="block w-full text-center text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-xl transition-colors"
             >
-              <Icon name="Plus" size={13} />
               Пополнить баланс
             </Link>
           </div>
         </div>
 
-        {/* ── В разработке / Роадмап ── */}
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-5">
-            <Icon name="Clock" size={16} className="text-slate-400" />
-            <h3 className="text-sm font-semibold text-slate-800">Готовится к запуску</h3>
-            <span className="text-xs text-slate-400 ml-1">— расширяем платформу каждый месяц</span>
+        {/* ── Ряд 5: В разработке (честный план-раздел) ── */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center">
+              <Icon name="Layers" size={13} className="text-slate-500" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-800">Платформа развивается вместе с вами</h3>
+            <span className="ml-auto text-xs text-slate-400 font-medium">В разработке</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {UPCOMING_MODULES.map(m => (
-              <div key={m.label} className="flex flex-col items-center text-center p-4 bg-slate-50 rounded-xl border border-slate-100 gap-2">
-                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
-                  <Icon name={m.icon} size={18} className="text-slate-400" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {UPCOMING.map(m => (
+              <div key={m.label} className="flex flex-col items-center gap-2 p-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-center opacity-70">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${m.color}`}>
+                  <Icon name={m.icon} size={17} />
                 </div>
-                <div className="text-xs font-semibold text-slate-500 leading-snug">{m.label}</div>
+                <span className="text-xs text-slate-600 leading-tight font-medium">{m.label}</span>
+                <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">Скоро</span>
               </div>
             ))}
           </div>

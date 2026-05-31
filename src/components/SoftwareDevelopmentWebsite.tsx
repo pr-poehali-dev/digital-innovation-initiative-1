@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
-import { ArrowRight, ChevronRight, Menu, X, Brain, Zap, FileText, Sparkles, Upload, BookOpen, Layers, GraduationCap, Map, Target, Users, Briefcase, Clock } from "lucide-react"
+import { ArrowRight, ChevronRight, Menu, X, Zap, FileText, Sparkles, Upload, BookOpen, Layers, GraduationCap, Map, Target, Users, Briefcase, Clock, Brain } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
 import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
@@ -243,10 +243,10 @@ const HeroHeader = () => {
 const Logo = ({ className }: { className?: string }) => {
   return (
     <div className={cn("flex items-center space-x-2", className)}>
-      <div className="bg-slate-800 rounded-lg p-2">
-        <Brain className="h-6 w-6 text-white" />
+      <div className="bg-gradient-to-br from-violet-600 to-indigo-600 rounded-lg p-2">
+        <span className="text-white font-bold text-base leading-none">Т</span>
       </div>
-      <span className="text-xl font-bold">DocMind AI</span>
+      <span className="text-xl font-bold">Траектория</span>
     </div>
   )
 }
@@ -300,7 +300,7 @@ export default function SoftwareDevelopmentWebsite() {
                     href="#services"
                     className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
                   >
-                    <span className="text-foreground text-sm">Платформа развития человека с AI-помощником</span>
+                    <span className="text-foreground text-sm">Траектория — личный кабинет развития и обучения с AI</span>
                     <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                     <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
@@ -316,13 +316,13 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
 
                   <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
-                    Ваш личный кабинет{" "}
+                    Траектория —{" "}
                     <span className="inline-block text-slate-600">
-                      роста и развития
+                      ваш путь развития с AI
                     </span>
                   </h1>
                   <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Учитесь, накапливайте знания, стройте карьерный план — AI помогает на каждом шаге. Уже сейчас работает модуль учебных проектов и презентаций.
+                    Личный кабинет развития и обучения: проекты, компетенции, карьерный план — AI помогает на каждом шаге.
                   </p>
                 </AnimatedGroup>
 
@@ -650,11 +650,11 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Для кого</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Кабинет для каждого,{" "}
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Траектория для каждого,{" "}
                 <span className="text-slate-600">кто развивается</span>
               </h2>
               <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Неважно — студент вы, преподаватель или специалист. AI-кабинет адаптируется под ваши цели.
+                Неважно — студент, преподаватель или специалист. Траектория адаптируется под ваши цели.
               </p>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -701,11 +701,11 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Платформа</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Один кабинет —{" "}
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Одна платформа —{" "}
                 <span className="text-slate-600">весь путь развития</span>
               </h2>
               <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Сейчас уже работает модуль учебных проектов. Остальные модули открываются постепенно.
+                Сейчас уже работает модуль учебных проектов. Траектория расширяется с каждым месяцем.
               </p>
             </div>
             <div className="grid md:grid-cols-2 gap-6">
@@ -758,7 +758,7 @@ export default function SoftwareDevelopmentWebsite() {
                     </li>
                   ))}
                 </ul>
-                <p className="mt-6 text-xs text-slate-400">Следите за обновлениями — мы расширяем платформу каждый месяц.</p>
+                <p className="mt-6 text-xs text-slate-400">Следите за обновлениями — Траектория расширяется каждый месяц.</p>
               </div>
             </div>
           </div>
@@ -774,7 +774,7 @@ export default function SoftwareDevelopmentWebsite() {
             <div className="space-y-4 sm:col-span-2 lg:col-span-1">
               <Logo />
               <p className="text-sm text-muted-foreground max-w-xs">
-                Личный AI-кабинет развития: учёба, компетенции, карьерный план и учебные проекты — всё в одном месте.
+                Траектория — личный кабинет развития и обучения с AI. Учёба, компетенции, карьерный план и проекты — всё в одном месте.
               </p>
             </div>
 

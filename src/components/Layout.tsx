@@ -91,10 +91,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Logo */}
         <div className={`flex items-center gap-3 px-4 py-4 border-b border-slate-100 ${collapsed ? "justify-center px-2" : ""}`}>
           <Link to="/cabinet" className="flex items-center gap-2.5 min-w-0">
-            <img src={LOGO_URL} alt="DocMind AI" className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center flex-shrink-0">
+              <span className="text-white font-bold text-sm">Т</span>
+            </div>
             {!collapsed && (
               <div className="min-w-0">
-                <div className="font-bold text-sm text-slate-900 leading-tight">DocMind AI</div>
+                <div className="font-bold text-sm text-slate-900 leading-tight">Траектория</div>
                 <div className="text-[10px] text-slate-400 leading-tight">Кабинет развития</div>
               </div>
             )}
@@ -165,8 +167,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2">
               {/* Mobile logo */}
               <Link to="/cabinet" className="flex items-center gap-2 lg:hidden">
-                <img src={LOGO_URL} alt="DocMind AI" className="w-7 h-7 rounded-lg object-cover" />
-                <span className="font-bold text-sm text-slate-900">DocMind AI</span>
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center">
+                  <span className="text-white font-bold text-xs">Т</span>
+                </div>
+                <span className="font-bold text-sm text-slate-900">Траектория</span>
               </Link>
               {/* Back button */}
               {canGoBack && (
