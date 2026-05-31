@@ -3,7 +3,6 @@ import { useAuth } from "@/lib/auth-context";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 
-const LOGO_URL = "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/0a6d2e9d-2156-49ee-a4b8-7baaa8811800.jpg";
 
 const NAV_ITEMS = [
   { label: "Главная", icon: "LayoutDashboard", href: "/cabinet", exact: true, active: true },
@@ -184,7 +183,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               )}
             </div>
 
-            {/* AI Assistant button */}
+            {/* Поиск */}
             <div className="flex-1 max-w-xs hidden md:block">
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-400 cursor-pointer hover:bg-slate-100 transition-colors">
                 <Icon name="Search" size={15} />

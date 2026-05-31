@@ -867,7 +867,7 @@ export default function SoftwareDevelopmentWebsite() {
           {/* Bottom section */}
           <div className="mt-12 pt-8 border-t border-slate-200">
             <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-              <div className="text-sm text-muted-foreground">© 2026 DocMind AI. Все права защищены.</div>
+              <div className="text-sm text-muted-foreground">© 2026 Траектория. Все права защищены.</div>
               <div className="text-xs text-muted-foreground">
                 Безопасная оплата через ЮKassa
               </div>
