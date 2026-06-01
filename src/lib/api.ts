@@ -14,6 +14,7 @@ const URLS = {
   education: "https://functions.poehali.dev/54faac64-7c7d-43d5-8590-e64e08067d56",
   audit: "https://functions.poehali.dev/0ac33ef6-6473-4be1-a1e6-a9565e6289a7",
   wallet: "https://functions.poehali.dev/72142b3b-2b3e-4f59-9d16-7008e7cea33d",
+  adminUsers: "https://functions.poehali.dev/8a915c0f-1259-4816-a8e3-14280bdb94ae",
 };
 
 function getSession(): string {

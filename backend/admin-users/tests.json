@@ -1,0 +1,38 @@
+{
+  "tests": [
+    {
+      "name": "list без токена — 401",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "get без токена — 401",
+      "method": "GET",
+      "path": "/?action=get&user_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "block без токена — 401",
+      "method": "POST",
+      "path": "/?action=block",
+      "body": {"user_id": 1, "reason": "test reason here"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unblock без токена — 401",
+      "method": "POST",
+      "path": "/?action=unblock",
+      "body": {"user_id": 1, "reason": "test reason here"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

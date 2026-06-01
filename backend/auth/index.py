@@ -140,13 +140,19 @@ def get_current_user(conn, session_id):
     schema = get_schema()
     cur = conn.cursor()
     cur.execute(
-        f"SELECT u.id, u.email, u.name FROM {schema}.sessions s JOIN {schema}.users u ON u.id = s.user_id WHERE s.id = %s AND s.expires_at > NOW()",
+        f"""SELECT u.id, u.email, u.name, COALESCE(f.is_blocked, FALSE)
+            FROM {schema}.sessions s
+            JOIN {schema}.users u ON u.id = s.user_id
+            LEFT JOIN {schema}.admin_user_flags f ON f.user_id = u.id
+            WHERE s.id = %s AND s.expires_at > NOW()""",
         (session_id,),
     )
     row = cur.fetchone()
-    if row:
-        return {"id": row[0], "email": row[1], "name": row[2]}
-    return None
+    if not row:
+        return None
+    if row[3]:  # is_blocked
+        return None
+    return {"id": row[0], "email": row[1], "name": row[2]}
 
 
 def check_rate_limit(conn, schema, key: str, bucket: str, max_hits: int, window_seconds: int):
@@ -420,6 +426,15 @@ def handler(event: dict, context) -> dict:
             valid, needs_rehash = verify_password(password, stored_hash)
             if not valid:
                 return json_response({"error": "Неверный email или пароль"}, 401)
+
+            # Проверяем блокировку — после проверки пароля (не раскрываем факт блокировки до валидации)
+            cur.execute(
+                f"SELECT is_blocked FROM {schema}.admin_user_flags WHERE user_id = %s",
+                (user_id,),
+            )
+            flag_row = cur.fetchone()
+            if flag_row and flag_row[0]:
+                return json_response({"error": "Аккаунт заблокирован. Обратитесь в поддержку."}, 403)
 
             # Автоматическая миграция legacy SHA-256 → Argon2id
             if needs_rehash:
