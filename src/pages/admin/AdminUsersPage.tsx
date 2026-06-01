@@ -246,7 +246,14 @@ function UserDrawer({
             </div>
 
             {/* Actions */}
-            <div className="pt-2 border-t border-slate-100">
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <a
+                href={`/admin/activity?user_id=${user.id}`}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 font-medium text-sm rounded-xl transition-colors"
+              >
+                <Icon name="Activity" size={15} />
+                Посмотреть активность
+              </a>
               {user.is_blocked ? (
                 <button
                   onClick={() => onAction(user, "unblock")}

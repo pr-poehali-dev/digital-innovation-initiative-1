@@ -3,12 +3,13 @@ import { useAdmin } from "@/lib/admin-context";
 import Icon from "@/components/ui/icon";
 
 const NAV = [
-  { label: "Дашборд", icon: "LayoutDashboard", href: "/admin" },
-  { label: "Пользователи", icon: "Users", href: "/admin/users" },
-  { label: "Проекты", icon: "FolderOpen", href: "/admin/projects" },
-  { label: "AI-операции", icon: "Sparkles", href: "/admin/ai-runs" },
-  { label: "Кошелёк", icon: "Wallet", href: "/admin/wallet" },
-  { label: "Аудит", icon: "ClipboardList", href: "/admin/audit" },
+  { label: "Дашборд",     icon: "LayoutDashboard", href: "/admin" },
+  { label: "Пользователи", icon: "Users",           href: "/admin/users" },
+  { label: "Проекты",     icon: "FolderOpen",       href: "/admin/projects" },
+  { label: "Активность",  icon: "Activity",          href: "/admin/activity" },
+  { label: "Аудит",       icon: "ClipboardList",    href: "/admin/audit" },
+  { label: "AI-операции", icon: "Sparkles",          href: "/admin/ai-runs" },
+  { label: "Кошелёк",    icon: "Wallet",            href: "/admin/wallet" },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {

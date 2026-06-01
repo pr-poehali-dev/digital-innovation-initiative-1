@@ -17,6 +17,7 @@ const URLS = {
   adminUsers: "https://functions.poehali.dev/8a915c0f-1259-4816-a8e3-14280bdb94ae",
   adminProjects: "https://functions.poehali.dev/31ce72f9-002e-4250-8da4-614aebf97e54",
   adminAudit: "https://functions.poehali.dev/f647adda-565a-4846-9b28-4462ebcf2ade",
+  adminActivity: "https://functions.poehali.dev/c3350df2-e2f0-424c-acc4-036e65286249",
 };
 
 function getSession(): string {

@@ -139,6 +139,15 @@ function OverviewTab({ project }: { project: Project }) {
         {project.updated_at && <div>Обновлён: {new Date(project.updated_at).toLocaleString("ru")}</div>}
         {project.archived_at && <div className="text-amber-600">Архивирован: {new Date(project.archived_at).toLocaleString("ru")}</div>}
       </div>
+
+      {/* Cross-link */}
+      <a
+        href={`/admin/activity?project_id=${project.id}`}
+        className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 font-medium text-sm rounded-xl transition-colors"
+      >
+        <Icon name="Activity" size={15} />
+        Посмотреть активность проекта
+      </a>
     </div>
   );
 }

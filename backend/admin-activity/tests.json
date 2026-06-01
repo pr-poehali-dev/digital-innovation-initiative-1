@@ -1,0 +1,34 @@
+{
+  "tests": [
+    {
+      "name": "list без токена — 401",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "get без токена — 401",
+      "method": "GET",
+      "path": "/?action=get&id=1",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST запрещён — 405",
+      "method": "POST",
+      "path": "/?action=list",
+      "expectedStatus": 405,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "неизвестный action — 400",
+      "method": "GET",
+      "path": "/?action=delete",
+      "expectedStatus": 401,
+      "bodyMatcher": "partial"
+    }
+  ]
+}
