@@ -543,6 +543,31 @@ def handler(event: dict, context) -> dict:
                 return resp({"error": "POST required"}, 405, origin)
             return action_restore(conn, admin, body, ip, ua, origin)
 
+        if action == "reindex_all":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            # Перестроить весь поисковый индекс — вызывается вручную один раз
+            if not INDEXER_URL:
+                return resp({"error": "SEARCH_INDEXER_URL not configured"}, 500, origin)
+            try:
+                hdrs = {"Content-Type": "application/json"}
+                if INDEXER_TOKEN:
+                    hdrs["X-Internal-Token"] = INDEXER_TOKEN
+                req = urllib.request.Request(
+                    f"{INDEXER_URL}?action=index_all",
+                    data=b"{}",
+                    headers=hdrs,
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    result = json.loads(r.read())
+                write_audit(conn, admin, "search.reindex_all", 0,
+                            {}, {"result": result}, "manual reindex", ip, ua)
+                conn.commit()
+                return resp({"ok": True, "indexed": result}, origin=origin)
+            except Exception as e:
+                return resp({"error": str(e)}, 500, origin)
+
         return resp({"error": "unknown action"}, 400, origin)
 
     finally:
