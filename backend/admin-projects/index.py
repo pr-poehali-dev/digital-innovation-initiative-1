@@ -428,7 +428,7 @@ def action_archive(conn, actor: dict, body: dict, ip: str, ua: str, origin: str)
     conn.commit()
 
     # Search side effects: каскадное удаление проекта + всех его задач/документов из индекса
-    notify_indexer("delete", project_id=project_id)  # cascade: project + tasks + documents
+    notify_indexer("delete_project_cascade", project_id=project_id)
 
     after = get_project_base(conn, project_id)
     return resp({"ok": True, "project": after}, origin=origin)

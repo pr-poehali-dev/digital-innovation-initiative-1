@@ -296,34 +296,39 @@ def action_upsert(conn, body: dict) -> dict:
 
 
 def action_delete(conn, body: dict) -> dict:
+    """Удаление одной сущности из индекса."""
     entity_type = body.get("entity_type")
     entity_id = body.get("entity_id")
-    project_id = body.get("project_id")
-
-    # Если передан project_id — каскадное удаление всего проекта из индекса
-    if project_id and not entity_type:
-        pid = int(project_id)
-        s = SCHEMA
-        with conn.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM {s}.search_acl WHERE entity_id IN ("
-                f"SELECT entity_id FROM {s}.search_index WHERE project_id = {pid}"
-                f") AND entity_type IN ('task','document')"
-            )
-            cur.execute(
-                f"DELETE FROM {s}.search_index WHERE project_id = {pid} "
-                f"AND entity_type IN ('task','document')"
-            )
-            # Сам проект
-            cur.execute(f"DELETE FROM {s}.search_acl WHERE entity_type='project' AND entity_id={pid}")
-            cur.execute(f"DELETE FROM {s}.search_index WHERE entity_type='project' AND entity_id={pid}")
-        conn.commit()
-        return {"ok": True, "deleted": f"project_cascade:{pid}"}
-
     if not entity_type or not entity_id:
         return {"error": "entity_type and entity_id required"}
     delete_entity(conn, entity_type, int(entity_id))
     return {"ok": True, "deleted": f"{entity_type}:{entity_id}"}
+
+
+def action_delete_project_cascade(conn, body: dict) -> dict:
+    """Каскадное удаление проекта: project + все его tasks + все его documents."""
+    project_id = body.get("project_id")
+    if not project_id:
+        return {"error": "project_id required"}
+    pid = int(project_id)
+    s = SCHEMA
+    with conn.cursor() as cur:
+        # Дочерние сущности
+        cur.execute(
+            f"DELETE FROM {s}.search_acl WHERE entity_id IN ("
+            f"  SELECT entity_id FROM {s}.search_index "
+            f"  WHERE project_id = {pid} AND entity_type IN ('task','document')"
+            f") AND entity_type IN ('task','document')"
+        )
+        cur.execute(
+            f"DELETE FROM {s}.search_index "
+            f"WHERE project_id = {pid} AND entity_type IN ('task','document')"
+        )
+        # Сам проект
+        cur.execute(f"DELETE FROM {s}.search_acl WHERE entity_type='project' AND entity_id={pid}")
+        cur.execute(f"DELETE FROM {s}.search_index WHERE entity_type='project' AND entity_id={pid}")
+    conn.commit()
+    return {"ok": True, "deleted": f"project_cascade:{pid}"}
 
 
 def action_rebuild_acl(conn, body: dict) -> dict:
@@ -360,9 +365,10 @@ def action_rebuild_acl(conn, body: dict) -> dict:
 
 
 def handler(event: dict, context) -> dict:
-    """Индексатор поиска: index_all / upsert / delete / rebuild_acl."""
+    """Индексатор поиска: index_all / upsert / delete / delete_project_cascade / rebuild_acl."""
     method = event.get("httpMethod", "POST")
 
+    # OPTIONS — до проверки токена (CORS preflight не должен требовать авторизации)
     if method == "OPTIONS":
         return resp({})
 
@@ -390,10 +396,16 @@ def handler(event: dict, context) -> dict:
         if action == "delete":
             return resp(action_delete(conn, body))
 
+        if action == "delete_project_cascade":
+            return resp(action_delete_project_cascade(conn, body))
+
         if action == "rebuild_acl":
             return resp(action_rebuild_acl(conn, body))
 
-        return resp({"error": "unknown action. Use: index_all, upsert, delete, rebuild_acl"}, 400)
+        return resp(
+            {"error": "unknown action. Use: index_all, upsert, delete, delete_project_cascade, rebuild_acl"},
+            400
+        )
 
     finally:
         conn.close()

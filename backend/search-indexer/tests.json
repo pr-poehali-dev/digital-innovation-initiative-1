@@ -18,11 +18,19 @@
       "bodyMatcher": "partial"
     },
     {
-      "name": "Неизвестное действие без токена — 403",
+      "name": "delete_project_cascade без токена — 403",
       "method": "POST",
-      "path": "/?action=unknown",
+      "path": "/?action=delete_project_cascade",
+      "body": {"project_id": 999},
       "expectedStatus": 403,
       "expectedBody": {"error": "forbidden"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "OPTIONS без токена — 200 (CORS preflight)",
+      "method": "OPTIONS",
+      "path": "/?action=index_all",
+      "expectedStatus": 200,
       "bodyMatcher": "partial"
     }
   ]
