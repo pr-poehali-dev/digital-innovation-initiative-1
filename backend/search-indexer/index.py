@@ -36,7 +36,7 @@ def resp(data: dict, code: int = 200) -> dict:
 
 def check_token(event: dict) -> bool:
     if not INTERNAL_TOKEN:
-        return True  # Если токен не задан — разрешаем (dev режим)
+        return False  # Токен обязателен — без него запрещаем
     headers = event.get("headers") or {}
     token = headers.get("X-Internal-Token") or headers.get("x-internal-token") or ""
     return token == INTERNAL_TOKEN

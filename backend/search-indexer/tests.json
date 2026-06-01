@@ -1,20 +1,28 @@
 {
   "tests": [
     {
-      "name": "Неверный токен — 403",
+      "name": "Без токена — 403",
       "method": "POST",
       "path": "/?action=index_all",
-      "headers": {"X-Internal-Token": "wrong_token"},
-      "expectedStatus": 200,
-      "expectedBody": {"ok": true},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "forbidden"},
       "bodyMatcher": "partial"
     },
     {
-      "name": "Неизвестное действие — 400",
+      "name": "Неверный токен — 403",
+      "method": "POST",
+      "path": "/?action=index_all",
+      "headers": {"X-Internal-Token": "wrong_token_xxxxxx"},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "forbidden"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Неизвестное действие без токена — 403",
       "method": "POST",
       "path": "/?action=unknown",
-      "expectedStatus": 400,
-      "expectedBody": {"error": "unknown action. Use: index_all, upsert, delete, rebuild_acl"},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "forbidden"},
       "bodyMatcher": "partial"
     }
   ]

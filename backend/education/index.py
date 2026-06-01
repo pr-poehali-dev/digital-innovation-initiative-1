@@ -46,6 +46,7 @@ KIND_GROUPS = {
 
 
 INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
+INDEXER_TOKEN = os.environ.get("SEARCH_INDEXER_TOKEN", "")
 
 
 def get_db():
@@ -62,10 +63,13 @@ def notify_indexer(action: str, entity_id: int = None):
         body = {"entity_type": "education"}
         if entity_id:
             body["entity_id"] = entity_id
+        hdrs = {"Content-Type": "application/json"}
+        if INDEXER_TOKEN:
+            hdrs["X-Internal-Token"] = INDEXER_TOKEN
         req = urllib.request.Request(
             f"{INDEXER_URL}?action={action}",
             data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
+            headers=hdrs,
             method="POST",
         )
         urllib.request.urlopen(req, timeout=3)
