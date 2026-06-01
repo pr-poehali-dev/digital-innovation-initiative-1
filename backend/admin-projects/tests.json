@@ -1,0 +1,45 @@
+{
+  "tests": [
+    {
+      "name": "list без токена — 401",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "get без токена — 401",
+      "method": "GET",
+      "path": "/?action=get&project_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "archive без токена — 401",
+      "method": "POST",
+      "path": "/?action=archive",
+      "body": {"project_id": 1, "reason": "test reason here"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "restore без токена — 401",
+      "method": "POST",
+      "path": "/?action=restore",
+      "body": {"project_id": 1, "reason": "test reason here"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "неизвестный action — 400",
+      "method": "GET",
+      "path": "/?action=delete_forever",
+      "expectedStatus": 401,
+      "bodyMatcher": "partial"
+    }
+  ]
+}

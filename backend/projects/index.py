@@ -346,6 +346,8 @@ def handle_restore(conn, user, body, request_id, origin=None):
         return err_response("not_found", "Проект не найден", 404, request_id, origin=origin)
     log_activity(cur, schema, project_id, user["id"], "restored_project", "project", project_id, row[0])
     conn.commit()
+    notify_indexer("upsert", "project", project_id)
+    notify_indexer("rebuild_acl", project_id=project_id)
     return ok_response({"ok": True}, request_id, origin=origin)
 
 
