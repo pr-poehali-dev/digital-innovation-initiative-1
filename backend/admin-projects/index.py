@@ -100,14 +100,17 @@ def notify_indexer(action: str, entity_type: str = None, entity_id: int = None,
         pass
 
 
-def write_audit(conn, actor: dict, action: str, entity_id: int,
-                before: dict, after: dict, reason: str, ip: str, ua: str):
+def write_audit(conn, actor: dict, action: str, entity_id: int | None,
+                before: dict, after: dict, reason: str, ip: str, ua: str,
+                entity_type: str = "project"):
     s = SCHEMA
     b = json.dumps(before, ensure_ascii=False, default=str).replace("'", "''")
     a = json.dumps(after, ensure_ascii=False, default=str).replace("'", "''")
     r = (reason or "").replace("'", "''")
     ip_s = (ip or "")[:64].replace("'", "''")
     ua_s = (ua or "")[:500].replace("'", "''")
+    eid_sql = str(entity_id) if entity_id else "NULL"
+    et_sql = entity_type.replace("'", "''")
     with conn.cursor() as cur:
         cur.execute(f"""
             INSERT INTO {s}.admin_audit_log
@@ -115,7 +118,7 @@ def write_audit(conn, actor: dict, action: str, entity_id: int,
                  before_json, after_json, reason, ip_address, user_agent)
             VALUES (
                 '{actor["actor_email"]}', '{actor["actor_role"]}',
-                '{action}', 'project', {entity_id},
+                '{action}', '{et_sql}', {eid_sql},
                 '{b}'::jsonb, '{a}'::jsonb,
                 '{r}', '{ip_s}', '{ua_s}'
             )
@@ -424,9 +427,8 @@ def action_archive(conn, actor: dict, body: dict, ip: str, ua: str, origin: str)
                 reason, ip, ua)
     conn.commit()
 
-    # Search side effects: удаляем проект из индекса + все его сущности
-    notify_indexer("delete", "project", project_id)
-    notify_indexer("rebuild_acl", project_id=project_id)
+    # Search side effects: каскадное удаление проекта + всех его задач/документов из индекса
+    notify_indexer("delete", project_id=project_id)  # cascade: project + tasks + documents
 
     after = get_project_base(conn, project_id)
     return resp({"ok": True, "project": after}, origin=origin)
@@ -561,8 +563,9 @@ def handler(event: dict, context) -> dict:
                 )
                 with urllib.request.urlopen(req, timeout=60) as r:
                     result = json.loads(r.read())
-                write_audit(conn, admin, "search.reindex_all", 0,
-                            {}, {"result": result}, "manual reindex", ip, ua)
+                write_audit(conn, admin, "search.reindex_all", None,
+                            {}, {"result": result}, "manual reindex", ip, ua,
+                            entity_type="system")
                 conn.commit()
                 return resp({"ok": True, "indexed": result}, origin=origin)
             except Exception as e:

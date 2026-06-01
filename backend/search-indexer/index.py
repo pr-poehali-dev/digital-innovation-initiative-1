@@ -146,7 +146,9 @@ def action_index_all(conn) -> dict:
         cur.execute(
             f"SELECT t.id, t.project_id, t.title, t.topic, t.goal, t.created_by "
             f"FROM {s}.tasks t "
-            f"WHERE t.archived_at IS NULL"
+            f"LEFT JOIN {s}.projects p ON p.id = t.project_id "
+            f"WHERE t.archived_at IS NULL "
+            f"AND (t.project_id IS NULL OR p.archived_at IS NULL)"
         )
         tasks = cur.fetchall()
 
@@ -169,7 +171,9 @@ def action_index_all(conn) -> dict:
         cur.execute(
             f"SELECT d.id, d.project_id, d.original_name, d.extracted_text, d.extracted_length "
             f"FROM {s}.documents d "
-            f"WHERE d.archived_at IS NULL"
+            f"LEFT JOIN {s}.projects p ON p.id = d.project_id "
+            f"WHERE d.archived_at IS NULL "
+            f"AND (d.project_id IS NULL OR p.archived_at IS NULL)"
         )
         documents = cur.fetchall()
 
@@ -294,6 +298,28 @@ def action_upsert(conn, body: dict) -> dict:
 def action_delete(conn, body: dict) -> dict:
     entity_type = body.get("entity_type")
     entity_id = body.get("entity_id")
+    project_id = body.get("project_id")
+
+    # Если передан project_id — каскадное удаление всего проекта из индекса
+    if project_id and not entity_type:
+        pid = int(project_id)
+        s = SCHEMA
+        with conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {s}.search_acl WHERE entity_id IN ("
+                f"SELECT entity_id FROM {s}.search_index WHERE project_id = {pid}"
+                f") AND entity_type IN ('task','document')"
+            )
+            cur.execute(
+                f"DELETE FROM {s}.search_index WHERE project_id = {pid} "
+                f"AND entity_type IN ('task','document')"
+            )
+            # Сам проект
+            cur.execute(f"DELETE FROM {s}.search_acl WHERE entity_type='project' AND entity_id={pid}")
+            cur.execute(f"DELETE FROM {s}.search_index WHERE entity_type='project' AND entity_id={pid}")
+        conn.commit()
+        return {"ok": True, "deleted": f"project_cascade:{pid}"}
+
     if not entity_type or not entity_id:
         return {"error": "entity_type and entity_id required"}
     delete_entity(conn, entity_type, int(entity_id))

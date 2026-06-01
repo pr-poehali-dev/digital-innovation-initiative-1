@@ -318,7 +318,7 @@ def handle_archive(conn, user, body, request_id, origin=None):
     )
     log_activity(cur, schema, project_id, user["id"], "archived_project", "project", project_id, row[0])
     conn.commit()
-    notify_indexer("delete", "project", project_id)
+    notify_indexer("delete", project_id=project_id)  # cascade: project + tasks + documents
     return ok_response({"ok": True, "archived": True, "can_restore": True}, request_id, origin=origin)
 
 
