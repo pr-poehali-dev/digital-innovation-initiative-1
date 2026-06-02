@@ -71,7 +71,8 @@ def get_admin_session(conn, token: str) -> dict | None:
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT actor_email, actor_role FROM {s}.admin_sessions "
-            f"WHERE token_hash = '{token_hash}' AND expires_at > NOW() LIMIT 1"
+            f"WHERE session_token_hash = '{token_hash}' "
+            f"AND expires_at > NOW() AND revoked_at IS NULL LIMIT 1"
         )
         row = cur.fetchone()
     return {"actor_email": row[0], "actor_role": row[1]} if row else None
