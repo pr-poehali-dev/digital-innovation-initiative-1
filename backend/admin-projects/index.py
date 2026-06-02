@@ -64,11 +64,16 @@ def get_admin_session(conn, token: str) -> dict | None:
         return None
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     s = SCHEMA
+    print(f"[get_admin_session] SCHEMA={s!r} token_len={len(token)}")
     with conn.cursor() as cur:
-        cur.execute(
-            f"SELECT actor_email, actor_role FROM {s}.admin_sessions "
-            f"WHERE token_hash = '{token_hash}' AND expires_at > NOW() LIMIT 1"
-        )
+        try:
+            cur.execute(
+                f"SELECT actor_email, actor_role FROM {s}.admin_sessions "
+                f"WHERE token_hash = '{token_hash}' AND expires_at > NOW() LIMIT 1"
+            )
+        except Exception as e:
+            print(f"[get_admin_session] SQL ERROR: {e!r} schema={s!r}")
+            raise
         row = cur.fetchone()
     return {"actor_email": row[0], "actor_role": row[1]} if row else None
 
