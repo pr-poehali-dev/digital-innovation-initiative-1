@@ -15,7 +15,9 @@ import hashlib
 import psycopg2
 
 DB = os.environ["DATABASE_URL"]
-SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
+_schema_env = os.environ.get("MAIN_DB_SCHEMA", "").strip()
+SCHEMA = _schema_env if _schema_env else "t_p61016064_digital_innovation_i"
+print(f"[admin-activity] SCHEMA={SCHEMA}")
 
 # Максимум символов для details в списке
 DETAILS_PREVIEW_LEN = 200

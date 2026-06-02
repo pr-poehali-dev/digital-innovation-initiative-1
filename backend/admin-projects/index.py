@@ -12,9 +12,11 @@ import psycopg2
 import urllib.request
 
 DB = os.environ["DATABASE_URL"]
-SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
+_schema_env = os.environ.get("MAIN_DB_SCHEMA", "").strip()
+SCHEMA = _schema_env if _schema_env else "t_p61016064_digital_innovation_i"
 INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
 INDEXER_TOKEN = os.environ.get("SEARCH_INDEXER_TOKEN", "")
+print(f"[admin-projects] SCHEMA={SCHEMA}")
 
 
 def get_db():

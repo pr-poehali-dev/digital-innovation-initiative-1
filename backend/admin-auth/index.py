@@ -11,7 +11,9 @@ import psycopg2
 from datetime import datetime, timedelta
 
 DB = os.environ["DATABASE_URL"]
-SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
+_schema_env = os.environ.get("MAIN_DB_SCHEMA", "").strip()
+SCHEMA = _schema_env if _schema_env else "t_p61016064_digital_innovation_i"
+print(f"[admin-auth] SCHEMA={SCHEMA}")
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH", "")

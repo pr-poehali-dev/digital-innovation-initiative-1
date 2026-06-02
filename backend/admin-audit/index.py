@@ -10,7 +10,9 @@ import hashlib
 import psycopg2
 
 DB = os.environ["DATABASE_URL"]
-SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
+_schema_env = os.environ.get("MAIN_DB_SCHEMA", "").strip()
+SCHEMA = _schema_env if _schema_env else "t_p61016064_digital_innovation_i"
+print(f"[admin-audit] SCHEMA={SCHEMA}")
 
 # Поля, которые никогда не должны попадать в UI в явном виде
 SENSITIVE_KEYS = frozenset({
