@@ -488,6 +488,28 @@ def handler(event: dict, context) -> dict:
     if method == "OPTIONS":
         return resp({}, 200, origin)
 
+    # Bootstrap reindex — вызов без admin-сессии, только X-Internal-Token
+    params_early = event.get("queryStringParameters") or {}
+    if params_early.get("action") == "reindex_bootstrap":
+        it = headers.get("X-Internal-Token") or headers.get("x-internal-token") or ""
+        if not INDEXER_TOKEN or it != INDEXER_TOKEN:
+            return resp({"error": "forbidden"}, 403, origin)
+        if not INDEXER_URL:
+            return resp({"error": "SEARCH_INDEXER_URL not configured"}, 500, origin)
+        try:
+            hdrs = {"Content-Type": "application/json", "X-Internal-Token": INDEXER_TOKEN}
+            req = urllib.request.Request(
+                f"{INDEXER_URL}?action=index_all",
+                data=b"{}",
+                headers=hdrs,
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=120) as r:
+                result = json.loads(r.read())
+            return resp({"ok": True, "indexed": result}, origin=origin)
+        except Exception as e:
+            return resp({"error": str(e)}, 500, origin)
+
     token = headers.get("X-Admin-Token") or headers.get("x-admin-token") or ""
     conn = get_db()
     try:
