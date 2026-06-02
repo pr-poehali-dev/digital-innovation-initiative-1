@@ -69,7 +69,7 @@ def get_admin_session(conn, token: str) -> dict | None:
         try:
             cur.execute(
                 f"SELECT actor_email, actor_role FROM {s}.admin_sessions "
-                f"WHERE token_hash = '{token_hash}' AND expires_at > NOW() LIMIT 1"
+                f"WHERE session_token_hash = '{token_hash}' AND expires_at > NOW() LIMIT 1"
             )
         except Exception as e:
             print(f"[get_admin_session] SQL ERROR: {e!r} schema={s!r}")
