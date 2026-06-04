@@ -125,25 +125,38 @@ export default function GrowthDashboard() {
   const activeProjects = projects.slice(0, 3);
   const projectCount = projects.length;
 
-  // Индекс развития: реальные шаги
-  const devValue = Math.min(1 + Math.min(projectCount, 5), 10);
+  // Прогресс обучения: среднее по всем целям
+  const learningPct = goals.length > 0
+    ? Math.round(Object.values(goalProgress).reduce((sum, p) => sum + p.percent, 0) / goals.length)
+    : 0;
+  const learningDone = Object.values(goalProgress).reduce((sum, p) => sum + p.done, 0);
+  const learningTotal = Object.values(goalProgress).reduce((sum, p) => sum + p.total, 0);
+
+  // Индекс развития: проекты (40%) + обучение (40%) + аккаунт (20%)
+  const projectScore = Math.min(projectCount / 5, 1) * 4;   // max 4 балла
+  const learningScore = (learningPct / 100) * 4;             // max 4 балла
+  const baseScore = 2;                                        // за аккаунт
+  const devValue = Math.round(Math.min(baseScore + projectScore + learningScore, 10));
   const devTotal = 10;
 
   // Ближайшие шаги: привязаны к реальному состоянию
+  const hasLearningGoal = goals.length > 0;
   const nextSteps = [
     { done: true, label: "Создать аккаунт" },
     { done: projectCount > 0, label: "Создать первый проект", href: "/cabinet/projects", disabled: false, coming: false },
-    { done: false, label: "Загрузить материалы в проект", href: "/cabinet/projects", disabled: projectCount === 0, coming: false },
-    { done: false, label: "Запустить AI-задание", href: "/cabinet/projects", disabled: projectCount === 0, coming: false },
+    { done: hasLearningGoal, label: "Поставить учебную цель", href: "/cabinet/learning", disabled: false, coming: false },
+    { done: learningDone > 0, label: "Освоить первую тему", href: "/cabinet/learning", disabled: !hasLearningGoal, coming: false },
     { done: false, label: "Заполнить карту компетенций", href: "#", disabled: false, coming: true },
   ];
 
-  // AI-инсайт: rule-based по реальным данным
-  const aiInsight = projectCount === 0
+  // AI-инсайт: учитывает и проекты, и обучение
+  const aiInsight = goals.length > 0 && learningPct > 0
+    ? `Прогресс по обучению — ${learningPct}%. ${learningDone} тем освоено из ${learningTotal}. Продолжай в том же темпе!`
+    : goals.length > 0
+    ? "Учебная цель создана — отметь первую тему как изученную, чтобы прогресс пошёл."
+    : projectCount === 0
     ? "Создайте первый проект — это первый шаг вашей траектории развития."
-    : projectCount < 3
-    ? "Вы уже начали! Загрузите материалы в проект, чтобы AI смог помочь вам продуктивнее."
-    : `У вас ${projectCount} ${projectCount < 5 ? "проекта" : "проектов"} — самое время завершить один из них.`;
+    : "Создай учебную цель — AI составит персональный план освоения новой сферы.";
 
   return (
     <Layout>
@@ -275,34 +288,42 @@ export default function GrowthDashboard() {
             <div className="flex justify-center">
               <ProgressArc value={devValue} total={devTotal} />
             </div>
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 space-y-2.5">
               {[
                 {
                   label: "Проекты",
                   value: Math.min(projectCount * 20, 100),
                   hint: projectCount > 0 ? `${projectCount} создано` : "Нет проектов",
                   color: "from-violet-400 to-indigo-500",
+                  href: "/cabinet/projects",
                 },
                 {
-                  label: "Материалы",
-                  value: 0,
-                  hint: "Загрузите первый файл",
-                  color: "from-blue-400 to-cyan-500",
+                  label: "Обучение",
+                  value: learningPct,
+                  hint: goals.length > 0
+                    ? `${learningDone} из ${learningTotal} тем`
+                    : "Нет целей",
+                  color: "from-blue-400 to-violet-500",
+                  href: "/cabinet/learning",
                 },
                 {
                   label: "Компетенции",
                   value: 0,
-                  hint: "В разработке",
+                  hint: "Скоро",
                   color: "from-emerald-400 to-teal-500",
+                  href: null,
                 },
               ].map(s => (
                 <div key={s.label}>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-500">{s.label}</span>
-                    <span className="text-slate-400">{s.hint}</span>
+                    <span className="text-slate-500 font-medium">{s.label}</span>
+                    <span className={`${s.value > 0 ? "text-slate-600 font-semibold" : "text-slate-400"}`}>{s.hint}</span>
                   </div>
-                  <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                    <div className={`h-1 bg-gradient-to-r ${s.color} rounded-full`} style={{ width: `${s.value}%` }} />
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full bg-gradient-to-r ${s.color} rounded-full transition-all duration-700`}
+                      style={{ width: `${s.value}%` }}
+                    />
                   </div>
                 </div>
               ))}
