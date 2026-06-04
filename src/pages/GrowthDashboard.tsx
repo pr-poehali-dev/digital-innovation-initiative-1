@@ -1,9 +1,17 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
-import { projectsApi } from "@/lib/api";
+import { projectsApi, learningApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+
+type Goal = {
+  id: number;
+  title: string;
+  status: string;
+  start_date?: string | null;
+};
+type Progress = { percent: number; done: number; total: number; in_progress: number };
 
 function getGreeting(name: string) {
   const h = new Date().getHours();
@@ -87,6 +95,8 @@ export default function GrowthDashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [goalProgress, setGoalProgress] = useState<Record<number, Progress>>({});
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -94,6 +104,22 @@ export default function GrowthDashboard() {
       .then((d: { projects?: Project[] }) => setProjects(d.projects ?? []))
       .catch(() => setProjects([]))
       .finally(() => setLoadingProjects(false));
+
+    learningApi.getGoals()
+      .then(async (d: { goals?: Goal[] }) => {
+        const gs = d.goals ?? [];
+        setGoals(gs);
+        // Загружаем прогресс для каждой цели
+        const progMap: Record<number, Progress> = {};
+        await Promise.all(gs.slice(0, 3).map(async (g) => {
+          try {
+            const p = await learningApi.getProgress(g.id) as { progress: Progress };
+            progMap[g.id] = p.progress;
+          } catch { /* ignore */ }
+        }));
+        setGoalProgress(progMap);
+      })
+      .catch(() => setGoals([]));
   }, []);
 
   const activeProjects = projects.slice(0, 3);
@@ -160,23 +186,83 @@ export default function GrowthDashboard() {
             </div>
           </div>
 
-          {/* Мои цели — модуль в разработке */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          {/* Мои цели — живые данные из Учебного кабинета */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Мои цели</h3>
-              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Скоро</span>
+              <Link to="/cabinet/learning" className="text-[11px] font-semibold text-violet-600 hover:text-violet-700">
+                Все →
+              </Link>
             </div>
-            <div className="flex flex-col items-center justify-center py-6 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-3">
-                <Icon name="Target" size={22} className="text-slate-300" />
+
+            {goals.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-5 text-center flex-1">
+                <div className="w-11 h-11 rounded-2xl bg-violet-50 flex items-center justify-center mb-2">
+                  <Icon name="GraduationCap" size={20} className="text-violet-400" />
+                </div>
+                <p className="text-sm text-slate-500 font-medium">Нет учебных целей</p>
+                <Link
+                  to="/cabinet/learning"
+                  className="mt-3 px-3.5 py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-xl hover:bg-violet-700 transition-colors"
+                >
+                  + Создать цель
+                </Link>
               </div>
-              <p className="text-sm font-medium text-slate-500">Цели ещё не добавлены</p>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Модуль постановки целей откроется в ближайшее время</p>
-            </div>
-            <div className="mt-2 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
-              <Icon name="Clock" size={12} />
-              <span>В разработке</span>
-            </div>
+            ) : (
+              <div className="space-y-3 flex-1">
+                {goals.slice(0, 3).map(goal => {
+                  const prog = goalProgress[goal.id];
+                  const pct = prog?.percent ?? 0;
+                  const startDate = goal.start_date ? new Date(goal.start_date) : null;
+                  const dayNum = startDate
+                    ? Math.floor((Date.now() - startDate.getTime()) / 86400000) + 1
+                    : null;
+                  const phase = dayNum === null ? null : dayNum <= 30 ? "0–30" : dayNum <= 60 ? "31–60" : "61–90";
+
+                  return (
+                    <Link key={goal.id} to="/cabinet/learning" className="block group">
+                      <div className="p-3 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/40 transition-all">
+                        <div className="flex items-start gap-2.5 mb-2">
+                          <div className="w-6 h-6 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <Icon name="GraduationCap" size={12} className="text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-800 leading-tight line-clamp-2">{goal.title}</p>
+                            {phase && (
+                              <span className="text-[10px] text-violet-600 font-medium">День {dayNum} · Фаза {phase}</span>
+                            )}
+                          </div>
+                          <span className="text-xs font-bold text-violet-600 flex-shrink-0">{pct}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        {prog && (
+                          <div className="flex gap-3 mt-1.5 text-[10px] text-slate-400">
+                            <span>✓ {prog.done} тем</span>
+                            {prog.in_progress > 0 && <span>⏳ {prog.in_progress} в работе</span>}
+                            <span className="ml-auto">{prog.total - prog.done} осталось</span>
+                          </div>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+
+            {goals.length > 0 && (
+              <Link
+                to="/cabinet/learning"
+                className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-center gap-1.5 text-xs text-violet-600 font-semibold hover:text-violet-700 transition-colors"
+              >
+                <Icon name="GraduationCap" size={12} />
+                Учебный кабинет
+              </Link>
+            )}
           </div>
         </div>
 
