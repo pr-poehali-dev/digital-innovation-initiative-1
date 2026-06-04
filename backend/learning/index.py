@@ -79,7 +79,7 @@ def handler(event: dict, context) -> dict:
         if method == "GET" and action == "goals":
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT id, title, description, status, ai_plan, created_at, updated_at
+                    f"""SELECT id, title, description, status, ai_plan, created_at, updated_at, start_date
                         FROM {SCHEMA}.learning_goals
                         WHERE user_id = %s AND status != 'archived'
                         ORDER BY created_at DESC""",
@@ -88,7 +88,7 @@ def handler(event: dict, context) -> dict:
                 rows = cur.fetchall()
             goals = [
                 {"id": r[0], "title": r[1], "description": r[2], "status": r[3],
-                 "ai_plan": r[4], "created_at": r[5], "updated_at": r[6]}
+                 "ai_plan": r[4], "created_at": r[5], "updated_at": r[6], "start_date": str(r[7]) if r[7] else None}
                 for r in rows
             ]
             return cors({"ok": True, "goals": goals})
@@ -108,6 +108,55 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True, "goal": {"id": goal_id, "title": title, "description": description,
                                                "status": "active", "ai_plan": None, "created_at": created_at}})
+
+        if method == "PUT" and action == "set_start_date":
+            goal_id = body.get("goal_id")
+            start_date = body.get("start_date")
+            if not goal_id or not start_date:
+                return cors({"ok": False, "error": {"message": "Нужны goal_id и start_date"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.learning_goals SET start_date = %s, updated_at = NOW() WHERE id = %s AND user_id = %s",
+                    (start_date, goal_id, user_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        if method == "POST" and action == "weekly_checkin":
+            goal_id = body.get("goal_id")
+            studied = (body.get("studied") or "").strip()
+            understood = (body.get("understood") or "").strip()
+            gaps = (body.get("gaps") or "").strip()
+            next_focus = (body.get("next_focus") or "").strip()
+            if not goal_id or not studied:
+                return cors({"ok": False, "error": {"message": "Нужны goal_id и studied"}}, 400)
+            content = f"Изучено: {studied}\nСтало понятнее: {understood}\nПробелы: {gaps}\nФокус следующей недели: {next_focus}"
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.learning_notes (user_id, goal_id, kind, title, content)
+                        VALUES (%s, %s, 'summary', %s, %s) RETURNING id""",
+                    (user_id, goal_id, f"Еженедельный check-in", content),
+                )
+                note_id = cur.fetchone()[0]
+            conn.commit()
+            # AI-саммари недели
+            system = "Ты наставник. Пиши кратко, по-русски, тезисно."
+            prompt = f"""Человек изучает тему «{body.get("goal_title", "")}».
+
+Еженедельный отчёт:
+- Изучено: {studied}
+- Стало понятнее: {understood}
+- Пробелы: {gaps}
+- Фокус следующей недели: {next_focus}
+
+Напиши:
+1. Короткое (2-3 предложения) резюме прогресса за неделю
+2. 3 конкретных рекомендации на следующую неделю"""
+            try:
+                ai_summary = yandex_gpt(prompt, system)
+            except Exception:
+                ai_summary = ""
+            return cors({"ok": True, "note_id": note_id, "ai_summary": ai_summary})
 
         if method == "PUT" and action == "update_goal":
             goal_id = body.get("goal_id")

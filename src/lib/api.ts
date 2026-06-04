@@ -507,4 +507,8 @@ export const learningApi = {
   askAi: (question: string, goal_title: string, topic_title?: string) =>
     request(URLS.learning, "/?action=ask_ai", "POST", { question, goal_title, topic_title }),
   getProgress: (goal_id: number) => request(URLS.learning, `/?action=progress&goal_id=${goal_id}`, "GET"),
+  setStartDate: (goal_id: number, start_date: string) =>
+    request(URLS.learning, "/?action=set_start_date", "PUT", { goal_id, start_date }),
+  weeklyCheckin: (data: { goal_id: number; goal_title: string; studied: string; understood: string; gaps: string; next_focus: string }) =>
+    request(URLS.learning, "/?action=weekly_checkin", "POST", data),
 };
