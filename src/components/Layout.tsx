@@ -8,14 +8,13 @@ import GlobalSearchDialog from "@/components/GlobalSearchDialog";
 const NAV_ITEMS = [
   { label: "Главная", icon: "LayoutDashboard", href: "/cabinet", exact: true, active: true },
   { label: "Проекты и презентации", icon: "FolderOpen", href: "/cabinet/projects", active: true },
-  { label: "Материалы и документы", icon: "FileText", href: "/cabinet/materials", active: false },
-  { label: "Дипломы и сертификаты", icon: "Award", href: "/cabinet/passport", active: false },
-  { label: "Тесты и повторение", icon: "ClipboardCheck", href: "/cabinet/tests", active: false },
+  { label: "Учебный кабинет", icon: "GraduationCap", href: "/cabinet/learning", active: true },
+  { label: "Дипломы и сертификаты", icon: "Award", href: "/cabinet/passport", active: true },
   { label: "Карта компетенций", icon: "Map", href: "/cabinet/competencies", active: false },
-  { label: "План развития", icon: "Target", href: "/cabinet/development", active: false },
-  { label: "Карьерная траектория", icon: "TrendingUp", href: "/cabinet/career", active: false },
+  { label: "Навигатор развития", icon: "TrendingUp", href: "/cabinet/development", active: false },
   { label: "Профессиональный профиль", icon: "User", href: "/cabinet/profile", active: false },
   { label: "Кошелёк", icon: "Wallet", href: "/cabinet/wallet", active: true },
+  { label: "Штаб Траектории", icon: "MapPin", href: "/cabinet/headquarters", active: true },
 ];
 
 const BOTTOM_ITEMS = [

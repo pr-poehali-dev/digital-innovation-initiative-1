@@ -27,6 +27,8 @@ import EducationalPassportPage from "./pages/EducationalPassportPage";
 import AuditPage from "./pages/AuditPage";
 import VisualsPage from "./pages/VisualsPage";
 import WalletPage from "./pages/WalletPage";
+import LearningPage from "./pages/LearningPage";
+import HeadquartersPage from "./pages/HeadquartersPage";
 import PrivacyPage from "./pages/legal/PrivacyPage";
 import TermsPage from "./pages/legal/TermsPage";
 import OfferPage from "./pages/legal/OfferPage";
@@ -75,6 +77,8 @@ const App = () => (
               <Route path="/cabinet/project/:id/audit" element={<ProtectedRoute><AuditPage /></ProtectedRoute>} />
               <Route path="/cabinet/visuals" element={<ProtectedRoute><VisualsPage /></ProtectedRoute>} />
               <Route path="/cabinet/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
+              <Route path="/cabinet/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
+              <Route path="/cabinet/headquarters" element={<ProtectedRoute><HeadquartersPage /></ProtectedRoute>} />
               <Route path="/legal/privacy" element={<PrivacyPage />} />
               <Route path="/legal/terms" element={<TermsPage />} />
               <Route path="/legal/offer" element={<OfferPage />} />

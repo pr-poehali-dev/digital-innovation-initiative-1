@@ -18,6 +18,7 @@ const URLS = {
   adminProjects: "https://functions.poehali.dev/31ce72f9-002e-4250-8da4-614aebf97e54",
   adminAudit: "https://functions.poehali.dev/f647adda-565a-4846-9b28-4462ebcf2ade",
   adminActivity: "https://functions.poehali.dev/c3350df2-e2f0-424c-acc4-036e65286249",
+  learning: "https://functions.poehali.dev/e328c6f8-e450-4345-a38d-bc8e77e742e1",
 };
 
 function getSession(): string {
@@ -484,4 +485,26 @@ export const walletApi = {
     request(URLS.wallet, "/", "POST", { action: "wallet.create_topup", amount_rub }),
   getPaymentStatus: (payment_id: number) =>
     request(URLS.wallet, "/", "POST", { action: "wallet.get_payment_status", payment_id }),
+};
+
+export const learningApi = {
+  getGoals: () => request(URLS.learning, "/?action=goals", "GET"),
+  createGoal: (title: string, description?: string) =>
+    request(URLS.learning, "/?action=create_goal", "POST", { title, description }),
+  updateGoal: (goal_id: number, fields: { title?: string; description?: string; status?: string }) =>
+    request(URLS.learning, "/?action=update_goal", "PUT", { goal_id, ...fields }),
+  generatePlan: (title: string, description: string, goal_id?: number) =>
+    request(URLS.learning, "/?action=generate_plan", "POST", { title, description, goal_id }),
+  getTopics: (goal_id: number) => request(URLS.learning, `/?action=topics&goal_id=${goal_id}`, "GET"),
+  updateTopic: (topic_id: number, status: string) =>
+    request(URLS.learning, "/?action=update_topic", "PUT", { topic_id, status }),
+  getNotes: (goal_id?: number, topic_id?: number) => {
+    const qs = topic_id ? `&topic_id=${topic_id}` : goal_id ? `&goal_id=${goal_id}` : "";
+    return request(URLS.learning, `/?action=notes${qs}`, "GET");
+  },
+  addNote: (data: { content: string; kind?: string; title?: string; url?: string; goal_id?: number; topic_id?: number }) =>
+    request(URLS.learning, "/?action=add_note", "POST", data),
+  askAi: (question: string, goal_title: string, topic_title?: string) =>
+    request(URLS.learning, "/?action=ask_ai", "POST", { question, goal_title, topic_title }),
+  getProgress: (goal_id: number) => request(URLS.learning, `/?action=progress&goal_id=${goal_id}`, "GET"),
 };
