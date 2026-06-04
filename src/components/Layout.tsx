@@ -24,9 +24,9 @@ const BOTTOM_ITEMS = [
 const MOBILE_NAV = [
   { label: "Главная", icon: "LayoutDashboard", href: "/cabinet" },
   { label: "Проекты", icon: "FolderOpen", href: "/cabinet/projects" },
-  { label: "Развитие", icon: "TrendingUp", href: "/cabinet/development" },
-  { label: "AI", icon: "Sparkles", href: "/cabinet" },
-  { label: "Профиль", icon: "User", href: "/cabinet/profile" },
+  { label: "Обучение", icon: "GraduationCap", href: "/cabinet/learning" },
+  { label: "Штаб", icon: "MapPin", href: "/cabinet/headquarters" },
+  { label: "Кошелёк", icon: "Wallet", href: "/cabinet/wallet" },
 ];
 
 function SidebarLink({ item, collapsed }: { item: typeof NAV_ITEMS[0]; collapsed: boolean }) {
