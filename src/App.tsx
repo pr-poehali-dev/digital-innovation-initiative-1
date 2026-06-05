@@ -22,6 +22,7 @@ import AdminErrorsPage from "./pages/admin/AdminErrorsPage";
 import AdminAlertsPage from "./pages/admin/AdminAlertsPage";
 import AdminFlagsPage from "./pages/admin/AdminFlagsPage";
 import AdminTicketsPage from "./pages/admin/AdminTicketsPage";
+import AdminAutomationsPage from "./pages/admin/AdminAutomationsPage";
 import AdminContentPage from "./pages/admin/AdminContentPage";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
@@ -79,6 +80,7 @@ const App = () => (
               <Route path="/admin/alerts" element={<AdminRoute><AdminAlertsPage /></AdminRoute>} />
               <Route path="/admin/flags" element={<AdminRoute><AdminFlagsPage /></AdminRoute>} />
               <Route path="/admin/tickets" element={<AdminRoute><AdminTicketsPage /></AdminRoute>} />
+              <Route path="/admin/automations" element={<AdminRoute><AdminAutomationsPage /></AdminRoute>} />
               <Route path="/admin/content" element={<AdminRoute><AdminContentPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 

@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "list без токена — 401",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 401
+    },
+    {
+      "name": "create без токена — 401",
+      "method": "POST",
+      "path": "/?action=create",
+      "body": {"name": "test"},
+      "expectedStatus": 401
+    }
+  ]
+}
