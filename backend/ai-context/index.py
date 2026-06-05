@@ -1,7 +1,7 @@
 import json
 import os
 import hashlib
-from datetime import timezone
+from datetime import timezone, datetime
 import psycopg2
 
 DB = os.environ["DATABASE_URL"]
@@ -47,6 +47,12 @@ def trim(text: str, limit: int = MAX_NOTE_CHARS) -> str:
     if len(text) > limit:
         return text[:limit] + "…"
     return text
+
+
+def stable_hash(obj) -> str:
+    """Детерминированный MD5 от объекта — массивы сортируются по JSON-ключу."""
+    canonical = json.dumps(obj, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.md5(canonical.encode()).hexdigest()
 
 
 # ── HQ ────────────────────────────────────────────────────────────────────────
@@ -194,6 +200,133 @@ def fetch_passport(conn) -> dict:
     return pp
 
 
+# ── Section hashes ─────────────────────────────────────────────────────────────
+def compute_section_hashes(hq: dict, proj: dict, pp: dict) -> dict:
+    """Детерминированные хеши по каждой секции — sorted keys, без updated_at шума."""
+
+    def clean_hq(d):
+        return {
+            "goals":     sorted([{k: v for k, v in g.items() if k != "updated_at"} for g in d["goals"]], key=lambda x: x.get("title","")),
+            "rules":     sorted([{k: v for k, v in r.items() if k != "updated_at"} for r in d["rules"]], key=lambda x: x.get("title","")),
+            "decisions": sorted([{k: v for k, v in r.items() if k not in ("updated_at","decided_at")} for r in d["decisions"]], key=lambda x: x.get("title","")),
+            "risks":     sorted([{k: v for k, v in r.items() if k != "updated_at"} for r in d["risks"]], key=lambda x: x.get("title","")),
+            "ideas":     sorted([{k: v for k, v in r.items() if k != "updated_at"} for r in d["ideas"]], key=lambda x: x.get("title","")),
+            "blocks":    {k: v["content"] for k, v in d["blocks"].items()},
+        }
+
+    def clean_project(d):
+        return {
+            "sections":       {k: v["content"] for k, v in d["sections"].items()},
+            "conflicts_open": sorted(d["conflicts_open"], key=lambda x: x.get("title","")),
+            "waves":          sorted([{k: v for k, v in w.items()} for w in d["waves"]], key=lambda x: x.get("num", 0)),
+            "decisions":      sorted([{k: v for k, v in r.items() if k not in ("updated_at","decided_at")} for r in d["decisions"]], key=lambda x: x.get("what","")[:40]),
+        }
+
+    def clean_passport(d):
+        return {
+            "modules":       sorted([{k: v for k, v in m.items() if k != "description"} for m in d["modules"]], key=lambda x: x.get("slug","")),
+            "entities":      sorted([{k: v for k, v in e.items()} for e in d["entities"]], key=lambda x: x.get("name","")),
+            "overlaps_open": sorted(d["overlaps_open"], key=lambda x: x.get("title","")),
+            "notes":         d["notes"],
+        }
+
+    hq_h   = stable_hash(clean_hq(hq))
+    proj_h = stable_hash(clean_project(proj))
+    pp_h   = stable_hash(clean_passport(pp))
+    full_h = stable_hash({"hq": hq_h, "project": proj_h, "passport": pp_h})
+
+    return {
+        "hq":      hq_h,
+        "project": proj_h,
+        "passport":pp_h,
+        "full":    full_h,
+    }
+
+
+# ── Last export lookup ─────────────────────────────────────────────────────────
+def get_last_export(conn, scope: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT source_hash, hq_hash, project_hash, passport_hash,
+                   section_hashes_json, item_counts_json, generated_at, generated_by
+            FROM {S}.admin_ai_context_exports
+            WHERE scope = %s
+            ORDER BY generated_at DESC LIMIT 1
+        """, (scope,))
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "source_hash":          row[0],
+        "hq_hash":              row[1],
+        "project_hash":         row[2],
+        "passport_hash":        row[3],
+        "section_hashes":       row[4] or {},
+        "item_counts":          row[5] or {},
+        "generated_at":         str(row[6]),
+        "generated_by":         row[7],
+    }
+
+
+def log_export(conn, scope: str, fmt: str, hashes: dict, counts: dict, actor: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_ai_context_exports
+              (scope, format, source_hash, hq_hash, project_hash, passport_hash,
+               section_hashes_json, item_counts_json, generated_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            scope, fmt,
+            hashes.get("full",""), hashes.get("hq",""),
+            hashes.get("project",""), hashes.get("passport",""),
+            json.dumps(hashes), json.dumps(counts),
+            actor,
+        ))
+    conn.commit()
+
+
+# ── Freshness ──────────────────────────────────────────────────────────────────
+def freshness_status(live_hashes: dict, last: dict | None, scope: str) -> dict:
+    if not last:
+        return {
+            "status":           "never_exported",
+            "changed_sections": [],
+            "last_exported_at": None,
+            "last_exported_by": None,
+            "last_hash":        None,
+        }
+
+    changed = []
+    for sec in ("hq", "project", "passport"):
+        live_h = live_hashes.get(sec, "")
+        prev_h = last.get("section_hashes", {}).get(sec, "") or last.get(f"{sec}_hash", "")
+        if live_h and prev_h and live_h != prev_h:
+            changed.append(sec)
+
+    # для scope != full сравниваем только нужную секцию
+    if scope != "full":
+        scope_hash_live = live_hashes.get(scope, "")
+        scope_hash_last = last.get("source_hash", "")
+        st = "fresh" if scope_hash_live == scope_hash_last else "changed"
+        return {
+            "status":           st,
+            "changed_sections": [scope] if st == "changed" else [],
+            "last_exported_at": last["generated_at"],
+            "last_exported_by": last["generated_by"],
+            "last_hash":        last["source_hash"],
+        }
+
+    live_full = live_hashes.get("full", "")
+    st = "fresh" if live_full == last["source_hash"] else "changed"
+    return {
+        "status":           st,
+        "changed_sections": changed,
+        "last_exported_at": last["generated_at"],
+        "last_exported_by": last["generated_by"],
+        "last_hash":        last["source_hash"],
+    }
+
+
 # ── Markdown renderer ─────────────────────────────────────────────────────────
 def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
     lines = []
@@ -218,8 +351,6 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
     # ── HQ ────────────────────────────────────────────────────────────────────
     a("## HQ — Стратегическая память")
     a("")
-
-    # blocks: vision / mission / focus
     for key, label in [("vision","### Vision"), ("mission","### Mission"), ("focus","### Focus")]:
         block = hq["blocks"].get(key)
         if block and block["content"]:
@@ -231,9 +362,7 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
     if hq["goals"]:
         a("### Goals")
         for g in hq["goals"]:
-            status_str = f" [{g['status']}]" if g.get("status") else ""
-            horizon_str = f" | horizon: {g['horizon']}" if g.get("horizon") else ""
-            a(f"- **{g['title']}**{status_str}{horizon_str}")
+            a(f"- **{g['title']}**{' [' + g['status'] + ']' if g.get('status') else ''}{' | horizon: ' + g['horizon'] if g.get('horizon') else ''}")
             if g.get("success_criteria"):
                 a(f"  - Success: {g['success_criteria']}")
         a("")
@@ -274,16 +403,14 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
     # ── Project ───────────────────────────────────────────────────────────────
     a("## Project — Архитектурный переход")
     a("")
-
-    as_is = proj["sections"].get("as_is", {})
-    to_be = proj["sections"].get("to_be", {})
+    as_is  = proj["sections"].get("as_is", {})
+    to_be  = proj["sections"].get("to_be", {})
     notes_sec = proj["sections"].get("notes", {})
 
     if as_is.get("content"):
         a("### As-is")
         a(as_is["content"])
         a("")
-
     if to_be.get("content"):
         a("### To-be")
         a(to_be["content"])
@@ -304,10 +431,10 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
     if proj["waves"]:
         a("### Waves of Change")
         for w in proj["waves"]:
-            done = w.get("done", 0)
+            done  = w.get("done", 0)
             total = w.get("total", 0)
-            progress = f" {done}/{total}" if total else ""
-            a(f"- **{w['title']}** [{w['status']}]{progress} — {w['goal']}")
+            prog  = f" {done}/{total}" if total else ""
+            a(f"- **{w['title']}** [{w['status']}]{prog} — {w['goal']}")
         a("")
 
     if proj["decisions"]:
@@ -326,21 +453,16 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
     # ── Passport ──────────────────────────────────────────────────────────────
     a("## Passport — Реестр платформы")
     a("")
-
     if pp["modules"]:
         a("### Modules")
         for m in pp["modules"]:
-            owner = m["owner_email"] or "no owner"
-            route = m["primary_route"] or "—"
-            a(f"- **{m['name']}** ({m['category']}) | status: {m['status']} | owner: {owner} | route: {route}")
+            a(f"- **{m['name']}** ({m['category']}) | status: {m['status']} | owner: {m['owner_email'] or 'no owner'} | route: {m['primary_route'] or '—'}")
         a("")
 
     if pp["entities"]:
         a("### Entities")
         for e in pp["entities"]:
-            sot = e.get("sot_module") or "no SOT"
-            owner = e["owner_email"] or "no owner"
-            a(f"- `{e['name']}` ({e['kind']}) | SOT: {sot} | owner: {owner}")
+            a(f"- `{e['name']}` ({e['kind']}) | SOT: {e.get('sot_module') or 'no SOT'} | owner: {e['owner_email'] or 'no owner'}")
         a("")
 
     if pp["overlaps_open"]:
@@ -365,18 +487,16 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
         a(pp["notes"])
         a("")
 
-    # ── Current priorities ────────────────────────────────────────────────────
     a("## Current Priorities")
-    active_waves = [w for w in proj["waves"] if w["status"] in ("in_progress",)]
-    if active_waves:
-        for w in active_waves:
+    for w in proj["waves"]:
+        if w["status"] == "in_progress":
             a(f"- Active wave: {w['title']} — {w['goal']}")
-    open_conflicts_count = len(proj["conflicts_open"])
-    open_overlaps_count  = len(pp["overlaps_open"])
-    if open_conflicts_count:
-        a(f"- Resolve {open_conflicts_count} open architecture conflict(s)")
-    if open_overlaps_count:
-        a(f"- Close {open_overlaps_count} open passport overlap(s)")
+    n_conf = len(proj["conflicts_open"])
+    n_over = len(pp["overlaps_open"])
+    if n_conf:
+        a(f"- Resolve {n_conf} open architecture conflict(s)")
+    if n_over:
+        a(f"- Close {n_over} open passport overlap(s)")
     a("")
 
     return "\n".join(lines)
@@ -384,7 +504,7 @@ def render_markdown(meta: dict, hq: dict, proj: dict, pp: dict) -> str:
 
 # ── Handler ───────────────────────────────────────────────────────────────────
 def handler(event: dict, context) -> dict:
-    """Unified AI context — серверная сборка HQ + Project + Passport."""
+    """Unified AI context — сборка HQ + Project + Passport, freshness signal, export log."""
     if event.get("httpMethod") == "OPTIONS":
         return cors({})
 
@@ -397,85 +517,111 @@ def handler(event: dict, context) -> dict:
         if not actor:
             return cors({"ok": False, "error": {"message": "Не авторизован"}}, 401)
 
-        qs = event.get("queryStringParameters") or {}
+        qs     = event.get("queryStringParameters") or {}
         action = qs.get("action", "")
         fmt    = qs.get("format", "json")
         scope  = qs.get("scope", "full")
 
-        if action != "export":
-            return cors({"ok": False, "error": {"message": "Нужен ?action=export"}}, 400)
-
-        from datetime import datetime
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        hq_data   = fetch_hq(conn)   if scope in ("full", "hq")      else {}
-        proj_data = fetch_project(conn) if scope in ("full", "project") else {}
-        pp_data   = fetch_passport(conn) if scope in ("full", "passport") else {}
-
-        if scope == "hq":
-            hq_data   = fetch_hq(conn)
-            proj_data = {"sections":{}, "conflicts_open":[], "waves":[], "decisions":[]}
-            pp_data   = {"modules":[], "entities":[], "overlaps_open":[], "notes":""}
-        elif scope == "project":
-            hq_data   = {"goals":[], "rules":[], "decisions":[], "risks":[], "ideas":[], "blocks":{}}
-            proj_data = fetch_project(conn)
-            pp_data   = {"modules":[], "entities":[], "overlaps_open":[], "notes":""}
-        elif scope == "passport":
-            hq_data   = {"goals":[], "rules":[], "decisions":[], "risks":[], "ideas":[], "blocks":{}}
-            proj_data = {"sections":{}, "conflicts_open":[], "waves":[], "decisions":[]}
-            pp_data   = fetch_passport(conn)
-        else:
+        # ── STATUS (no side-effects, not logged) ──────────────────────────────
+        if action == "status":
             hq_data   = fetch_hq(conn)
             proj_data = fetch_project(conn)
             pp_data   = fetch_passport(conn)
 
-        meta = {
-            "generated_at": now_iso,
-            "generated_by": actor,
-            "export_version": EXPORT_VERSION,
-            "scope": scope,
-        }
+            live_hashes = compute_section_hashes(hq_data, proj_data, pp_data)
 
-        summary = {
-            "goals":           len(hq_data.get("goals", [])),
-            "rules":           len(hq_data.get("rules", [])),
-            "strategic_decisions": len(hq_data.get("decisions", [])),
-            "risks":           len(hq_data.get("risks", [])),
-            "ideas":           len(hq_data.get("ideas", [])),
-            "open_conflicts":  len(proj_data.get("conflicts_open", [])),
-            "waves":           len(proj_data.get("waves", [])),
-            "arch_decisions":  len(proj_data.get("decisions", [])),
-            "modules":         len(pp_data.get("modules", [])),
-            "entities":        len(pp_data.get("entities", [])),
-            "open_overlaps":   len(pp_data.get("overlaps_open", [])),
-        }
+            # для scope != full берём только нужный хеш как source_hash
+            if scope == "full":
+                last = get_last_export(conn, "full")
+            else:
+                last = get_last_export(conn, scope)
+                # пересчитываем source_hash как хеш конкретной секции
+                if last:
+                    last["source_hash"] = last.get("section_hashes", {}).get(scope, last["source_hash"])
 
-        rendered_md = render_markdown(meta, hq_data, proj_data, pp_data)
+            fresh = freshness_status(live_hashes, last, scope)
 
-        # simple hash для source fingerprinting
-        source_hash = hashlib.md5(rendered_md.encode()).hexdigest()[:16]
+            return cors({
+                "ok": True,
+                "scope": scope,
+                "live_hashes": live_hashes,
+                "freshness": fresh,
+            })
 
-        payload = {
-            "ok": True,
-            "meta": {**meta, "source_hash": source_hash},
-            "summary": summary,
-            "hq": hq_data,
-            "project": proj_data,
-            "passport": pp_data,
-            "rendered_markdown": rendered_md,
-        }
+        # ── EXPORT (logged) ───────────────────────────────────────────────────
+        if action == "export":
+            now_iso = datetime.now(timezone.utc).isoformat()
 
-        if fmt == "markdown":
-            return {
-                "statusCode": 200,
-                "headers": {
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Type": "text/plain; charset=utf-8",
-                },
-                "body": rendered_md,
+            if scope == "hq":
+                hq_data   = fetch_hq(conn)
+                proj_data = {"sections":{}, "conflicts_open":[], "waves":[], "decisions":[]}
+                pp_data   = {"modules":[], "entities":[], "overlaps_open":[], "notes":""}
+            elif scope == "project":
+                hq_data   = {"goals":[], "rules":[], "decisions":[], "risks":[], "ideas":[], "blocks":{}}
+                proj_data = fetch_project(conn)
+                pp_data   = {"modules":[], "entities":[], "overlaps_open":[], "notes":""}
+            elif scope == "passport":
+                hq_data   = {"goals":[], "rules":[], "decisions":[], "risks":[], "ideas":[], "blocks":{}}
+                proj_data = {"sections":{}, "conflicts_open":[], "waves":[], "decisions":[]}
+                pp_data   = fetch_passport(conn)
+            else:
+                hq_data   = fetch_hq(conn)
+                proj_data = fetch_project(conn)
+                pp_data   = fetch_passport(conn)
+
+            # Всегда считаем полные хеши (нужны для section_hashes_json)
+            full_hq   = hq_data   if scope == "full" else fetch_hq(conn)
+            full_proj = proj_data if scope == "full" else fetch_project(conn)
+            full_pp   = pp_data   if scope == "full" else fetch_passport(conn)
+            all_hashes = compute_section_hashes(full_hq, full_proj, full_pp)
+
+            counts = {
+                "goals":     len(hq_data.get("goals",[])),
+                "rules":     len(hq_data.get("rules",[])),
+                "decisions": len(hq_data.get("decisions",[])),
+                "risks":     len(hq_data.get("risks",[])),
+                "ideas":     len(hq_data.get("ideas",[])),
+                "conflicts":  len(proj_data.get("conflicts_open",[])),
+                "waves":      len(proj_data.get("waves",[])),
+                "modules":    len(pp_data.get("modules",[])),
+                "entities":   len(pp_data.get("entities",[])),
             }
 
-        return cors(payload)
+            meta = {
+                "generated_at":   now_iso,
+                "generated_by":   actor,
+                "export_version": EXPORT_VERSION,
+                "scope":          scope,
+                "source_hash":    all_hashes.get(scope if scope != "full" else "full", all_hashes["full"]),
+                "section_hashes": all_hashes,
+            }
+
+            rendered_md = render_markdown(meta, hq_data, proj_data, pp_data)
+
+            # Логируем экспорт
+            log_export(conn, scope, fmt, all_hashes, counts, actor)
+
+            if fmt == "markdown":
+                return {
+                    "statusCode": 200,
+                    "headers": {
+                        "Access-Control-Allow-Origin": "*",
+                        "Content-Type": "text/plain; charset=utf-8",
+                    },
+                    "body": rendered_md,
+                }
+
+            return cors({
+                "ok": True,
+                "meta": meta,
+                "summary": counts,
+                "hq": hq_data,
+                "project": proj_data,
+                "passport": pp_data,
+                "rendered_markdown": rendered_md,
+            })
+
+        return cors({"ok": False, "error": {"message": "Нужен ?action=export|status"}}, 400)
 
     finally:
         conn.close()

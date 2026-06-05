@@ -204,10 +204,21 @@ async function aiCtxReq(path: string) {
 }
 
 export type AiCtxScope = "full" | "hq" | "project" | "passport";
+export type FreshnessStatus = "fresh" | "changed" | "never_exported";
+
+export type AiFreshness = {
+  status: FreshnessStatus;
+  changed_sections: string[];
+  last_exported_at: string | null;
+  last_exported_by: string | null;
+  last_hash: string | null;
+};
 
 export const aiContextApi = {
   export: (scope: AiCtxScope = "full") =>
     aiCtxReq(`/?action=export&format=json&scope=${scope}`),
+  status: (scope: AiCtxScope = "full") =>
+    aiCtxReq(`/?action=status&scope=${scope}`),
 };
 
 export const adminApi = {
