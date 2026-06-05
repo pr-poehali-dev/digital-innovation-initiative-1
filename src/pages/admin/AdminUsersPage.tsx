@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { getAdminToken } from "@/lib/admin-api";
@@ -16,6 +16,54 @@ type UserRow = {
   is_blocked: boolean;
   blocked_at: string | null;
   balance_rub: number;
+  open_tickets: number;
+  last_activity_at: string | null;
+};
+
+type TicketPreview = {
+  id: number;
+  ticket_no: string;
+  status: string;
+  priority: string;
+  subject: string;
+  created_at: string;
+  assignee_email: string;
+};
+
+type CommPreview = {
+  id: number;
+  comm_no: string;
+  channel: string;
+  status: string;
+  subject: string;
+  sent_at: string | null;
+  audience: string;
+};
+
+type ActivityEvent = {
+  id: number;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  details: string;
+  created_at: string;
+};
+
+type AuditEvent = {
+  id: number;
+  action: string;
+  actor_email: string;
+  reason: string | null;
+  created_at: string;
+};
+
+type LearningGoal = {
+  id: number;
+  goal_text: string;
+  target_level: string | null;
+  status: string;
+  started_at: string | null;
+  target_date: string | null;
 };
 
 type UserDetail = UserRow & {
@@ -26,6 +74,51 @@ type UserDetail = UserRow & {
   tasks_count: number;
   documents_count: number;
   active_sessions: number;
+  tickets: TicketPreview[];
+  tickets_open: number;
+  tickets_urgent: number;
+  communications: CommPreview[];
+  activity: ActivityEvent[];
+  audit_events: AuditEvent[];
+  learning_goals: LearningGoal[];
+};
+
+// ── Helpers ───────────────────────────────────────────────────────
+
+function fmtDate(iso?: string | null): string {
+  if (!iso || iso.startsWith("0001")) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function relativeDate(iso: string | null): string {
+  if (!iso) return "—";
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return "Сегодня";
+  if (days === 1) return "Вчера";
+  if (days < 30) return `${days} дн. назад`;
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" });
+}
+
+const PRIORITY_DOT: Record<string, string> = {
+  urgent: "bg-red-500 animate-pulse",
+  high: "bg-orange-500",
+  medium: "bg-blue-400",
+  low: "bg-gray-400",
+};
+
+const STATUS_BADGE: Record<string, string> = {
+  new: "text-blue-600 bg-blue-50",
+  open: "text-emerald-600 bg-emerald-50",
+  pending: "text-violet-600 bg-violet-50",
+  waiting_user: "text-amber-600 bg-amber-50",
+  resolved: "text-gray-500 bg-gray-100",
+  closed: "text-gray-400 bg-gray-50",
 };
 
 // ── API helpers ──────────────────────────────────────────────────
@@ -140,6 +233,8 @@ function ConfirmDialog({
 
 // ── User Drawer ──────────────────────────────────────────────────
 
+type DrawerTab = "profile" | "tickets" | "activity";
+
 function UserDrawer({
   userId,
   onClose,
@@ -149,131 +244,349 @@ function UserDrawer({
   onClose: () => void;
   onAction: (user: UserRow, type: "block" | "unblock") => void;
 }) {
+  const navigate = useNavigate();
   const [user, setUser] = useState<UserDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<DrawerTab>("profile");
+  const [emailCopied, setEmailCopied] = useState(false);
 
   useEffect(() => {
+    setLoading(true);
+    setTab("profile");
     fetchUser(userId).then(d => {
       setUser(d.user ?? null);
       setLoading(false);
     });
   }, [userId]);
 
+  function copyEmail() {
+    if (!user) return;
+    navigator.clipboard.writeText(user.email).then(() => {
+      setEmailCopied(true);
+      setTimeout(() => setEmailCopied(false), 1500);
+    });
+  }
+
+  const TABS: { key: DrawerTab; label: string }[] = [
+    { key: "profile", label: "Профиль" },
+    { key: "tickets", label: "Тикеты" },
+    { key: "activity", label: "Активность" },
+  ];
+
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm bg-white h-full shadow-2xl flex flex-col overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+      <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 flex-shrink-0">
           <h2 className="font-semibold text-slate-900">Карточка пользователя</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100">
-            <Icon name="X" size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={copyEmail}
+              className="p-1.5 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+              title="Скопировать email"
+            >
+              <Icon name={emailCopied ? "Check" : "Copy"} size={16} className={emailCopied ? "text-green-500" : undefined} />
+            </button>
+            <button
+              onClick={() => navigate("/admin/audit")}
+              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+              title="Открыть аудит"
+            >
+              <Icon name="ShieldCheck" size={16} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 ml-1 transition-colors"
+            >
+              <Icon name="X" size={18} />
+            </button>
+          </div>
         </div>
 
-        {loading && (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
+        {/* Tabs */}
+        <div className="flex border-b border-slate-100 px-5 flex-shrink-0">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`py-2.5 px-1 mr-5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t.key
+                  ? "border-violet-600 text-violet-700"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-        {!loading && !user && (
-          <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">Пользователь не найден</div>
-        )}
-
-        {user && (
-          <div className="flex-1 px-5 py-4 space-y-5">
-            {/* Avatar + name */}
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-lg">{user.name?.charAt(0)?.toUpperCase() ?? "?"}</span>
-              </div>
-              <div>
-                <div className="font-semibold text-slate-900">{user.name}</div>
-                <div className="text-sm text-slate-500">{user.email}</div>
-              </div>
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="flex-1 flex items-center justify-center py-20">
+              <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
             </div>
+          )}
 
-            {/* Status badge */}
-            <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
-              user.is_blocked ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
-            }`}>
-              <Icon name={user.is_blocked ? "ShieldOff" : "ShieldCheck"} size={14} />
-              {user.is_blocked ? "Заблокирован" : "Активен"}
-            </div>
+          {!loading && !user && (
+            <div className="py-20 text-center text-slate-400 text-sm">Пользователь не найден</div>
+          )}
 
-            {/* Block reason */}
-            {user.is_blocked && user.block_reason && (
-              <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-                <div className="text-xs font-semibold text-red-600 mb-1 uppercase tracking-wide">Причина блокировки</div>
-                <div className="text-sm text-red-800">{user.block_reason}</div>
+          {!loading && user && tab === "profile" && (
+            <div className="px-5 py-4 space-y-5">
+              {/* Avatar + name */}
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                  <span className="text-white font-bold text-lg">{user.name?.charAt(0)?.toUpperCase() ?? "?"}</span>
+                </div>
+                <div>
+                  <div className="font-semibold text-slate-900">{user.name}</div>
+                  <div className="text-sm text-slate-500">{user.email}</div>
+                </div>
+              </div>
+
+              {/* Status badge */}
+              <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
+                user.is_blocked ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+              }`}>
+                <Icon name={user.is_blocked ? "ShieldOff" : "ShieldCheck"} size={14} />
+                {user.is_blocked ? "Заблокирован" : "Активен"}
+              </div>
+
+              {/* Block reason */}
+              {user.is_blocked && user.block_reason && (
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+                  <div className="text-xs font-semibold text-red-600 mb-1 uppercase tracking-wide">Причина блокировки</div>
+                  <div className="text-sm text-red-800">{user.block_reason}</div>
+                  {user.blocked_at && (
+                    <div className="text-xs text-red-400 mt-1">{new Date(user.blocked_at).toLocaleString("ru")}</div>
+                  )}
+                </div>
+              )}
+
+              {/* Stats grid */}
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: "Проекты", value: user.projects_count, icon: "FolderOpen" },
+                  { label: "Задачи", value: user.tasks_count, icon: "CheckSquare" },
+                  { label: "Документы", value: user.documents_count, icon: "FileText" },
+                  { label: "Сессии", value: user.active_sessions, icon: "Monitor" },
+                ].map(s => (
+                  <div key={s.label} className="bg-slate-50 rounded-xl p-3 flex items-center gap-2">
+                    <Icon name={s.icon} size={15} className="text-slate-400 flex-shrink-0" />
+                    <div>
+                      <div className="text-xs text-slate-400">{s.label}</div>
+                      <div className="text-sm font-semibold text-slate-800">{s.value ?? 0}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Learning goals */}
+              {user.learning_goals && user.learning_goals.length > 0 && (
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Цели обучения</p>
+                  {user.learning_goals.map(g => (
+                    <div key={g.id} className="flex items-center justify-between">
+                      <span className="text-sm text-gray-700 truncate">{g.goal_text}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ml-2 flex-shrink-0 ${
+                        g.status === "active"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-gray-100 text-gray-500"
+                      }`}>{g.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Audit events */}
+              {user.audit_events && user.audit_events.length > 0 && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Admin-действия</p>
+                  {user.audit_events.map(e => (
+                    <div key={e.id} className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono text-amber-800">{e.action}</span>
+                      <span className="text-[10px] text-amber-500 flex-shrink-0">{fmtDate(e.created_at)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Wallet balance */}
+              <div className="bg-violet-50 border border-violet-100 rounded-xl p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Icon name="Wallet" size={16} className="text-violet-500" />
+                  <span className="text-sm text-violet-700 font-medium">Баланс</span>
+                </div>
+                <span className="text-base font-bold text-violet-800">
+                  {user.balance_rub?.toLocaleString("ru")} ₽
+                </span>
+              </div>
+
+              {/* Dates */}
+              <div className="space-y-1.5 text-xs text-slate-400">
+                <div className="flex justify-between">
+                  <span>Регистрация</span>
+                  <span className="text-slate-600">{fmtDate(user.created_at)}</span>
+                </div>
                 {user.blocked_at && (
-                  <div className="text-xs text-red-400 mt-1">{new Date(user.blocked_at).toLocaleString("ru")}</div>
+                  <div className="flex justify-between">
+                    <span>Заблокирован</span>
+                    <span className="text-red-500">{fmtDate(user.blocked_at)}</span>
+                  </div>
+                )}
+                {user.unblocked_at && (
+                  <div className="flex justify-between">
+                    <span>Разблокирован</span>
+                    <span className="text-green-600">{fmtDate(user.unblocked_at)}</span>
+                  </div>
                 )}
               </div>
-            )}
 
-            {/* Stats */}
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: "Проекты", value: user.projects_count, icon: "FolderOpen" },
-                { label: "Задачи", value: user.tasks_count, icon: "Sparkles" },
-                { label: "Документы", value: user.documents_count, icon: "FileText" },
-                { label: "Сессии", value: user.active_sessions, icon: "Monitor" },
-              ].map(s => (
-                <div key={s.label} className="bg-slate-50 rounded-xl p-3">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-                    <Icon name={s.icon} size={12} />
-                    {s.label}
-                  </div>
-                  <div className="text-xl font-bold text-slate-900">{s.value}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Wallet */}
-            <div className="bg-slate-50 rounded-xl p-3 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <Icon name="Wallet" size={15} />
-                Баланс кошелька
+              {/* Actions */}
+              <div className="space-y-2 pb-2">
+                <a
+                  href={`/admin/activity?user_id=${user.id}`}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 font-medium text-sm rounded-xl transition-colors"
+                >
+                  <Icon name="Activity" size={15} />
+                  Посмотреть активность
+                </a>
+                {user.is_blocked ? (
+                  <button
+                    onClick={() => onAction(user, "unblock")}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm rounded-xl transition-colors"
+                  >
+                    <Icon name="ShieldCheck" size={15} />
+                    Разблокировать
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onAction(user, "block")}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-semibold text-sm rounded-xl transition-colors"
+                  >
+                    <Icon name="ShieldOff" size={15} />
+                    Заблокировать
+                  </button>
+                )}
               </div>
-              <div className="font-semibold text-slate-900">{user.balance_rub.toLocaleString("ru")} ₽</div>
             </div>
+          )}
 
-            {/* Dates */}
-            <div className="text-xs text-slate-400 space-y-1">
-              <div>Зарегистрирован: {new Date(user.created_at).toLocaleString("ru")}</div>
-              {user.unblocked_at && <div>Разблокирован: {new Date(user.unblocked_at).toLocaleString("ru")}</div>}
-            </div>
+          {!loading && user && tab === "tickets" && (
+            <div className="px-5 py-4 space-y-4">
+              {/* Summary */}
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Icon name="Ticket" size={15} className="text-slate-400" />
+                <span>
+                  <span className="font-semibold text-slate-700">{user.tickets_open ?? 0}</span> открытых
+                  {" · "}
+                  <span className={`font-semibold ${(user.tickets_urgent ?? 0) > 0 ? "text-red-600" : "text-slate-700"}`}>
+                    {user.tickets_urgent ?? 0}
+                  </span> urgent
+                </span>
+              </div>
 
-            {/* Actions */}
-            <div className="pt-2 border-t border-slate-100 space-y-2">
-              <a
-                href={`/admin/activity?user_id=${user.id}`}
+              {/* Ticket list */}
+              {(!user.tickets || user.tickets.length === 0) ? (
+                <div className="py-12 text-center text-slate-400 text-sm">Нет тикетов</div>
+              ) : (
+                <div className="space-y-2">
+                  {user.tickets.map(t => (
+                    <div key={t.id} className="bg-slate-50 border border-slate-100 rounded-xl p-3 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_DOT[t.priority] ?? "bg-gray-400"}`} />
+                        <span className="font-mono text-[10px] text-slate-500 uppercase">{t.ticket_no}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ml-auto flex-shrink-0 ${STATUS_BADGE[t.status] ?? "text-gray-500 bg-gray-100"}`}>
+                          {t.status}
+                        </span>
+                      </div>
+                      <div className="text-sm text-slate-800 truncate">{t.subject}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-gray-400 truncate">{t.assignee_email}</span>
+                        <span className="text-[10px] text-gray-400 flex-shrink-0">{fmtDate(t.created_at)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Navigate button */}
+              <button
+                onClick={() => navigate("/admin/tickets")}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 font-medium text-sm rounded-xl transition-colors"
               >
-                <Icon name="Activity" size={15} />
-                Посмотреть активность
-              </a>
-              {user.is_blocked ? (
-                <button
-                  onClick={() => onAction(user, "unblock")}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm rounded-xl transition-colors"
-                >
-                  <Icon name="ShieldCheck" size={15} />
-                  Разблокировать
-                </button>
-              ) : (
-                <button
-                  onClick={() => onAction(user, "block")}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-semibold text-sm rounded-xl transition-colors"
-                >
-                  <Icon name="ShieldOff" size={15} />
-                  Заблокировать
-                </button>
-              )}
+                <Icon name="ExternalLink" size={15} />
+                Открыть в Tickets
+              </button>
             </div>
-          </div>
-        )}
+          )}
+
+          {!loading && user && tab === "activity" && (
+            <div className="px-5 py-4 space-y-5">
+              {/* Activity log */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Лог активности</p>
+                {(!user.activity || user.activity.length === 0) ? (
+                  <div className="py-6 text-center text-slate-400 text-sm">Нет записей</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {user.activity.map(ev => (
+                      <div key={ev.id} className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 flex items-start gap-2">
+                        <span className="w-2 h-2 rounded-full bg-violet-400 flex-shrink-0 mt-1.5" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-slate-700">{ev.action}</span>
+                            <span className="text-[10px] text-slate-400 flex-shrink-0">{fmtDate(ev.created_at)}</span>
+                          </div>
+                          {ev.details && (
+                            <div className="text-xs text-slate-500 truncate mt-0.5">{ev.details}</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Communications */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Коммуникации</p>
+                {(!user.communications || user.communications.length === 0) ? (
+                  <div className="py-6 text-center text-slate-400 text-sm">Нет коммуникаций</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {user.communications.map(c => {
+                      const channelIcon =
+                        c.channel === "email" ? "Mail"
+                        : c.channel === "push" ? "Bell"
+                        : "Cpu";
+                      return (
+                        <div key={c.id} className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 flex items-start gap-2">
+                          <Icon name={channelIcon} size={14} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm text-slate-800 truncate">{c.subject}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${STATUS_BADGE[c.status] ?? "text-gray-500 bg-gray-100"}`}>
+                                {c.status}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                              <span className="text-[10px] text-gray-400 uppercase">{c.channel}</span>
+                              <span className="text-[10px] text-gray-400 flex-shrink-0">{fmtDate(c.sent_at)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -283,12 +596,13 @@ function UserDrawer({
 
 export default function AdminUsersPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
   const [page, setPage] = useState(1);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(searchParams.get("q") ?? "");
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
 
@@ -409,6 +723,8 @@ export default function AdminUsersPage() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Пользователь</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Регистрация</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden md:table-cell">Баланс</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Тикеты</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden lg:table-cell">Активность</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Статус</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -438,14 +754,27 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3 hidden md:table-cell">
                       <span className="text-sm text-slate-700 font-medium">{u.balance_rub.toLocaleString("ru")} ₽</span>
                     </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      {(u.open_tickets ?? 0) > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-sky-400 font-semibold text-xs">
+                          <Icon name="Ticket" size={12} />
+                          {u.open_tickets}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <span className="text-xs text-slate-500">{relativeDate(u.last_activity_at)}</span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
                         u.is_blocked
                           ? "bg-red-50 text-red-600"
                           : "bg-green-50 text-green-600"
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${u.is_blocked ? "bg-red-500" : "bg-green-500"}`} />
-                        {u.is_blocked ? "Заблокирован" : "Активен"}
+                        <span className={`w-1.5 h-1.5 rounded-full ${u.is_blocked ? "bg-red-400" : "bg-green-400"}`} />
+                        {u.is_blocked ? "Блок" : "Активен"}
                       </span>
                     </td>
                     <td className="px-4 py-3">

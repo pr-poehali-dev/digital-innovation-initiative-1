@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
@@ -501,6 +502,7 @@ function DetailPanel({
   onMessageSent,
 }: DetailPanelProps) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [assigneeVal, setAssigneeVal] = useState(ticket.assignee_email);
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
@@ -651,7 +653,20 @@ function DetailPanel({
         <div>
           <p className="text-gray-600 mb-0.5">Заявитель</p>
           <p className="text-gray-200 font-medium">{ticket.requester_name || "—"}</p>
-          <p className="text-gray-500">{ticket.requester_email || "—"}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-gray-500">{ticket.requester_email || "—"}</p>
+            {ticket.requester_email && (
+              <button
+                onClick={() => {
+                  navigate(`/admin/users?q=${encodeURIComponent(ticket.requester_email)}`);
+                }}
+                className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-violet-900/40 text-violet-400 border border-violet-800 hover:bg-violet-800/60 transition-colors"
+              >
+                <Icon name="User" size={9} />
+                Профиль
+              </button>
+            )}
+          </div>
         </div>
         <div>
           <p className="text-gray-600 mb-0.5">Исполнитель</p>

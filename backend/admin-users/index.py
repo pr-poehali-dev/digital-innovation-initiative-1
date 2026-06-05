@@ -183,7 +183,12 @@ def action_list(conn, params: dict, origin: str) -> dict:
                 u.id, u.email, u.name, u.created_at,
                 COALESCE(f.is_blocked, FALSE) AS is_blocked,
                 f.blocked_at,
-                COALESCE(w.balance_kopecks, 0) AS balance_kopecks
+                COALESCE(w.balance_kopecks, 0) AS balance_kopecks,
+                (SELECT COUNT(*) FROM {s}.admin_tickets t
+                 WHERE t.requester_email = u.email
+                   AND t.status NOT IN ('resolved','closed')) AS open_tickets,
+                (SELECT MAX(al.created_at) FROM {s}.activity_log al
+                 WHERE al.user_id = u.id) AS last_activity_at
             {base_sql}
             ORDER BY u.created_at DESC
             LIMIT {per_page} OFFSET {offset}
@@ -201,6 +206,8 @@ def action_list(conn, params: dict, origin: str) -> dict:
             "blocked_at":      r[5],
             "balance_kopecks": r[6],
             "balance_rub":     round(r[6] / 100, 2),
+            "open_tickets":    r[7],
+            "last_activity_at": str(r[8]) if r[8] else None,
         })
 
     return resp({
@@ -213,7 +220,7 @@ def action_list(conn, params: dict, origin: str) -> dict:
 
 
 def action_get(conn, user_id: int, origin: str) -> dict:
-    """Карточка пользователя: базовая инфо + статистика."""
+    """User 360: базовая инфо + статистика + tickets + comms + activity."""
     s = SCHEMA
     user = get_user_row(conn, user_id)
     if not user:
@@ -242,10 +249,99 @@ def action_get(conn, user_id: int, origin: str) -> dict:
         )
         active_sessions = cur.fetchone()[0]
 
-    user["projects_count"]    = projects_count
-    user["tasks_count"]       = tasks_count
-    user["documents_count"]   = docs_count
-    user["active_sessions"]   = active_sessions
+        # ── Tickets (по email пользователя) ──────────────────────────────────
+        user_email_safe = user["email"].replace("'", "''")
+        cur.execute(f"""
+            SELECT id, ticket_no, status, priority, subject, created_at, assignee_email
+            FROM {s}.admin_tickets
+            WHERE requester_email = '{user_email_safe}'
+            ORDER BY created_at DESC LIMIT 5
+        """)
+        tickets_rows = cur.fetchall()
+        tickets = [{
+            "id": r[0], "ticket_no": r[1], "status": r[2], "priority": r[3],
+            "subject": r[4][:100], "created_at": str(r[5]), "assignee_email": r[6],
+        } for r in tickets_rows]
+
+        cur.execute(f"""
+            SELECT COUNT(*) FROM {s}.admin_tickets
+            WHERE requester_email = '{user_email_safe}'
+            AND status NOT IN ('resolved','closed')
+        """)
+        tickets_open = cur.fetchone()[0]
+
+        cur.execute(f"""
+            SELECT COUNT(*) FROM {s}.admin_tickets
+            WHERE requester_email = '{user_email_safe}'
+            AND priority = 'urgent' AND status NOT IN ('resolved','closed')
+        """)
+        tickets_urgent = cur.fetchone()[0]
+
+        # ── Communications (по audience или subject-match) ────────────────────
+        cur.execute(f"""
+            SELECT id, comm_no, channel, status, subject, sent_at, audience
+            FROM {s}.admin_communications
+            WHERE audience = 'all'
+               OR audience = 'learners'
+            ORDER BY created_at DESC LIMIT 5
+        """)
+        comms_rows = cur.fetchall()
+        comms = [{
+            "id": r[0], "comm_no": r[1], "channel": r[2], "status": r[3],
+            "subject": r[4][:100], "sent_at": str(r[5]) if r[5] else None, "audience": r[6],
+        } for r in comms_rows]
+
+        # ── Last activity events ──────────────────────────────────────────────
+        cur.execute(f"""
+            SELECT id, action, entity_type, entity_id, details, created_at
+            FROM {s}.activity_log
+            WHERE user_id = {user_id}
+            ORDER BY created_at DESC LIMIT 8
+        """)
+        activity_rows = cur.fetchall()
+        activity = [{
+            "id": r[0], "action": r[1], "entity_type": r[2],
+            "entity_id": r[3], "details": (r[4] or "")[:120], "created_at": str(r[5]),
+        } for r in activity_rows]
+
+        # ── Last audit events (по entity_type=user) ──────────────────────────
+        cur.execute(f"""
+            SELECT id, action, actor_email, reason, created_at
+            FROM {s}.admin_audit_log
+            WHERE entity_type = 'user' AND entity_id = {user_id}
+            ORDER BY created_at DESC LIMIT 5
+        """)
+        audit_rows = cur.fetchall()
+        audit_events = [{
+            "id": r[0], "action": r[1], "actor_email": r[2],
+            "reason": r[3], "created_at": str(r[4]),
+        } for r in audit_rows]
+
+        # ── Passport / learning modules ───────────────────────────────────────
+        cur.execute(f"""
+            SELECT id, goal_text, target_level, status, started_at, target_date
+            FROM {s}.learning_goals
+            WHERE user_id = {user_id}
+            ORDER BY created_at DESC LIMIT 3
+        """)
+        goals_rows = cur.fetchall()
+        learning_goals = [{
+            "id": r[0], "goal_text": (r[1] or "")[:80], "target_level": r[2],
+            "status": r[3], "started_at": str(r[4]) if r[4] else None,
+            "target_date": str(r[5]) if r[5] else None,
+        } for r in goals_rows]
+
+    user["projects_count"]  = projects_count
+    user["tasks_count"]     = tasks_count
+    user["documents_count"] = docs_count
+    user["active_sessions"] = active_sessions
+    user["tickets"]         = tickets
+    user["tickets_open"]    = tickets_open
+    user["tickets_urgent"]  = tickets_urgent
+    user["communications"]  = comms
+    user["activity"]        = activity
+    user["audit_events"]    = audit_events
+    user["learning_goals"]  = learning_goals
 
     return resp({"user": user}, origin=origin)
 
