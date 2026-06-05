@@ -159,6 +159,39 @@ export const passportApi = {
     ppReq("/?action=save_notes", { method: "PUT", body: JSON.stringify({ content }) }),
 };
 
+const OPS_BASE = "https://functions.poehali.dev/7730f705-e699-49ac-9cda-1aafb13a0bad";
+
+async function opsReq(path: string, options: RequestInit = {}) {
+  const token = getAdminToken();
+  const res = await fetch(`${OPS_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { "X-Admin-Token": token } : {}), ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type OpsErrorSeverity = "low" | "medium" | "high" | "critical";
+export type OpsErrorStatus   = "open" | "investigating" | "muted" | "resolved";
+export type OpsAlertSeverity = "low" | "medium" | "high" | "critical";
+export type OpsAlertStatus   = "active" | "triggered" | "muted" | "resolved";
+export type OpsFlagStatus    = "active" | "planned" | "deprecated";
+
+export const opsApi = {
+  allErrors: () => opsReq("/?action=all&module=errors"),
+  addError:  (d: Record<string, unknown>) => opsReq("/?action=add_error",  { method: "POST", body: JSON.stringify(d) }),
+  updateError:(d: Record<string, unknown>) => opsReq("/?action=update_error",{ method: "PUT",  body: JSON.stringify(d) }),
+
+  allAlerts: () => opsReq("/?action=all&module=alerts"),
+  addAlert:  (d: Record<string, unknown>) => opsReq("/?action=add_alert",  { method: "POST", body: JSON.stringify(d) }),
+  updateAlert:(d: Record<string, unknown>) => opsReq("/?action=update_alert",{ method: "PUT",  body: JSON.stringify(d) }),
+
+  allFlags: () => opsReq("/?action=all&module=flags"),
+  addFlag:  (d: Record<string, unknown>) => opsReq("/?action=add_flag",   { method: "POST", body: JSON.stringify(d) }),
+  updateFlag:(d: Record<string, unknown>) => opsReq("/?action=update_flag", { method: "PUT",  body: JSON.stringify(d) }),
+  toggleFlag:(id: number)                 => opsReq("/?action=toggle_flag", { method: "PUT",  body: JSON.stringify({ id }) }),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");

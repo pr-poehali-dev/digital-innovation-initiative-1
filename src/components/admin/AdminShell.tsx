@@ -10,6 +10,9 @@ const NAV = [
   { label: "Аудит",       icon: "ClipboardList",    href: "/admin/audit" },
   { label: "AI-операции", icon: "Sparkles",          href: "/admin/ai-runs" },
   { label: "Кошелёк",    icon: "Wallet",            href: "/admin/wallet" },
+  { label: "Ошибки",      icon: "AlertTriangle",    href: "/admin/errors" },
+  { label: "Алерты",      icon: "Bell",             href: "/admin/alerts" },
+  { label: "Flags",        icon: "ToggleRight",      href: "/admin/flags" },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {

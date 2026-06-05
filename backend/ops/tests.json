@@ -1,0 +1,7 @@
+{
+  "tests": [
+    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 },
+    { "name": "Unauthorized errors", "method": "GET", "path": "/?action=all&module=errors", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" },
+    { "name": "Unauthorized flags",  "method": "GET", "path": "/?action=all&module=flags",  "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" }
+  ]
+}
