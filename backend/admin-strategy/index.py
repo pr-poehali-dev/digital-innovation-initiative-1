@@ -900,10 +900,542 @@ def action_report_get(conn, report_id, origin):
     }}, origin=origin)
 
 
+# ── Roadmap stubs (W6.2 actions — добавлены в handler routing) ──────
+
+def action_report_delete(conn, actor, body, origin):
+    rid = body.get("id")
+    if not rid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.admin_strategy_reports WHERE id = %s", (int(rid),))
+    conn.commit()
+    return resp({"ok": True}, origin=origin)
+
+
+def _roadmap_row(r) -> dict:
+    return {"id": r[0], "title": r[1], "description": r[2], "lane": r[3], "status": r[4],
+            "source_type": r[5], "source_report_id": r[6],
+            "source_payload": r[7] if isinstance(r[7], dict) else {},
+            "target_segment": r[8], "target_metric": r[9],
+            "impact": r[10], "effort": r[11], "confidence": r[12],
+            "owner": r[13], "sort_order": r[14],
+            "created_by": r[15], "updated_by": r[16],
+            "created_at": str(r[17]), "updated_at": str(r[18])}
+
+
+def action_roadmap_list(conn, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id,title,description,lane,status,source_type,source_report_id,source_payload,
+               target_segment,target_metric,impact,effort,confidence,owner,sort_order,
+               created_by,updated_by,created_at,updated_at
+        FROM {S}.admin_strategy_roadmap_items WHERE status!='archived'
+        ORDER BY lane,sort_order,created_at DESC
+    """)
+    items = [_roadmap_row(r) for r in rows]
+    grouped = {"now": [], "next": [], "later": []}
+    for item in items:
+        lane = item["lane"] if item["lane"] in grouped else "next"
+        grouped[lane].append(item)
+    return resp({"roadmap": grouped, "total": len(items)}, origin=origin)
+
+
+def action_roadmap_create(conn, actor, body, origin):
+    LANES_R = ["now","next","later"]; STATUSES_R = ["idea","planned","in_progress","done","archived"]
+    title = (body.get("title") or "").strip()
+    if not title: return resp({"error": "title required"}, 400, origin)
+    lane   = body.get("lane","next"); lane = lane if lane in LANES_R else "next"
+    status = body.get("status","idea"); status = status if status in STATUSES_R else "idea"
+    ae = actor["email"]
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_roadmap_items
+              (title,description,lane,status,source_type,source_report_id,source_payload,
+               target_segment,target_metric,impact,effort,confidence,owner,sort_order,created_by,updated_by)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+        """, (title, body.get("description",""), lane, status,
+              body.get("source_type","manual"), body.get("source_report_id"),
+              json.dumps(body.get("source_payload") or {}, ensure_ascii=False),
+              body.get("target_segment",""), body.get("target_metric",""),
+              body.get("impact","medium"), body.get("effort","medium"),
+              body.get("confidence","medium"), body.get("owner",""),
+              int(body.get("sort_order",0)), ae, ae))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "strategy.roadmap_item_created", f"[{lane.upper()}] {title[:60]}")
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_roadmap_update(conn, actor, body, origin):
+    rid = body.get("id")
+    if not rid: return resp({"error": "id required"}, 400, origin)
+    LANES_R = ["now","next","later"]; STATUSES_R = ["idea","planned","in_progress","done","archived"]
+    fields, vals = [], []
+    for key in ["title","description","target_segment","target_metric","impact","effort","confidence","owner"]:
+        if key in body: fields.append(f"{key}=%s"); vals.append(str(body[key]))
+    if "lane" in body and body["lane"] in LANES_R:
+        fields.append("lane=%s"); vals.append(body["lane"])
+    if "status" in body and body["status"] in STATUSES_R:
+        fields.append("status=%s"); vals.append(body["status"])
+    if "sort_order" in body:
+        fields.append("sort_order=%s"); vals.append(int(body["sort_order"]))
+    if not fields: return resp({"ok": True}, origin=origin)
+    fields += ["updated_at=NOW()","updated_by=%s"]; vals += [actor["email"], int(rid)]
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_roadmap_items SET {','.join(fields)} WHERE id=%s", vals)
+    conn.commit()
+    _audit(conn, actor, "strategy.roadmap_item_updated", f"id={rid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_roadmap_delete(conn, actor, body, origin):
+    rid = body.get("id")
+    if not rid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_roadmap_items SET status='archived',updated_at=NOW() WHERE id=%s", (int(rid),))
+    conn.commit()
+    _audit(conn, actor, "strategy.roadmap_item_deleted", f"id={rid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_roadmap_from_insight(conn, actor, body, origin):
+    source_type = body.get("source_type","hypothesis")
+    payload     = body.get("insight_payload") or {}
+    source_rid  = body.get("source_report_id")
+    ae = actor["email"]
+    # Smart mapping
+    if source_type == "hypothesis":
+        title = payload.get("title",""); desc = payload.get("hypothesis","") or payload.get("problem","")
+        t_met = payload.get("target_metric",""); t_seg = payload.get("target_segment","")
+        imp = payload.get("expected_impact","medium"); eff = payload.get("effort","medium")
+    elif source_type == "next_action":
+        title = str(payload.get("text", payload.get("title",""))); desc = ""
+        t_met = ""; t_seg = ""; imp = "high"; eff = "low"
+    elif source_type == "segment_plan":
+        title = str(payload.get("action", payload.get("title",""))); desc = str(payload.get("expected_result",""))
+        t_met = str(payload.get("metric_to_watch","")); t_seg = str(payload.get("segment",""))
+        imp = "medium"; eff = "medium"
+    else:
+        title = str(payload.get("title", payload.get("claim",""))); desc = str(payload.get("claim",""))
+        t_met = ""; t_seg = ""; imp = str(payload.get("impact","medium")); eff = "medium"
+    title      = str(body.get("title", title)).strip() or "Без названия"
+    lane       = body.get("lane","next")
+    if lane not in ["now","next","later"]: lane = "next"
+    t_met      = str(body.get("target_metric", t_met)).strip()
+    t_seg      = str(body.get("target_segment", t_seg)).strip()
+    imp        = body.get("impact", imp)
+    eff        = body.get("effort", eff)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_roadmap_items
+              (title,description,lane,status,source_type,source_report_id,source_payload,
+               target_segment,target_metric,impact,effort,confidence,owner,sort_order,created_by,updated_by)
+            VALUES(%s,%s,%s,'idea',%s,%s,%s,%s,%s,%s,%s,'medium','',0,%s,%s) RETURNING id
+        """, (title,str(desc),lane,source_type,source_rid,
+              json.dumps(payload,ensure_ascii=False,default=str),
+              t_seg,t_met,imp,eff,ae,ae))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "strategy.roadmap_item_created_from_insight", f"[{lane.upper()}] {title[:60]}")
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+# ── Scenarios ────────────────────────────────────────────────────────
+
+SCENARIO_TYPES = {
+    "activation_uplift":        "Activation Rate Uplift",
+    "goal_to_checkin_uplift":   "Goal → First Check-in Uplift",
+    "second_checkin_uplift":    "Second Check-in Uplift",
+    "stalled_goals_reduction":  "Stalled Goals Reduction",
+    "repeat_ticket_reduction":  "Repeat Ticket Rate Reduction",
+}
+
+
+def _confidence_level(sample: int) -> str:
+    if sample >= 100: return "high"
+    if sample >= 20:  return "medium"
+    return "low"
+
+
+def _compute_scenario(conn, stype: str, target_delta: float, d_from: str, d_to: str) -> dict:
+    """
+    Детерминированный расчёт сценария.
+    target_delta — желаемое изменение в процентных пунктах (положительное = улучшение).
+    Возвращает: baseline, projected, delta, downstream, sample_size.
+    """
+    s = S
+
+    if stype == "activation_uplift":
+        # Baseline: users → has_goal / users total
+        total = (_fetch_one(conn,
+            f"SELECT COUNT(*) FROM {s}.users WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'"
+        ) or [0])[0] or 0
+        activated = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT g.user_id) FROM {s}.learning_goals g
+            JOIN {s}.users u ON u.id=g.user_id
+            WHERE u.created_at::date BETWEEN '{d_from}' AND '{d_to}'
+        """) or [0])[0] or 0
+
+        base_rate = round(activated / total * 100, 1) if total > 0 else 0
+        proj_rate = min(100.0, base_rate + target_delta)
+        delta_rate = proj_rate - base_rate
+
+        # Downstream: projected activated → first_checkin (current conv)
+        first_ci = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT c.user_id) FROM {s}.learning_checkins c
+            JOIN {s}.users u ON u.id=c.user_id
+            WHERE u.created_at::date BETWEEN '{d_from}' AND '{d_to}'
+        """) or [0])[0] or 0
+        ci_conv = first_ci / activated if activated > 0 else 0
+
+        proj_activated = round(total * proj_rate / 100)
+        proj_ci = round(proj_activated * ci_conv)
+        delta_ci = proj_ci - first_ci
+
+        return {
+            "sample_size": total,
+            "confidence":  _confidence_level(total),
+            "baseline": {
+                "total_users":    total,
+                "activated":      activated,
+                "activation_rate": base_rate,
+                "first_checkin":  first_ci,
+            },
+            "projected": {
+                "activation_rate": proj_rate,
+                "activated":       proj_activated,
+                "first_checkin":   proj_ci,
+            },
+            "delta": {
+                "activation_rate": round(delta_rate, 1),
+                "activated":       proj_activated - activated,
+                "first_checkin":   delta_ci,
+            },
+            "assumptions": [
+                f"Activation rate улучшается на {target_delta} п.п.: {base_rate}% → {proj_rate}%",
+                f"Downstream conversion first_checkin остаётся {round(ci_conv*100,1)}%",
+                "Без изменений в downstream stages",
+            ],
+        }
+
+    elif stype == "goal_to_checkin_uplift":
+        # Baseline: goals → first checkin conv
+        active_users = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT g.user_id) FROM {s}.learning_goals g
+            WHERE g.created_at::date BETWEEN '{d_from}' AND '{d_to}'
+        """) or [0])[0] or 0
+        with_checkin = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT c.user_id) FROM {s}.learning_checkins c
+            JOIN {s}.learning_goals g ON g.user_id=c.user_id
+            WHERE g.created_at::date BETWEEN '{d_from}' AND '{d_to}'
+        """) or [0])[0] or 0
+
+        base_rate = round(with_checkin / active_users * 100, 1) if active_users > 0 else 0
+        proj_rate = min(100.0, base_rate + target_delta)
+
+        # Downstream: with_checkin → second_checkin (current conv)
+        with_2nd = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT user_id) FROM (
+                SELECT user_id FROM {s}.learning_checkins GROUP BY user_id HAVING COUNT(*)>=2
+            ) x
+        """) or [0])[0] or 0
+        ci2_conv = with_2nd / with_checkin if with_checkin > 0 else 0
+
+        proj_checkin = round(active_users * proj_rate / 100)
+        proj_2nd     = round(proj_checkin * ci2_conv)
+
+        # Downstream: second_checkin → completion
+        completed = (_fetch_one(conn,
+            f"SELECT COUNT(DISTINCT user_id) FROM {s}.learning_goals WHERE status='done'"
+        ) or [0])[0] or 0
+        comp_conv = completed / with_2nd if with_2nd > 0 else 0
+        proj_comp = round(proj_2nd * comp_conv)
+
+        return {
+            "sample_size": active_users,
+            "confidence":  _confidence_level(active_users),
+            "baseline": {
+                "users_with_goal":   active_users,
+                "with_first_checkin": with_checkin,
+                "checkin_rate":       base_rate,
+                "with_2nd_checkin":   with_2nd,
+                "completed":          completed,
+            },
+            "projected": {
+                "checkin_rate":       proj_rate,
+                "with_first_checkin": proj_checkin,
+                "with_2nd_checkin":   proj_2nd,
+                "completed":          proj_comp,
+            },
+            "delta": {
+                "checkin_rate":       round(proj_rate - base_rate, 1),
+                "with_first_checkin": proj_checkin - with_checkin,
+                "with_2nd_checkin":   proj_2nd - with_2nd,
+                "completed":          proj_comp - completed,
+            },
+            "assumptions": [
+                f"Goal→First Check-in rate: {base_rate}% → {proj_rate}%",
+                f"Downstream 2nd check-in conv {round(ci2_conv*100,1)}% не изменяется",
+                f"Completion conv {round(comp_conv*100,1)}% не изменяется",
+            ],
+        }
+
+    elif stype == "second_checkin_uplift":
+        with_1st = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT user_id) FROM {s}.learning_checkins
+        """) or [0])[0] or 0
+        with_2nd = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT user_id) FROM (
+                SELECT user_id FROM {s}.learning_checkins GROUP BY user_id HAVING COUNT(*)>=2
+            ) x
+        """) or [0])[0] or 0
+        base_rate = round(with_2nd / with_1st * 100, 1) if with_1st > 0 else 0
+        proj_rate = min(100.0, base_rate + target_delta)
+
+        completed = (_fetch_one(conn,
+            f"SELECT COUNT(*) FROM {s}.learning_goals WHERE status='done'"
+        ) or [0])[0] or 0
+        comp_conv = completed / with_2nd if with_2nd > 0 else 0
+
+        proj_2nd  = round(with_1st * proj_rate / 100)
+        proj_comp = round(proj_2nd * comp_conv)
+
+        return {
+            "sample_size": with_1st,
+            "confidence":  _confidence_level(with_1st),
+            "baseline": {"with_1st_checkin": with_1st, "with_2nd_checkin": with_2nd, "rate_2nd": base_rate, "completed": completed},
+            "projected": {"rate_2nd": proj_rate, "with_2nd_checkin": proj_2nd, "completed": proj_comp},
+            "delta":     {"rate_2nd": round(proj_rate-base_rate,1), "with_2nd_checkin": proj_2nd-with_2nd, "completed": proj_comp-completed},
+            "assumptions": [
+                f"2nd check-in rate: {base_rate}% → {proj_rate}%",
+                f"Completion conv {round(comp_conv*100,1)}% не изменяется",
+            ],
+        }
+
+    elif stype == "stalled_goals_reduction":
+        active_total = (_fetch_one(conn,
+            f"SELECT COUNT(*) FROM {s}.learning_goals WHERE status='active'"
+        ) or [0])[0] or 0
+        stalled = (_fetch_one(conn, f"""
+            SELECT COUNT(*) FROM {s}.learning_goals g WHERE g.status='active'
+            AND NOT EXISTS (SELECT 1 FROM {s}.learning_checkins c WHERE c.goal_id=g.id AND c.created_at>=NOW()-INTERVAL '14 days')
+        """) or [0])[0] or 0
+        base_rate = round(stalled / active_total * 100, 1) if active_total > 0 else 0
+        proj_rate = max(0.0, base_rate - target_delta)
+
+        # If stalled goals get unblocked, estimate additional completion
+        non_stalled_comp = (_fetch_one(conn, f"""
+            SELECT COUNT(*) FROM {s}.learning_goals g WHERE g.status='done'
+            AND EXISTS (SELECT 1 FROM {s}.learning_checkins c WHERE c.goal_id=g.id)
+        """) or [0])[0] or 0
+        non_stalled_total = active_total - stalled
+        comp_rate_non_stalled = non_stalled_comp / non_stalled_total if non_stalled_total > 0 else 0
+
+        delta_stalled = round(stalled - active_total * proj_rate / 100)
+        est_additional_completions = round(delta_stalled * comp_rate_non_stalled)
+
+        return {
+            "sample_size": active_total,
+            "confidence":  _confidence_level(active_total),
+            "baseline": {"active_goals": active_total, "stalled": stalled, "stalled_rate": base_rate},
+            "projected": {"stalled_rate": proj_rate, "stalled": round(active_total*proj_rate/100), "est_additional_completions": est_additional_completions},
+            "delta":     {"stalled_rate": round(proj_rate-base_rate,1), "stalled": -delta_stalled, "est_additional_completions": est_additional_completions},
+            "assumptions": [
+                f"Stalled rate: {base_rate}% → {proj_rate}%",
+                f"Разблокированные goals имеют completion rate non-stalled = {round(comp_rate_non_stalled*100,1)}%",
+            ],
+        }
+
+    elif stype == "repeat_ticket_reduction":
+        total_tickets = (_fetch_one(conn, f"""
+            SELECT COUNT(*) FROM {s}.admin_tickets
+            WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'
+        """) or [0])[0] or 0
+        unique_req = (_fetch_one(conn, f"""
+            SELECT COUNT(DISTINCT requester_email) FROM {s}.admin_tickets
+            WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'
+        """) or [0])[0] or 0
+        repeat = (_fetch_one(conn, f"""
+            SELECT COUNT(*) FROM (
+                SELECT requester_email FROM {s}.admin_tickets
+                WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'
+                GROUP BY requester_email HAVING COUNT(*)>=2
+            ) x
+        """) or [0])[0] or 0
+
+        base_rate = round(repeat / unique_req * 100, 1) if unique_req > 0 else 0
+        proj_rate = max(0.0, base_rate - target_delta)
+
+        # Estimate projected total tickets
+        avg_tickets_per_repeat = total_tickets / max(unique_req, 1)
+        saved = round((base_rate - proj_rate) / 100 * unique_req * (avg_tickets_per_repeat - 1))
+        proj_total = max(0, total_tickets - saved)
+
+        return {
+            "sample_size": unique_req,
+            "confidence":  _confidence_level(unique_req),
+            "baseline": {"total_tickets": total_tickets, "unique_requesters": unique_req, "repeat_requesters": repeat, "repeat_rate": base_rate},
+            "projected": {"repeat_rate": proj_rate, "repeat_requesters": round(unique_req*proj_rate/100), "total_tickets": proj_total},
+            "delta":     {"repeat_rate": round(proj_rate-base_rate,1), "repeat_requesters": -round((base_rate-proj_rate)/100*unique_req), "total_tickets": -(total_tickets-proj_total)},
+            "assumptions": [
+                f"Repeat ticket rate: {base_rate}% → {proj_rate}%",
+                f"Avg tickets per requester остаётся {round(avg_tickets_per_repeat,1)}",
+            ],
+        }
+
+    return {"error": f"unknown scenario type: {stype}", "sample_size": 0, "confidence": "low", "baseline": {}, "projected": {}, "delta": {}, "assumptions": []}
+
+
+def action_scenario_run(conn, actor, qs, body, origin):
+    """Запустить сценарий: считаем deterministic, затем AI commentary."""
+    d_from, d_to, _, _ = parse_period(qs)
+    stype        = body.get("scenario_type", "activation_uplift")
+    target_delta = float(body.get("target_delta", 10))  # % points
+    name         = (body.get("name") or "").strip() or f"{SCENARIO_TYPES.get(stype, stype)} +{target_delta}п.п."
+
+    if stype not in SCENARIO_TYPES:
+        return resp({"error": f"unknown scenario_type. Valid: {list(SCENARIO_TYPES)}"}, 400, origin)
+
+    # Deterministic calculation
+    result = _compute_scenario(conn, stype, target_delta, d_from, d_to)
+    if "error" in result:
+        return resp({"error": result["error"]}, 400, origin)
+
+    # AI commentary (поверх уже посчитанных чисел)
+    ai_commentary = {}
+    try:
+        stype_label = SCENARIO_TYPES.get(stype, stype)
+        context = f"""
+Тип сценария: {stype_label}
+Период: {d_from} — {d_to}
+Целевое улучшение: {target_delta} п.п.
+Confidence: {result["confidence"]} (sample_size={result["sample_size"]})
+
+Baseline метрики:
+{json.dumps(result["baseline"], ensure_ascii=False, indent=2)}
+
+Projected метрики:
+{json.dumps(result["projected"], ensure_ascii=False, indent=2)}
+
+Delta:
+{json.dumps(result["delta"], ensure_ascii=False, indent=2)}
+
+Assumptions:
+{json.dumps(result.get("assumptions",[]), ensure_ascii=False)}
+"""
+        messages = [
+            {"role": "system", "content": "Ты продуктовый аналитик. Интерпретируй результаты what-if сценария кратко и конкретно. JSON только. Русский язык."},
+            {"role": "user", "content": f"""
+Проанализируй результат сценария и дай структурированный комментарий.
+
+{context}
+
+{"ВАЖНО: sample_size мал, confidence=low — сценарий иллюстративный." if result["sample_size"] < 20 else ""}
+
+Верни JSON:
+{{
+  "interpretation": "что означают эти изменения для продукта (2-3 предложения)",
+  "key_impact": "главный ожидаемый эффект одной фразой",
+  "required_initiatives": ["что нужно сделать чтобы достичь этого", "..."],
+  "risks": ["риск 1", "риск 2"],
+  "confidence_note": "пояснение уровня достоверности",
+  "illustrative": {str(result["sample_size"] < 20).lower()}
+}}
+Только JSON.
+"""}
+        ]
+        text = call_gpt(messages, max_tokens=1500, temperature=0.3)
+        import re
+        clean = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        clean = re.sub(r'\s*```$', '', clean).strip()
+        m = re.search(r'\{[\s\S]*\}', clean)
+        if m: clean = m.group(0)
+        ai_commentary = json.loads(clean)
+    except Exception as e:
+        ai_commentary = {"error": str(e)}
+
+    # Сохраняем сценарий
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_scenarios
+              (name,scenario_type,period_start,period_end,filters_json,assumptions_json,
+               baseline_metrics,projected_metrics,delta_metrics,ai_commentary,
+               sample_size,confidence,created_by)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (name, stype, d_from, d_to, "{}",
+              json.dumps(result.get("assumptions",[]), ensure_ascii=False),
+              json.dumps(result["baseline"], ensure_ascii=False),
+              json.dumps(result["projected"], ensure_ascii=False),
+              json.dumps(result["delta"], ensure_ascii=False),
+              json.dumps(ai_commentary, ensure_ascii=False, default=str),
+              result["sample_size"], result["confidence"],
+              actor["email"]))
+        scenario_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "strategy.scenario_run", f"{stype} delta={target_delta} id={scenario_id}")
+
+    return resp({
+        "scenario_id":    scenario_id,
+        "name":           name,
+        "scenario_type":  stype,
+        "period":         {"from": d_from, "to": d_to},
+        "sample_size":    result["sample_size"],
+        "confidence":     result["confidence"],
+        "baseline":       result["baseline"],
+        "projected":      result["projected"],
+        "delta":          result["delta"],
+        "assumptions":    result.get("assumptions", []),
+        "ai_commentary":  ai_commentary,
+    }, origin=origin)
+
+
+def action_scenarios_list(conn, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id, name, scenario_type, period_start, period_end,
+               sample_size, confidence, created_by, created_at
+        FROM {S}.admin_strategy_scenarios ORDER BY created_at DESC LIMIT 30
+    """)
+    return resp({"scenarios": [{
+        "id": r[0], "name": r[1], "scenario_type": r[2],
+        "period_start": str(r[3]) if r[3] else None,
+        "period_end":   str(r[4]) if r[4] else None,
+        "sample_size":  r[5], "confidence": r[6],
+        "created_by": r[7], "created_at": str(r[8]),
+    } for r in rows]}, origin=origin)
+
+
+def action_scenario_get(conn, sid, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id,name,scenario_type,period_start,period_end,assumptions_json,
+               baseline_metrics,projected_metrics,delta_metrics,ai_commentary,
+               sample_size,confidence,created_by,created_at
+        FROM {S}.admin_strategy_scenarios WHERE id={sid} LIMIT 1
+    """)
+    if not rows: return resp({"error": "not_found"}, 404, origin)
+    r = rows[0]
+    return resp({"scenario": {
+        "id": r[0], "name": r[1], "scenario_type": r[2],
+        "period_start": str(r[3]) if r[3] else None,
+        "period_end":   str(r[4]) if r[4] else None,
+        "assumptions":  r[5], "baseline": r[6], "projected": r[7],
+        "delta": r[8], "ai_commentary": r[9],
+        "sample_size": r[10], "confidence": r[11],
+        "created_by": r[12], "created_at": str(r[13]),
+    }}, origin=origin)
+
+
+def action_scenario_delete(conn, actor, body, origin):
+    sid = body.get("id")
+    if not sid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.admin_strategy_scenarios WHERE id=%s", (int(sid),))
+    conn.commit()
+    return resp({"ok": True}, origin=origin)
+
+
 # ── Handler ─────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
-    """W6.1 Strategy Intelligence: profile + analytics + AI + reports."""
+    """W6.1-W6.3 Strategy Intelligence."""
     headers = event.get("headers") or {}
     origin  = headers.get("origin") or headers.get("Origin") or ""
     method  = event.get("httpMethod", "GET")
@@ -962,6 +1494,39 @@ def handler(event: dict, context) -> dict:
             rid = qs.get("id") or body.get("id")
             if not rid: return resp({"error": "id required"}, 400, origin)
             return action_report_get(conn, int(rid), origin)
+        if action == "strategy_report_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_report_delete(conn, actor, body, origin)
+
+        # Roadmap
+        if action == "strategy_roadmap_list":
+            return action_roadmap_list(conn, origin)
+        if action == "strategy_roadmap_create":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_roadmap_create(conn, actor, body, origin)
+        if action == "strategy_roadmap_update":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_roadmap_update(conn, actor, body, origin)
+        if action == "strategy_roadmap_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_roadmap_delete(conn, actor, body, origin)
+        if action == "strategy_roadmap_from_insight":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_roadmap_from_insight(conn, actor, body, origin)
+
+        # Scenarios
+        if action == "strategy_scenario_run":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_scenario_run(conn, actor, qs, body, origin)
+        if action == "strategy_scenarios_list":
+            return action_scenarios_list(conn, origin)
+        if action == "strategy_scenario_get":
+            sid = qs.get("id") or body.get("id")
+            if not sid: return resp({"error": "id required"}, 400, origin)
+            return action_scenario_get(conn, int(sid), origin)
+        if action == "strategy_scenario_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_scenario_delete(conn, actor, body, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 

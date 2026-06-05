@@ -275,7 +275,7 @@ function ProfileEditor({ profile, onSave }: { profile: Profile; onSave: (p: Prof
 
 // ── Tabs config ────────────────────────────────────────────────────
 
-type Tab = "overview" | "health" | "trajectory" | "segments" | "learning" | "support" | "ai_lab" | "roadmap" | "reports" | "profile";
+type Tab = "overview" | "health" | "trajectory" | "segments" | "learning" | "support" | "ai_lab" | "roadmap" | "reports" | "scenarios" | "profile";
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview",   label: "Обзор",      icon: "LayoutDashboard" },
@@ -286,6 +286,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "support",    label: "Support",    icon: "MessageSquare" },
   { key: "ai_lab",     label: "AI Lab",     icon: "Sparkles" },
   { key: "roadmap",    label: "Roadmap",    icon: "Kanban" },
+  { key: "scenarios",  label: "Сценарии",   icon: "FlaskConical" },
   { key: "reports",    label: "История",    icon: "History" },
   { key: "profile",    label: "Профиль",    icon: "Settings" },
 ];
@@ -312,6 +313,14 @@ export default function AdminStrategyPage() {
   const [hypoFocus,      setHypoFocus]      = useState("growth");
   const [segPlan,        setSegPlan]        = useState<Record<string, unknown> | null>(null);
   const [segPlanTarget,  setSegPlanTarget]  = useState("stalled");
+
+  // W6.3: Scenarios
+  const [scenarioType,    setScenarioType]    = useState("activation_uplift");
+  const [scenarioDelta,   setScenarioDelta]   = useState(10);
+  const [scenarioName,    setScenarioName]    = useState("");
+  const [scenarioResult,  setScenarioResult]  = useState<Record<string, unknown> | null>(null);
+  const [savedScenarios,  setSavedScenarios]  = useState<Record<string, unknown>[]>([]);
+  const [openedScenario,  setOpenedScenario]  = useState<Record<string, unknown> | null>(null);
 
   // W6.2: Roadmap + Reports
   const [roadmap,      setRoadmap]      = useState<RoadmapBoard>({ now: [], next: [], later: [] });
@@ -385,6 +394,12 @@ export default function AdminStrategyPage() {
       const d = await roadmapReq("strategy_reports_list");
       setReports(d.reports ?? []);
       setLoad("reports", false);
+    }
+    if (t === "scenarios") {
+      setLoad("scenarios_list", true);
+      const d = await roadmapReq("strategy_scenarios_list");
+      setSavedScenarios(d.scenarios ?? []);
+      setLoad("scenarios_list", false);
     }
   }, [period, overview, health, trajectory, segments, learning, support]);
 
@@ -462,6 +477,25 @@ export default function AdminStrategyPage() {
     if (d.report_id) setLastHypoReportId(d.report_id);
     setLoad("hypotheses", false);
     showToast("Гипотезы сгенерированы");
+  }
+
+  async function runScenario() {
+    setLoad("scenario_run", true);
+    setScenarioResult(null);
+    const res = await fetch(`${STRATEGY_URL}/?action=strategy_scenario_run&days=${period}`, {
+      method: "POST", headers: hdr(),
+      body: JSON.stringify({
+        scenario_type: scenarioType,
+        target_delta:  scenarioDelta,
+        name:          scenarioName.trim() || undefined,
+      }),
+    });
+    const d = await res.json();
+    setScenarioResult(d ?? null);
+    setLoad("scenario_run", false);
+    // refresh saved list
+    const list = await roadmapReq("strategy_scenarios_list");
+    setSavedScenarios(list.scenarios ?? []);
   }
 
   async function genSegPlan() {
@@ -1136,6 +1170,271 @@ export default function AdminStrategyPage() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── SCENARIOS ───────────────────────────────────────────── */}
+          {tab === "scenarios" && (
+            <div className="space-y-5 max-w-3xl">
+              <h2 className="text-lg font-bold text-gray-100">Scenario Planner</h2>
+              <p className="text-sm text-gray-500">Детерминированный what-if калькулятор. ИИ интерпретирует результат, но математику считает система.</p>
+
+              {/* Configurator */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Настройка сценария</p>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1.5 font-semibold uppercase">Тип сценария</label>
+                    <select value={scenarioType} onChange={e => setScenarioType(e.target.value)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-600">
+                      {[
+                        ["activation_uplift",       "Activation Rate Uplift"],
+                        ["goal_to_checkin_uplift",  "Goal → First Check-in Uplift"],
+                        ["second_checkin_uplift",   "Second Check-in Uplift"],
+                        ["stalled_goals_reduction", "Stalled Goals Reduction"],
+                        ["repeat_ticket_reduction", "Repeat Ticket Rate Reduction"],
+                      ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1.5 font-semibold uppercase">
+                      Целевое изменение
+                      <span className="ml-1 font-normal text-gray-600">(п.п.)</span>
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input type="range" min="1" max="30" step="1" value={scenarioDelta}
+                        onChange={e => setScenarioDelta(Number(e.target.value))}
+                        className="flex-1 accent-violet-500" />
+                      <span className="text-xl font-bold text-violet-400 w-12 text-right">+{scenarioDelta}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-1.5 font-semibold uppercase">Название (необязательно)</label>
+                  <input value={scenarioName} onChange={e => setScenarioName(e.target.value)}
+                    placeholder="Например: Q3 onboarding improvement"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600" />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button onClick={runScenario} disabled={loading.scenario_run}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
+                    {loading.scenario_run ? <Spinner /> : <Icon name="FlaskConical" size={14} />}
+                    Запустить сценарий
+                  </button>
+                  <span className="text-[10px] text-gray-600">Период: {period} дней · Результат сохраняется автоматически</span>
+                </div>
+              </div>
+
+              {/* Result */}
+              {scenarioResult && !('error' in scenarioResult) && (
+                <div className="space-y-4">
+                  {/* Confidence banner */}
+                  <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+                    String(scenarioResult.confidence) === "high"   ? "bg-emerald-900/20 border-emerald-800/60" :
+                    String(scenarioResult.confidence) === "medium" ? "bg-amber-900/20 border-amber-800/60" :
+                    "bg-gray-800/60 border-gray-700"
+                  }`}>
+                    <Icon name={String(scenarioResult.confidence) === "high" ? "ShieldCheck" : "AlertTriangle"} size={16}
+                      className={String(scenarioResult.confidence) === "high" ? "text-emerald-400" : String(scenarioResult.confidence) === "medium" ? "text-amber-400" : "text-gray-500"} />
+                    <div>
+                      <span className="text-xs font-semibold text-gray-200">
+                        Confidence: {String(scenarioResult.confidence).toUpperCase()}
+                      </span>
+                      <span className="text-[10px] text-gray-500 ml-2">sample_size: {String(scenarioResult.sample_size)}</span>
+                    </div>
+                    {Number(scenarioResult.sample_size) < 20 && (
+                      <span className="ml-auto text-[10px] text-gray-600 italic">сценарий иллюстративный</span>
+                    )}
+                  </div>
+
+                  {/* Baseline vs Projected cards */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                      <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-3">Baseline</p>
+                      {Object.entries((scenarioResult.baseline as Record<string, unknown>) ?? {}).map(([k, v]) => (
+                        <div key={k} className="flex items-center justify-between py-1 border-b border-gray-800/60 last:border-0">
+                          <span className="text-[10px] text-gray-500 font-mono">{k}</span>
+                          <span className="text-xs font-semibold text-gray-200">{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bg-gray-900 border border-violet-800/40 rounded-xl p-4">
+                      <p className="text-[10px] text-violet-400 font-semibold uppercase tracking-wide mb-3">Projected</p>
+                      {Object.entries((scenarioResult.projected as Record<string, unknown>) ?? {}).map(([k, v]) => {
+                        const delta = ((scenarioResult.delta as Record<string, unknown>) ?? {})[k];
+                        const isPositive = typeof delta === "number" ? delta > 0 : String(delta ?? "").startsWith("+");
+                        return (
+                          <div key={k} className="flex items-center justify-between py-1 border-b border-gray-800/60 last:border-0">
+                            <span className="text-[10px] text-gray-500 font-mono">{k}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold text-violet-300">{String(v)}</span>
+                              {delta !== undefined && delta !== 0 && (
+                                <span className={`text-[9px] font-semibold ${isPositive ? "text-emerald-400" : "text-red-400"}`}>
+                                  {isPositive ? "▲" : "▼"} {Math.abs(Number(delta))}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Assumptions */}
+                  {Array.isArray(scenarioResult.assumptions) && (scenarioResult.assumptions as string[]).length > 0 && (
+                    <div className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-4">
+                      <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-2">Допущения</p>
+                      {(scenarioResult.assumptions as string[]).map((a, i) => (
+                        <div key={i} className="flex items-start gap-2 mb-1">
+                          <span className="text-gray-600 flex-shrink-0 mt-0.5">→</span>
+                          <span className="text-xs text-gray-400">{a}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* AI Commentary */}
+                  {scenarioResult.ai_commentary && typeof scenarioResult.ai_commentary === "object" && !('error' in (scenarioResult.ai_commentary as Record<string,unknown>)) && (
+                    <div className="bg-violet-900/20 border border-violet-800/40 rounded-xl p-5 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Icon name="Sparkles" size={14} className="text-violet-400" />
+                        <p className="text-xs font-semibold text-gray-300 uppercase tracking-wide">AI Интерпретация</p>
+                      </div>
+
+                      {(scenarioResult.ai_commentary as Record<string,unknown>).key_impact && (
+                        <p className="text-base font-medium text-violet-200">
+                          {String((scenarioResult.ai_commentary as Record<string,unknown>).key_impact)}
+                        </p>
+                      )}
+                      {(scenarioResult.ai_commentary as Record<string,unknown>).interpretation && (
+                        <p className="text-sm text-gray-400">
+                          {String((scenarioResult.ai_commentary as Record<string,unknown>).interpretation)}
+                        </p>
+                      )}
+
+                      {Array.isArray((scenarioResult.ai_commentary as Record<string,unknown>).required_initiatives) && (
+                        <div>
+                          <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Требуемые инициативы</p>
+                          {((scenarioResult.ai_commentary as Record<string,unknown>).required_initiatives as string[]).map((init, i) => (
+                            <div key={i} className="flex items-center gap-2 mb-1.5">
+                              <span className="text-violet-500 flex-shrink-0">•</span>
+                              <span className="text-xs text-gray-300 flex-1">{init}</span>
+                              <button onClick={() => setItemModal({
+                                source_type: "next_action",
+                                source_report_id: typeof scenarioResult.scenario_id === "number" ? scenarioResult.scenario_id : null,
+                                insight_payload: { text: init, scenario_type: scenarioType },
+                                prefill_title: init,
+                                prefill_impact: "high",
+                                prefill_effort: "medium",
+                              })}
+                                className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-gray-800 text-gray-600 hover:text-violet-400 hover:bg-violet-900/20 border border-gray-700 transition-colors flex-shrink-0">
+                                + Roadmap
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {Array.isArray((scenarioResult.ai_commentary as Record<string,unknown>).risks) && (
+                        <div>
+                          <p className="text-[10px] text-red-400 font-semibold uppercase mb-1.5">Риски</p>
+                          {((scenarioResult.ai_commentary as Record<string,unknown>).risks as string[]).map((r, i) => (
+                            <div key={i} className="flex items-start gap-2 mb-1">
+                              <span className="text-red-500 flex-shrink-0 mt-0.5">⚠</span>
+                              <span className="text-xs text-gray-400">{r}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {(scenarioResult.ai_commentary as Record<string,unknown>).confidence_note && (
+                        <p className="text-[10px] text-gray-600 italic border-t border-gray-800 pt-2">
+                          {String((scenarioResult.ai_commentary as Record<string,unknown>).confidence_note)}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Saved scenarios list */}
+              {savedScenarios.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Сохранённые сценарии</p>
+                  <div className="space-y-2">
+                    {savedScenarios.map(sc => {
+                      const CONF_COLOR: Record<string, string> = { high: "text-emerald-400", medium: "text-amber-400", low: "text-gray-500" };
+                      return (
+                        <div key={String(sc.id)} className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center gap-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-200 truncate">{String(sc.name)}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <span className="text-[10px] text-gray-600 font-mono">{String(sc.scenario_type)}</span>
+                              <span className={`text-[10px] font-semibold ${CONF_COLOR[String(sc.confidence)] ?? "text-gray-500"}`}>
+                                {String(sc.confidence)} confidence
+                              </span>
+                              <span className="text-[10px] text-gray-700">sample: {String(sc.sample_size)}</span>
+                              <span className="text-[10px] text-gray-700">
+                                {new Date(String(sc.created_at)).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button onClick={async () => {
+                              const d = await fetch(`${STRATEGY_URL}/?action=strategy_scenario_get&id=${sc.id}`, { headers: hdr() }).then(r => r.json());
+                              setOpenedScenario(d.scenario ?? null);
+                            }}
+                              className="text-[10px] px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
+                              Открыть
+                            </button>
+                            <button onClick={async () => {
+                              await roadmapReq("strategy_scenario_delete", { id: sc.id });
+                              setSavedScenarios(prev => prev.filter(x => x.id !== sc.id));
+                              if (openedScenario && (openedScenario as Record<string,unknown>).id === sc.id) setOpenedScenario(null);
+                            }}
+                              className="text-gray-700 hover:text-red-500 p-1.5 transition-colors">
+                              <Icon name="Trash2" size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Opened saved scenario detail */}
+              {openedScenario && (
+                <div className="bg-gray-900 border border-violet-800/40 rounded-xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-gray-200">{String((openedScenario as Record<string,unknown>).name)}</p>
+                    <button onClick={() => setOpenedScenario(null)} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={14} /></button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-2">Baseline</p>
+                      {Object.entries((openedScenario as Record<string,unknown>).baseline as Record<string,unknown> ?? {}).map(([k,v]) => (
+                        <div key={k} className="flex justify-between py-0.5"><span className="text-gray-600 font-mono text-[10px]">{k}</span><span className="text-gray-300">{String(v)}</span></div>
+                      ))}
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-violet-400 uppercase tracking-wide mb-2">Projected</p>
+                      {Object.entries((openedScenario as Record<string,unknown>).projected as Record<string,unknown> ?? {}).map(([k,v]) => (
+                        <div key={k} className="flex justify-between py-0.5"><span className="text-gray-600 font-mono text-[10px]">{k}</span><span className="text-violet-300">{String(v)}</span></div>
+                      ))}
+                    </div>
+                  </div>
+                  {(openedScenario as Record<string,unknown>).ai_commentary && typeof (openedScenario as Record<string,unknown>).ai_commentary === "object" && (
+                    <div className="bg-gray-800/40 rounded-xl p-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-2">AI Commentary</p>
+                      <p className="text-xs text-gray-400">{String(((openedScenario as Record<string,unknown>).ai_commentary as Record<string,unknown>).interpretation ?? "")}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
