@@ -42,6 +42,34 @@ type Profile = {
   target_segments: string[]; quarter_goals: string[];
   priority_themes: string[]; non_goals: string[];
 };
+type RoadmapItem = {
+  id: number; title: string; description: string;
+  lane: "now" | "next" | "later"; status: string;
+  source_type: string; source_report_id: number | null;
+  source_payload: Record<string, unknown>;
+  target_segment: string; target_metric: string;
+  impact: string; effort: string; confidence: string;
+  owner: string; sort_order: number;
+  created_by: string; created_at: string; updated_at: string;
+};
+type RoadmapBoard = { now: RoadmapItem[]; next: RoadmapItem[]; later: RoadmapItem[] };
+type ReportItem = {
+  id: number; report_type: string;
+  period_start: string | null; period_end: string | null;
+  created_by: string; created_at: string;
+  meta: { data_maturity?: string; health_score?: number; sample_users?: number; focus?: string; segment?: string };
+};
+type InsightPayload = {
+  source_type: "summary" | "hypothesis" | "next_action" | "segment_plan" | "manual";
+  source_report_id?: number | null;
+  insight_payload?: Record<string, unknown>;
+  prefill_title?: string;
+  prefill_target_metric?: string;
+  prefill_target_segment?: string;
+  prefill_impact?: string;
+  prefill_effort?: string;
+  prefill_description?: string;
+};
 
 // ── API ────────────────────────────────────────────────────────────
 
@@ -52,6 +80,16 @@ function hdr() {
 async function stratReq(action: string, days: string, extra: Record<string, string> = {}, body?: object) {
   const qs = new URLSearchParams({ action, days, ...extra }).toString();
   const res = await fetch(`${STRATEGY_URL}/?${qs}`, {
+    method: body ? "POST" : "GET",
+    headers: hdr(),
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  return res.json();
+}
+
+async function roadmapReq(action: string, body?: object) {
+  const url = `${STRATEGY_URL}/?action=${action}`;
+  const res = await fetch(url, {
     method: body ? "POST" : "GET",
     headers: hdr(),
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -93,6 +131,64 @@ function ImpactBadge({ impact }: { impact: string }) {
 
 function Spinner() {
   return <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />;
+}
+
+// ── RoadmapCard ────────────────────────────────────────────────────
+
+const IMPACT_COLOR: Record<string, string> = { high: "text-red-400", medium: "text-amber-400", low: "text-gray-500" };
+const EFFORT_COLOR: Record<string, string> = { high: "bg-red-900/20 text-red-400", medium: "bg-amber-900/20 text-amber-400", low: "bg-emerald-900/20 text-emerald-400" };
+const RM_STATUS_CFG: Record<string, string> = { idea: "bg-gray-800 text-gray-500", planned: "bg-blue-900/40 text-blue-400", in_progress: "bg-violet-900/40 text-violet-400", done: "bg-emerald-900/40 text-emerald-400" };
+const SOURCE_ICON: Record<string, string> = { hypothesis: "Lightbulb", summary: "Sparkles", next_action: "ArrowRight", segment_plan: "Target", manual: "PenLine" };
+
+function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange }: {
+  item: RoadmapItem;
+  onMoveLane: (lane: string) => void;
+  onDelete: () => void;
+  onStatusChange: (status: string) => void;
+}) {
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 space-y-2 group">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-200 flex-1 leading-snug">{item.title}</p>
+        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          {item.lane !== "now" && (
+            <button onClick={() => onMoveLane(item.lane === "later" ? "next" : "now")}
+              className="p-1 text-gray-700 hover:text-gray-400 transition-colors" title="Вперёд">
+              <Icon name="ChevronLeft" size={11} />
+            </button>
+          )}
+          {item.lane !== "later" && (
+            <button onClick={() => onMoveLane(item.lane === "now" ? "next" : "later")}
+              className="p-1 text-gray-700 hover:text-gray-400 transition-colors" title="Назад">
+              <Icon name="ChevronRight" size={11} />
+            </button>
+          )}
+          <button onClick={onDelete} className="p-1 text-gray-700 hover:text-red-500 transition-colors">
+            <Icon name="Trash2" size={11} />
+          </button>
+        </div>
+      </div>
+      {item.description && <p className="text-[10px] text-gray-500 line-clamp-2">{item.description}</p>}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <select value={item.status} onChange={e => { e.stopPropagation(); onStatusChange(e.target.value); }}
+          onClick={e => e.stopPropagation()}
+          className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border-0 focus:outline-none cursor-pointer ${RM_STATUS_CFG[item.status] ?? RM_STATUS_CFG.idea}`}>
+          {["idea","planned","in_progress","done"].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span className={`text-[9px] font-semibold ${IMPACT_COLOR[item.impact] ?? "text-gray-500"}`}>↑{item.impact}</span>
+        <span className={`text-[9px] px-1 py-0.5 rounded ${EFFORT_COLOR[item.effort] ?? ""}`}>{item.effort} eff.</span>
+        {item.source_type && item.source_type !== "manual" && (
+          <Icon name={SOURCE_ICON[item.source_type] ?? "Circle"} size={10} className="text-gray-700 ml-auto" />
+        )}
+      </div>
+      {(item.target_metric || item.target_segment) && (
+        <div className="text-[9px] text-gray-700 space-y-0.5">
+          {item.target_metric && <div>📊 {item.target_metric}</div>}
+          {item.target_segment && <div>👥 {item.target_segment}</div>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Profile Editor ─────────────────────────────────────────────────
@@ -179,7 +275,7 @@ function ProfileEditor({ profile, onSave }: { profile: Profile; onSave: (p: Prof
 
 // ── Tabs config ────────────────────────────────────────────────────
 
-type Tab = "overview" | "health" | "trajectory" | "segments" | "learning" | "support" | "ai_lab" | "profile";
+type Tab = "overview" | "health" | "trajectory" | "segments" | "learning" | "support" | "ai_lab" | "roadmap" | "reports" | "profile";
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview",   label: "Обзор",      icon: "LayoutDashboard" },
@@ -189,6 +285,8 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "learning",   label: "Обучение",   icon: "GraduationCap" },
   { key: "support",    label: "Support",    icon: "MessageSquare" },
   { key: "ai_lab",     label: "AI Lab",     icon: "Sparkles" },
+  { key: "roadmap",    label: "Roadmap",    icon: "Kanban" },
+  { key: "reports",    label: "История",    icon: "History" },
   { key: "profile",    label: "Профиль",    icon: "Settings" },
 ];
 
@@ -214,6 +312,17 @@ export default function AdminStrategyPage() {
   const [hypoFocus,      setHypoFocus]      = useState("growth");
   const [segPlan,        setSegPlan]        = useState<Record<string, unknown> | null>(null);
   const [segPlanTarget,  setSegPlanTarget]  = useState("stalled");
+
+  // W6.2: Roadmap + Reports
+  const [roadmap,      setRoadmap]      = useState<RoadmapBoard>({ now: [], next: [], later: [] });
+  const [reports,      setReports]      = useState<ReportItem[]>([]);
+  const [selectedReport, setSelectedReport] = useState<Record<string, unknown> | null>(null);
+  const [itemModal,    setItemModal]    = useState<InsightPayload | null>(null);
+  const [itemForm,     setItemForm]     = useState({ title: "", description: "", lane: "next", target_metric: "", target_segment: "", impact: "medium", effort: "medium", confidence: "medium", owner: "" });
+  const [savingItem,   setSavingItem]   = useState(false);
+  const [lastSummaryReportId,  setLastSummaryReportId]  = useState<number | null>(null);
+  const [lastHypoReportId,     setLastHypoReportId]     = useState<number | null>(null);
+  const [lastSegPlanReportId,  setLastSegPlanReportId]  = useState<number | null>(null);
 
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [toast,   setToast]   = useState<string | null>(null);
@@ -265,6 +374,18 @@ export default function AdminStrategyPage() {
       setSupport(d.support ?? null);
       setLoad("support", false);
     }
+    if (t === "roadmap") {
+      setLoad("roadmap", true);
+      const d = await roadmapReq("strategy_roadmap_list");
+      setRoadmap(d.roadmap ?? { now: [], next: [], later: [] });
+      setLoad("roadmap", false);
+    }
+    if (t === "reports") {
+      setLoad("reports", true);
+      const d = await roadmapReq("strategy_reports_list");
+      setReports(d.reports ?? []);
+      setLoad("reports", false);
+    }
   }, [period, overview, health, trajectory, segments, learning, support]);
 
   function switchTab(t: Tab) { setTab(t); loadTab(t); }
@@ -273,6 +394,45 @@ export default function AdminStrategyPage() {
     setPeriod(p);
     setOverview(null); setHealth(null); setTrajectory(null);
     setSegments(null); setLearning(null); setSupport(null);
+  }
+
+  // Pre-fill itemForm when modal opens
+  useEffect(() => {
+    if (!itemModal) return;
+    setItemForm({
+      title:           itemModal.prefill_title ?? "",
+      description:     itemModal.prefill_description ?? "",
+      lane:            "next",
+      target_metric:   itemModal.prefill_target_metric ?? "",
+      target_segment:  itemModal.prefill_target_segment ?? "",
+      impact:          itemModal.prefill_impact ?? "medium",
+      effort:          itemModal.prefill_effort ?? "medium",
+      confidence:      "medium",
+      owner:           "",
+    });
+  }, [itemModal]);
+
+  async function handleSaveToRoadmap() {
+    if (!itemModal || !itemForm.title.trim()) return;
+    setSavingItem(true);
+    await roadmapReq("strategy_roadmap_from_insight", {
+      source_type:      itemModal.source_type,
+      source_report_id: itemModal.source_report_id ?? null,
+      insight_payload:  itemModal.insight_payload ?? {},
+      lane:             itemForm.lane,
+      title:            itemForm.title.trim(),
+      target_metric:    itemForm.target_metric,
+      target_segment:   itemForm.target_segment,
+      impact:           itemForm.impact,
+      effort:           itemForm.effort,
+    });
+    setSavingItem(false);
+    setItemModal(null);
+    showToast("Добавлено в Roadmap");
+    if (tab === "roadmap") {
+      const d = await roadmapReq("strategy_roadmap_list");
+      setRoadmap(d.roadmap ?? { now: [], next: [], later: [] });
+    }
   }
 
   // Reload current tab when period changes
@@ -290,6 +450,7 @@ export default function AdminStrategyPage() {
     setLoad("ai_summary", true); setAiSummary(null);
     const d = await stratReq("strategy_ai_summary", period);
     setAiSummary(d.ai_summary ?? null);
+    if (d.report_id) setLastSummaryReportId(d.report_id);
     setLoad("ai_summary", false);
     showToast("AI-сводка готова");
   }
@@ -298,6 +459,7 @@ export default function AdminStrategyPage() {
     setLoad("hypotheses", true); setHypotheses(null);
     const d = await stratReq("strategy_ai_hypotheses", period, { focus: hypoFocus });
     setHypotheses(d.hypotheses?.hypotheses ?? null);
+    if (d.report_id) setLastHypoReportId(d.report_id);
     setLoad("hypotheses", false);
     showToast("Гипотезы сгенерированы");
   }
@@ -309,6 +471,7 @@ export default function AdminStrategyPage() {
     });
     const d = await res.json();
     setSegPlan(d.segment_plan ?? null);
+    if (d.report_id) setLastSegPlanReportId(d.report_id);
     setLoad("seg_plan", false);
     showToast("План сегмента готов");
   }
@@ -425,6 +588,10 @@ export default function AdminStrategyPage() {
                             <span className="text-sm font-semibold text-gray-200">{ins.title}</span>
                             <ConfBadge conf={ins.confidence} />
                             <ImpactBadge impact={ins.impact} />
+                            <button onClick={() => setItemModal({ source_type: "summary", source_report_id: lastSummaryReportId, insight_payload: ins as Record<string,unknown>, prefill_title: ins.title, prefill_description: ins.claim, prefill_impact: ins.impact })}
+                              className="text-[9px] font-medium px-2 py-0.5 rounded bg-gray-800 text-gray-600 hover:text-violet-400 hover:bg-violet-900/20 border border-gray-700 transition-colors ml-auto">
+                              + Roadmap
+                            </button>
                           </div>
                           <p className="text-xs text-gray-400">{ins.claim}</p>
                         </div>
@@ -469,9 +636,13 @@ export default function AdminStrategyPage() {
                       <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-2">Следующие шаги</p>
                       <div className="space-y-1.5">
                         {aiSummary.next_actions.map((a, i) => (
-                          <div key={i} className="flex items-start gap-2">
-                            <span className="text-violet-500 font-bold flex-shrink-0 mt-0.5">{i+1}.</span>
-                            <span className="text-xs text-gray-300">{a}</span>
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-violet-500 font-bold flex-shrink-0">{i+1}.</span>
+                            <span className="text-xs text-gray-300 flex-1">{a}</span>
+                            <button onClick={() => setItemModal({ source_type: "next_action", source_report_id: lastSummaryReportId, insight_payload: { text: a }, prefill_title: a, prefill_impact: "high", prefill_effort: "low" })}
+                              className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-gray-800 text-gray-600 hover:text-violet-400 hover:bg-violet-900/20 border border-gray-700 transition-colors flex-shrink-0">
+                              + Roadmap
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -826,6 +997,12 @@ export default function AdminStrategyPage() {
                           {" · "}Сегмент: <span className="text-gray-500">{h.target_segment}</span>
                         </p>
                         <p className="text-[10px] text-violet-500 mt-1">На основе: {h.evidence}</p>
+                        <div className="pt-2 flex justify-end">
+                          <button onClick={() => setItemModal({ source_type: "hypothesis", source_report_id: lastHypoReportId, insight_payload: h as unknown as Record<string,unknown>, prefill_title: h.title, prefill_description: h.hypothesis, prefill_target_metric: h.target_metric, prefill_target_segment: h.target_segment, prefill_impact: h.expected_impact, prefill_effort: h.effort })}
+                            className="text-[9px] font-medium px-2.5 py-1 rounded bg-gray-800 text-gray-600 hover:text-violet-400 hover:bg-violet-900/20 border border-gray-700 transition-colors">
+                            + В Roadmap
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -867,7 +1044,11 @@ export default function AdminStrategyPage() {
                           <span className="w-5 h-5 rounded-full bg-gray-700 text-[10px] text-gray-400 flex items-center justify-center font-bold flex-shrink-0">
                             {String(step.step ?? i + 1)}
                           </span>
-                          <span className="text-xs font-semibold text-gray-200">{String(step.action ?? "")}</span>
+                          <span className="text-xs font-semibold text-gray-200 flex-1">{String(step.action ?? "")}</span>
+                          <button onClick={() => setItemModal({ source_type: "segment_plan", source_report_id: lastSegPlanReportId, insight_payload: { ...step, segment: segPlanTarget }, prefill_title: String(step.action ?? ""), prefill_description: String(step.expected_result ?? ""), prefill_target_segment: segPlanTarget, prefill_target_metric: String(step.metric_to_watch ?? "") })}
+                            className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-gray-800 text-gray-600 hover:text-violet-400 hover:bg-violet-900/20 border border-gray-700 transition-colors flex-shrink-0">
+                            + Roadmap
+                          </button>
                         </div>
                         <p className="text-[10px] text-gray-500 ml-7">
                           → {String(step.expected_result ?? "")} · {String(step.timeline ?? "")}
@@ -900,8 +1081,208 @@ export default function AdminStrategyPage() {
             </div>
           )}
 
+          {/* ── ROADMAP ────────────────────────────────────────────── */}
+          {tab === "roadmap" && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-gray-100">Strategic Roadmap</h2>
+                <button onClick={() => setItemModal({ source_type: "manual", prefill_title: "" })}
+                  className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
+                  <Icon name="Plus" size={13} /> Добавить инициативу
+                </button>
+              </div>
+              {loading.roadmap && <div className="flex justify-center py-10"><Spinner /></div>}
+              {!loading.roadmap && (
+                <div className="grid grid-cols-3 gap-4">
+                  {(["now","next","later"] as const).map(lane => {
+                    const LANE_CFG = {
+                      now:   { label: "Now",   bg: "border-red-800/60 bg-red-900/10",     badge: "bg-red-900/40 text-red-400 border-red-800",     dot: "bg-red-500" },
+                      next:  { label: "Next",  bg: "border-amber-800/60 bg-amber-900/10", badge: "bg-amber-900/30 text-amber-400 border-amber-800", dot: "bg-amber-500" },
+                      later: { label: "Later", bg: "border-gray-700 bg-gray-900/50",       badge: "bg-gray-800 text-gray-400 border-gray-700",      dot: "bg-gray-500" },
+                    };
+                    const cfg  = LANE_CFG[lane];
+                    const items = roadmap[lane] ?? [];
+                    return (
+                      <div key={lane} className={`border rounded-xl p-4 min-h-[400px] ${cfg.bg}`}>
+                        <div className="flex items-center gap-2 mb-4">
+                          <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />
+                          <span className="text-sm font-bold text-gray-200">{cfg.label}</span>
+                          <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg.badge}`}>{items.length}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {items.map(item => (
+                            <RoadmapCard key={item.id} item={item}
+                              onMoveLane={async (newLane) => {
+                                await roadmapReq("strategy_roadmap_update", { id: item.id, lane: newLane });
+                                const d = await roadmapReq("strategy_roadmap_list");
+                                setRoadmap(d.roadmap ?? { now: [], next: [], later: [] });
+                              }}
+                              onDelete={async () => {
+                                await roadmapReq("strategy_roadmap_delete", { id: item.id });
+                                const d = await roadmapReq("strategy_roadmap_list");
+                                setRoadmap(d.roadmap ?? { now: [], next: [], later: [] });
+                              }}
+                              onStatusChange={async (newStatus) => {
+                                await roadmapReq("strategy_roadmap_update", { id: item.id, status: newStatus });
+                                const d = await roadmapReq("strategy_roadmap_list");
+                                setRoadmap(d.roadmap ?? { now: [], next: [], later: [] });
+                              }}
+                            />
+                          ))}
+                          {items.length === 0 && (
+                            <div className="text-center py-8 text-gray-700 text-xs">Пока пусто</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── REPORTS ────────────────────────────────────────────── */}
+          {tab === "reports" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold text-gray-100">История генераций</h2>
+              {loading.reports && <div className="flex justify-center py-10"><Spinner /></div>}
+              {!loading.reports && reports.length === 0 && (
+                <div className="text-center py-12 text-gray-600 text-sm">Отчётов пока нет. Запустите AI Summary или Гипотезы.</div>
+              )}
+              {!loading.reports && reports.length > 0 && (
+                <div className="space-y-2">
+                  {reports.map(r => {
+                    const TYPE_CFG: Record<string,{label:string;color:string}> = {
+                      ai_summary:      { label: "AI Summary",    color: "bg-violet-900/40 text-violet-400 border-violet-800" },
+                      ai_hypotheses:   { label: "Гипотезы",      color: "bg-emerald-900/40 text-emerald-400 border-emerald-800" },
+                      ai_segment_plan: { label: "План сегмента", color: "bg-orange-900/30 text-orange-400 border-orange-800" },
+                    };
+                    const cfg = TYPE_CFG[r.report_type] ?? { label: r.report_type, color: "bg-gray-800 text-gray-500 border-gray-700" };
+                    const MATURITY_COLOR: Record<string,string> = { early: "text-gray-600", growing: "text-amber-500", mature: "text-emerald-500" };
+                    return (
+                      <div key={r.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cfg.color}`}>{cfg.label}</span>
+                            {r.meta.data_maturity && <span className={`text-[10px] ${MATURITY_COLOR[r.meta.data_maturity] ?? "text-gray-600"}`}>{r.meta.data_maturity}</span>}
+                            {r.meta.health_score && <span className="text-[10px] text-gray-600">score: {r.meta.health_score}/10</span>}
+                            {r.meta.focus && <span className="text-[10px] text-gray-600">focus: {r.meta.focus}</span>}
+                            {r.meta.segment && <span className="text-[10px] text-gray-600">segment: {r.meta.segment}</span>}
+                          </div>
+                          <div className="text-[10px] text-gray-600">
+                            {r.period_start && r.period_end ? `${r.period_start} — ${r.period_end} · ` : ""}
+                            {new Date(r.created_at).toLocaleString("ru-RU",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}
+                            {" · "}{r.created_by}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={async () => {
+                              const d = await fetch(`${STRATEGY_URL}/?action=strategy_report_get&id=${r.id}`, { headers: hdr() }).then(x => x.json());
+                              setSelectedReport(d.report ?? null);
+                            }}
+                            className="text-[10px] px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
+                            Открыть
+                          </button>
+                          <button
+                            onClick={async () => {
+                              await roadmapReq("strategy_report_delete", { id: r.id });
+                              setReports(prev => prev.filter(x => x.id !== r.id));
+                              if (selectedReport && (selectedReport as Record<string,unknown>).id === r.id) setSelectedReport(null);
+                              showToast("Отчёт удалён");
+                            }}
+                            className="text-gray-700 hover:text-red-500 p-1.5 transition-colors">
+                            <Icon name="Trash2" size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {selectedReport && (
+                <div className="bg-gray-900 border border-violet-800/40 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-semibold text-gray-200">
+                      Отчёт #{String((selectedReport as Record<string,unknown>).id)} · {String((selectedReport as Record<string,unknown>).report_type)}
+                    </p>
+                    <button onClick={() => setSelectedReport(null)} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={14} /></button>
+                  </div>
+                  <pre className="text-[10px] text-gray-500 font-mono whitespace-pre-wrap overflow-auto max-h-80">
+                    {JSON.stringify((selectedReport as Record<string,unknown>).insights, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       </div>
+
+      {/* ── ITEM MODAL ─────────────────────────────────────────────── */}
+      {itemModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setItemModal(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg mx-4 p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-100">Добавить в Roadmap</h3>
+              <button onClick={() => setItemModal(null)} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={16} /></button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-400 border border-violet-800">{itemModal.source_type}</span>
+              {itemModal.source_report_id && <span className="text-[10px] text-gray-600">report #{itemModal.source_report_id}</span>}
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Название *</label>
+                <input value={itemForm.title} onChange={e => setItemForm(f => ({...f, title: e.target.value}))}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+                  placeholder="Название инициативы" />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[["lane","Lane",[["now","Now"],["next","Next"],["later","Later"]]], ["impact","Impact",[["high","High"],["medium","Medium"],["low","Low"]]], ["effort","Effort",[["low","Low"],["medium","Medium"],["high","High"]]]].map(([k,lbl,opts]) => (
+                  <div key={String(k)}>
+                    <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">{String(lbl)}</label>
+                    <select value={(itemForm as Record<string,string>)[String(k)]} onChange={e => setItemForm(f => ({...f, [String(k)]: e.target.value}))}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-300 focus:outline-none focus:border-violet-600">
+                      {(opts as string[][]).map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Метрика</label>
+                  <input value={itemForm.target_metric} onChange={e => setItemForm(f => ({...f, target_metric: e.target.value}))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+                    placeholder="activation_rate" />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Сегмент</label>
+                  <input value={itemForm.target_segment} onChange={e => setItemForm(f => ({...f, target_segment: e.target.value}))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+                    placeholder="new users" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Описание</label>
+                <textarea value={itemForm.description} onChange={e => setItemForm(f => ({...f, description: e.target.value}))}
+                  rows={2} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600 resize-none"
+                  placeholder="Дополнительный контекст..." />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setItemModal(null)}
+                className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 text-sm rounded-xl transition-colors">
+                Отмена
+              </button>
+              <button onClick={handleSaveToRoadmap} disabled={savingItem || !itemForm.title.trim()}
+                className="flex-1 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
+                {savingItem ? "Добавляю..." : "В Roadmap"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium z-50 bg-emerald-900 text-emerald-300 border border-emerald-700 transition-all">
