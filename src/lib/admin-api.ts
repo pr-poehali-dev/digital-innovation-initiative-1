@@ -110,6 +110,55 @@ export const projectApi = {
     projectRequest("/?action=update_wave_item", { method: "PUT", body: JSON.stringify(d) }),
 };
 
+const PASSPORT_BASE = "https://functions.poehali.dev/7a808b5e-cd1e-4e96-9fcb-e4d11cf9006a";
+
+async function ppReq(path: string, options: RequestInit = {}) {
+  const token = getAdminToken();
+  const res = await fetch(`${PASSPORT_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { "X-Admin-Token": token } : {}), ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type PPModuleStatus   = "active" | "planned" | "deprecated" | "draft";
+export type PPModuleCategory = "platform" | "operations" | "content" | "analytics" | "support" | "finance" | "domain";
+export type PPEntityKind     = "business" | "system" | "content" | "analytics" | "support" | "finance" | "internal";
+export type PPOverlapType    = "duplicate" | "overlap" | "responsibility_gap" | "unclear_boundary" | "missing_owner";
+export type PPOverlapStatus  = "open" | "resolved";
+export type PPDepType        = "reads" | "writes" | "auth" | "navigation" | "shared_ui" | "background_job" | "reporting";
+
+export const passportApi = {
+  all: () => ppReq("/?action=all"),
+
+  addModule: (d: Record<string, string>) =>
+    ppReq("/?action=add_module", { method: "POST", body: JSON.stringify(d) }),
+  updateModule: (d: Record<string, string | number>) =>
+    ppReq("/?action=update_module", { method: "PUT", body: JSON.stringify(d) }),
+
+  addRoute: (d: { module_id: number; title: string; route: string; route_type?: string; description?: string; status?: string; owner_email?: string }) =>
+    ppReq("/?action=add_route", { method: "POST", body: JSON.stringify(d) }),
+  updateRoute: (d: Record<string, string | number>) =>
+    ppReq("/?action=update_route", { method: "PUT", body: JSON.stringify(d) }),
+
+  addEntity: (d: Record<string, string | number | null>) =>
+    ppReq("/?action=add_entity", { method: "POST", body: JSON.stringify(d) }),
+  updateEntity: (d: Record<string, string | number | null>) =>
+    ppReq("/?action=update_entity", { method: "PUT", body: JSON.stringify(d) }),
+
+  addDependency: (d: { from_module_id: number; to_module_id: number; dep_type?: string; criticality?: string; notes?: string }) =>
+    ppReq("/?action=add_dependency", { method: "POST", body: JSON.stringify(d) }),
+
+  addOverlap: (d: { title: string; overlap_type?: string; description?: string; related_module_id?: number | null; resolution?: string }) =>
+    ppReq("/?action=add_overlap", { method: "POST", body: JSON.stringify(d) }),
+  updateOverlap: (d: Record<string, string | number | null>) =>
+    ppReq("/?action=update_overlap", { method: "PUT", body: JSON.stringify(d) }),
+
+  saveNotes: (content: string) =>
+    ppReq("/?action=save_notes", { method: "PUT", body: JSON.stringify({ content }) }),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");

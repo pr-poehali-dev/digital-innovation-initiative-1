@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 const CARDS = [
   { label: "Штаб",         icon: "Command",       href: "/admin/hq",       color: "text-violet-400", highlight: true },
   { label: "Архитектура",  icon: "Map",           href: "/admin/project",  color: "text-cyan-400"   },
+  { label: "Паспорт",      icon: "BookMarked",    href: "/admin/passport", color: "text-emerald-400" },
   { label: "Пользователи", icon: "Users",         href: "/admin/users",    color: "text-blue-400"   },
   { label: "Проекты",      icon: "FolderOpen",    href: "/admin/projects", color: "text-purple-400" },
   { label: "Стратегия",    icon: "Compass",       href: "/admin/strategy", color: "text-sky-400"    },
