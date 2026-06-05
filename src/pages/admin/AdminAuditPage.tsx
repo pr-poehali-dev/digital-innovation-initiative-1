@@ -33,12 +33,25 @@ type AuditDetail = AuditEntry & {
 // ── Helpers ───────────────────────────────────────────────────────
 
 const ACTION_COLORS: Record<string, string> = {
-  "user.block":        "bg-red-100 text-red-700",
-  "user.unblock":      "bg-green-100 text-green-700",
-  "project.archive":   "bg-amber-100 text-amber-700",
-  "project.restore":   "bg-blue-100 text-blue-700",
-  "admin.login":       "bg-slate-100 text-slate-600",
-  "admin.logout":      "bg-slate-100 text-slate-500",
+  // Users / Projects
+  "user.block":               "bg-red-100 text-red-700",
+  "user.unblock":             "bg-green-100 text-green-700",
+  "project.archive":          "bg-amber-100 text-amber-700",
+  "project.restore":          "bg-blue-100 text-blue-700",
+  "admin.login":              "bg-slate-100 text-slate-600",
+  "admin.logout":             "bg-slate-100 text-slate-500",
+  // Tickets
+  "ticket.status_changed":    "bg-sky-100 text-sky-700",
+  "ticket.priority_changed":  "bg-orange-100 text-orange-700",
+  "ticket.assignee_changed":  "bg-indigo-100 text-indigo-700",
+  // Content
+  "content.published":        "bg-emerald-100 text-emerald-700",
+  "content.archived":         "bg-gray-100 text-gray-600",
+  // Communications
+  "communication.sent":       "bg-violet-100 text-violet-700",
+  "communication.cancelled":  "bg-red-100 text-red-600",
+  // AI Context
+  "ai_context.exported":      "bg-purple-100 text-purple-700",
 };
 
 function actionBadge(action: string) {
@@ -53,7 +66,11 @@ function actionBadge(action: string) {
 
 function entityBadge(type: string | null) {
   if (!type) return null;
-  const icons: Record<string, string> = { user: "User", project: "FolderOpen", "admin": "Shield" };
+  const icons: Record<string, string> = {
+    user: "User", project: "FolderOpen", admin: "Shield",
+    ticket: "Ticket", content_item: "FileText",
+    communication: "Send", ai_context: "BrainCircuit",
+  };
   return (
     <span className="inline-flex items-center gap-1 text-xs text-slate-500">
       <Icon name={icons[type] ?? "FileText"} size={11} />

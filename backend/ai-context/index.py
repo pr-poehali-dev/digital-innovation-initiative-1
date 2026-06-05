@@ -268,6 +268,23 @@ def get_last_export(conn, scope: str) -> dict | None:
     }
 
 
+def _audit(conn, actor: str, action: str,
+           entity_type: str, entity_id: int,
+           before: dict, after: dict, reason: str = "") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {S}.admin_audit_log "
+            f"(actor_email, actor_role, action, entity_type, entity_id, "
+            f"before_json, after_json, reason) "
+            f"VALUES (%s,'super_admin',%s,%s,%s,%s,%s,%s)",
+            (actor, action, entity_type, entity_id,
+             json.dumps(before, default=str),
+             json.dumps(after, default=str),
+             reason),
+        )
+    conn.commit()
+
+
 def log_export(conn, scope: str, fmt: str, hashes: dict, counts: dict, actor: str) -> None:
     with conn.cursor() as cur:
         cur.execute(f"""
@@ -598,8 +615,13 @@ def handler(event: dict, context) -> dict:
 
             rendered_md = render_markdown(meta, hq_data, proj_data, pp_data)
 
-            # Логируем экспорт
+            # Логируем экспорт + audit trail
             log_export(conn, scope, fmt, all_hashes, counts, actor)
+            _audit(conn, actor, "ai_context.exported", "ai_context", 0,
+                   {}, {"scope": scope, "format": fmt,
+                        "source_hash": all_hashes.get("full","")[:12],
+                        "items": counts},
+                   reason=f"scope={scope} format={fmt}")
 
             if fmt == "markdown":
                 return {

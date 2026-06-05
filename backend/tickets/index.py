@@ -39,6 +39,23 @@ def get_actor(conn, token: str) -> str | None:
     return row[0] if row else None
 
 
+def _audit(conn, actor: str, action: str,
+           entity_type: str, entity_id: int,
+           before: dict, after: dict, reason: str = "") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {S}.admin_audit_log "
+            f"(actor_email, actor_role, action, entity_type, entity_id, "
+            f"before_json, after_json, reason) "
+            f"VALUES (%s,'super_admin',%s,%s,%s,%s,%s,%s)",
+            (actor, action, entity_type, entity_id,
+             json.dumps(before, default=str),
+             json.dumps(after, default=str),
+             reason),
+        )
+    conn.commit()
+
+
 def next_ticket_no(conn) -> str:
     with conn.cursor() as cur:
         cur.execute(f"SELECT nextval('{S}.ticket_no_seq')")
@@ -195,9 +212,23 @@ def handler(event: dict, context) -> dict:
         # ── UPDATE TICKET ─────────────────────────────────────────────────────
         if method == "PUT" and action == "update_ticket":
             tid = int(body.get("id", 0))
+            audit_fields = ["status", "priority", "assignee_email"]
             allowed = ["status", "priority", "source", "module_slug",
                        "requester_name", "requester_email", "subject", "body",
                        "assignee_email", "owner_email"]
+
+            # Снимаем before для audit-полей
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT ticket_no, status, priority, assignee_email FROM {S}.admin_tickets WHERE id = %s",
+                    (tid,),
+                )
+                before_row = cur.fetchone()
+            before_snap = {}
+            if before_row:
+                before_snap = {"ticket_no": before_row[0], "status": before_row[1],
+                               "priority": before_row[2], "assignee_email": before_row[3]}
+
             fields, vals = [], []
             for f in allowed:
                 if f in body:
@@ -222,6 +253,23 @@ def handler(event: dict, context) -> dict:
                 if new_status:
                     _add_msg(conn, tid, "system_event", "System", actor,
                              f"Статус изменён → {new_status}", actor)
+
+                # Audit: логируем только если изменилось значимое поле
+                after_snap = {f: body[f] for f in audit_fields if f in body}
+                if after_snap:
+                    changed = {f: v for f, v in after_snap.items()
+                               if v != before_snap.get(f)}
+                    if changed:
+                        action_name = (
+                            "ticket.status_changed"   if "status"         in changed else
+                            "ticket.priority_changed" if "priority"       in changed else
+                            "ticket.assignee_changed"
+                        )
+                        _audit(conn, actor, action_name, "ticket", tid,
+                               {f: before_snap.get(f) for f in changed},
+                               changed,
+                               reason=before_snap.get("ticket_no", ""))
+
             return cors({"ok": True})
 
         # ── MESSAGES: GET ─────────────────────────────────────────────────────

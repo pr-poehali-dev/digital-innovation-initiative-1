@@ -43,6 +43,23 @@ def get_actor(conn, token: str) -> str | None:
     return row[0] if row else None
 
 
+def _audit(conn, actor: str, action: str,
+           entity_type: str, entity_id: int,
+           before: dict, after: dict, reason: str = "") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            f"INSERT INTO {S}.admin_audit_log "
+            f"(actor_email, actor_role, action, entity_type, entity_id, "
+            f"before_json, after_json, reason) "
+            f"VALUES (%s,'super_admin',%s,%s,%s,%s,%s,%s)",
+            (actor, action, entity_type, entity_id,
+             json.dumps(before, default=str),
+             json.dumps(after, default=str),
+             reason),
+        )
+    conn.commit()
+
+
 def slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
@@ -220,6 +237,12 @@ def handler(event: dict, context) -> dict:
         if method == "POST" and action == "publish_content":
             cid = int(body.get("id", 0))
             with conn.cursor() as cur:
+                cur.execute(f"SELECT title, status, content_no FROM {S}.admin_content_items WHERE id = %s", (cid,))
+                before_row = cur.fetchone()
+            before_status = before_row[1] if before_row else "unknown"
+            title_str     = before_row[0] if before_row else ""
+            cno           = before_row[2] if before_row else ""
+            with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {S}.admin_content_items "
                     f"SET status = 'published', published_at = NOW(), updated_at = NOW(), updated_by = %s "
@@ -227,10 +250,18 @@ def handler(event: dict, context) -> dict:
                     (actor, cid),
                 )
             conn.commit()
+            _audit(conn, actor, "content.published", "content_item", cid,
+                   {"status": before_status}, {"status": "published"}, reason=f"{cno}: {title_str[:80]}")
             return cors({"ok": True})
 
         if method == "POST" and action == "archive_content":
             cid = int(body.get("id", 0))
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT title, status, content_no FROM {S}.admin_content_items WHERE id = %s", (cid,))
+                before_row = cur.fetchone()
+            before_status = before_row[1] if before_row else "unknown"
+            title_str     = before_row[0] if before_row else ""
+            cno           = before_row[2] if before_row else ""
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {S}.admin_content_items "
@@ -238,6 +269,8 @@ def handler(event: dict, context) -> dict:
                     (actor, cid),
                 )
             conn.commit()
+            _audit(conn, actor, "content.archived", "content_item", cid,
+                   {"status": before_status}, {"status": "archived"}, reason=f"{cno}: {title_str[:80]}")
             return cors({"ok": True})
 
         # ════════════════════════════════════════════════════════════════════
@@ -344,6 +377,14 @@ def handler(event: dict, context) -> dict:
         if method == "POST" and action == "send_communication":
             cid = int(body.get("id", 0))
             with conn.cursor() as cur:
+                cur.execute(f"SELECT subject, status, comm_no, channel, audience FROM {S}.admin_communications WHERE id = %s", (cid,))
+                before_row = cur.fetchone()
+            before_status = before_row[1] if before_row else "unknown"
+            subj_str      = before_row[0] if before_row else ""
+            cno_c         = before_row[2] if before_row else ""
+            channel_str   = before_row[3] if before_row else ""
+            audience_str  = before_row[4] if before_row else ""
+            with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {S}.admin_communications "
                     f"SET status = 'sent', sent_at = NOW(), updated_at = NOW(), updated_by = %s "
@@ -352,10 +393,20 @@ def handler(event: dict, context) -> dict:
                 )
             conn.commit()
             _add_event(conn, cid, "sent", None, {}, actor)
+            _audit(conn, actor, "communication.sent", "communication", cid,
+                   {"status": before_status},
+                   {"status": "sent", "channel": channel_str, "audience": audience_str},
+                   reason=f"{cno_c}: {subj_str[:80]}")
             return cors({"ok": True})
 
         if method == "POST" and action == "cancel_communication":
             cid = int(body.get("id", 0))
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT subject, status, comm_no FROM {S}.admin_communications WHERE id = %s", (cid,))
+                before_row = cur.fetchone()
+            before_status = before_row[1] if before_row else "unknown"
+            subj_str      = before_row[0] if before_row else ""
+            cno_c         = before_row[2] if before_row else ""
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE {S}.admin_communications "
@@ -365,6 +416,9 @@ def handler(event: dict, context) -> dict:
                 )
             conn.commit()
             _add_event(conn, cid, "failed", "cancelled_by_user", {}, actor)
+            _audit(conn, actor, "communication.cancelled", "communication", cid,
+                   {"status": before_status}, {"status": "cancelled"},
+                   reason=f"{cno_c}: {subj_str[:80]}")
             return cors({"ok": True})
 
         if action == "communication_events":
