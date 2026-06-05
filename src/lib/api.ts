@@ -487,6 +487,15 @@ export const walletApi = {
     request(URLS.wallet, "/", "POST", { action: "wallet.get_payment_status", payment_id }),
 };
 
+export const TOPIC_STATUSES = [
+  { value: "not_started", label: "Не начато",           color: "text-slate-400",  bg: "bg-slate-100",      dot: "bg-slate-400"   },
+  { value: "studying",    label: "Изучаю",               color: "text-blue-600",   bg: "bg-blue-50",        dot: "bg-blue-500"    },
+  { value: "understood",  label: "Понимаю концептуально", color: "text-violet-600", bg: "bg-violet-50",      dot: "bg-violet-500"  },
+  { value: "applied",     label: "Могу применить",        color: "text-emerald-600",bg: "bg-emerald-50",     dot: "bg-emerald-500" },
+] as const;
+
+export type TopicStatus = typeof TOPIC_STATUSES[number]["value"];
+
 export const learningApi = {
   getGoals: () => request(URLS.learning, "/?action=goals", "GET"),
   createGoal: (title: string, description?: string) =>
@@ -496,7 +505,7 @@ export const learningApi = {
   generatePlan: (title: string, description: string, goal_id?: number) =>
     request(URLS.learning, "/?action=generate_plan", "POST", { title, description, goal_id }),
   getTopics: (goal_id: number) => request(URLS.learning, `/?action=topics&goal_id=${goal_id}`, "GET"),
-  updateTopic: (topic_id: number, status: string) =>
+  updateTopic: (topic_id: number, status: TopicStatus) =>
     request(URLS.learning, "/?action=update_topic", "PUT", { topic_id, status }),
   getNotes: (goal_id?: number, topic_id?: number) => {
     const qs = topic_id ? `&topic_id=${topic_id}` : goal_id ? `&goal_id=${goal_id}` : "";
@@ -509,6 +518,7 @@ export const learningApi = {
   getProgress: (goal_id: number) => request(URLS.learning, `/?action=progress&goal_id=${goal_id}`, "GET"),
   setStartDate: (goal_id: number, start_date: string) =>
     request(URLS.learning, "/?action=set_start_date", "PUT", { goal_id, start_date }),
-  weeklyCheckin: (data: { goal_id: number; goal_title: string; studied: string; understood: string; gaps: string; next_focus: string }) =>
-    request(URLS.learning, "/?action=weekly_checkin", "POST", data),
+  saveCheckin: (data: { goal_id: number; goal_title: string; learned: string; clearer_now: string; gaps: string; next_focus: string }) =>
+    request(URLS.learning, "/?action=save_checkin", "POST", data),
+  getCheckins: (goal_id: number) => request(URLS.learning, `/?action=checkins&goal_id=${goal_id}`, "GET"),
 };

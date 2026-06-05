@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
-import { learningApi } from "@/lib/api";
+import { learningApi, TOPIC_STATUSES, type TopicStatus } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 type Goal = {
@@ -28,7 +28,7 @@ type Topic = {
   title: string;
   description?: string;
   order_index: number;
-  status: "not_started" | "in_progress" | "done" | "skipped";
+  status: TopicStatus;
 };
 
 type Note = {
@@ -44,24 +44,14 @@ type Note = {
 
 type Progress = {
   total: number;
+  applied: number;
+  understood: number;
+  studying: number;
+  not_started: number;
   done: number;
   in_progress: number;
-  not_started: number;
   percent: number;
   notes_count: number;
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  not_started: "bg-slate-100 text-slate-500",
-  in_progress: "bg-blue-100 text-blue-700",
-  done: "bg-emerald-100 text-emerald-700",
-  skipped: "bg-slate-100 text-slate-400",
-};
-const STATUS_LABELS: Record<string, string> = {
-  not_started: "Не начата",
-  in_progress: "Изучаю",
-  done: "Готово",
-  skipped: "Пропущена",
 };
 const KIND_ICONS: Record<string, string> = {
   note: "StickyNote",
@@ -90,9 +80,10 @@ export default function LearningPage() {
 
   // Check-in
   const [showCheckin, setShowCheckin] = useState(false);
-  const [checkinData, setCheckinData] = useState({ studied: "", understood: "", gaps: "", next_focus: "" });
+  const [checkinData, setCheckinData] = useState({ learned: "", clearer_now: "", gaps: "", next_focus: "" });
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [checkinResult, setCheckinResult] = useState("");
+  const [checkins, setCheckins] = useState<{id:number;week_start:string;learned:string;clearer_now:string;gaps:string;next_focus:string;ai_summary:string;created_at:string}[]>([]);
 
   // Создание цели
   const [showNewGoal, setShowNewGoal] = useState(false);
@@ -143,14 +134,16 @@ export default function LearningPage() {
   }
 
   async function loadGoalData(goalId: number) {
-    const [topicsData, notesData, progressData] = await Promise.all([
+    const [topicsData, notesData, progressData, checkinsData] = await Promise.all([
       learningApi.getTopics(goalId) as Promise<{ topics: Topic[] }>,
       learningApi.getNotes(goalId) as Promise<{ notes: Note[] }>,
       learningApi.getProgress(goalId) as Promise<{ progress: Progress }>,
+      learningApi.getCheckins(goalId).catch(() => ({ checkins: [] })) as Promise<{ checkins: typeof checkins }>,
     ]);
     setTopics(topicsData.topics || []);
     setNotes(notesData.notes || []);
     setProgress(progressData.progress || null);
+    setCheckins(checkinsData.checkins || []);
   }
 
   async function handleCreateGoal() {
@@ -187,16 +180,38 @@ export default function LearningPage() {
     }
   }
 
-  async function handleTopicStatus(topic: Topic, status: string) {
+  async function handleTopicStatus(topic: Topic, status: TopicStatus) {
+    // Оптимистичное обновление — сразу показываем новый статус
+    setTopics(prev => prev.map(t => t.id === topic.id ? { ...t, status } : t));
     try {
       await learningApi.updateTopic(topic.id, status);
-      setTopics(prev => prev.map(t => t.id === topic.id ? { ...t, status: status as Topic["status"] } : t));
       if (activeGoal) {
         const p = await learningApi.getProgress(activeGoal.id) as { progress: Progress };
         setProgress(p.progress);
       }
     } catch {
+      // Откатываем при ошибке
+      setTopics(prev => prev.map(t => t.id === topic.id ? { ...t, status: topic.status } : t));
       toast({ title: "Не удалось обновить статус", variant: "destructive" });
+    }
+  }
+
+  async function handleCheckinSubmit() {
+    if (!activeGoal || !checkinData.learned.trim()) return;
+    setCheckinLoading(true);
+    try {
+      const res = await learningApi.saveCheckin({
+        goal_id: activeGoal.id,
+        goal_title: activeGoal.title,
+        ...checkinData,
+      }) as { checkin: typeof checkins[0] };
+      setCheckinResult(res.checkin.ai_summary);
+      setCheckins(prev => [res.checkin, ...prev]);
+      setCheckinData({ learned: "", clearer_now: "", gaps: "", next_focus: "" });
+    } catch {
+      toast({ title: "Не удалось сохранить check-in", variant: "destructive" });
+    } finally {
+      setCheckinLoading(false);
     }
   }
 
@@ -452,8 +467,9 @@ export default function LearningPage() {
                     ) : (
                       rootTopics.map(phase => {
                         const children = childTopics(phase.id);
+                        const WEIGHTS: Record<string, number> = { not_started: 0, studying: 0.33, understood: 0.66, applied: 1, done: 1, in_progress: 0.33 };
                         const donePct = children.length
-                          ? Math.round(children.filter(c => c.status === "done").length / children.length * 100)
+                          ? Math.round(children.reduce((sum, c) => sum + (WEIGHTS[c.status] ?? 0), 0) / children.length * 100)
                           : 0;
                         return (
                           <div key={phase.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -473,33 +489,38 @@ export default function LearningPage() {
                             </div>
                             {children.length > 0 && (
                               <div className="divide-y divide-slate-50">
-                                {children.map(topic => (
-                                  <div key={topic.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors">
-                                    <button
-                                      onClick={() => {
-                                        const next = topic.status === "not_started" ? "in_progress"
-                                          : topic.status === "in_progress" ? "done" : "not_started";
-                                        handleTopicStatus(topic, next);
-                                      }}
-                                      className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
-                                        topic.status === "done"
-                                          ? "bg-emerald-500 border-emerald-500"
-                                          : topic.status === "in_progress"
-                                          ? "bg-blue-500 border-blue-500"
-                                          : "border-slate-300 hover:border-violet-400"
-                                      }`}
-                                    >
-                                      {topic.status === "done" && <Icon name="Check" size={11} className="text-white" />}
-                                      {topic.status === "in_progress" && <div className="w-2 h-2 rounded-full bg-white" />}
-                                    </button>
-                                    <span className={`text-sm flex-1 ${topic.status === "done" ? "line-through text-slate-400" : "text-slate-700"}`}>
-                                      {topic.title}
-                                    </span>
-                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[topic.status]}`}>
-                                      {STATUS_LABELS[topic.status]}
-                                    </span>
-                                  </div>
-                                ))}
+                                {children.map(topic => {
+                                  const cur = TOPIC_STATUSES.find(s => s.value === topic.status) ?? TOPIC_STATUSES[0];
+                                  return (
+                                    <div key={topic.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors group">
+                                      {/* Цветная точка текущего статуса */}
+                                      <div className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${cur.dot}`} />
+                                      <span className={`text-sm flex-1 leading-snug ${topic.status === "applied" ? "text-slate-500" : "text-slate-700"}`}>
+                                        {topic.title}
+                                      </span>
+                                      {/* 4-уровневый inline-селектор */}
+                                      <div className="flex gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                                        {TOPIC_STATUSES.map(s => (
+                                          <button
+                                            key={s.value}
+                                            onClick={() => handleTopicStatus(topic, s.value)}
+                                            title={s.label}
+                                            className={`h-5 rounded px-1.5 text-[10px] font-semibold transition-all ${
+                                              topic.status === s.value
+                                                ? `${s.bg} ${s.color} ring-1 ring-current`
+                                                : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                                            }`}
+                                          >
+                                            {s.value === "not_started" ? "—" : s.value === "studying" ? "S" : s.value === "understood" ? "U" : "✓"}
+                                          </button>
+                                        ))}
+                                      </div>
+                                      <span className={`hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${cur.bg} ${cur.color}`}>
+                                        {cur.label}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
@@ -698,34 +719,15 @@ export default function LearningPage() {
                     topics={topics}
                     notes={notes}
                     progress={progress}
+                    checkins={checkins}
                     showCheckin={showCheckin}
                     setShowCheckin={setShowCheckin}
                     checkinData={checkinData}
                     setCheckinData={setCheckinData}
                     checkinLoading={checkinLoading}
                     checkinResult={checkinResult}
-                    onCheckinSubmit={async () => {
-                      if (!checkinData.studied.trim()) return;
-                      setCheckinLoading(true);
-                      setCheckinResult("");
-                      try {
-                        const res = await learningApi.weeklyCheckin({
-                          goal_id: activeGoal.id,
-                          goal_title: activeGoal.title,
-                          ...checkinData,
-                        }) as { ai_summary: string };
-                        setCheckinResult(res.ai_summary || "");
-                        setCheckinData({ studied: "", understood: "", gaps: "", next_focus: "" });
-                        setShowCheckin(false);
-                        const data = await learningApi.getNotes(activeGoal.id) as { notes: Note[] };
-                        setNotes(data.notes || []);
-                        toast({ title: "Check-in сохранён!" });
-                      } catch {
-                        toast({ title: "Не удалось сохранить check-in", variant: "destructive" });
-                      } finally {
-                        setCheckinLoading(false);
-                      }
-                    }}
+                    setCheckinResult={setCheckinResult}
+                    onCheckinSubmit={handleCheckinSubmit}
                     onSetStartDate={async (date: string) => {
                       await learningApi.setStartDate(activeGoal.id, date);
                       setGoals(prev => prev.map(g => g.id === activeGoal.id ? { ...g, start_date: date } : g));
@@ -823,22 +825,24 @@ const PHASE_COLORS: Record<string, { bg: string; border: string; badge: string; 
 };
 
 function RoadmapTab({
-  goal, topics, notes, progress,
+  goal, topics, progress, checkins,
   showCheckin, setShowCheckin,
   checkinData, setCheckinData,
-  checkinLoading, checkinResult,
+  checkinLoading, checkinResult, setCheckinResult,
   onCheckinSubmit, onSetStartDate,
 }: {
   goal: Goal;
   topics: Topic[];
-  notes: Note[];
+  notes?: Note[];
   progress: Progress | null;
+  checkins: { id: number; week_start: string; learned: string; clearer_now: string; gaps: string; next_focus: string; ai_summary: string; created_at: string }[];
   showCheckin: boolean;
   setShowCheckin: (v: boolean) => void;
-  checkinData: { studied: string; understood: string; gaps: string; next_focus: string };
-  setCheckinData: (v: { studied: string; understood: string; gaps: string; next_focus: string }) => void;
+  checkinData: { learned: string; clearer_now: string; gaps: string; next_focus: string };
+  setCheckinData: (v: { learned: string; clearer_now: string; gaps: string; next_focus: string }) => void;
   checkinLoading: boolean;
   checkinResult: string;
+  setCheckinResult: (v: string) => void;
   onCheckinSubmit: () => void;
   onSetStartDate: (date: string) => void;
 }) {
@@ -863,8 +867,6 @@ function RoadmapTab({
     const rootIds = phaseRoots.map(r => r.id);
     return topics.filter(t => t.parent_id !== null && rootIds.includes(t.parent_id));
   }
-
-  const checkinNotes = notes.filter(n => n.kind === "summary" && n.title?.includes("check-in"));
 
   return (
     <div className="space-y-4">
@@ -1023,7 +1025,91 @@ function RoadmapTab({
         );
       })}
 
-      {/* Еженедельный check-in */}
+      {/* ── Что делать сейчас ───────────────────────────────────────── */}
+      {currentPhaseIdx >= 0 && (() => {
+        const WEIGHTS: Record<string, number> = { not_started: 0, studying: 0.33, understood: 0.66, applied: 1, done: 1, in_progress: 0.33 };
+        // темы текущей фазы: берём дочерние темы этапов текущей фазы
+        const phaseRootIds = topics
+          .filter(t => t.parent_id === null && getPhaseForTopic(t) === currentPhaseIdx)
+          .map(r => r.id);
+        const phaseTopics = allChildren.filter(t => phaseRootIds.includes(t.parent_id!));
+        const notDone = phaseTopics.filter(t => t.status !== "applied" && t.status !== "done");
+        const studying = notDone.filter(t => t.status === "studying");
+        const notStarted = notDone.filter(t => t.status === "not_started");
+        const todoItems: string[] = [
+          ...studying.slice(0, 2).map(t => t.title),
+          ...notStarted.slice(0, 3 - Math.min(studying.length, 2)).map(t => t.title),
+          ...(!checkins.length ? ["Заполнить первый weekly check-in"] : []),
+          ...(checkins.length && (() => {
+            const last = new Date(checkins[0].created_at);
+            return (Date.now() - last.getTime()) > 6 * 86400000;
+          })() ? ["Заполнить weekly check-in за эту неделю"] : []),
+        ].slice(0, 5);
+
+        if (!todoItems.length) return null;
+        const c = PHASE_COLORS[PHASE_DEFS[currentPhaseIdx].color as keyof typeof PHASE_COLORS];
+        return (
+          <div className={`bg-white border ${c.border} rounded-2xl overflow-hidden`}>
+            <div className={`px-5 py-3.5 ${c.bg} flex items-center gap-2.5 border-b ${c.border}`}>
+              <Icon name="Zap" size={15} className="text-slate-700" />
+              <span className="text-sm font-bold text-slate-800">Что делать сейчас</span>
+              <span className={`ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full ${c.badge}`}>
+                Фаза {currentPhaseIdx + 1} · День {dayNumber}
+              </span>
+            </div>
+            <div className="px-5 py-4 space-y-2">
+              {todoItems.map((item, i) => (
+                <div key={i} className="flex items-start gap-2.5">
+                  <div className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center mt-0.5">
+                    <span className="text-[10px] font-bold text-slate-500">{i + 1}</span>
+                  </div>
+                  <span className="text-sm text-slate-700 leading-snug">{item}</span>
+                </div>
+              ))}
+            </div>
+            {/* Осталось освоить */}
+            {(() => {
+              const remaining = phaseTopics.filter(t => t.status !== "applied" && t.status !== "done");
+              const phasePct = phaseTopics.length
+                ? Math.round(phaseTopics.reduce((s, t) => s + (WEIGHTS[t.status] ?? 0), 0) / phaseTopics.length * 100)
+                : 0;
+              const byStatus = {
+                not_started: remaining.filter(t => t.status === "not_started").length,
+                studying:    remaining.filter(t => t.status === "studying").length,
+                understood:  remaining.filter(t => t.status === "understood").length,
+              };
+              return (
+                <div className="px-5 pb-4 border-t border-slate-100 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Осталось освоить</span>
+                    <span className="text-xs font-bold text-slate-600">{remaining.length} тем · {phasePct}% фазы</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3">
+                    <div className={`h-full ${c.bar} rounded-full transition-all`} style={{ width: `${phasePct}%` }} />
+                  </div>
+                  <div className="flex gap-3 text-xs text-slate-500 mb-3">
+                    {byStatus.not_started > 0 && <span><span className="font-semibold text-slate-400">{byStatus.not_started}</span> не начато</span>}
+                    {byStatus.studying > 0    && <span><span className="font-semibold text-blue-500">{byStatus.studying}</span> изучаю</span>}
+                    {byStatus.understood > 0  && <span><span className="font-semibold text-violet-500">{byStatus.understood}</span> понимаю</span>}
+                  </div>
+                  {remaining.slice(0, 5).map(t => {
+                    const st = TOPIC_STATUSES.find(s => s.value === t.status) ?? TOPIC_STATUSES[0];
+                    return (
+                      <div key={t.id} className="flex items-center gap-2 py-1">
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${st.dot}`} />
+                        <span className="text-xs text-slate-600 flex-1 truncate">{t.title}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${st.bg} ${st.color}`}>{st.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
+
+      {/* ── Weekly check-in ─────────────────────────────────────────── */}
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1031,34 +1117,34 @@ function RoadmapTab({
               <Icon name="CalendarCheck" size={15} className="text-white" />
             </div>
             <div>
-              <div className="text-sm font-bold text-slate-800">Еженедельный check-in</div>
+              <div className="text-sm font-bold text-slate-800">Weekly check-in</div>
               <div className="text-xs text-slate-400">
-                {checkinNotes.length > 0
-                  ? `Последний: ${new Date(checkinNotes[0].created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`
+                {checkins.length > 0
+                  ? `Последний: ${new Date(checkins[0].created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`
                   : "Ещё не было — начни первый"}
               </div>
             </div>
           </div>
           <button
-            onClick={() => setShowCheckin(!showCheckin)}
-            className="px-3.5 py-1.5 bg-slate-800 text-white text-xs font-medium rounded-xl hover:bg-slate-700 transition-colors"
+            onClick={() => { setShowCheckin(!showCheckin); setCheckinResult(""); }}
+            className="px-3.5 py-1.5 bg-slate-800 text-white text-xs font-semibold rounded-xl hover:bg-slate-700 transition-colors"
           >
-            {showCheckin ? "Свернуть" : "Заполнить"}
+            {showCheckin ? "Свернуть" : "+ Заполнить"}
           </button>
         </div>
 
         {showCheckin && (
           <div className="px-5 pb-5 space-y-3 border-t border-slate-100 pt-4">
             {[
-              { key: "studied", label: "Что изучено за неделю?", placeholder: "Темы, материалы, встречи..." },
-              { key: "understood", label: "Что стало понятнее?", placeholder: "Инсайты, ключевые выводы..." },
-              { key: "gaps", label: "Где есть пробелы?", placeholder: "Что осталось непонятым, где нужно копнуть глубже..." },
-              { key: "next_focus", label: "Фокус следующей недели", placeholder: "3–5 конкретных шагов..." },
+              { key: "learned",     label: "Что изучено за неделю?",    placeholder: "Темы, материалы, встречи, практика..." },
+              { key: "clearer_now", label: "Что стало понятнее?",        placeholder: "Инсайты, ключевые выводы..." },
+              { key: "gaps",        label: "Где есть пробелы?",          placeholder: "Что осталось непонятым, где нужно глубже..." },
+              { key: "next_focus",  label: "Фокус следующей недели",     placeholder: "3–5 конкретных шагов..." },
             ].map(f => (
               <div key={f.key}>
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{f.label}</label>
                 <textarea
-                  className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+                  className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
                   rows={2}
                   placeholder={f.placeholder}
                   value={checkinData[f.key as keyof typeof checkinData]}
@@ -1069,18 +1155,18 @@ function RoadmapTab({
             <div className="flex justify-end">
               <button
                 onClick={onCheckinSubmit}
-                disabled={checkinLoading || !checkinData.studied.trim()}
-                className="flex items-center gap-2 px-5 py-2 bg-slate-800 text-white text-sm font-medium rounded-xl hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                disabled={checkinLoading || !checkinData.learned.trim()}
+                className="flex items-center gap-2 px-5 py-2 bg-violet-600 text-white text-sm font-semibold rounded-xl hover:bg-violet-700 disabled:opacity-50 transition-colors"
               >
-                {checkinLoading ? (
-                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> AI подводит итог...</>
-                ) : (
-                  <><Icon name="Sparkles" size={14} /> Сохранить и получить AI-саммари</>
-                )}
+                {checkinLoading
+                  ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> AI подводит итог...</>
+                  : <><Icon name="Sparkles" size={14} /> Сохранить + AI-саммари</>
+                }
               </button>
             </div>
             {checkinResult && (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+              <div className="bg-violet-50 border border-violet-100 rounded-xl p-4 text-sm text-violet-900 whitespace-pre-wrap leading-relaxed">
+                <div className="text-xs font-semibold text-violet-500 uppercase tracking-wide mb-2">AI-саммари недели</div>
                 {checkinResult}
               </div>
             )}
@@ -1088,15 +1174,22 @@ function RoadmapTab({
         )}
 
         {/* История check-in'ов */}
-        {checkinNotes.length > 0 && (
-          <div className="px-5 pb-4 border-t border-slate-100 pt-3 space-y-2">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">История check-in'ов</div>
-            {checkinNotes.slice(0, 3).map(n => (
-              <div key={n.id} className="flex items-start gap-2 text-xs text-slate-500">
-                <Icon name="CalendarCheck" size={12} className="text-slate-300 mt-0.5 flex-shrink-0" />
-                <span>{new Date(n.created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
-                <span className="text-slate-300">·</span>
-                <span className="truncate">{n.content.split("\n")[0]}</span>
+        {checkins.length > 0 && (
+          <div className="px-5 pb-4 border-t border-slate-100 pt-3 space-y-3">
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">История</div>
+            {checkins.slice(0, 5).map(c => (
+              <div key={c.id} className="rounded-xl border border-slate-100 p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-600">
+                    {new Date(c.created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">{c.learned}</p>
+                {c.ai_summary && (
+                  <div className="bg-violet-50 rounded-lg px-3 py-2 text-xs text-violet-700 leading-relaxed line-clamp-3">
+                    {c.ai_summary}
+                  </div>
+                )}
               </div>
             ))}
           </div>

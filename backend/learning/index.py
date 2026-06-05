@@ -274,21 +274,6 @@ def handler(event: dict, context) -> dict:
             ]
             return cors({"ok": True, "topics": topics})
 
-        if method == "PUT" and action == "update_topic":
-            topic_id = body.get("topic_id")
-            new_status = body.get("status")
-            if not topic_id or not new_status:
-                return cors({"ok": False, "error": {"message": "Нужны topic_id и status"}}, 400)
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""UPDATE {SCHEMA}.learning_topics
-                        SET status = %s, updated_at = NOW()
-                        WHERE id = %s AND goal_id IN (SELECT id FROM {SCHEMA}.learning_goals WHERE user_id = %s)""",
-                    (new_status, topic_id, user_id),
-                )
-            conn.commit()
-            return cors({"ok": True})
-
         # ── Находки (notes) ───────────────────────────────────────────
         if method == "GET" and action == "notes":
             goal_id = qs.get("goal_id")
@@ -357,15 +342,16 @@ def handler(event: dict, context) -> dict:
             answer = yandex_gpt(question, system)
             return cors({"ok": True, "answer": answer})
 
-        # ── Прогресс ──────────────────────────────────────────────────
+        # ── Прогресс (веса: not_started=0, studying=0.33, understood=0.66, applied=1.0) ──
         if method == "GET" and action == "progress":
             goal_id = qs.get("goal_id")
             if not goal_id:
                 return cors({"ok": False, "error": {"message": "Нужен goal_id"}}, 400)
+            WEIGHTS = {"not_started": 0.0, "studying": 0.33, "understood": 0.66, "applied": 1.0,
+                       "done": 1.0, "in_progress": 0.33}
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT status, COUNT(*) FROM {SCHEMA}.learning_topics
-                        WHERE goal_id = %s GROUP BY status""",
+                    f"SELECT status, COUNT(*) FROM {SCHEMA}.learning_topics WHERE goal_id = %s GROUP BY status",
                     (goal_id,),
                 )
                 counts = {r[0]: r[1] for r in cur.fetchall()}
@@ -375,12 +361,102 @@ def handler(event: dict, context) -> dict:
                 )
                 notes_count = cur.fetchone()[0]
             total = sum(counts.values())
-            done = counts.get("done", 0)
-            pct = int(done / total * 100) if total else 0
+            weighted_sum = sum(WEIGHTS.get(s, 0) * n for s, n in counts.items())
+            pct = int(weighted_sum / total * 100) if total else 0
+            applied = counts.get("applied", 0) + counts.get("done", 0)
+            understood = counts.get("understood", 0)
+            studying = counts.get("studying", 0) + counts.get("in_progress", 0)
+            not_started = counts.get("not_started", 0)
             return cors({"ok": True, "progress": {
-                "total": total, "done": done, "in_progress": counts.get("in_progress", 0),
-                "not_started": counts.get("not_started", 0), "percent": pct, "notes_count": notes_count,
+                "total": total,
+                "applied": applied,
+                "understood": understood,
+                "studying": studying,
+                "not_started": not_started,
+                "done": applied,
+                "in_progress": studying,
+                "percent": pct,
+                "notes_count": notes_count,
             }})
+
+        # ── Валидация статуса темы (4 уровня) ─────────────────────────
+        if method == "PUT" and action == "update_topic":
+            topic_id = body.get("topic_id")
+            new_status = body.get("status")
+            VALID = {"not_started", "studying", "understood", "applied"}
+            if not topic_id or new_status not in VALID:
+                return cors({"ok": False, "error": {"message": f"Статус должен быть одним из: {', '.join(VALID)}"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.learning_topics
+                        SET status = %s, updated_at = NOW()
+                        WHERE id = %s AND goal_id IN (SELECT id FROM {SCHEMA}.learning_goals WHERE user_id = %s)""",
+                    (new_status, topic_id, user_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Weekly check-in: сохранить ────────────────────────────────
+        if method == "POST" and action == "save_checkin":
+            goal_id = body.get("goal_id")
+            learned     = (body.get("learned") or "").strip()
+            clearer_now = (body.get("clearer_now") or "").strip()
+            gaps        = (body.get("gaps") or "").strip()
+            next_focus  = (body.get("next_focus") or "").strip()
+            goal_title  = (body.get("goal_title") or "").strip()
+            if not goal_id or not learned:
+                return cors({"ok": False, "error": {"message": "Нужны goal_id и learned"}}, 400)
+            # AI summary
+            system = "Ты наставник. Пиши кратко, тезисно, по-русски."
+            prompt = (
+                f"Человек изучает: «{goal_title}».\n\n"
+                f"Отчёт за неделю:\n"
+                f"- Изучено: {learned}\n"
+                f"- Стало понятнее: {clearer_now}\n"
+                f"- Пробелы: {gaps}\n"
+                f"- Фокус следующей недели: {next_focus}\n\n"
+                "Напиши:\n1. Резюме прогресса (2–3 предложения)\n2. 3 конкретных рекомендации на следующую неделю"
+            )
+            try:
+                ai_summary = yandex_gpt(prompt, system)
+            except Exception:
+                ai_summary = ""
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.learning_checkins
+                        (user_id, goal_id, week_start, learned, clearer_now, gaps, next_focus, ai_summary)
+                        VALUES (%s, %s, CURRENT_DATE, %s, %s, %s, %s, %s)
+                        RETURNING id, created_at""",
+                    (user_id, goal_id, learned, clearer_now, gaps, next_focus, ai_summary),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return cors({"ok": True, "checkin": {
+                "id": row[0], "learned": learned, "clearer_now": clearer_now,
+                "gaps": gaps, "next_focus": next_focus, "ai_summary": ai_summary,
+                "created_at": str(row[1]),
+            }})
+
+        # ── Weekly check-in: история ──────────────────────────────────
+        if method == "GET" and action == "checkins":
+            goal_id = qs.get("goal_id")
+            if not goal_id:
+                return cors({"ok": False, "error": {"message": "Нужен goal_id"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, week_start, learned, clearer_now, gaps, next_focus, ai_summary, created_at
+                        FROM {SCHEMA}.learning_checkins
+                        WHERE goal_id = %s AND user_id = %s
+                        ORDER BY created_at DESC LIMIT 20""",
+                    (goal_id, user_id),
+                )
+                rows = cur.fetchall()
+            checkins = [
+                {"id": r[0], "week_start": str(r[1]), "learned": r[2], "clearer_now": r[3],
+                 "gaps": r[4], "next_focus": r[5], "ai_summary": r[6], "created_at": str(r[7])}
+                for r in rows
+            ]
+            return cors({"ok": True, "checkins": checkins})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 

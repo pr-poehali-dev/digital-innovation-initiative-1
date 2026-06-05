@@ -7,9 +7,25 @@
       "expectedStatus": 200
     },
     {
-      "name": "Unauthorized access",
+      "name": "Unauthorized - goals",
       "method": "GET",
       "path": "/?action=goals",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized - progress",
+      "method": "GET",
+      "path": "/?action=progress&goal_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized - checkins",
+      "method": "GET",
+      "path": "/?action=checkins&goal_id=1",
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
