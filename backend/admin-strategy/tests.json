@@ -1,0 +1,7 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "profile без токена — 401", "method": "GET", "path": "/?action=strategy_profile_get", "expectedStatus": 401},
+    {"name": "overview без токена — 401", "method": "GET", "path": "/?action=strategy_overview", "expectedStatus": 401}
+  ]
+}

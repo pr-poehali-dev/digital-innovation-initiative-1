@@ -14,6 +14,7 @@ const NAV = [
   { label: "Алерты",      icon: "Bell",             href: "/admin/alerts" },
   { label: "Flags",        icon: "ToggleRight",      href: "/admin/flags" },
   { label: "Тикеты",      icon: "Ticket",           href: "/admin/tickets" },
+  { label: "Стратегия",    icon: "TrendingUp",        href: "/admin/strategy" },
   { label: "Автоматизация", icon: "Zap",             href: "/admin/automations" },
   { label: "Контент",     icon: "FileText",         href: "/admin/content" },
 ];
