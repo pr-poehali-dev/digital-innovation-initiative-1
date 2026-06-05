@@ -118,9 +118,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Bottom */}
         <div className="px-2 py-3 border-t border-slate-100 space-y-0.5">
-          {BOTTOM_ITEMS.map(item => (
-            <SidebarLink key={item.href} item={item} collapsed={collapsed} />
-          ))}
           {/* User */}
           <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl mt-1 ${collapsed ? "justify-center px-2" : ""}`}>
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center flex-shrink-0">
