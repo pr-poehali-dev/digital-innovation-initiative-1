@@ -28,7 +28,8 @@ def get_admin(conn, token: str) -> bool:
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT id FROM {SCHEMA}.admin_sessions "
-            f"WHERE session_token_hash = '{token_hash}' AND expires_at > NOW() AND revoked_at IS NULL LIMIT 1"
+            f"WHERE session_token_hash = %s AND expires_at > NOW() AND revoked_at IS NULL LIMIT 1",
+            (token_hash,),
         )
         return cur.fetchone() is not None
 

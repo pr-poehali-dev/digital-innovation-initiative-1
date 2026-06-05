@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { hqApi, type HQGoalStatus, type HQIdeaStatus, type HQRiskImpact, type HQRiskStatus } from "@/lib/admin-api";
+import { useToast } from "@/hooks/use-toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Block = { title: string; content: string; updated_at: string };
@@ -129,20 +130,21 @@ function Badge({ label, color }: { label: string; color: string }) {
   return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${color}`}>{label}</span>;
 }
 
-// ── Inline select ─────────────────────────────────────────────────────────────
-function InlineSelect<T extends string>({ value, options, labels, onChange }: {
-  value: T; options: readonly T[]; labels: Record<T, string>; onChange: (v: T) => void;
+// ── Idea status select ────────────────────────────────────────────────────────
+function IdeaStatusSelect({ value, onChange }: {
+  value: HQIdeaStatus; onChange: (v: HQIdeaStatus) => void;
 }) {
   return (
-    <select value={value} onChange={e => onChange(e.target.value as T)}
-      className="text-[11px] bg-gray-800 border border-gray-700 text-gray-300 rounded px-1.5 py-0.5 focus:outline-none">
-      {options.map(o => <option key={o} value={o}>{labels[o]}</option>)}
+    <select value={value} onChange={e => onChange(e.target.value as HQIdeaStatus)}
+      className="text-[11px] bg-gray-800 border border-gray-700 text-gray-300 rounded px-1.5 py-0.5 focus:outline-none flex-shrink-0">
+      {IDEA_STATUSES.map(s => <option key={s} value={s}>{IDEA_STATUS[s].label}</option>)}
     </select>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function AdminHQPage() {
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [blocks, setBlocks] = useState<Record<string, Block>>({});
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -183,8 +185,13 @@ export default function AdminHQPage() {
 
   // ── Actions ────────────────────────────────────────────────────────────────
   async function saveBlock(key: string, content: string) {
-    await hqApi.saveBlock(key, content);
-    setBlocks(prev => ({ ...prev, [key]: { ...prev[key], content } }));
+    const res = await hqApi.saveBlock(key, content);
+    if (res.ok) {
+      setBlocks(prev => ({ ...prev, [key]: { ...prev[key], content } }));
+    } else {
+      toast({ title: "Не удалось сохранить", variant: "destructive" });
+      throw new Error("save failed");
+    }
   }
 
   async function submitGoal() {
@@ -194,13 +201,20 @@ export default function AdminHQPage() {
       setGoals(prev => [...prev, { ...newGoal, id: res.data.id }]);
       setNewGoal({ title: "", horizon: "", status: "planned", criterion: "" });
       setAddingGoal(false);
+      toast({ title: "Цель добавлена" });
+    } else {
+      toast({ title: "Не удалось добавить цель", variant: "destructive" });
     }
   }
 
   async function cycleGoalStatus(g: Goal) {
     const next = GOAL_STATUSES[(GOAL_STATUSES.indexOf(g.status) + 1) % GOAL_STATUSES.length];
-    await hqApi.updateGoal({ id: g.id, status: next });
     setGoals(prev => prev.map(x => x.id === g.id ? { ...x, status: next } : x));
+    const res = await hqApi.updateGoal({ id: g.id, status: next });
+    if (!res.ok) {
+      setGoals(prev => prev.map(x => x.id === g.id ? { ...x, status: g.status } : x));
+      toast({ title: "Не удалось обновить статус", variant: "destructive" });
+    }
   }
 
   async function submitDecision() {
@@ -214,6 +228,9 @@ export default function AdminHQPage() {
       }, ...prev]);
       setNewDecision({ what: "", why: "", changed: "" });
       setAddingDecision(false);
+      toast({ title: "Решение зафиксировано" });
+    } else {
+      toast({ title: "Не удалось сохранить решение", variant: "destructive" });
     }
   }
 
@@ -224,14 +241,21 @@ export default function AdminHQPage() {
       setRisks(prev => [...prev, { ...newRisk, id: res.data.id }]);
       setNewRisk({ title: "", impact: "medium", mitigation: "", status: "open" });
       setAddingRisk(false);
+      toast({ title: "Риск добавлен" });
+    } else {
+      toast({ title: "Не удалось добавить риск", variant: "destructive" });
     }
   }
 
   async function cycleRiskStatus(r: Risk) {
     const statuses: HQRiskStatus[] = ["open", "mitigated", "closed"];
     const next = statuses[(statuses.indexOf(r.status) + 1) % statuses.length];
-    await hqApi.updateRisk({ id: r.id, status: next });
     setRisks(prev => prev.map(x => x.id === r.id ? { ...x, status: next } : x));
+    const res = await hqApi.updateRisk({ id: r.id, status: next });
+    if (!res.ok) {
+      setRisks(prev => prev.map(x => x.id === r.id ? { ...x, status: r.status } : x));
+      toast({ title: "Не удалось обновить статус", variant: "destructive" });
+    }
   }
 
   async function submitRule() {
@@ -241,6 +265,9 @@ export default function AdminHQPage() {
       setRules(prev => [...prev, { ...newRule, id: res.data.id, order_index: 0 }]);
       setNewRule({ category: "general", rule_text: "" });
       setAddingRule(false);
+      toast({ title: "Правило добавлено" });
+    } else {
+      toast({ title: "Не удалось добавить правило", variant: "destructive" });
     }
   }
 
@@ -251,12 +278,19 @@ export default function AdminHQPage() {
       setIdeas(prev => [{ ...newIdea, id: res.data.id, status: "new" as HQIdeaStatus, created_at: new Date().toISOString() }, ...prev]);
       setNewIdea({ title: "", why: "", priority: "medium", source: "" });
       setAddingIdea(false);
+      toast({ title: "Идея добавлена" });
+    } else {
+      toast({ title: "Не удалось добавить идею", variant: "destructive" });
     }
   }
 
   async function updateIdeaStatus(idea: Idea, status: HQIdeaStatus) {
-    await hqApi.updateIdea({ id: idea.id, status });
     setIdeas(prev => prev.map(x => x.id === idea.id ? { ...x, status } : x));
+    const res = await hqApi.updateIdea({ id: idea.id, status });
+    if (!res.ok) {
+      setIdeas(prev => prev.map(x => x.id === idea.id ? { ...x, status: idea.status } : x));
+      toast({ title: "Не удалось обновить статус", variant: "destructive" });
+    }
   }
 
   // ── AI context copy ────────────────────────────────────────────────────────
@@ -598,10 +632,8 @@ export default function AdminHQPage() {
                     {idea.why && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{idea.why}</p>}
                     {idea.source && <p className="text-xs text-gray-700 mt-0.5">→ {idea.source}</p>}
                   </div>
-                  <InlineSelect<HQIdeaStatus>
+                  <IdeaStatusSelect
                     value={idea.status}
-                    options={IDEA_STATUSES}
-                    labels={Object.fromEntries(IDEA_STATUSES.map(s => [s, IDEA_STATUS[s].label])) as Record<HQIdeaStatus, string>}
                     onChange={status => updateIdeaStatus(idea, status)}
                   />
                 </div>
