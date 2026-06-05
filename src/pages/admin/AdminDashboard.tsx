@@ -2,9 +2,10 @@ import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 
 const CARDS = [
+  { label: "Штаб",         icon: "Command",       href: "/admin/hq",       color: "text-violet-400", highlight: true },
   { label: "Пользователи", icon: "Users",         href: "/admin/users",    color: "text-blue-400"   },
   { label: "Проекты",      icon: "FolderOpen",    href: "/admin/projects", color: "text-purple-400" },
-  { label: "Стратегия",    icon: "Compass",       href: "/admin/strategy", color: "text-violet-400" },
+  { label: "Стратегия",    icon: "Compass",       href: "/admin/strategy", color: "text-sky-400"    },
   { label: "План",         icon: "ClipboardList", href: "/admin/plan",     color: "text-indigo-400" },
   { label: "Аудит",        icon: "ShieldCheck",   href: "/admin/audit",    color: "text-red-400"    },
   { label: "Активность",   icon: "Activity",      href: "/admin/activity", color: "text-orange-400" },
@@ -24,7 +25,11 @@ export default function AdminDashboard() {
             <a
               key={card.href}
               href={card.href}
-              className="group flex flex-col gap-3 p-5 rounded-xl bg-gray-900 border border-gray-800 hover:border-gray-700 transition-colors"
+              className={`group flex flex-col gap-3 p-5 rounded-xl border transition-colors ${
+                (card as {highlight?: boolean}).highlight
+                  ? "bg-violet-900/20 border-violet-800 hover:border-violet-700"
+                  : "bg-gray-900 border-gray-800 hover:border-gray-700"
+              }`}
             >
               <Icon name={card.icon} size={22} className={card.color} />
               <span className="text-sm font-medium text-gray-300 group-hover:text-white transition-colors">

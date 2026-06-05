@@ -24,6 +24,55 @@ async function request(path: string, options: RequestInit = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
+const HQ_BASE = "https://functions.poehali.dev/d30df439-1b62-4d68-bc12-6124c4afa049";
+
+async function hqRequest(path: string, options: RequestInit = {}) {
+  const token = getAdminToken();
+  const res = await fetch(`${HQ_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { "X-Admin-Token": token } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type HQGoalStatus = "planned" | "on_track" | "at_risk" | "done";
+export type HQIdeaStatus  = "new" | "considering" | "in_plan" | "rejected" | "done";
+export type HQRiskImpact  = "high" | "medium" | "low";
+export type HQRiskStatus  = "open" | "mitigated" | "closed";
+
+export const hqApi = {
+  all: () => hqRequest("/?action=all"),
+
+  saveBlock: (key: string, content: string) =>
+    hqRequest("/?action=save_block", { method: "PUT", body: JSON.stringify({ key, content }) }),
+
+  addGoal: (d: { title: string; horizon: string; status: HQGoalStatus; criterion: string }) =>
+    hqRequest("/?action=add_goal", { method: "POST", body: JSON.stringify(d) }),
+  updateGoal: (d: { id: number; title?: string; horizon?: string; status?: HQGoalStatus; criterion?: string }) =>
+    hqRequest("/?action=update_goal", { method: "PUT", body: JSON.stringify(d) }),
+
+  addDecision: (d: { what: string; why: string; changed: string; decided_at?: string }) =>
+    hqRequest("/?action=add_decision", { method: "POST", body: JSON.stringify(d) }),
+
+  addRisk: (d: { title: string; impact: HQRiskImpact; mitigation: string; status: HQRiskStatus }) =>
+    hqRequest("/?action=add_risk", { method: "POST", body: JSON.stringify(d) }),
+  updateRisk: (d: { id: number; title?: string; impact?: HQRiskImpact; mitigation?: string; status?: HQRiskStatus }) =>
+    hqRequest("/?action=update_risk", { method: "PUT", body: JSON.stringify(d) }),
+
+  addRule: (d: { category: string; rule_text: string; order_index?: number }) =>
+    hqRequest("/?action=add_rule", { method: "POST", body: JSON.stringify(d) }),
+
+  addIdea: (d: { title: string; why: string; priority: string; source: string }) =>
+    hqRequest("/?action=add_idea", { method: "POST", body: JSON.stringify(d) }),
+  updateIdea: (d: { id: number; title?: string; why?: string; priority?: string; status?: HQIdeaStatus; source?: string }) =>
+    hqRequest("/?action=update_idea", { method: "PUT", body: JSON.stringify(d) }),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");
