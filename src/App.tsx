@@ -21,6 +21,7 @@ import AdminPassportPage from "./pages/admin/AdminPassportPage";
 import AdminErrorsPage from "./pages/admin/AdminErrorsPage";
 import AdminAlertsPage from "./pages/admin/AdminAlertsPage";
 import AdminFlagsPage from "./pages/admin/AdminFlagsPage";
+import AdminTicketsPage from "./pages/admin/AdminTicketsPage";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
@@ -77,6 +78,7 @@ const App = () => (
               <Route path="/admin/errors" element={<AdminRoute><AdminErrorsPage /></AdminRoute>} />
               <Route path="/admin/alerts" element={<AdminRoute><AdminAlertsPage /></AdminRoute>} />
               <Route path="/admin/flags" element={<AdminRoute><AdminFlagsPage /></AdminRoute>} />
+              <Route path="/admin/tickets" element={<AdminRoute><AdminTicketsPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}

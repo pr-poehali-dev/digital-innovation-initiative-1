@@ -221,6 +221,35 @@ export const aiContextApi = {
     aiCtxReq(`/?action=status&scope=${scope}`),
 };
 
+const TICKETS_BASE = "https://functions.poehali.dev/d5e57a3f-a793-4f65-849e-8f084619e51d";
+
+async function ticketsReq(path: string, options: RequestInit = {}) {
+  const token = getAdminToken();
+  const res = await fetch(`${TICKETS_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { "X-Admin-Token": token } : {}), ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type TicketStatus   = "new" | "open" | "pending" | "waiting_user" | "resolved" | "closed";
+export type TicketPriority = "low" | "medium" | "high" | "urgent";
+export type TicketMsgType  = "public_reply" | "internal_note" | "system_event";
+
+export const ticketsApi = {
+  summary:    ()                          => ticketsReq("/?action=tickets_summary"),
+  all:        (params: Record<string,string> = {}) => {
+    const qs = new URLSearchParams({ action: "tickets_all", ...params }).toString();
+    return ticketsReq(`/?${qs}`);
+  },
+  get:        (id: number)                => ticketsReq(`/?action=ticket_get&id=${id}`),
+  add:        (d: Record<string,unknown>) => ticketsReq("/?action=add_ticket",    { method: "POST", body: JSON.stringify(d) }),
+  update:     (d: Record<string,unknown>) => ticketsReq("/?action=update_ticket", { method: "PUT",  body: JSON.stringify(d) }),
+  messages:   (ticket_id: number)         => ticketsReq(`/?action=ticket_messages&ticket_id=${ticket_id}`),
+  addMessage: (d: Record<string,unknown>) => ticketsReq("/?action=add_ticket_message", { method: "POST", body: JSON.stringify(d) }),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");
