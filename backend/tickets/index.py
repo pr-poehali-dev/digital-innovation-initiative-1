@@ -2,6 +2,7 @@ import json
 import os
 import hashlib
 import psycopg2
+from datetime import datetime, timezone
 
 DB = os.environ["DATABASE_URL"]
 _s = os.environ.get("MAIN_DB_SCHEMA", "").strip()
@@ -10,6 +11,71 @@ S = _s if _s else "t_p61016064_digital_innovation_i"
 STATUSES  = ["new", "open", "pending", "waiting_user", "resolved", "closed"]
 PRIORITIES = ["low", "medium", "high", "urgent"]
 MSG_TYPES  = ["public_reply", "internal_note", "system_event"]
+
+# SLA limits (calendar hours, no business-hours)
+SLA_RESPONSE_H  = {"urgent": 2,  "high": 8,  "medium": 24, "low": 72}
+SLA_RESOLVE_H   = {"urgent": 8,  "high": 24, "medium": 72, "low": 168}
+
+
+def _sla_state(created_at_str: str, priority: str,
+               first_response_at: str | None, resolved_at: str | None) -> dict:
+    """Вычисляет SLA-состояние тикета без сохранения в БД."""
+    now = datetime.now(timezone.utc)
+
+    def parse(s):
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    created = parse(created_at_str)
+    if not created:
+        return {"sla_state": "ok", "is_overdue": False, "age_hours": 0,
+                "response_due_at": None, "resolve_due_at": None}
+
+    age_h = (now - created).total_seconds() / 3600
+    resp_h = SLA_RESPONSE_H.get(priority, 24)
+    res_h  = SLA_RESOLVE_H.get(priority, 72)
+
+    from datetime import timedelta
+    resp_due = created + timedelta(hours=resp_h)
+    res_due  = created + timedelta(hours=res_h)
+
+    # Если уже ответили — response SLA закрыт
+    resp_ok = first_response_at is not None
+    is_resolved = resolved_at is not None
+
+    # Определяем активный дедлайн
+    if is_resolved:
+        sla_state = "ok"
+        is_overdue = False
+    elif not resp_ok and now > resp_due:
+        sla_state = "overdue"
+        is_overdue = True
+    elif not is_resolved and now > res_due:
+        sla_state = "overdue"
+        is_overdue = True
+    elif not resp_ok and (resp_due - now).total_seconds() < 3600:
+        sla_state = "due_soon"
+        is_overdue = False
+    elif (res_due - now).total_seconds() < 3600 * 4:
+        sla_state = "due_soon"
+        is_overdue = False
+    else:
+        sla_state = "ok"
+        is_overdue = False
+
+    return {
+        "sla_state":      sla_state,
+        "is_overdue":     is_overdue,
+        "age_hours":      round(age_h, 1),
+        "response_due_at": resp_due.isoformat(),
+        "resolve_due_at":  res_due.isoformat(),
+        "resp_sla_met":    resp_ok,
+    }
 
 
 def cors(body: dict, code: int = 200) -> dict:
@@ -64,6 +130,13 @@ def next_ticket_no(conn) -> str:
 
 
 def row_to_ticket(r) -> dict:
+    created_at  = str(r[18])
+    priority    = r[3]
+    first_resp  = str(r[14]) if r[14] else None
+    resolved_at = str(r[16]) if r[16] else None
+
+    sla = _sla_state(created_at, priority, first_resp, resolved_at)
+
     return {
         "id": r[0], "ticket_no": r[1], "status": r[2], "priority": r[3],
         "source": r[4], "module_slug": r[5],
@@ -71,12 +144,14 @@ def row_to_ticket(r) -> dict:
         "subject": r[9], "body": r[10],
         "assignee_email": r[11], "owner_email": r[12],
         "tags_json": r[13] or [],
-        "first_response_at": str(r[14]) if r[14] else None,
+        "first_response_at": first_resp,
         "last_message_at":   str(r[15]) if r[15] else None,
-        "resolved_at":       str(r[16]) if r[16] else None,
+        "resolved_at":       resolved_at,
         "closed_at":         str(r[17]) if r[17] else None,
-        "created_at": str(r[18]), "created_by": r[19],
+        "created_at": created_at, "created_by": r[19],
         "updated_at": str(r[20]), "updated_by": r[21],
+        # SLA (computed)
+        **sla,
     }
 
 
@@ -124,14 +199,20 @@ def handler(event: dict, context) -> dict:
                             AND status NOT IN ('resolved','closed'))              AS unassigned_cnt,
                         COUNT(*) FILTER (WHERE status = 'resolved'
                             AND resolved_at >= NOW() - INTERVAL '24 hours')      AS resolved_today,
-                        COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed')) AS active_cnt
+                        COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed')) AS active_cnt,
+                        COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed') AND (
+                            (priority = 'urgent' AND created_at < NOW() - INTERVAL '8 hours') OR
+                            (priority = 'high'   AND created_at < NOW() - INTERVAL '24 hours') OR
+                            (priority = 'medium' AND created_at < NOW() - INTERVAL '72 hours') OR
+                            (priority = 'low'    AND created_at < NOW() - INTERVAL '168 hours')
+                        ))                                                        AS overdue_cnt
                     FROM {S}.admin_tickets
                 """)
                 r = cur.fetchone()
             return cors({"ok": True, "summary": {
                 "new": r[0], "open": r[1], "waiting_user": r[2],
                 "urgent": r[3], "unassigned": r[4],
-                "resolved_today": r[5], "active": r[6],
+                "resolved_today": r[5], "active": r[6], "overdue": r[7],
             }})
 
         # ── LIST ──────────────────────────────────────────────────────────────
@@ -147,9 +228,27 @@ def handler(event: dict, context) -> dict:
                 filters.append("assignee_email = %s"); vals.append(qs["assignee"])
             if qs.get("unassigned") == "1":
                 filters.append("assignee_email = ''")
+                filters.append("status NOT IN ('resolved','closed')")
             if qs.get("urgent") == "1":
                 filters.append("priority = 'urgent'")
                 filters.append("status NOT IN ('resolved','closed')")
+            if qs.get("queue") == "overdue":
+                # Просрочены по SLA: дольше чем resolve_sla с момента created_at
+                filters.append("""status NOT IN ('resolved','closed') AND (
+                    (priority = 'urgent'  AND created_at < NOW() - INTERVAL '8 hours') OR
+                    (priority = 'high'    AND created_at < NOW() - INTERVAL '24 hours') OR
+                    (priority = 'medium'  AND created_at < NOW() - INTERVAL '72 hours') OR
+                    (priority = 'low'     AND created_at < NOW() - INTERVAL '168 hours')
+                )""")
+            elif qs.get("queue") == "due_soon":
+                filters.append("""status NOT IN ('resolved','closed') AND (
+                    (priority = 'urgent'  AND created_at BETWEEN NOW() - INTERVAL '8 hours'   AND NOW() - INTERVAL '4 hours') OR
+                    (priority = 'high'    AND created_at BETWEEN NOW() - INTERVAL '24 hours'  AND NOW() - INTERVAL '20 hours') OR
+                    (priority = 'medium'  AND created_at BETWEEN NOW() - INTERVAL '72 hours'  AND NOW() - INTERVAL '68 hours') OR
+                    (priority = 'low'     AND created_at BETWEEN NOW() - INTERVAL '168 hours' AND NOW() - INTERVAL '164 hours')
+                )""")
+            elif qs.get("queue") == "waiting_user":
+                filters.append("status = 'waiting_user'")
             if qs.get("q"):
                 filters.append("(subject ILIKE %s OR requester_email ILIKE %s OR ticket_no ILIKE %s)")
                 q = "%" + qs["q"] + "%"
@@ -157,7 +256,12 @@ def handler(event: dict, context) -> dict:
 
             where = ("WHERE " + " AND ".join(filters)) if filters else ""
             with conn.cursor() as cur:
-                cur.execute(f"SELECT {TICKET_COLS} FROM {S}.admin_tickets {where} ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_at DESC LIMIT 200", vals)
+                cur.execute(
+                    f"SELECT {TICKET_COLS} FROM {S}.admin_tickets {where} "
+                    f"ORDER BY CASE priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_at DESC "
+                    f"LIMIT 200",
+                    vals,
+                )
                 rows = cur.fetchall()
             return cors({"ok": True, "tickets": [row_to_ticket(r) for r in rows]})
 
@@ -314,6 +418,70 @@ def handler(event: dict, context) -> dict:
                 """, (actor, mtyp, tid))
             conn.commit()
             return cors({"ok": True})
+
+        # ── BULK ACTIONS ──────────────────────────────────────────────────────
+        if method == "POST" and action == "bulk_tickets":
+            ids = body.get("ids", [])
+            op  = body.get("op", "")   # assign | status | priority
+            if not ids or not op:
+                return cors({"ok": False, "error": {"message": "ids and op required"}}, 400)
+            ids_clean = [int(i) for i in ids if str(i).isdigit()]
+            if not ids_clean:
+                return cors({"ok": False, "error": {"message": "no valid ids"}}, 400)
+            ids_sql = ",".join(str(i) for i in ids_clean)
+
+            if op == "assign":
+                assignee = body.get("assignee_email", "").strip()
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {S}.admin_tickets SET assignee_email = %s, updated_at = NOW(), updated_by = %s "
+                        f"WHERE id IN ({ids_sql})",
+                        (assignee, actor),
+                    )
+                conn.commit()
+                _audit(conn, actor, "ticket.bulk_assigned", "ticket", 0,
+                       {}, {"ids": ids_clean, "assignee_email": assignee},
+                       reason=f"bulk assign {len(ids_clean)} tickets")
+
+            elif op == "status":
+                new_status = body.get("status", "")
+                if new_status not in STATUSES:
+                    return cors({"ok": False, "error": {"message": "invalid status"}}, 400)
+                extra = ""
+                if new_status == "resolved":
+                    extra = ", resolved_at = NOW()"
+                elif new_status == "closed":
+                    extra = ", closed_at = NOW()"
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {S}.admin_tickets SET status = %s{extra}, updated_at = NOW(), updated_by = %s "
+                        f"WHERE id IN ({ids_sql})",
+                        (new_status, actor),
+                    )
+                conn.commit()
+                _audit(conn, actor, "ticket.bulk_status_changed", "ticket", 0,
+                       {}, {"ids": ids_clean, "status": new_status},
+                       reason=f"bulk status→{new_status} {len(ids_clean)} tickets")
+
+            elif op == "priority":
+                new_prio = body.get("priority", "")
+                if new_prio not in PRIORITIES:
+                    return cors({"ok": False, "error": {"message": "invalid priority"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {S}.admin_tickets SET priority = %s, updated_at = NOW(), updated_by = %s "
+                        f"WHERE id IN ({ids_sql})",
+                        (new_prio, actor),
+                    )
+                conn.commit()
+                _audit(conn, actor, "ticket.bulk_priority_changed", "ticket", 0,
+                       {}, {"ids": ids_clean, "priority": new_prio},
+                       reason=f"bulk priority→{new_prio} {len(ids_clean)} tickets")
+
+            else:
+                return cors({"ok": False, "error": {"message": "unknown op"}}, 400)
+
+            return cors({"ok": True, "updated": len(ids_clean)})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 

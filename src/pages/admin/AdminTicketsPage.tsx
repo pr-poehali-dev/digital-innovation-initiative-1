@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
-import { ticketsApi, type TicketStatus, type TicketPriority, type TicketMsgType } from "@/lib/admin-api";
+import { ticketsApi, getAdminToken, type TicketStatus, type TicketPriority, type TicketMsgType } from "@/lib/admin-api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -30,6 +30,13 @@ type Ticket = {
   created_by: string;
   updated_at: string;
   updated_by: string;
+  // SLA fields
+  sla_state: "ok" | "due_soon" | "overdue";
+  is_overdue: boolean;
+  age_hours: number;
+  response_due_at: string | null;
+  resolve_due_at: string | null;
+  resp_sla_met: boolean;
 };
 
 type TicketMessage = {
@@ -51,6 +58,7 @@ type Summary = {
   unassigned: number;
   resolved_today: number;
   active: number;
+  overdue: number;
 };
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -75,7 +83,41 @@ const STATUSES: TicketStatus[]    = ["new", "open", "pending", "waiting_user", "
 const PRIORITIES: TicketPriority[] = ["low", "medium", "high", "urgent"];
 const SOURCES = ["email", "web", "api", "chat", "phone", "other"];
 
+const QUEUES = [
+  { key: "all",          label: "Все" },
+  { key: "unassigned",   label: "Без исп." },
+  { key: "urgent",       label: "Срочные" },
+  { key: "overdue",      label: "Просроченные" },
+  { key: "waiting_user", label: "Ожидают" },
+];
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const TICKETS_URL = "https://functions.poehali.dev/d5e57a3f-a793-4f65-849e-8f084619e51d";
+
+async function bulkTickets(ids: number[], op: string, extra: Record<string, string> = {}) {
+  const res = await fetch(`${TICKETS_URL}/?action=bulk_tickets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Admin-Token": getAdminToken() },
+    body: JSON.stringify({ ids, op, ...extra }),
+  });
+  return res.json();
+}
+
+function slaColor(state: string) {
+  if (state === "overdue")  return "text-red-400";
+  if (state === "due_soon") return "text-amber-400";
+  return "text-gray-600";
+}
+
+function slaLabel(t: Ticket) {
+  if (t.is_overdue) return `+${Math.round(t.age_hours)}h overdue`;
+  const h = t.age_hours;
+  if (!h && h !== 0) return "—";
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${Math.round(h)}h`;
+  return `${Math.floor(h / 24)}d`;
+}
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "—";
@@ -260,7 +302,7 @@ function AddTicketForm({ onAdd, onCancel }: AddFormProps) {
         <label className={labelCls}>Модуль</label>
         <input
           className={inputCls}
-          placeholder="module-slug (опционально)"
+          placeholder="module-slug"
           value={form.module_slug}
           onChange={e => set("module_slug", e.target.value)}
         />
@@ -314,34 +356,64 @@ function TicketRow({
   ticket,
   selected,
   onClick,
+  bulkMode,
+  isChecked,
+  onCheck,
 }: {
   ticket: Ticket;
   selected: boolean;
   onClick: () => void;
+  bulkMode: boolean;
+  isChecked: boolean;
+  onCheck: (id: number, checked: boolean) => void;
 }) {
   return (
     <div
-      onClick={onClick}
+      onClick={bulkMode ? undefined : onClick}
       className={`px-4 py-3 cursor-pointer transition-colors hover:bg-gray-800/50 ${
-        selected
-          ? "bg-violet-900/20 border-l-2 border-violet-500"
-          : "border-l-2 border-transparent"
-      }`}
+        selected && !bulkMode ? "bg-violet-900/20 border-l-2 border-violet-500" : "border-l-2 border-transparent"
+      } ${isChecked ? "bg-violet-900/10" : ""}`}
     >
       <div className="flex items-center gap-1.5 mb-1">
+        {bulkMode && (
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={e => { e.stopPropagation(); onCheck(ticket.id, e.target.checked); }}
+            onClick={e => e.stopPropagation()}
+            className="w-3 h-3 accent-violet-500 cursor-pointer flex-shrink-0"
+          />
+        )}
         <PriorityDot priority={ticket.priority} />
         <span className="font-mono text-[10px] text-gray-600 flex-shrink-0">{ticket.ticket_no}</span>
-        <div className="ml-auto">
+        {/* SLA badge */}
+        {ticket.sla_state && ticket.sla_state !== "ok" && (
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+            ticket.sla_state === "overdue"
+              ? "bg-red-900/40 text-red-400 border border-red-800"
+              : "bg-amber-900/30 text-amber-400 border border-amber-800"
+          }`}>
+            {ticket.sla_state === "overdue" ? "Overdue" : "Due soon"}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className={`text-[9px] font-mono ${slaColor(ticket.sla_state ?? "ok")}`}>
+            {slaLabel(ticket)}
+          </span>
           <StatusBadge status={ticket.status} />
         </div>
       </div>
-      <p className="text-sm font-medium text-gray-200 truncate leading-snug">{ticket.subject}</p>
+      <p
+        className={`text-sm font-medium truncate leading-snug ${bulkMode ? "cursor-pointer" : ""}`}
+        onClick={bulkMode ? onClick : undefined}
+        style={{ color: "#e2e8f0" }}
+      >
+        {ticket.subject}
+      </p>
       <div className="flex items-center gap-1.5 mt-1">
         <span className="text-[10px] text-gray-600 truncate flex-1">{ticket.requester_email}</span>
-        {ticket.module_slug && (
-          <span className="text-[10px] text-violet-500 font-mono flex-shrink-0">
-            {ticket.module_slug}
-          </span>
+        {ticket.assignee_email && (
+          <span className="text-[10px] text-gray-600 truncate max-w-[80px]">→ {ticket.assignee_email}</span>
         )}
         <span className="text-[10px] text-gray-700 flex-shrink-0">
           {fmtDate(ticket.last_message_at || ticket.created_at)}
@@ -515,228 +587,226 @@ function DetailPanel({
 
   // Close dropdowns on outside click
   useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (statusRef.current && !statusRef.current.contains(e.target as Node)) {
-        setStatusOpen(false);
-      }
-      if (priorityRef.current && !priorityRef.current.contains(e.target as Node)) {
-        setPriorityOpen(false);
-      }
+    function handler(e: MouseEvent) {
+      if (statusRef.current && !statusRef.current.contains(e.target as Node)) setStatusOpen(false);
+      if (priorityRef.current && !priorityRef.current.contains(e.target as Node)) setPriorityOpen(false);
     }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  async function updateField(fields: Record<string, unknown>) {
-    const { ok, data } = await ticketsApi.update({ id: ticket.id, ...fields });
+  async function changeStatus(status: TicketStatus) {
+    setStatusOpen(false);
+    const { ok, data } = await ticketsApi.update({ id: ticket.id, status });
     if (ok && data.ticket) {
       onTicketChange(data.ticket as Ticket);
+      toast({ title: `Статус → ${STATUS_CFG[status].label}` });
     } else {
-      toast({ title: "Ошибка обновления тикета", variant: "destructive" });
+      toast({ title: "Ошибка обновления статуса", variant: "destructive" });
+    }
+  }
+
+  async function changePriority(priority: TicketPriority) {
+    setPriorityOpen(false);
+    const { ok, data } = await ticketsApi.update({ id: ticket.id, priority });
+    if (ok && data.ticket) {
+      onTicketChange(data.ticket as Ticket);
+      toast({ title: `Приоритет → ${PRIORITY_CFG[priority].label}` });
+    } else {
+      toast({ title: "Ошибка обновления приоритета", variant: "destructive" });
     }
   }
 
   async function saveAssignee() {
-    if (assigneeVal === ticket.assignee_email) return;
-    await updateField({ assignee_email: assigneeVal });
+    const { ok, data } = await ticketsApi.update({ id: ticket.id, assignee_email: assigneeVal });
+    if (ok && data.ticket) {
+      onTicketChange(data.ticket as Ticket);
+      toast({ title: "Исполнитель обновлён" });
+    } else {
+      toast({ title: "Ошибка обновления исполнителя", variant: "destructive" });
+    }
   }
 
-  const isClosedOrResolved = ticket.status === "resolved" || ticket.status === "closed";
-
   const inputCls =
-    "w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600 transition-colors";
+    "w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600 transition-colors";
 
   return (
-    <div className="px-6 py-5 space-y-5 max-w-3xl">
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-mono text-xs text-gray-600">{ticket.ticket_no}</span>
-          <div className="ml-auto flex items-center gap-2">
-            {/* Quick actions */}
-            {!isClosedOrResolved && (
-              <>
-                <button
-                  onClick={() => updateField({ status: "resolved" })}
-                  className="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-900/40 text-emerald-400 hover:bg-emerald-800/60 border border-emerald-800 transition-colors"
-                >
-                  Resolve
-                </button>
-                <button
-                  onClick={() => updateField({ status: "closed" })}
-                  className="px-3 py-1 text-xs font-semibold rounded-lg bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700 transition-colors"
-                >
-                  Close
-                </button>
-              </>
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Panel header */}
+      <div className="px-6 py-4 border-b border-gray-800 flex items-start gap-3 flex-shrink-0">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-mono text-xs text-gray-500">{ticket.ticket_no}</span>
+            {ticket.module_slug && (
+              <span className="text-[10px] text-violet-400 font-mono px-1.5 py-0.5 rounded bg-violet-900/30 border border-violet-800">
+                {ticket.module_slug}
+              </span>
             )}
-            {isClosedOrResolved && (
+            {/* SLA info in header */}
+            {ticket.sla_state && ticket.sla_state !== "ok" && (
+              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                ticket.sla_state === "overdue"
+                  ? "bg-red-900/40 text-red-400 border border-red-800"
+                  : "bg-amber-900/30 text-amber-400 border border-amber-800"
+              }`}>
+                {ticket.sla_state === "overdue" ? "Overdue" : "Due soon"}
+              </span>
+            )}
+          </div>
+          <h2 className="text-base font-semibold text-gray-100 leading-snug">{ticket.subject}</h2>
+          <p className="text-xs text-gray-500 mt-1">
+            {ticket.requester_name} · {ticket.requester_email}
+            {ticket.requester_user_id && (
               <button
-                onClick={() => updateField({ status: "open" })}
-                className="px-3 py-1 text-xs font-semibold rounded-lg bg-violet-900/40 text-violet-400 hover:bg-violet-800/60 border border-violet-800 transition-colors"
+                onClick={() => navigate(`/admin/users?id=${ticket.requester_user_id}`)}
+                className="ml-2 text-violet-400 hover:underline"
               >
-                Reopen
+                профиль
               </button>
             )}
-          </div>
-        </div>
-        <h2 className="text-xl font-bold text-white leading-snug">{ticket.subject}</h2>
-
-        {/* Badges row */}
-        <div className="flex flex-wrap items-center gap-2 mt-3">
-          {/* Status with dropdown */}
-          <div className="relative" ref={statusRef}>
-            <StatusBadge status={ticket.status} onClick={() => setStatusOpen(o => !o)} />
-            {statusOpen && (
-              <div className="absolute top-full left-0 mt-1 z-20 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[130px]">
-                {STATUSES.map(s => (
-                  <button
-                    key={s}
-                    onClick={() => {
-                      setStatusOpen(false);
-                      updateField({ status: s });
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-800 transition-colors"
-                  >
-                    <StatusBadge status={s} />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Priority with dropdown */}
-          <div className="relative" ref={priorityRef}>
-            <button
-              onClick={() => setPriorityOpen(o => !o)}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full border border-gray-700 bg-gray-800/60 hover:opacity-80 cursor-pointer ${
-                PRIORITY_CFG[ticket.priority].color
-              }`}
-            >
-              <PriorityDot priority={ticket.priority} />
-              {PRIORITY_CFG[ticket.priority].label}
-            </button>
-            {priorityOpen && (
-              <div className="absolute top-full left-0 mt-1 z-20 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[110px]">
-                {PRIORITIES.map(p => (
-                  <button
-                    key={p}
-                    onClick={() => {
-                      setPriorityOpen(false);
-                      updateField({ priority: p });
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-gray-800 transition-colors"
-                  >
-                    <PriorityDot priority={p} />
-                    <span className={PRIORITY_CFG[p].color}>{PRIORITY_CFG[p].label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {ticket.source && (
-            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border border-gray-700 bg-gray-800/60 text-gray-400">
-              {ticket.source}
-            </span>
-          )}
-          {ticket.module_slug && (
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-violet-800 bg-violet-900/20 text-violet-400">
-              {ticket.module_slug}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Meta grid */}
-      <div className="grid grid-cols-2 gap-4 bg-gray-900 rounded-xl p-4 border border-gray-800 text-xs">
-        <div>
-          <p className="text-gray-600 mb-0.5">Заявитель</p>
-          <p className="text-gray-200 font-medium">{ticket.requester_name || "—"}</p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-gray-500">{ticket.requester_email || "—"}</p>
-            {ticket.requester_email && (
-              <button
-                onClick={() => {
-                  navigate(`/admin/users?q=${encodeURIComponent(ticket.requester_email)}`);
-                }}
-                className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-violet-900/40 text-violet-400 border border-violet-800 hover:bg-violet-800/60 transition-colors"
-              >
-                <Icon name="User" size={9} />
-                Профиль
-              </button>
-            )}
-          </div>
-        </div>
-        <div>
-          <p className="text-gray-600 mb-0.5">Исполнитель</p>
-          <input
-            className={inputCls}
-            value={assigneeVal}
-            placeholder="assignee@example.com"
-            onChange={e => setAssigneeVal(e.target.value)}
-            onBlur={saveAssignee}
-          />
-        </div>
-        <div>
-          <p className="text-gray-600 mb-0.5">Owner</p>
-          <p className="text-gray-400">{ticket.owner_email || "—"}</p>
-        </div>
-        <div>
-          <p className="text-gray-600 mb-0.5">Создан</p>
-          <p className="text-gray-400">{fmtDate(ticket.created_at)}</p>
-          {ticket.created_by && (
-            <p className="text-gray-600 text-[10px]">{ticket.created_by}</p>
-          )}
-        </div>
-        <div>
-          <p className="text-gray-600 mb-0.5">Последнее сообщение</p>
-          <p className="text-gray-400">{fmtDate(ticket.last_message_at)}</p>
-        </div>
-        <div>
-          <p className="text-gray-600 mb-0.5">Первый ответ</p>
-          <p className="text-gray-400">{fmtDate(ticket.first_response_at)}</p>
-        </div>
-      </div>
-
-      {/* Original body */}
-      {ticket.body && (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 px-4 py-3">
-          <p className="text-[10px] text-gray-600 mb-1.5 font-semibold uppercase tracking-wide">
-            Исходное сообщение
           </p>
-          <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{ticket.body}</p>
-        </div>
-      )}
-
-      {/* Timeline */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Icon name="MessageSquare" size={14} className="text-gray-500" />
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">История</span>
-          <span className="ml-auto text-[10px] text-gray-600">{messages.length} сообщений</span>
         </div>
 
-        {loadingMsgs ? (
-          <div className="flex justify-center py-6">
-            <Spinner />
-          </div>
-        ) : messages.length === 0 ? (
-          <p className="text-xs text-gray-600 text-center py-4">Сообщений пока нет</p>
-        ) : (
-          <div className="space-y-3">
-            {messages.map(msg => (
-              <MessageBubble key={msg.id} msg={msg} />
-            ))}
-          </div>
+        {/* Status dropdown */}
+        <div className="relative flex-shrink-0" ref={statusRef}>
+          <StatusBadge status={ticket.status} onClick={() => setStatusOpen(o => !o)} />
+          {statusOpen && (
+            <div className="absolute right-0 top-full mt-1 z-20 bg-gray-850 border border-gray-700 rounded-xl shadow-xl overflow-hidden w-36"
+                 style={{ background: "#1a1d23" }}>
+              {STATUSES.map(s => (
+                <button
+                  key={s}
+                  onClick={() => changeStatus(s)}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors ${
+                    s === ticket.status ? "text-violet-400 bg-violet-900/20" : "text-gray-300"
+                  }`}
+                >
+                  {STATUS_CFG[s].label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Meta row */}
+      <div className="px-6 py-3 border-b border-gray-800/60 flex flex-wrap gap-x-4 gap-y-2 flex-shrink-0">
+        {/* Priority */}
+        <div className="relative" ref={priorityRef}>
+          <button
+            onClick={() => setPriorityOpen(o => !o)}
+            className={`flex items-center gap-1.5 text-xs font-medium hover:opacity-80 transition-opacity ${PRIORITY_CFG[ticket.priority].color}`}
+          >
+            <PriorityDot priority={ticket.priority} />
+            {PRIORITY_CFG[ticket.priority].label}
+          </button>
+          {priorityOpen && (
+            <div className="absolute left-0 top-full mt-1 z-20 bg-gray-850 border border-gray-700 rounded-xl shadow-xl overflow-hidden w-28"
+                 style={{ background: "#1a1d23" }}>
+              {PRIORITIES.map(p => (
+                <button
+                  key={p}
+                  onClick={() => changePriority(p)}
+                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 transition-colors ${
+                    p === ticket.priority ? "text-violet-400 bg-violet-900/20" : "text-gray-300"
+                  }`}
+                >
+                  {PRIORITY_CFG[p].label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <span className="text-xs text-gray-600">
+          Создан: <span className="text-gray-400">{fmtDate(ticket.created_at)}</span>
+        </span>
+        {ticket.first_response_at && (
+          <span className="text-xs text-gray-600">
+            1й ответ: <span className="text-gray-400">{fmtDate(ticket.first_response_at)}</span>
+          </span>
+        )}
+        {ticket.resolved_at && (
+          <span className="text-xs text-gray-600">
+            Решён: <span className="text-gray-400">{fmtDate(ticket.resolved_at)}</span>
+          </span>
+        )}
+        {/* SLA timing */}
+        {(ticket.response_due_at || ticket.resolve_due_at) && (
+          <span className={`text-xs font-mono ${slaColor(ticket.sla_state ?? "ok")}`}>
+            SLA: {slaLabel(ticket)}
+          </span>
         )}
       </div>
 
-      {/* Reply form */}
-      <ReplyForm
-        ticketId={ticket.id}
-        onSent={msg => onMessageSent(msg)}
-      />
+      {/* Assignee */}
+      <div className="px-6 py-3 border-b border-gray-800/60 flex items-center gap-2 flex-shrink-0">
+        <span className="text-[10px] text-gray-500 w-20 flex-shrink-0">Исполнитель</span>
+        <input
+          className={`${inputCls} flex-1`}
+          placeholder="email@example.com"
+          value={assigneeVal}
+          onChange={e => setAssigneeVal(e.target.value)}
+          onBlur={saveAssignee}
+          onKeyDown={e => e.key === "Enter" && saveAssignee()}
+        />
+      </div>
+
+      {/* Tags */}
+      {ticket.tags_json && ticket.tags_json.length > 0 && (
+        <div className="px-6 py-2 border-b border-gray-800/60 flex flex-wrap gap-1 flex-shrink-0">
+          {ticket.tags_json.map(tag => (
+            <span
+              key={tag}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        {/* Original body */}
+        {ticket.body && (
+          <div className="bg-gray-900 rounded-xl border border-gray-800 px-4 py-3">
+            <p className="text-[10px] text-gray-600 mb-1.5 font-semibold uppercase tracking-wide">
+              Исходное сообщение
+            </p>
+            <p className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{ticket.body}</p>
+          </div>
+        )}
+
+        {/* Timeline */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Icon name="MessageSquare" size={14} className="text-gray-500" />
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">История</span>
+            <span className="ml-auto text-[10px] text-gray-600">{messages.length} сообщений</span>
+          </div>
+
+          {loadingMsgs ? (
+            <div className="flex justify-center py-6">
+              <Spinner />
+            </div>
+          ) : messages.length === 0 ? (
+            <p className="text-xs text-gray-600 text-center py-4">Сообщений пока нет</p>
+          ) : (
+            <div className="space-y-3">
+              {messages.map(msg => (
+                <MessageBubble key={msg.id} msg={msg} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Reply form */}
+        <ReplyForm
+          ticketId={ticket.id}
+          onSent={msg => onMessageSent(msg)}
+        />
+      </div>
     </div>
   );
 }
@@ -756,6 +826,7 @@ export default function AdminTicketsPage() {
     unassigned: 0,
     resolved_today: 0,
     active: 0,
+    overdue: 0,
   });
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [selected, setSelected] = useState<Ticket | null>(null);
@@ -772,6 +843,18 @@ export default function AdminTicketsPage() {
   const [filterModule, setFilterModule] = useState("");
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
 
+  // Queue tabs state
+  const [queue, setQueue] = useState("all");
+
+  // Bulk mode state
+  const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkOp, setBulkOp] = useState<"assign" | "status" | "priority" | null>(null);
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [bulkStatus, setBulkStatus] = useState<TicketStatus>("open");
+  const [bulkPriority, setBulkPriority] = useState<TicketPriority>("medium");
+  const [bulkSaving, setBulkSaving] = useState(false);
+
   // Load summary + list
   async function loadAll() {
     setLoadingList(true);
@@ -779,6 +862,9 @@ export default function AdminTicketsPage() {
     if (filterStatus) params.status = filterStatus;
     if (filterPriority) params.priority = filterPriority;
     if (search) params.search = search;
+    if (queue === "unassigned") { params.unassigned = "1"; }
+    else if (queue === "urgent") { params.urgent = "1"; }
+    else if (queue === "overdue" || queue === "waiting_user") { params.queue = queue; }
 
     const [summaryRes, listRes] = await Promise.all([
       ticketsApi.summary(),
@@ -799,7 +885,7 @@ export default function AdminTicketsPage() {
   useEffect(() => {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus, filterPriority]);
+  }, [filterStatus, filterPriority, queue]);
 
   // Load messages when a ticket is selected
   async function loadMessages(ticketId: number) {
@@ -892,6 +978,16 @@ export default function AdminTicketsPage() {
             >
               + Новый тикет
             </button>
+            <button
+              onClick={() => { setBulkMode(m => !m); setBulkSelected(new Set()); }}
+              className={`text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
+                bulkMode
+                  ? "bg-violet-900/40 text-violet-400 border-violet-700"
+                  : "bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300"
+              }`}
+            >
+              {bulkMode ? `✓ ${bulkSelected.size}` : "Bulk"}
+            </button>
           </div>
 
           {/* Add form */}
@@ -900,13 +996,38 @@ export default function AdminTicketsPage() {
           )}
 
           {/* Overview cards */}
-          <div className="px-4 pt-3 pb-2 grid grid-cols-3 gap-2 flex-shrink-0">
+          <div className="px-4 pt-3 pb-2 grid grid-cols-4 gap-1.5 flex-shrink-0">
             <OverviewCard value={summary.new} label="New" color="text-blue-400" />
             <OverviewCard value={summary.open} label="Open" color="text-emerald-400" />
             <OverviewCard value={summary.urgent} label="Urgent" color="text-red-400" />
+            <OverviewCard value={summary.overdue ?? 0} label="Overdue" color="text-red-500" />
             <OverviewCard value={summary.waiting_user} label="Waiting" color="text-amber-400" />
             <OverviewCard value={summary.unassigned} label="Unassigned" color="text-gray-400" />
+            <OverviewCard value={summary.active} label="Active" color="text-violet-400" />
             <OverviewCard value={summary.resolved_today} label="Resolved today" color="text-gray-500" />
+          </div>
+
+          {/* Queue tabs */}
+          <div className="px-4 py-2 flex gap-1 flex-wrap border-b border-gray-800/60 flex-shrink-0">
+            {QUEUES.map(q => (
+              <button
+                key={q.key}
+                onClick={() => { setQueue(q.key); setBulkSelected(new Set()); }}
+                className={`text-[10px] font-semibold px-2.5 py-1 rounded-full transition-colors ${
+                  queue === q.key
+                    ? "bg-violet-700 text-white"
+                    : "bg-gray-800 text-gray-500 hover:text-gray-300 border border-gray-700"
+                }`}
+              >
+                {q.label}
+                {q.key === "overdue" && (summary.overdue ?? 0) > 0 && (
+                  <span className="ml-1 bg-red-500 text-white text-[9px] px-1 rounded-full">{summary.overdue}</span>
+                )}
+                {q.key === "urgent" && summary.urgent > 0 && (
+                  <span className="ml-1 bg-red-900/60 text-red-400 text-[9px] px-1 rounded-full">{summary.urgent}</span>
+                )}
+              </button>
+            ))}
           </div>
 
           {/* Filters */}
@@ -945,35 +1066,125 @@ export default function AdminTicketsPage() {
             </div>
             <div className="flex gap-2">
               <input
-                className={`${selectCls} flex-1 border border-gray-700 rounded-lg px-2 py-1.5`}
-                placeholder="Модуль..."
+                className={`${selectCls} flex-1`}
+                placeholder="Модуль"
                 value={filterModule}
                 onChange={e => setFilterModule(e.target.value)}
               />
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={onlyUnassigned}
+                  onChange={e => setOnlyUnassigned(e.target.checked)}
+                  className="w-3 h-3 accent-violet-500"
+                />
+                <span className="text-[10px] text-gray-500">Без исп.</span>
+              </label>
               <button
-                onClick={() => setOnlyUnassigned(o => !o)}
-                className={`text-xs px-3 py-1.5 rounded-lg border transition-colors font-medium ${
-                  onlyUnassigned
-                    ? "bg-violet-900/40 text-violet-400 border-violet-700"
-                    : "bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300"
-                }`}
+                onClick={loadAll}
+                className="text-[10px] text-gray-500 hover:text-gray-300 px-2 py-1 rounded border border-gray-700 bg-gray-800 transition-colors"
               >
-                Only unassigned
+                Обновить
               </button>
             </div>
           </div>
 
+          {/* Bulk action bar */}
+          {bulkMode && bulkSelected.size > 0 && (
+            <div className="px-4 py-2 bg-violet-900/20 border-b border-violet-800/40 flex items-center gap-2 flex-shrink-0 flex-wrap">
+              <span className="text-[10px] text-violet-400 font-semibold">{bulkSelected.size} выбрано</span>
+              <select
+                value={bulkOp ?? ""}
+                onChange={e => setBulkOp(e.target.value as typeof bulkOp)}
+                className="bg-gray-800 border border-gray-700 text-[10px] text-gray-300 rounded px-1.5 py-1 focus:outline-none"
+              >
+                <option value="">Действие</option>
+                <option value="assign">Назначить</option>
+                <option value="status">Статус</option>
+                <option value="priority">Приоритет</option>
+              </select>
+              {bulkOp === "assign" && (
+                <input
+                  value={bulkAssignee}
+                  onChange={e => setBulkAssignee(e.target.value)}
+                  placeholder="email исполнителя"
+                  className="bg-gray-800 border border-gray-700 text-[10px] text-gray-200 rounded px-2 py-1 focus:outline-none w-40"
+                />
+              )}
+              {bulkOp === "status" && (
+                <select
+                  value={bulkStatus}
+                  onChange={e => setBulkStatus(e.target.value as TicketStatus)}
+                  className="bg-gray-800 border border-gray-700 text-[10px] text-gray-300 rounded px-1.5 py-1 focus:outline-none"
+                >
+                  {STATUSES.map(s => <option key={s} value={s}>{STATUS_CFG[s].label}</option>)}
+                </select>
+              )}
+              {bulkOp === "priority" && (
+                <select
+                  value={bulkPriority}
+                  onChange={e => setBulkPriority(e.target.value as TicketPriority)}
+                  className="bg-gray-800 border border-gray-700 text-[10px] text-gray-300 rounded px-1.5 py-1 focus:outline-none"
+                >
+                  {PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_CFG[p].label}</option>)}
+                </select>
+              )}
+              <button
+                disabled={!bulkOp || bulkSaving}
+                onClick={async () => {
+                  if (!bulkOp) return;
+                  setBulkSaving(true);
+                  const extra: Record<string, string> = {};
+                  if (bulkOp === "assign") extra.assignee_email = bulkAssignee;
+                  if (bulkOp === "status") extra.status = bulkStatus;
+                  if (bulkOp === "priority") extra.priority = bulkPriority;
+                  await bulkTickets([...bulkSelected], bulkOp, extra);
+                  setBulkSaving(false);
+                  setBulkSelected(new Set());
+                  setBulkOp(null);
+                  loadAll();
+                }}
+                className="px-2.5 py-1 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-[10px] font-semibold rounded-lg transition-colors"
+              >
+                {bulkSaving ? "..." : "Применить"}
+              </button>
+              <button
+                onClick={() => { setBulkSelected(new Set()); setBulkOp(null); }}
+                className="ml-auto text-[10px] text-gray-600 hover:text-gray-400"
+              >
+                Сбросить
+              </button>
+            </div>
+          )}
+
+          {/* Select all row when bulk mode active */}
+          {bulkMode && (
+            <div className="px-4 py-1.5 border-b border-gray-800/60 flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => setBulkSelected(new Set(displayed.map(t => t.id)))}
+                className="text-[10px] text-violet-400 hover:text-violet-300"
+              >
+                Выбрать все ({displayed.length})
+              </button>
+              {bulkSelected.size > 0 && (
+                <button
+                  onClick={() => setBulkSelected(new Set())}
+                  className="text-[10px] text-gray-600 hover:text-gray-400 ml-2"
+                >
+                  Снять всё
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Ticket list */}
           <div className="flex-1 overflow-y-auto divide-y divide-gray-800/60">
             {loadingList ? (
-              <div className="flex justify-center items-center py-10">
+              <div className="flex justify-center py-8">
                 <Spinner />
               </div>
             ) : displayed.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2">
-                <Icon name="InboxIcon" size={24} className="text-gray-700" fallback="Inbox" />
-                <p className="text-xs text-gray-600">Тикетов не найдено</p>
-              </div>
+              <p className="text-xs text-gray-600 text-center py-8">Тикетов не найдено</p>
             ) : (
               displayed.map(ticket => (
                 <TicketRow
@@ -981,31 +1192,38 @@ export default function AdminTicketsPage() {
                   ticket={ticket}
                   selected={selected?.id === ticket.id}
                   onClick={() => selectTicket(ticket)}
+                  bulkMode={bulkMode}
+                  isChecked={bulkSelected.has(ticket.id)}
+                  onCheck={(id, checked) => {
+                    setBulkSelected(prev => {
+                      const next = new Set(prev);
+                      if (checked) next.add(id); else next.delete(id);
+                      return next;
+                    });
+                  }}
                 />
               ))
             )}
           </div>
         </div>
 
-        {/* ── RIGHT COLUMN ────────────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto">
-          {selected === null ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-8">
-              <Icon name="Inbox" size={40} className="text-gray-700" />
-              <p className="text-sm text-gray-600">Выберите тикет</p>
-              <p className="text-xs text-gray-700">
-                Нажмите на тикет в списке слева, чтобы открыть детали
-              </p>
-            </div>
-          ) : (
+        {/* ── RIGHT PANEL ─────────────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          {selected ? (
             <DetailPanel
-              key={selected.id}
               ticket={selected}
               messages={messages}
               loadingMsgs={loadingMsgs}
               onTicketChange={handleTicketChange}
               onMessageSent={handleMessageSent}
             />
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center space-y-2">
+                <Icon name="Ticket" size={32} className="text-gray-700 mx-auto" />
+                <p className="text-sm text-gray-600">Выберите тикет для просмотра</p>
+              </div>
+            </div>
           )}
         </div>
       </div>
