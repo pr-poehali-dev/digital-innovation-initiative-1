@@ -24,7 +24,7 @@ export const NAV_ITEMS = [
   { label: "Учебный кабинет",          icon: "GraduationCap",   href: ROUTES.learning,     exact: false, active: true  },
   { label: "Дипломы и сертификаты",    icon: "Award",           href: ROUTES.passport,     exact: false, active: true  },
   { label: "Кошелёк",                  icon: "Wallet",          href: ROUTES.wallet,       exact: false, active: true  },
-  { label: "Штаб Траектории",          icon: "MapPin",          href: ROUTES.headquarters, exact: false, active: true  },
+  // Штаб Траектории — платформенный раздел, живёт в /admin/hq, не в пользовательском меню
   // Неактивные (скоро):
   { label: "Карта компетенций",        icon: "Map",             href: "#", exact: false, active: false },
   { label: "Навигатор развития",       icon: "TrendingUp",      href: "#", exact: false, active: false },
@@ -35,6 +35,5 @@ export const MOBILE_NAV = [
   { label: "Главная",   icon: "LayoutDashboard", href: ROUTES.home         },
   { label: "Проекты",  icon: "FolderOpen",      href: ROUTES.projects     },
   { label: "Обучение", icon: "GraduationCap",   href: ROUTES.learning     },
-  { label: "Штаб",     icon: "MapPin",          href: ROUTES.headquarters },
   { label: "Кошелёк",  icon: "Wallet",          href: ROUTES.wallet       },
 ] as const;
