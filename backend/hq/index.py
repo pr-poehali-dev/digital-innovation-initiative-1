@@ -57,6 +57,54 @@ def handler(event: dict, context) -> dict:
         if event.get("body"):
             body = json.loads(event["body"])
 
+        # ── Сводные счётчики платформы ────────────────────────────────
+        if method == "GET" and action == "summary":
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT
+                        (SELECT COUNT(*)  FROM {SCHEMA}.passport_modules)                         AS modules_total,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.passport_modules WHERE status = 'active') AS modules_active,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.project_waves)                            AS waves_total,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.project_waves WHERE status = 'done')      AS waves_done,
+                        (SELECT wave_num  FROM {SCHEMA}.project_waves WHERE status = 'in_progress'
+                                          ORDER BY wave_num LIMIT 1)                              AS current_wave,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.hq_goals)                                AS goals_total,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.hq_goals WHERE status = 'on_track')      AS goals_on_track,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.hq_risks  WHERE status = 'open')         AS risks_open,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.admin_tickets
+                            WHERE status NOT IN ('resolved','closed'))                            AS tickets_active,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.admin_tickets
+                            WHERE priority = 'urgent'
+                              AND status NOT IN ('resolved','closed'))                            AS tickets_urgent,
+                        (SELECT COUNT(*)  FROM {SCHEMA}.admin_ticket_messages
+                            WHERE created_at >= NOW() - INTERVAL '24 hours')                      AS messages_24h
+                """)
+                r = cur.fetchone()
+
+            # Число миграций — считаем файлы в папке миграций через каталог схемы
+            # Реальный счётчик: количество таблиц в схеме (proxy для размера платформы)
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT COUNT(*) FROM information_schema.tables
+                    WHERE table_schema = '{SCHEMA}' AND table_type = 'BASE TABLE'
+                """)
+                tables_total = cur.fetchone()[0]
+
+            return cors({"ok": True, "summary": {
+                "modules_total":   r[0],
+                "modules_active":  r[1],
+                "waves_total":     r[2],
+                "waves_done":      r[3],
+                "current_wave":    r[4],
+                "goals_total":     r[5],
+                "goals_on_track":  r[6],
+                "risks_open":      r[7],
+                "tickets_active":  r[8],
+                "tickets_urgent":  r[9],
+                "messages_24h":    r[10],
+                "db_tables_total": tables_total,
+            }})
+
         # ── Загрузить всё сразу (главная HQ) ─────────────────────────
         if method == "GET" and action == "all":
             with conn.cursor() as cur:

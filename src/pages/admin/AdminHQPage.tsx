@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
-import { hqApi, type HQGoalStatus, type HQIdeaStatus, type HQRiskImpact, type HQRiskStatus } from "@/lib/admin-api";
+import { hqApi, type HQGoalStatus, type HQIdeaStatus, type HQRiskImpact, type HQRiskStatus, type HQSummary } from "@/lib/admin-api";
 import { useToast } from "@/hooks/use-toast";
 import AiContextExporter from "@/components/admin/AiContextExporter";
 
@@ -159,6 +160,77 @@ function IdeaStatusSelect({ value, onChange }: {
       className="text-[11px] bg-gray-800 border border-gray-700 text-gray-300 rounded px-1.5 py-0.5 focus:outline-none flex-shrink-0">
       {IDEA_STATUSES.map(s => <option key={s} value={s}>{IDEA_STATUS[s].label}</option>)}
     </select>
+  );
+}
+
+// ── Platform Summary Bar ──────────────────────────────────────────────────────
+function PlatformSummaryBar() {
+  const navigate = useNavigate();
+  const [s, setS] = useState<HQSummary | null>(null);
+
+  useEffect(() => {
+    hqApi.summary().then(r => { if (r.ok) setS(r.data.summary); }).catch(() => {});
+  }, []);
+
+  if (!s) return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="h-16 bg-gray-900 border border-gray-800 rounded-xl animate-pulse" />
+      ))}
+    </div>
+  );
+
+  const cards: { label: string; value: string; sub?: string; icon: string; color: string; href?: string }[] = [
+    {
+      label: "Модули",
+      value: `${s.modules_active} из ${s.modules_total}`,
+      sub: "активных в Passport",
+      icon: "Layers",
+      color: "text-emerald-400",
+      href: "/admin/passport",
+    },
+    {
+      label: "Волна",
+      value: s.current_wave != null ? `W${s.current_wave}` : "—",
+      sub: `${s.waves_done} из ${s.waves_total} завершены`,
+      icon: "Waves",
+      color: "text-violet-400",
+      href: "/admin/project",
+    },
+    {
+      label: "Тикеты",
+      value: String(s.tickets_active),
+      sub: s.tickets_urgent > 0 ? `${s.tickets_urgent} urgent` : "нет urgent",
+      icon: "Ticket",
+      color: s.tickets_urgent > 0 ? "text-red-400" : "text-sky-400",
+      href: "/admin/tickets",
+    },
+    {
+      label: "Таблиц в БД",
+      value: String(s.db_tables_total),
+      sub: "в схеме проекта",
+      icon: "Database",
+      color: "text-blue-400",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {cards.map(c => (
+        <button
+          key={c.label}
+          onClick={() => c.href && navigate(c.href)}
+          className={`bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-left transition-all ${c.href ? "hover:border-gray-700 cursor-pointer" : "cursor-default"}`}
+        >
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Icon name={c.icon} size={12} className={c.color} />
+            <span className="text-[10px] text-gray-600 uppercase tracking-wide">{c.label}</span>
+          </div>
+          <p className={`text-xl font-bold ${c.color}`}>{c.value}</p>
+          {c.sub && <p className="text-[10px] text-gray-700 mt-0.5">{c.sub}</p>}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -341,6 +413,9 @@ export default function AdminHQPage() {
           </div>
           <AiContextExporter defaultScope="hq" />
         </div>
+
+        {/* ── Platform counters ───────────────────────────────────────────── */}
+        <PlatformSummaryBar />
 
         {/* ── Текущий фокус ───────────────────────────────────────────────── */}
         <div className="bg-gradient-to-r from-violet-900/30 to-blue-900/20 border border-violet-800/40 rounded-2xl overflow-hidden">

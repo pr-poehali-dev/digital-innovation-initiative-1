@@ -13,6 +13,14 @@
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized - summary",
+      "method": "GET",
+      "path": "/?action=summary",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

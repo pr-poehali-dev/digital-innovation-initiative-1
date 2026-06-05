@@ -45,8 +45,18 @@ export type HQIdeaStatus  = "new" | "considering" | "in_plan" | "rejected" | "do
 export type HQRiskImpact  = "high" | "medium" | "low";
 export type HQRiskStatus  = "open" | "mitigated" | "closed";
 
+export type HQSummary = {
+  modules_total: number; modules_active: number;
+  waves_total: number; waves_done: number; current_wave: number | null;
+  goals_total: number; goals_on_track: number;
+  risks_open: number;
+  tickets_active: number; tickets_urgent: number; messages_24h: number;
+  db_tables_total: number;
+};
+
 export const hqApi = {
-  all: () => hqRequest("/?action=all"),
+  all:     () => hqRequest("/?action=all"),
+  summary: () => hqRequest("/?action=summary"),
 
   saveBlock: (key: string, content: string) =>
     hqRequest("/?action=save_block", { method: "PUT", body: JSON.stringify({ key, content }) }),
