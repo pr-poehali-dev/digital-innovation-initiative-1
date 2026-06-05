@@ -233,7 +233,98 @@ function ConfirmDialog({
 
 // ── User Drawer ──────────────────────────────────────────────────
 
-type DrawerTab = "profile" | "tickets" | "activity";
+// ── Casework types ────────────────────────────────────────────────
+
+type UserNote = {
+  id: number; user_id: number; note_text: string; visibility: string;
+  created_at: string; created_by: string;
+  updated_at: string | null; updated_by: string | null;
+};
+
+type UserCaseFlag = {
+  id: number; user_id: number; flag_type: string; title: string;
+  description: string; status: string;
+  created_at: string; created_by: string;
+  resolved_at: string | null; resolved_by: string | null;
+};
+
+// ── Casework API helpers ──────────────────────────────────────────
+
+async function fetchUserNotes(userId: number): Promise<UserNote[]> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=user_notes&user_id=${userId}`, { headers: authHeaders() });
+  const d = await res.json();
+  return d.notes ?? [];
+}
+
+async function addUserNote(userId: number, noteText: string): Promise<{ ok: boolean; id?: number }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=add_user_note`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ user_id: userId, note_text: noteText }),
+  });
+  return res.json();
+}
+
+async function deleteUserNote(noteId: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=delete_user_note`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ note_id: noteId }),
+  });
+  return res.json();
+}
+
+async function fetchUserCaseFlags(userId: number): Promise<UserCaseFlag[]> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=user_case_flags&user_id=${userId}`, { headers: authHeaders() });
+  const d = await res.json();
+  return d.flags ?? [];
+}
+
+async function addUserCaseFlag(userId: number, title: string, flagType: string, description: string): Promise<{ ok: boolean; id?: number }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=add_user_case_flag`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ user_id: userId, title, flag_type: flagType, description }),
+  });
+  return res.json();
+}
+
+async function resolveUserCaseFlag(flagId: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=resolve_user_case_flag`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ flag_id: flagId }),
+  });
+  return res.json();
+}
+
+async function createUserTicket(userId: number, subject: string, body: string, priority: string): Promise<{ ok: boolean; ticket_no?: string; ticket_id?: number }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=create_user_ticket`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ user_id: userId, subject, body, priority }),
+  });
+  return res.json();
+}
+
+const FLAG_TYPES = [
+  { value: "observation",        label: "Наблюдение" },
+  { value: "risk",               label: "Риск" },
+  { value: "fraud_suspicion",    label: "Подозрение на фрод" },
+  { value: "payment_issue",      label: "Проблема с оплатой" },
+  { value: "support_escalation", label: "Эскалация" },
+  { value: "vip",                label: "VIP" },
+  { value: "churn_risk",         label: "Риск оттока" },
+  { value: "custom",             label: "Другое" },
+];
+
+const FLAG_TYPE_COLOR: Record<string, string> = {
+  observation:        "bg-blue-50 text-blue-700",
+  risk:               "bg-orange-50 text-orange-700",
+  fraud_suspicion:    "bg-red-50 text-red-700",
+  payment_issue:      "bg-amber-50 text-amber-700",
+  support_escalation: "bg-violet-50 text-violet-700",
+  vip:                "bg-emerald-50 text-emerald-700",
+  churn_risk:         "bg-rose-50 text-rose-700",
+  custom:             "bg-slate-50 text-slate-600",
+};
+
+type DrawerTab = "profile" | "tickets" | "activity" | "case";
 
 function UserDrawer({
   userId,
@@ -250,14 +341,39 @@ function UserDrawer({
   const [tab, setTab] = useState<DrawerTab>("profile");
   const [emailCopied, setEmailCopied] = useState(false);
 
+  // Casework state
+  const [notes, setNotes] = useState<UserNote[]>([]);
+  const [caseFlags, setCaseFlags] = useState<UserCaseFlag[]>([]);
+  const [caseLoading, setCaseLoading] = useState(false);
+  const [noteText, setNoteText] = useState("");
+  const [addingNote, setAddingNote] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [addingFlag, setAddingFlag] = useState(false);
+  const [flagForm, setFlagForm] = useState({ title: "", flag_type: "observation", description: "" });
+  const [savingFlag, setSavingFlag] = useState(false);
+  const [showTicketForm, setShowTicketForm] = useState(false);
+  const [ticketForm, setTicketForm] = useState({ subject: "", body: "", priority: "medium" });
+  const [savingTicket, setSavingTicket] = useState(false);
+  const [ticketCreated, setTicketCreated] = useState<string | null>(null);
+
   useEffect(() => {
     setLoading(true);
     setTab("profile");
+    setNotes([]); setCaseFlags([]); setTicketCreated(null);
     fetchUser(userId).then(d => {
       setUser(d.user ?? null);
       setLoading(false);
     });
   }, [userId]);
+
+  // Load casework data when tab opens
+  useEffect(() => {
+    if (tab !== "case") return;
+    setCaseLoading(true);
+    Promise.all([fetchUserNotes(userId), fetchUserCaseFlags(userId)]).then(([n, f]) => {
+      setNotes(n); setCaseFlags(f); setCaseLoading(false);
+    });
+  }, [tab, userId]);
 
   function copyEmail() {
     if (!user) return;
@@ -267,10 +383,58 @@ function UserDrawer({
     });
   }
 
+  async function handleAddNote() {
+    if (!noteText.trim()) return;
+    setSavingNote(true);
+    const res = await addUserNote(userId, noteText.trim());
+    setSavingNote(false);
+    if (res.ok) {
+      setNoteText(""); setAddingNote(false);
+      const fresh = await fetchUserNotes(userId);
+      setNotes(fresh);
+    }
+  }
+
+  async function handleDeleteNote(noteId: number) {
+    await deleteUserNote(noteId);
+    setNotes(prev => prev.filter(n => n.id !== noteId));
+  }
+
+  async function handleAddFlag() {
+    if (!flagForm.title.trim()) return;
+    setSavingFlag(true);
+    const res = await addUserCaseFlag(userId, flagForm.title.trim(), flagForm.flag_type, flagForm.description.trim());
+    setSavingFlag(false);
+    if (res.ok) {
+      setFlagForm({ title: "", flag_type: "observation", description: "" });
+      setAddingFlag(false);
+      const fresh = await fetchUserCaseFlags(userId);
+      setCaseFlags(fresh);
+    }
+  }
+
+  async function handleResolveFlag(flagId: number) {
+    await resolveUserCaseFlag(flagId);
+    setCaseFlags(prev => prev.map(f => f.id === flagId ? { ...f, status: "resolved" } : f));
+  }
+
+  async function handleCreateTicket() {
+    if (!ticketForm.subject.trim()) return;
+    setSavingTicket(true);
+    const res = await createUserTicket(userId, ticketForm.subject.trim(), ticketForm.body.trim(), ticketForm.priority);
+    setSavingTicket(false);
+    if (res.ok && res.ticket_no) {
+      setTicketCreated(res.ticket_no);
+      setShowTicketForm(false);
+      setTicketForm({ subject: "", body: "", priority: "medium" });
+    }
+  }
+
   const TABS: { key: DrawerTab; label: string }[] = [
-    { key: "profile", label: "Профиль" },
-    { key: "tickets", label: "Тикеты" },
+    { key: "profile",  label: "Профиль" },
+    { key: "tickets",  label: "Тикеты" },
     { key: "activity", label: "Активность" },
+    { key: "case",     label: "Кейс" },
   ];
 
   return (
@@ -581,6 +745,209 @@ function UserDrawer({
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: КЕЙС ─────────────────────────────────────────────────── */}
+          {!loading && user && tab === "case" && (
+            <div className="px-5 py-4 space-y-5">
+
+              {/* Create ticket quick action */}
+              <div className="bg-violet-50 border border-violet-100 rounded-xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-violet-700 uppercase tracking-wide flex items-center gap-1.5">
+                    <Icon name="Ticket" size={12} /> Создать тикет
+                  </p>
+                  <button onClick={() => setShowTicketForm(v => !v)}
+                    className="text-[10px] text-violet-600 hover:text-violet-800 font-medium">
+                    {showTicketForm ? "Скрыть" : "Открыть форму"}
+                  </button>
+                </div>
+
+                {ticketCreated && (
+                  <div className="flex items-center gap-2 py-1.5 px-2 bg-emerald-50 border border-emerald-200 rounded-lg mb-2">
+                    <Icon name="Check" size={12} className="text-emerald-600" />
+                    <span className="text-xs text-emerald-700">Создан <span className="font-mono font-semibold">{ticketCreated}</span></span>
+                    <button onClick={() => navigate("/admin/tickets")}
+                      className="ml-auto text-[10px] text-emerald-600 hover:underline">Открыть →</button>
+                  </div>
+                )}
+
+                {showTicketForm && (
+                  <div className="space-y-2 mt-2">
+                    <input
+                      className="w-full border border-violet-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-violet-400"
+                      placeholder="Тема тикета *"
+                      value={ticketForm.subject}
+                      onChange={e => setTicketForm(f => ({ ...f, subject: e.target.value }))}
+                    />
+                    <textarea
+                      className="w-full border border-violet-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-violet-400 resize-none"
+                      rows={2}
+                      placeholder="Описание (необязательно)"
+                      value={ticketForm.body}
+                      onChange={e => setTicketForm(f => ({ ...f, body: e.target.value }))}
+                    />
+                    <div className="flex gap-2">
+                      <select
+                        className="flex-1 border border-violet-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 focus:outline-none"
+                        value={ticketForm.priority}
+                        onChange={e => setTicketForm(f => ({ ...f, priority: e.target.value }))}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                      <button onClick={handleCreateTicket} disabled={savingTicket || !ticketForm.subject.trim()}
+                        className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors">
+                        {savingTicket ? "..." : "Создать"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Case flags */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                    <Icon name="Flag" size={12} /> Флаги кейса
+                    {caseFlags.filter(f => f.status === "open").length > 0 && (
+                      <span className="ml-1 text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-semibold">
+                        {caseFlags.filter(f => f.status === "open").length}
+                      </span>
+                    )}
+                  </p>
+                  <button onClick={() => setAddingFlag(v => !v)}
+                    className="text-[10px] text-slate-500 hover:text-slate-700 font-medium">
+                    {addingFlag ? "Отмена" : "+ Добавить"}
+                  </button>
+                </div>
+
+                {addingFlag && (
+                  <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 space-y-2 mb-3">
+                    <input
+                      className="w-full border border-orange-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-300"
+                      placeholder="Заголовок флага *"
+                      value={flagForm.title}
+                      onChange={e => setFlagForm(f => ({ ...f, title: e.target.value }))}
+                    />
+                    <select
+                      className="w-full border border-orange-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 focus:outline-none"
+                      value={flagForm.flag_type}
+                      onChange={e => setFlagForm(f => ({ ...f, flag_type: e.target.value }))}
+                    >
+                      {FLAG_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
+                    </select>
+                    <textarea
+                      className="w-full border border-orange-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none resize-none"
+                      rows={2}
+                      placeholder="Описание (необязательно)"
+                      value={flagForm.description}
+                      onChange={e => setFlagForm(f => ({ ...f, description: e.target.value }))}
+                    />
+                    <button onClick={handleAddFlag} disabled={savingFlag || !flagForm.title.trim()}
+                      className="w-full py-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors">
+                      {savingFlag ? "Сохраняю..." : "Добавить флаг"}
+                    </button>
+                  </div>
+                )}
+
+                {caseLoading ? (
+                  <div className="flex justify-center py-4">
+                    <div className="w-4 h-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : caseFlags.length === 0 ? (
+                  <div className="py-4 text-center text-slate-400 text-sm">Флагов нет</div>
+                ) : (
+                  <div className="space-y-2">
+                    {caseFlags.map(flag => (
+                      <div key={flag.id} className={`border rounded-xl p-2.5 ${flag.status === "open" ? "bg-white border-orange-200" : "bg-slate-50 border-slate-100 opacity-60"}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${FLAG_TYPE_COLOR[flag.flag_type] ?? "bg-slate-100 text-slate-600"}`}>
+                                {FLAG_TYPES.find(f => f.value === flag.flag_type)?.label ?? flag.flag_type}
+                              </span>
+                              {flag.status === "resolved" && (
+                                <span className="text-[10px] text-gray-400">✓ закрыт</span>
+                              )}
+                            </div>
+                            <p className="text-sm text-slate-800 mt-1 font-medium">{flag.title}</p>
+                            {flag.description && <p className="text-xs text-slate-500 mt-0.5">{flag.description}</p>}
+                            <p className="text-[10px] text-slate-400 mt-1">{fmtDate(flag.created_at)} · {flag.created_by}</p>
+                          </div>
+                          {flag.status === "open" && (
+                            <button onClick={() => handleResolveFlag(flag.id)}
+                              className="flex-shrink-0 text-[10px] px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg font-medium transition-colors">
+                              Закрыть
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Internal notes */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                    <Icon name="StickyNote" size={12} /> Заметки
+                    {notes.filter(n => n.visibility !== "deleted").length > 0 && (
+                      <span className="ml-1 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-semibold">
+                        {notes.filter(n => n.visibility !== "deleted").length}
+                      </span>
+                    )}
+                  </p>
+                  <button onClick={() => setAddingNote(v => !v)}
+                    className="text-[10px] text-slate-500 hover:text-slate-700 font-medium">
+                    {addingNote ? "Отмена" : "+ Добавить"}
+                  </button>
+                </div>
+
+                {addingNote && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-2 mb-3">
+                    <textarea
+                      className="w-full border border-amber-200 rounded-lg px-2.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-300 resize-none"
+                      rows={3}
+                      placeholder="Внутренняя заметка..."
+                      value={noteText}
+                      onChange={e => setNoteText(e.target.value)}
+                      autoFocus
+                    />
+                    <button onClick={handleAddNote} disabled={savingNote || !noteText.trim()}
+                      className="w-full py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors">
+                      {savingNote ? "Сохраняю..." : "Сохранить заметку"}
+                    </button>
+                  </div>
+                )}
+
+                {caseLoading ? (
+                  <div className="flex justify-center py-4">
+                    <div className="w-4 h-4 border-2 border-slate-300 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : notes.filter(n => n.visibility !== "deleted").length === 0 ? (
+                  <div className="py-4 text-center text-slate-400 text-sm">Заметок нет</div>
+                ) : (
+                  <div className="space-y-2">
+                    {notes.filter(n => n.visibility !== "deleted").map(note => (
+                      <div key={note.id} className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm text-slate-800 flex-1 whitespace-pre-wrap">{note.note_text}</p>
+                          <button onClick={() => handleDeleteNote(note.id)}
+                            className="flex-shrink-0 text-slate-400 hover:text-red-500 p-0.5 transition-colors">
+                            <Icon name="X" size={12} />
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1.5">{fmtDate(note.created_at)} · {note.created_by}</p>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

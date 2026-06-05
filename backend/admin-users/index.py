@@ -346,6 +346,220 @@ def action_get(conn, user_id: int, origin: str) -> dict:
     return resp({"user": user}, origin=origin)
 
 
+# ── Notes ─────────────────────────────────────────────────────────
+
+def action_user_notes(conn, user_id: int, origin: str) -> dict:
+    """Список заметок по пользователю."""
+    s = SCHEMA
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT id, user_id, note_text, visibility, created_at, created_by, updated_at, updated_by
+            FROM {s}.admin_user_notes WHERE user_id = {user_id}
+            ORDER BY created_at DESC LIMIT 50
+        """)
+        rows = cur.fetchall()
+    notes = [{
+        "id": r[0], "user_id": r[1], "note_text": r[2], "visibility": r[3],
+        "created_at": str(r[4]), "created_by": r[5],
+        "updated_at": str(r[6]) if r[6] else None, "updated_by": r[7],
+    } for r in rows]
+    return resp({"notes": notes}, origin=origin)
+
+
+def action_add_user_note(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Добавить internal note к пользователю."""
+    s = SCHEMA
+    user_id = body.get("user_id")
+    note_text = (body.get("note_text") or "").strip()
+    if not user_id or not note_text:
+        return resp({"error": "user_id and note_text required"}, 400, origin)
+    user_id = int(user_id)
+    actor_email = actor["actor_email"]
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {s}.admin_user_notes (user_id, note_text, visibility, created_by)
+            VALUES ({user_id}, %s, 'internal', %s)
+            RETURNING id
+        """, (note_text, actor_email))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    write_audit(conn, actor, "user.note_added", user_id,
+                {}, {"note_id": new_id, "preview": note_text[:60]},
+                f"Note #{new_id}", ip, ua)
+    conn.commit()
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_delete_user_note(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Мягкое удаление заметки (помечаем как deleted через visibility='deleted')."""
+    s = SCHEMA
+    note_id = body.get("note_id")
+    if not note_id:
+        return resp({"error": "note_id required"}, 400, origin)
+    note_id = int(note_id)
+    actor_email = actor["actor_email"]
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            UPDATE {s}.admin_user_notes
+            SET visibility = 'deleted', updated_at = NOW(), updated_by = %s
+            WHERE id = {note_id}
+        """, (actor_email,))
+    conn.commit()
+    return resp({"ok": True}, origin=origin)
+
+
+# ── Case flags ────────────────────────────────────────────────────
+
+FLAG_TYPES = ["observation", "risk", "fraud_suspicion", "payment_issue",
+              "support_escalation", "vip", "churn_risk", "custom"]
+
+
+def action_user_case_flags(conn, user_id: int, origin: str) -> dict:
+    """Список casework-флагов по пользователю."""
+    s = SCHEMA
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT id, user_id, flag_type, title, description, status,
+                   created_at, created_by, resolved_at, resolved_by
+            FROM {s}.admin_user_case_flags
+            WHERE user_id = {user_id}
+            ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, created_at DESC LIMIT 20
+        """)
+        rows = cur.fetchall()
+    flags = [{
+        "id": r[0], "user_id": r[1], "flag_type": r[2], "title": r[3],
+        "description": r[4], "status": r[5],
+        "created_at": str(r[6]), "created_by": r[7],
+        "resolved_at": str(r[8]) if r[8] else None, "resolved_by": r[9],
+    } for r in rows]
+    return resp({"flags": flags}, origin=origin)
+
+
+def action_add_user_case_flag(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Добавить casework-флаг к пользователю."""
+    s = SCHEMA
+    user_id = body.get("user_id")
+    title = (body.get("title") or "").strip()
+    if not user_id or not title:
+        return resp({"error": "user_id and title required"}, 400, origin)
+    user_id = int(user_id)
+    flag_type = body.get("flag_type", "observation")
+    if flag_type not in FLAG_TYPES:
+        flag_type = "observation"
+    description = (body.get("description") or "").strip()
+    actor_email = actor["actor_email"]
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {s}.admin_user_case_flags
+              (user_id, flag_type, title, description, status, created_by)
+            VALUES ({user_id}, %s, %s, %s, 'open', %s)
+            RETURNING id
+        """, (flag_type, title, description, actor_email))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    write_audit(conn, actor, "user.flag_created", user_id,
+                {}, {"flag_id": new_id, "flag_type": flag_type, "title": title},
+                f"Flag: {title[:60]}", ip, ua)
+    conn.commit()
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_resolve_user_case_flag(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Закрыть casework-флаг."""
+    s = SCHEMA
+    flag_id = body.get("flag_id")
+    if not flag_id:
+        return resp({"error": "flag_id required"}, 400, origin)
+    flag_id = int(flag_id)
+    actor_email = actor["actor_email"]
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            UPDATE {s}.admin_user_case_flags
+            SET status = 'resolved', resolved_at = NOW(), resolved_by = %s
+            WHERE id = {flag_id} AND status = 'open'
+            RETURNING user_id, title
+        """, (actor_email,))
+        row = cur.fetchone()
+    if not row:
+        return resp({"error": "not found or already resolved"}, 404, origin)
+    conn.commit()
+    write_audit(conn, actor, "user.flag_resolved", row[0],
+                {"status": "open"}, {"status": "resolved", "flag_id": flag_id},
+                f"Flag resolved: {row[1][:60]}", ip, ua)
+    conn.commit()
+    return resp({"ok": True}, origin=origin)
+
+
+# ── Create ticket from user profile ──────────────────────────────
+
+def action_create_user_ticket(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Создать тикет прямо из профиля пользователя."""
+    s = SCHEMA
+    user_id = body.get("user_id")
+    subject = (body.get("subject") or "").strip()
+    if not user_id or not subject:
+        return resp({"error": "user_id and subject required"}, 400, origin)
+    user_id = int(user_id)
+
+    # Берём email/name пользователя
+    user = get_user_row(conn, user_id)
+    if not user:
+        return resp({"error": "user not found"}, 404, origin)
+
+    actor_email = actor["actor_email"]
+
+    # Получаем следующий ticket_no через sequences
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT nextval('{s}.ticket_no_seq')")
+        tno_num = cur.fetchone()[0]
+    tno = f"TCK-{tno_num}"
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {s}.admin_tickets
+              (ticket_no, status, priority, source, module_slug,
+               requester_name, requester_email, requester_user_id,
+               subject, body, assignee_email, owner_email,
+               tags_json, created_by, updated_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            tno,
+            body.get("status", "new"),
+            body.get("priority", "medium"),
+            "admin_ui",
+            body.get("module_slug", ""),
+            user["name"],
+            user["email"],
+            user_id,
+            subject,
+            body.get("body", ""),
+            actor_email,
+            actor_email,
+            "[]",
+            actor_email, actor_email,
+        ))
+        ticket_id = cur.fetchone()[0]
+    conn.commit()
+
+    # System message
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {s}.admin_ticket_messages
+              (ticket_id, message_type, author_name, author_email, body, created_by)
+            VALUES ({ticket_id}, 'system_event', 'System', %s,
+                    'Тикет создан из профиля пользователя', %s)
+        """, (actor_email, actor_email))
+    conn.commit()
+
+    write_audit(conn, actor, "user.ticket_created", user_id,
+                {}, {"ticket_id": ticket_id, "ticket_no": tno, "subject": subject[:60]},
+                f"Ticket {tno}: {subject[:60]}", ip, ua)
+    conn.commit()
+
+    return resp({"ok": True, "ticket_id": ticket_id, "ticket_no": tno}, origin=origin)
+
+
 def action_block(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
     """
     Блокировка пользователя:
@@ -489,6 +703,46 @@ def handler(event: dict, context) -> dict:
             if method != "POST":
                 return resp({"error": "POST required"}, 405, origin)
             return action_unblock(conn, admin, body, ip, ua, origin)
+
+        # ── Notes ──────────────────────────────────────────────────────────
+        if action == "user_notes":
+            uid = params.get("user_id") or body.get("user_id")
+            if not uid:
+                return resp({"error": "user_id required"}, 400, origin)
+            return action_user_notes(conn, int(uid), origin)
+
+        if action == "add_user_note":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_add_user_note(conn, admin, body, ip, ua, origin)
+
+        if action == "delete_user_note":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_delete_user_note(conn, admin, body, ip, ua, origin)
+
+        # ── Case flags ─────────────────────────────────────────────────────
+        if action == "user_case_flags":
+            uid = params.get("user_id") or body.get("user_id")
+            if not uid:
+                return resp({"error": "user_id required"}, 400, origin)
+            return action_user_case_flags(conn, int(uid), origin)
+
+        if action == "add_user_case_flag":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_add_user_case_flag(conn, admin, body, ip, ua, origin)
+
+        if action == "resolve_user_case_flag":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_resolve_user_case_flag(conn, admin, body, ip, ua, origin)
+
+        # ── Create ticket from user profile ────────────────────────────────
+        if action == "create_user_ticket":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_create_user_ticket(conn, admin, body, ip, ua, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 
