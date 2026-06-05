@@ -1,6 +1,9 @@
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
+const BUILD_COMMIT = (import.meta.env.VITE_COMMIT_SHA as string | undefined) ?? "8870789";
+const BUILD_DATE = (import.meta.env.VITE_BUILD_DATE as string | undefined) ?? "2026-06-05";
+
 type Phase = {
   id: string;
   label: string;
@@ -153,13 +156,25 @@ export default function HeadquartersPage() {
 
         {/* Header */}
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center">
-              <Icon name="MapPin" size={18} className="text-white" />
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="flex items-center gap-3 mb-1">
+                <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center">
+                  <Icon name="MapPin" size={18} className="text-white" />
+                </div>
+                <h1 className="text-2xl font-bold text-slate-900">Штаб Траектории</h1>
+              </div>
+              <p className="text-sm text-slate-500 ml-12">Карта продукта, роадмап и текущий статус платформы</p>
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">Штаб Траектории</h1>
+            <div className="flex-shrink-0 text-right">
+              <div className="inline-flex items-center gap-1.5 bg-slate-100 rounded-xl px-3 py-1.5">
+                <Icon name="GitCommit" size={12} className="text-slate-400" />
+                <span className="text-[11px] font-mono text-slate-500">{BUILD_COMMIT.slice(0, 7)}</span>
+                <span className="text-slate-300">·</span>
+                <span className="text-[11px] text-slate-400">{BUILD_DATE}</span>
+              </div>
+            </div>
           </div>
-          <p className="text-sm text-slate-500 ml-12">Карта продукта, роадмап и текущий статус платформы</p>
         </div>
 
         {/* Текущий статус — карточки */}
@@ -269,26 +284,87 @@ export default function HeadquartersPage() {
           </div>
         </div>
 
-        {/* Следующий шаг */}
-        <div className="bg-gradient-to-br from-violet-600 to-indigo-700 rounded-2xl p-5 text-white">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
-              <Icon name="Rocket" size={18} className="text-white" />
-            </div>
-            <div>
-              <div className="font-bold text-base mb-1">Следующий шаг: Навигатор развития</div>
-              <p className="text-sm text-white/80 leading-relaxed">
-                После Учебного кабинета — визуальная карта навыков, gap-анализ и AI-резюме.
-                Пользователь увидит кем становится, чего не хватает и куда двигаться дальше.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                {["Карта навыков", "Gap analysis", "AI-резюме", "Путь 30/60/90"].map(tag => (
-                  <span key={tag} className="px-2.5 py-1 bg-white/20 rounded-lg">{tag}</span>
+        {/* Текущий спринт — Done / In Progress / Next */}
+        <div>
+          <h2 className="text-base font-bold text-slate-800 mb-3">Текущий спринт</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+            {/* Done */}
+            <div className="bg-white border border-emerald-100 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                  <Icon name="CheckCheck" size={14} className="text-emerald-600" />
+                </div>
+                <span className="text-sm font-bold text-emerald-700">Done</span>
+              </div>
+              <div className="space-y-2">
+                {[
+                  "Стабилизация маршрутов (убраны 404)",
+                  "Единый источник роутов (routes.ts)",
+                  "Синхронизация мобильного и десктопного меню",
+                  "Виджет «Мои цели» с живыми данными",
+                  "Индекс развития: проекты + обучение",
+                  "Версия сборки / commit в Штабе",
+                ].map(item => (
+                  <div key={item} className="flex items-start gap-2 text-xs text-slate-600">
+                    <Icon name="Check" size={12} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                    {item}
+                  </div>
                 ))}
               </div>
             </div>
+
+            {/* In Progress */}
+            <div className="bg-white border border-blue-100 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                  <Icon name="Loader2" size={14} className="text-blue-600" />
+                </div>
+                <span className="text-sm font-bold text-blue-700">In Progress</span>
+              </div>
+              <div className="space-y-2">
+                {[
+                  "4 уровня статусов тем в обучении",
+                  "Блок «Что делать сейчас»",
+                  "Блок «Осталось освоить»",
+                  "Артефакты по фазам 30/60/90",
+                  "Weekly check-in",
+                ].map(item => (
+                  <div key={item} className="flex items-start gap-2 text-xs text-slate-600">
+                    <Icon name="Minus" size={12} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Next */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center">
+                  <Icon name="ArrowRight" size={14} className="text-slate-500" />
+                </div>
+                <span className="text-sm font-bold text-slate-600">Next</span>
+              </div>
+              <div className="space-y-2">
+                {[
+                  "Штаб: журнал решений",
+                  "Штаб: риски платформы",
+                  "Шаблоны: stakeholder map",
+                  "Шаблоны: pain point register",
+                  "Навигатор развития (карта навыков)",
+                ].map(item => (
+                  <div key={item} className="flex items-start gap-2 text-xs text-slate-500">
+                    <Icon name="Circle" size={10} className="text-slate-300 mt-0.5 flex-shrink-0" />
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+
           </div>
         </div>
+
       </div>
     </Layout>
   );

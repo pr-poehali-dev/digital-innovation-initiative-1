@@ -3,31 +3,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import GlobalSearchDialog from "@/components/GlobalSearchDialog";
-
-
-const NAV_ITEMS = [
-  { label: "Главная", icon: "LayoutDashboard", href: "/cabinet", exact: true, active: true },
-  { label: "Проекты и презентации", icon: "FolderOpen", href: "/cabinet/projects", active: true },
-  { label: "Учебный кабинет", icon: "GraduationCap", href: "/cabinet/learning", active: true },
-  { label: "Дипломы и сертификаты", icon: "Award", href: "/cabinet/passport", active: true },
-  { label: "Карта компетенций", icon: "Map", href: "/cabinet/competencies", active: false },
-  { label: "Навигатор развития", icon: "TrendingUp", href: "/cabinet/development", active: false },
-  { label: "Профессиональный профиль", icon: "User", href: "/cabinet/profile", active: false },
-  { label: "Кошелёк", icon: "Wallet", href: "/cabinet/wallet", active: true },
-  { label: "Штаб Траектории", icon: "MapPin", href: "/cabinet/headquarters", active: true },
-];
-
-const BOTTOM_ITEMS = [
-  { label: "Настройки и приватность", icon: "Settings", href: "/cabinet/settings", active: false },
-];
-
-const MOBILE_NAV = [
-  { label: "Главная", icon: "LayoutDashboard", href: "/cabinet" },
-  { label: "Проекты", icon: "FolderOpen", href: "/cabinet/projects" },
-  { label: "Обучение", icon: "GraduationCap", href: "/cabinet/learning" },
-  { label: "Штаб", icon: "MapPin", href: "/cabinet/headquarters" },
-  { label: "Кошелёк", icon: "Wallet", href: "/cabinet/wallet" },
-];
+import { NAV_ITEMS, MOBILE_NAV } from "@/lib/routes";
 
 function SidebarLink({ item, collapsed }: { item: typeof NAV_ITEMS[0]; collapsed: boolean }) {
   const location = useLocation();
