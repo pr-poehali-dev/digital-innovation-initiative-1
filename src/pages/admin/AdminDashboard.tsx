@@ -2,11 +2,12 @@ import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 
 const CARDS = [
-  { label: "Пользователи", icon: "Users", href: "/admin/users", color: "text-blue-400" },
-  { label: "Проекты", icon: "FolderOpen", href: "/admin/projects", color: "text-purple-400" },
-  { label: "План проекта", icon: "ClipboardList", href: "/admin/plan", color: "text-violet-400" },
-  { label: "Аудит", icon: "ShieldCheck", href: "/admin/audit", color: "text-red-400" },
-  { label: "Активность", icon: "Activity", href: "/admin/activity", color: "text-orange-400" },
+  { label: "Пользователи", icon: "Users",         href: "/admin/users",    color: "text-blue-400"   },
+  { label: "Проекты",      icon: "FolderOpen",    href: "/admin/projects", color: "text-purple-400" },
+  { label: "Стратегия",    icon: "Compass",       href: "/admin/strategy", color: "text-violet-400" },
+  { label: "План",         icon: "ClipboardList", href: "/admin/plan",     color: "text-indigo-400" },
+  { label: "Аудит",        icon: "ShieldCheck",   href: "/admin/audit",    color: "text-red-400"    },
+  { label: "Активность",   icon: "Activity",      href: "/admin/activity", color: "text-orange-400" },
 ];
 
 export default function AdminDashboard() {
