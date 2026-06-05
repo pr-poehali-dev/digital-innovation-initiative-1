@@ -560,6 +560,223 @@ def action_create_user_ticket(conn, actor: dict, body: dict, ip: str, ua: str, o
     return resp({"ok": True, "ticket_id": ticket_id, "ticket_no": tno}, origin=origin)
 
 
+# ── Access (learning + education + groups) ────────────────────────
+
+def action_user_access(conn, user_id: int, origin: str) -> dict:
+    """Сводка доступа: learning goals, last checkins, education items, groups."""
+    s = SCHEMA
+
+    with conn.cursor() as cur:
+        # Learning goals
+        cur.execute(f"""
+            SELECT g.id, g.title, g.status, g.start_date, g.created_at, g.updated_at,
+                   (SELECT COUNT(*) FROM {s}.learning_topics t WHERE t.goal_id = g.id) AS topics_total,
+                   (SELECT COUNT(*) FROM {s}.learning_topics t WHERE t.goal_id = g.id AND t.status = 'completed') AS topics_done,
+                   (SELECT MAX(c.created_at) FROM {s}.learning_checkins c WHERE c.goal_id = g.id) AS last_checkin_at
+            FROM {s}.learning_goals g
+            WHERE g.user_id = {user_id}
+            ORDER BY g.created_at DESC LIMIT 20
+        """)
+        goals_rows = cur.fetchall()
+        learning_goals = [{
+            "id": r[0], "title": r[1], "status": r[2],
+            "start_date": str(r[3]) if r[3] else None,
+            "created_at": str(r[4]), "updated_at": str(r[5]),
+            "topics_total": r[6], "topics_done": r[7],
+            "last_checkin_at": str(r[8]) if r[8] else None,
+        } for r in goals_rows]
+
+        # Last checkin
+        cur.execute(f"""
+            SELECT c.id, c.goal_id, c.week_start, c.learned, c.next_focus, c.ai_summary, c.created_at
+            FROM {s}.learning_checkins c
+            WHERE c.user_id = {user_id}
+            ORDER BY c.created_at DESC LIMIT 3
+        """)
+        checkin_rows = cur.fetchall()
+        recent_checkins = [{
+            "id": r[0], "goal_id": r[1],
+            "week_start": str(r[2]) if r[2] else None,
+            "learned": (r[3] or "")[:200],
+            "next_focus": (r[4] or "")[:200],
+            "ai_summary": (r[5] or "")[:200],
+            "created_at": str(r[6]),
+        } for r in checkin_rows]
+
+        # Education items
+        cur.execute(f"""
+            SELECT id, kind, title, issuer_name, institution_name,
+                   status, study_status, issued_at, end_date, is_confirmed, confidence
+            FROM {s}.education_items
+            WHERE user_id = {user_id} AND (archived_at IS NULL OR archived_at > NOW())
+            ORDER BY issued_at DESC NULLS LAST, created_at DESC LIMIT 20
+        """)
+        edu_rows = cur.fetchall()
+        education_items = [{
+            "id": r[0], "kind": r[1], "title": r[2],
+            "issuer_name": r[3], "institution_name": r[4],
+            "status": r[5], "study_status": r[6],
+            "issued_at": str(r[7]) if r[7] else None,
+            "end_date": str(r[8]) if r[8] else None,
+            "is_confirmed": r[9], "confidence": r[10],
+        } for r in edu_rows]
+
+        # Groups
+        cur.execute(f"""
+            SELECT id, group_key, group_label, created_at, created_by
+            FROM {s}.admin_user_groups WHERE user_id = {user_id}
+            ORDER BY created_at DESC
+        """)
+        group_rows = cur.fetchall()
+        groups = [{
+            "id": r[0], "group_key": r[1], "group_label": r[2],
+            "created_at": str(r[3]), "created_by": r[4],
+        } for r in group_rows]
+
+        # Project memberships
+        cur.execute(f"""
+            SELECT pm.project_id, p.title, pm.role, pm.joined_at
+            FROM {s}.project_members pm
+            JOIN {s}.projects p ON p.id = pm.project_id AND p.archived_at IS NULL
+            WHERE pm.user_id = {user_id}
+            ORDER BY pm.joined_at DESC LIMIT 10
+        """)
+        proj_rows = cur.fetchall()
+        projects = [{
+            "project_id": r[0], "title": r[1], "role": r[2],
+            "joined_at": str(r[3]) if r[3] else None,
+        } for r in proj_rows]
+
+    return resp({
+        "learning_goals":   learning_goals,
+        "recent_checkins":  recent_checkins,
+        "education_items":  education_items,
+        "groups":           groups,
+        "projects":         projects,
+    }, origin=origin)
+
+
+def action_reopen_learning_goal(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Переоткрыть learning goal (статус → active)."""
+    s = SCHEMA
+    goal_id = body.get("goal_id")
+    if not goal_id:
+        return resp({"error": "goal_id required"}, 400, origin)
+    goal_id = int(goal_id)
+    actor_email = actor["actor_email"]
+
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT user_id, title, status FROM {s}.learning_goals WHERE id = {goal_id}")
+        row = cur.fetchone()
+    if not row:
+        return resp({"error": "not found"}, 404, origin)
+    user_id, title, before_status = row[0], row[1], row[2]
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            UPDATE {s}.learning_goals
+            SET status = 'active', updated_at = NOW()
+            WHERE id = {goal_id}
+        """)
+    conn.commit()
+
+    write_audit(conn, actor, "user.learning_reopened", user_id,
+                {"status": before_status, "goal_title": title},
+                {"status": "active", "goal_id": goal_id},
+                f"Reopened: {title[:60]}", ip, ua)
+    conn.commit()
+
+    return resp({"ok": True}, origin=origin)
+
+
+def action_archive_learning_goal(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Архивировать learning goal (статус → archived)."""
+    s = SCHEMA
+    goal_id = body.get("goal_id")
+    if not goal_id:
+        return resp({"error": "goal_id required"}, 400, origin)
+    goal_id = int(goal_id)
+
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT user_id, title, status FROM {s}.learning_goals WHERE id = {goal_id}")
+        row = cur.fetchone()
+    if not row:
+        return resp({"error": "not found"}, 404, origin)
+    user_id, title, before_status = row[0], row[1], row[2]
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            UPDATE {s}.learning_goals
+            SET status = 'archived', updated_at = NOW()
+            WHERE id = {goal_id}
+        """)
+    conn.commit()
+
+    write_audit(conn, actor, "user.learning_archived", user_id,
+                {"status": before_status, "goal_title": title},
+                {"status": "archived", "goal_id": goal_id},
+                f"Archived: {title[:60]}", ip, ua)
+    conn.commit()
+
+    return resp({"ok": True}, origin=origin)
+
+
+def action_add_user_group(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Добавить пользователя в admin-группу."""
+    s = SCHEMA
+    user_id = body.get("user_id")
+    group_key = (body.get("group_key") or "").strip().lower().replace(" ", "_")
+    group_label = (body.get("group_label") or "").strip() or None
+    if not user_id or not group_key:
+        return resp({"error": "user_id and group_key required"}, 400, origin)
+    user_id = int(user_id)
+    actor_email = actor["actor_email"]
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {s}.admin_user_groups (user_id, group_key, group_label, created_by)
+            VALUES ({user_id}, %s, %s, %s)
+            ON CONFLICT (user_id, group_key) DO UPDATE SET group_label = EXCLUDED.group_label
+            RETURNING id
+        """, (group_key, group_label, actor_email))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+
+    write_audit(conn, actor, "user.group_added", user_id,
+                {}, {"group_key": group_key, "group_label": group_label},
+                f"Group: {group_key}", ip, ua)
+    conn.commit()
+
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_remove_user_group(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
+    """Убрать пользователя из admin-группы."""
+    s = SCHEMA
+    group_id = body.get("group_id")
+    if not group_id:
+        return resp({"error": "group_id required"}, 400, origin)
+    group_id = int(group_id)
+
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT user_id, group_key FROM {s}.admin_user_groups WHERE id = {group_id}")
+        row = cur.fetchone()
+    if not row:
+        return resp({"error": "not found"}, 404, origin)
+    user_id, group_key = row[0], row[1]
+
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {s}.admin_user_groups WHERE id = {group_id}")
+    conn.commit()
+
+    write_audit(conn, actor, "user.group_removed", user_id,
+                {"group_key": group_key}, {},
+                f"Group removed: {group_key}", ip, ua)
+    conn.commit()
+
+    return resp({"ok": True}, origin=origin)
+
+
 def action_block(conn, actor: dict, body: dict, ip: str, ua: str, origin: str) -> dict:
     """
     Блокировка пользователя:
@@ -743,6 +960,33 @@ def handler(event: dict, context) -> dict:
             if method != "POST":
                 return resp({"error": "POST required"}, 405, origin)
             return action_create_user_ticket(conn, admin, body, ip, ua, origin)
+
+        # ── Access (learning + education + groups) ──────────────────────────
+        if action == "user_access":
+            uid = params.get("user_id") or body.get("user_id")
+            if not uid:
+                return resp({"error": "user_id required"}, 400, origin)
+            return action_user_access(conn, int(uid), origin)
+
+        if action == "reopen_learning_goal":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_reopen_learning_goal(conn, admin, body, ip, ua, origin)
+
+        if action == "archive_learning_goal":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_archive_learning_goal(conn, admin, body, ip, ua, origin)
+
+        if action == "add_user_group":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_add_user_group(conn, admin, body, ip, ua, origin)
+
+        if action == "remove_user_group":
+            if method != "POST":
+                return resp({"error": "POST required"}, 405, origin)
+            return action_remove_user_group(conn, admin, body, ip, ua, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 

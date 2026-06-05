@@ -324,7 +324,100 @@ const FLAG_TYPE_COLOR: Record<string, string> = {
   custom:             "bg-slate-50 text-slate-600",
 };
 
-type DrawerTab = "profile" | "tickets" | "activity" | "case";
+// ── Access types ──────────────────────────────────────────────────
+
+type LearningGoalAccess = {
+  id: number; title: string; status: string;
+  start_date: string | null; created_at: string; updated_at: string;
+  topics_total: number; topics_done: number;
+  last_checkin_at: string | null;
+};
+type RecentCheckin = {
+  id: number; goal_id: number; week_start: string | null;
+  learned: string; next_focus: string; ai_summary: string; created_at: string;
+};
+type EducationItem = {
+  id: number; kind: string; title: string;
+  issuer_name: string | null; institution_name: string | null;
+  status: string; study_status: string | null;
+  issued_at: string | null; end_date: string | null;
+  is_confirmed: boolean; confidence: string | null;
+};
+type UserGroup = {
+  id: number; group_key: string; group_label: string | null;
+  created_at: string; created_by: string;
+};
+type ProjectMembership = {
+  project_id: number; title: string; role: string; joined_at: string | null;
+};
+type UserAccessData = {
+  learning_goals: LearningGoalAccess[];
+  recent_checkins: RecentCheckin[];
+  education_items: EducationItem[];
+  groups: UserGroup[];
+  projects: ProjectMembership[];
+};
+
+// ── Access API helpers ────────────────────────────────────────────
+
+async function fetchUserAccess(userId: number): Promise<UserAccessData> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=user_access&user_id=${userId}`, { headers: authHeaders() });
+  const d = await res.json();
+  return {
+    learning_goals: d.learning_goals ?? [],
+    recent_checkins: d.recent_checkins ?? [],
+    education_items: d.education_items ?? [],
+    groups: d.groups ?? [],
+    projects: d.projects ?? [],
+  };
+}
+
+async function reopenLearningGoal(goalId: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=reopen_learning_goal`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ goal_id: goalId }),
+  });
+  return res.json();
+}
+
+async function archiveLearningGoal(goalId: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=archive_learning_goal`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ goal_id: goalId }),
+  });
+  return res.json();
+}
+
+async function addUserGroup(userId: number, groupKey: string, groupLabel: string): Promise<{ ok: boolean; id?: number }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=add_user_group`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ user_id: userId, group_key: groupKey, group_label: groupLabel }),
+  });
+  return res.json();
+}
+
+async function removeUserGroup(groupId: number): Promise<{ ok: boolean }> {
+  const res = await fetch(`${ADMIN_USERS_URL}?action=remove_user_group`, {
+    method: "POST", headers: authHeaders(),
+    body: JSON.stringify({ group_id: groupId }),
+  });
+  return res.json();
+}
+
+const GOAL_STATUS_CFG: Record<string, { label: string; cls: string }> = {
+  active:   { label: "Активна",   cls: "bg-emerald-50 text-emerald-700" },
+  archived: { label: "Архив",     cls: "bg-slate-100 text-slate-500"    },
+  done:     { label: "Завершена", cls: "bg-blue-50 text-blue-700"       },
+};
+
+const EDU_KIND_CFG: Record<string, string> = {
+  degree: "Диплом", certificate: "Сертификат", course: "Курс",
+  program: "Программа", book: "Книга", lecture: "Лекция",
+  presentation: "Презентация", methodology: "Методология",
+  notes: "Заметки", article: "Статья", material: "Материал", other: "Другое",
+};
+
+type DrawerTab = "profile" | "tickets" | "activity" | "case" | "access";
 
 function UserDrawer({
   userId,
@@ -340,6 +433,13 @@ function UserDrawer({
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<DrawerTab>("profile");
   const [emailCopied, setEmailCopied] = useState(false);
+
+  // Access state
+  const [accessData, setAccessData] = useState<UserAccessData | null>(null);
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [groupForm, setGroupForm] = useState({ key: "", label: "" });
+  const [savingGroup, setSavingGroup] = useState(false);
 
   // Casework state
   const [notes, setNotes] = useState<UserNote[]>([]);
@@ -359,7 +459,7 @@ function UserDrawer({
   useEffect(() => {
     setLoading(true);
     setTab("profile");
-    setNotes([]); setCaseFlags([]); setTicketCreated(null);
+    setNotes([]); setCaseFlags([]); setTicketCreated(null); setAccessData(null);
     fetchUser(userId).then(d => {
       setUser(d.user ?? null);
       setLoading(false);
@@ -374,6 +474,51 @@ function UserDrawer({
       setNotes(n); setCaseFlags(f); setCaseLoading(false);
     });
   }, [tab, userId]);
+
+  // Load access data when tab opens
+  useEffect(() => {
+    if (tab !== "access") return;
+    setAccessLoading(true);
+    fetchUserAccess(userId).then(d => {
+      setAccessData(d); setAccessLoading(false);
+    });
+  }, [tab, userId]);
+
+  async function handleReopen(goalId: number) {
+    await reopenLearningGoal(goalId);
+    setAccessData(prev => prev ? {
+      ...prev,
+      learning_goals: prev.learning_goals.map(g => g.id === goalId ? { ...g, status: "active" } : g),
+    } : null);
+  }
+
+  async function handleArchiveGoal(goalId: number) {
+    await archiveLearningGoal(goalId);
+    setAccessData(prev => prev ? {
+      ...prev,
+      learning_goals: prev.learning_goals.map(g => g.id === goalId ? { ...g, status: "archived" } : g),
+    } : null);
+  }
+
+  async function handleAddGroup() {
+    if (!groupForm.key.trim()) return;
+    setSavingGroup(true);
+    const res = await addUserGroup(userId, groupForm.key.trim(), groupForm.label.trim());
+    setSavingGroup(false);
+    if (res.ok) {
+      setGroupForm({ key: "", label: "" }); setAddingGroup(false);
+      const fresh = await fetchUserAccess(userId);
+      setAccessData(fresh);
+    }
+  }
+
+  async function handleRemoveGroup(groupId: number) {
+    await removeUserGroup(groupId);
+    setAccessData(prev => prev ? {
+      ...prev,
+      groups: prev.groups.filter(g => g.id !== groupId),
+    } : null);
+  }
 
   function copyEmail() {
     if (!user) return;
@@ -435,6 +580,7 @@ function UserDrawer({
     { key: "tickets",  label: "Тикеты" },
     { key: "activity", label: "Активность" },
     { key: "case",     label: "Кейс" },
+    { key: "access",   label: "Доступ" },
   ];
 
   return (
@@ -951,6 +1097,233 @@ function UserDrawer({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+          {/* ── TAB: ДОСТУП ─────────────────────────────────────────────────── */}
+          {!loading && user && tab === "access" && (
+            <div className="px-5 py-4 space-y-5">
+
+              {accessLoading ? (
+                <div className="flex justify-center py-10">
+                  <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : accessData && (
+                <>
+                  {/* ── Learning goals ──────────────────────────────────── */}
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                      <Icon name="GraduationCap" size={12} /> Цели обучения
+                      <span className="ml-1 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-semibold">
+                        {accessData.learning_goals.length}
+                      </span>
+                    </p>
+
+                    {accessData.learning_goals.length === 0 ? (
+                      <div className="py-4 text-center text-slate-400 text-sm">Целей обучения нет</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {accessData.learning_goals.map(g => {
+                          const cfg = GOAL_STATUS_CFG[g.status] ?? { label: g.status, cls: "bg-slate-100 text-slate-500" };
+                          const progress = g.topics_total > 0
+                            ? Math.round((g.topics_done / g.topics_total) * 100) : null;
+                          return (
+                            <div key={g.id} className="bg-slate-50 border border-slate-100 rounded-xl p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${cfg.cls}`}>{cfg.label}</span>
+                                    {progress !== null && (
+                                      <span className="text-[10px] text-slate-500">{g.topics_done}/{g.topics_total} тем</span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-slate-800 font-medium truncate">{g.title}</p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    {g.start_date && (
+                                      <span className="text-[10px] text-slate-400">Старт: {g.start_date}</span>
+                                    )}
+                                    {g.last_checkin_at && (
+                                      <span className="text-[10px] text-slate-400">
+                                        Чекин: {fmtDate(g.last_checkin_at)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {progress !== null && (
+                                    <div className="mt-1.5 h-1 bg-slate-200 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-emerald-400 rounded-full transition-all"
+                                        style={{ width: `${progress}%` }}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex flex-col gap-1 flex-shrink-0">
+                                  {g.status !== "active" && (
+                                    <button
+                                      onClick={() => handleReopen(g.id)}
+                                      className="text-[10px] px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg font-medium transition-colors"
+                                    >
+                                      Reopen
+                                    </button>
+                                  )}
+                                  {g.status === "active" && (
+                                    <button
+                                      onClick={() => handleArchiveGoal(g.id)}
+                                      className="text-[10px] px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg font-medium transition-colors"
+                                    >
+                                      Archive
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Recent checkins */}
+                    {accessData.recent_checkins.length > 0 && (
+                      <div className="mt-3 border-t border-slate-100 pt-3">
+                        <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mb-2">
+                          Последние чекины
+                        </p>
+                        {accessData.recent_checkins.map(c => (
+                          <div key={c.id} className="bg-white border border-slate-100 rounded-lg p-2 mb-1.5">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] font-semibold text-slate-600">
+                                {c.week_start ?? fmtDate(c.created_at)}
+                              </span>
+                            </div>
+                            {c.learned && <p className="text-xs text-slate-700 truncate">📚 {c.learned}</p>}
+                            {c.next_focus && <p className="text-xs text-slate-500 truncate">🎯 {c.next_focus}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Education items ──────────────────────────────────── */}
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                      <Icon name="Award" size={12} /> Образование и сертификаты
+                      <span className="ml-1 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-semibold">
+                        {accessData.education_items.length}
+                      </span>
+                    </p>
+
+                    {accessData.education_items.length === 0 ? (
+                      <div className="py-4 text-center text-slate-400 text-sm">Записей нет</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {accessData.education_items.map(e => (
+                          <div key={e.id} className="bg-slate-50 border border-slate-100 rounded-xl p-2.5">
+                            <div className="flex items-start gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                                  <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-semibold">
+                                    {EDU_KIND_CFG[e.kind] ?? e.kind}
+                                  </span>
+                                  {e.is_confirmed && (
+                                    <span className="text-[10px] text-emerald-600">✓ подтверждено</span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-slate-800 font-medium truncate">{e.title}</p>
+                                {(e.issuer_name || e.institution_name) && (
+                                  <p className="text-xs text-slate-500 truncate">
+                                    {e.issuer_name || e.institution_name}
+                                  </p>
+                                )}
+                                {e.issued_at && (
+                                  <p className="text-[10px] text-slate-400 mt-0.5">{e.issued_at}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Project memberships ───────────────────────────────── */}
+                  {accessData.projects.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <Icon name="FolderOpen" size={12} /> Проекты
+                      </p>
+                      <div className="space-y-1.5">
+                        {accessData.projects.map(p => (
+                          <div key={p.project_id} className="flex items-center justify-between py-1.5 px-2 bg-slate-50 border border-slate-100 rounded-lg">
+                            <span className="text-sm text-slate-800 truncate">{p.title}</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ml-2 ${
+                              p.role === "owner" ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-600"
+                            }`}>{p.role}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Admin groups ──────────────────────────────────────── */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                        <Icon name="Users" size={12} /> Группы
+                        {accessData.groups.length > 0 && (
+                          <span className="ml-1 text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-semibold">
+                            {accessData.groups.length}
+                          </span>
+                        )}
+                      </p>
+                      <button onClick={() => setAddingGroup(v => !v)}
+                        className="text-[10px] text-slate-500 hover:text-slate-700 font-medium">
+                        {addingGroup ? "Отмена" : "+ Добавить"}
+                      </button>
+                    </div>
+
+                    {addingGroup && (
+                      <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-2 mb-3">
+                        <input
+                          className="w-full border border-blue-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          placeholder="Ключ группы (slug) *"
+                          value={groupForm.key}
+                          onChange={e => setGroupForm(f => ({ ...f, key: e.target.value }))}
+                        />
+                        <input
+                          className="w-full border border-blue-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          placeholder="Название группы (опционально)"
+                          value={groupForm.label}
+                          onChange={e => setGroupForm(f => ({ ...f, label: e.target.value }))}
+                        />
+                        <button onClick={handleAddGroup} disabled={savingGroup || !groupForm.key.trim()}
+                          className="w-full py-1.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors">
+                          {savingGroup ? "Сохраняю..." : "Добавить в группу"}
+                        </button>
+                      </div>
+                    )}
+
+                    {accessData.groups.length === 0 && !addingGroup ? (
+                      <div className="py-4 text-center text-slate-400 text-sm">Не состоит в группах</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {accessData.groups.map(g => (
+                          <div key={g.id} className="flex items-center justify-between py-1.5 px-2.5 bg-slate-50 border border-slate-100 rounded-lg">
+                            <div>
+                              <span className="text-xs font-mono text-slate-700">{g.group_key}</span>
+                              {g.group_label && (
+                                <span className="ml-2 text-xs text-slate-500">{g.group_label}</span>
+                              )}
+                            </div>
+                            <button onClick={() => handleRemoveGroup(g.id)}
+                              className="text-slate-400 hover:text-red-500 p-0.5 transition-colors ml-2">
+                              <Icon name="X" size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
