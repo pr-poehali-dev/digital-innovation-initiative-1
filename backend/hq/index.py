@@ -21,17 +21,19 @@ def cors(body: dict, code: int = 200) -> dict:
     }
 
 
-def get_admin(conn, token: str) -> bool:
+def get_admin(conn, token: str) -> str | None:
+    """Возвращает actor_email если токен валиден, иначе None."""
     if not token:
-        return False
+        return None
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT id FROM {SCHEMA}.admin_sessions "
+            f"SELECT actor_email FROM {SCHEMA}.admin_sessions "
             f"WHERE session_token_hash = %s AND expires_at > NOW() AND revoked_at IS NULL LIMIT 1",
             (token_hash,),
         )
-        return cur.fetchone() is not None
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 def handler(event: dict, context) -> dict:
@@ -44,7 +46,8 @@ def handler(event: dict, context) -> dict:
 
     conn = psycopg2.connect(DB)
     try:
-        if not get_admin(conn, token):
+        actor = get_admin(conn, token)
+        if not actor:
             return cors({"ok": False, "error": {"message": "Не авторизован"}}, 401)
 
         method = event.get("httpMethod", "GET")
@@ -57,14 +60,14 @@ def handler(event: dict, context) -> dict:
         # ── Загрузить всё сразу (главная HQ) ─────────────────────────
         if method == "GET" and action == "all":
             with conn.cursor() as cur:
-                cur.execute(f"SELECT block_key, title, content, updated_at FROM {SCHEMA}.hq_blocks ORDER BY id")
-                blocks = {r[0]: {"title": r[1], "content": r[2], "updated_at": str(r[3])} for r in cur.fetchall()}
+                cur.execute(f"SELECT block_key, title, content, updated_at, updated_by FROM {SCHEMA}.hq_blocks ORDER BY id")
+                blocks = {r[0]: {"title": r[1], "content": r[2], "updated_at": str(r[3]), "updated_by": r[4]} for r in cur.fetchall()}
 
                 cur.execute(f"SELECT id, title, horizon, status, criterion, order_index FROM {SCHEMA}.hq_goals ORDER BY order_index, id")
                 goals = [{"id": r[0], "title": r[1], "horizon": r[2], "status": r[3], "criterion": r[4], "order_index": r[5]} for r in cur.fetchall()]
 
-                cur.execute(f"SELECT id, what, why, changed, decided_at, created_at FROM {SCHEMA}.hq_decisions ORDER BY decided_at DESC, id DESC LIMIT 20")
-                decisions = [{"id": r[0], "what": r[1], "why": r[2], "changed": r[3], "decided_at": str(r[4]), "created_at": str(r[5])} for r in cur.fetchall()]
+                cur.execute(f"SELECT id, what, why, changed, decided_at, created_at, created_by FROM {SCHEMA}.hq_decisions ORDER BY decided_at DESC, id DESC LIMIT 20")
+                decisions = [{"id": r[0], "what": r[1], "why": r[2], "changed": r[3], "decided_at": str(r[4]), "created_at": str(r[5]), "created_by": r[6]} for r in cur.fetchall()]
 
                 cur.execute(f"SELECT id, title, impact, mitigation, status FROM {SCHEMA}.hq_risks ORDER BY CASE impact WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id")
                 risks = [{"id": r[0], "title": r[1], "impact": r[2], "mitigation": r[3], "status": r[4]} for r in cur.fetchall()]
@@ -86,11 +89,11 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен key"}}, 400)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"UPDATE {SCHEMA}.hq_blocks SET content = %s, updated_at = NOW() WHERE block_key = %s",
-                    (content, key),
+                    f"UPDATE {SCHEMA}.hq_blocks SET content = %s, updated_at = NOW(), updated_by = %s WHERE block_key = %s",
+                    (content, actor, key),
                 )
             conn.commit()
-            return cors({"ok": True})
+            return cors({"ok": True, "updated_at": "now", "updated_by": actor})
 
         # ── Цели ──────────────────────────────────────────────────────
         if method == "POST" and action == "add_goal":
@@ -129,12 +132,12 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен what"}}, 400)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"INSERT INTO {SCHEMA}.hq_decisions (what, why, changed, decided_at) VALUES (%s, %s, %s, %s) RETURNING id, created_at",
-                    (what, body.get("why", ""), body.get("changed", ""), body.get("decided_at") or "CURRENT_DATE"),
+                    f"INSERT INTO {SCHEMA}.hq_decisions (what, why, changed, decided_at, created_by) VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
+                    (what, body.get("why", ""), body.get("changed", ""), body.get("decided_at") or "CURRENT_DATE", actor),
                 )
                 row = cur.fetchone()
             conn.commit()
-            return cors({"ok": True, "id": row[0], "created_at": str(row[1])})
+            return cors({"ok": True, "id": row[0], "created_at": str(row[1]), "created_by": actor})
 
         # ── Риски ─────────────────────────────────────────────────────
         if method == "POST" and action == "add_risk":

@@ -5,9 +5,9 @@ import { hqApi, type HQGoalStatus, type HQIdeaStatus, type HQRiskImpact, type HQ
 import { useToast } from "@/hooks/use-toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Block = { title: string; content: string; updated_at: string };
+type Block = { title: string; content: string; updated_at: string; updated_by: string };
 type Goal = { id: number; title: string; horizon: string; status: HQGoalStatus; criterion: string };
-type Decision = { id: number; what: string; why: string; changed: string; decided_at: string; created_at: string };
+type Decision = { id: number; what: string; why: string; changed: string; decided_at: string; created_at: string; created_by: string };
 type Risk = { id: number; title: string; impact: HQRiskImpact; mitigation: string; status: HQRiskStatus };
 type Rule = { id: number; category: string; rule_text: string; order_index: number };
 type Idea = { id: number; title: string; why: string; priority: string; status: HQIdeaStatus; source: string; created_at: string };
@@ -42,9 +42,10 @@ const IDEA_STATUSES: HQIdeaStatus[] = ["new", "considering", "in_plan", "rejecte
 const RISK_IMPACTS: HQRiskImpact[] = ["high", "medium", "low"];
 
 // ── Reusable: editable text block ─────────────────────────────────────────────
-function TextBlock({ blockKey, title, icon, iconColor, value, placeholder, onSave }: {
+function TextBlock({ blockKey, title, icon, iconColor, value, placeholder, updatedAt, updatedBy, onSave }: {
   blockKey: string; title: string; icon: string; iconColor: string;
-  value: string; placeholder: string; onSave: (key: string, v: string) => Promise<void>;
+  value: string; placeholder: string; updatedAt?: string; updatedBy?: string;
+  onSave: (key: string, v: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -91,9 +92,18 @@ function TextBlock({ blockKey, title, icon, iconColor, value, placeholder, onSav
             </div>
           </>
         ) : (
-          <p className={`text-sm leading-relaxed whitespace-pre-wrap ${value ? "text-gray-300" : "text-gray-600 italic"}`}>
-            {value || placeholder}
-          </p>
+          <>
+            <p className={`text-sm leading-relaxed whitespace-pre-wrap ${value ? "text-gray-300" : "text-gray-600 italic"}`}>
+              {value || placeholder}
+            </p>
+            {updatedAt && updatedAt !== "0001-01-01 00:00:00" && (
+              <p className="text-[10px] text-gray-700 mt-3 flex items-center gap-1">
+                <Icon name="Clock" size={10} />
+                {new Date(updatedAt).toLocaleString("ru-RU", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                {updatedBy && <span className="ml-1 text-gray-700">· {updatedBy}</span>}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -381,6 +391,8 @@ export default function AdminHQPage() {
               blockKey="focus" title="" icon="Zap" iconColor=""
               value={blocks.focus?.content || ""}
               placeholder="3–5 конкретных шагов на эту неделю. Главный блокер. Решение, которое надо принять."
+              updatedAt={blocks.focus?.updated_at}
+              updatedBy={blocks.focus?.updated_by}
               onSave={saveBlock}
             />
           </div>
@@ -391,10 +403,12 @@ export default function AdminHQPage() {
           <TextBlock blockKey="vision" title="Видение" icon="Eye" iconColor="text-violet-400"
             value={blocks.vision?.content || ""}
             placeholder="Зачем существует проект? Что получится через 12 месяцев?"
+            updatedAt={blocks.vision?.updated_at} updatedBy={blocks.vision?.updated_by}
             onSave={saveBlock} />
           <TextBlock blockKey="mission" title="Миссия" icon="Target" iconColor="text-blue-400"
             value={blocks.mission?.content || ""}
             placeholder="Что мы делаем каждый день и для кого?"
+            updatedAt={blocks.mission?.updated_at} updatedBy={blocks.mission?.updated_by}
             onSave={saveBlock} />
         </div>
 
@@ -482,6 +496,7 @@ export default function AdminHQPage() {
                   </div>
                   {d.why && <p className="text-xs text-gray-500 leading-relaxed">{d.why}</p>}
                   {d.changed && <p className="text-xs text-gray-600 mt-1 italic">{d.changed}</p>}
+                  {d.created_by && <p className="text-[10px] text-gray-700 mt-1.5 flex items-center gap-1"><Icon name="User" size={9} />{d.created_by}</p>}
                 </div>
               ))}
             </div>
@@ -648,6 +663,7 @@ export default function AdminHQPage() {
           <TextBlock blockKey="scratch" title="" icon="PenLine" iconColor=""
             value={blocks.scratch?.content || ""}
             placeholder="Свободные заметки, гипотезы, вопросы без ответа, идеи на будущее..."
+            updatedAt={blocks.scratch?.updated_at} updatedBy={blocks.scratch?.updated_by}
             onSave={saveBlock} />
         </div>
 
