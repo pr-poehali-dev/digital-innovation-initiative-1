@@ -260,6 +260,49 @@ export const ticketsApi = {
   addMessage: (d: Record<string,unknown>) => ticketsReq("/?action=add_ticket_message", { method: "POST", body: JSON.stringify(d) }),
 };
 
+const CONTENT_BASE = "https://functions.poehali.dev/7689e249-e586-4718-9f88-7602f8b22c51";
+
+async function contentReq(path: string, options: RequestInit = {}) {
+  const token = getAdminToken();
+  const res = await fetch(`${CONTENT_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { "X-Admin-Token": token } : {}), ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type ContentType     = "announcement" | "release_note" | "faq" | "guide" | "article" | "template";
+export type ContentStatus   = "draft" | "review" | "published" | "archived";
+export type CommChannel     = "in_app" | "email" | "system";
+export type CommStatus      = "draft" | "scheduled" | "sent" | "failed" | "cancelled";
+export type ContentAudience = "all" | "learners" | "admins" | "support" | "project_team";
+
+export const contentApi = {
+  contentSummary:       ()                          => contentReq("/?action=content_summary"),
+  contentList:          (p: Record<string,string> = {}) => {
+    const qs = new URLSearchParams({ action: "content_list", ...p }).toString();
+    return contentReq(`/?${qs}`);
+  },
+  contentGet:           (id: number)                => contentReq(`/?action=content_get&id=${id}`),
+  addContent:           (d: Record<string,unknown>) => contentReq("/?action=add_content",     { method: "POST", body: JSON.stringify(d) }),
+  updateContent:        (d: Record<string,unknown>) => contentReq("/?action=update_content",  { method: "PUT",  body: JSON.stringify(d) }),
+  publishContent:       (id: number)                => contentReq("/?action=publish_content", { method: "POST", body: JSON.stringify({ id }) }),
+  archiveContent:       (id: number)                => contentReq("/?action=archive_content", { method: "POST", body: JSON.stringify({ id }) }),
+
+  commSummary:          ()                          => contentReq("/?action=communications_summary"),
+  commList:             (p: Record<string,string> = {}) => {
+    const qs = new URLSearchParams({ action: "communications_list", ...p }).toString();
+    return contentReq(`/?${qs}`);
+  },
+  commGet:              (id: number)                => contentReq(`/?action=communication_get&id=${id}`),
+  addComm:              (d: Record<string,unknown>) => contentReq("/?action=add_communication",    { method: "POST", body: JSON.stringify(d) }),
+  updateComm:           (d: Record<string,unknown>) => contentReq("/?action=update_communication", { method: "PUT",  body: JSON.stringify(d) }),
+  sendComm:             (id: number)                => contentReq("/?action=send_communication",   { method: "POST", body: JSON.stringify({ id }) }),
+  cancelComm:           (id: number)                => contentReq("/?action=cancel_communication", { method: "POST", body: JSON.stringify({ id }) }),
+  commEvents:           (communication_id: number)  => contentReq(`/?action=communication_events&communication_id=${communication_id}`),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");

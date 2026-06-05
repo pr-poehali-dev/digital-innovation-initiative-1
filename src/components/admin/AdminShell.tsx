@@ -14,6 +14,7 @@ const NAV = [
   { label: "Алерты",      icon: "Bell",             href: "/admin/alerts" },
   { label: "Flags",        icon: "ToggleRight",      href: "/admin/flags" },
   { label: "Тикеты",      icon: "Ticket",           href: "/admin/tickets" },
+  { label: "Контент",     icon: "FileText",         href: "/admin/content" },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {

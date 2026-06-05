@@ -1,0 +1,8 @@
+{
+  "tests": [
+    { "name": "OPTIONS preflight",         "method": "OPTIONS", "path": "/",                            "expectedStatus": 200 },
+    { "name": "Unauthorized content list", "method": "GET",     "path": "/?action=content_list",        "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" },
+    { "name": "Unauthorized comm list",    "method": "GET",     "path": "/?action=communications_list", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" },
+    { "name": "Unauthorized summary",      "method": "GET",     "path": "/?action=content_summary",     "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" }
+  ]
+}
