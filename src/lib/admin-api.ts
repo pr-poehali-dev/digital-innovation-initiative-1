@@ -192,6 +192,24 @@ export const opsApi = {
   toggleFlag:(id: number)                 => opsReq("/?action=toggle_flag", { method: "PUT",  body: JSON.stringify({ id }) }),
 };
 
+const AI_CTX_BASE = "https://functions.poehali.dev/ae7057d8-becb-483d-9353-4858fadc5fbd";
+
+async function aiCtxReq(path: string) {
+  const token = getAdminToken();
+  const res = await fetch(`${AI_CTX_BASE}${path}`, {
+    headers: { "Content-Type": "application/json", ...(token ? { "X-Admin-Token": token } : {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type AiCtxScope = "full" | "hq" | "project" | "passport";
+
+export const aiContextApi = {
+  export: (scope: AiCtxScope = "full") =>
+    aiCtxReq(`/?action=export&format=json&scope=${scope}`),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");

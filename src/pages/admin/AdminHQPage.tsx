@@ -3,6 +3,7 @@ import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { hqApi, type HQGoalStatus, type HQIdeaStatus, type HQRiskImpact, type HQRiskStatus } from "@/lib/admin-api";
 import { useToast } from "@/hooks/use-toast";
+import AiContextExporter from "@/components/admin/AiContextExporter";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Block = { title: string; content: string; updated_at: string; updated_by: string };
@@ -171,8 +172,6 @@ export default function AdminHQPage() {
   const [risks, setRisks] = useState<Risk[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [copied, setCopied] = useState(false);
-
   // Forms
   const [addingGoal, setAddingGoal] = useState(false);
   const [newGoal, setNewGoal] = useState({ title: "", horizon: "", status: "planned" as HQGoalStatus, criterion: "" });
@@ -312,43 +311,6 @@ export default function AdminHQPage() {
     }
   }
 
-  // ── AI context copy ────────────────────────────────────────────────────────
-  function buildAIContext(): string {
-    const b = blocks;
-    const lines: string[] = [
-      "# Контекст проекта «Траектория»",
-      "",
-      `## Видение\n${b.vision?.content || "—"}`,
-      "",
-      `## Миссия\n${b.mission?.content || "—"}`,
-      "",
-      `## Текущий фокус\n${b.focus?.content || "—"}`,
-      "",
-      "## Стратегические цели",
-      ...goals.map(g => `- [${GOAL_STATUS[g.status].label}] ${g.title} (${g.horizon})`),
-      "",
-      "## Ключевые решения",
-      ...decisions.slice(0, 5).map(d => `- ${d.decided_at}: ${d.what} — ${d.why}`),
-      "",
-      "## Активные риски",
-      ...risks.filter(r => r.status === "open").map(r => `- [${IMPACT[r.impact].label}] ${r.title}`),
-      "",
-      "## Правила проекта",
-      ...rules.map(r => `- [${RULE_CAT_LABELS[r.category] || r.category}] ${r.rule_text}`),
-      "",
-      "## Идеи в работе",
-      ...ideas.filter(i => i.status === "new" || i.status === "considering").map(i => `- ${i.title}`),
-    ];
-    return lines.join("\n");
-  }
-
-  function copyContext() {
-    navigator.clipboard.writeText(buildAIContext()).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
   if (loading) {
     return (
       <AdminShell>
@@ -377,15 +339,7 @@ export default function AdminHQPage() {
             </div>
             <p className="text-gray-500 text-sm ml-12">Живая память проекта — видение, правила, решения, риски, идеи</p>
           </div>
-          <button onClick={copyContext}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-              copied
-                ? "bg-emerald-700 text-white"
-                : "bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700"
-            }`}>
-            <Icon name={copied ? "Check" : "Copy"} size={14} />
-            {copied ? "Скопировано!" : "Контекст для AI"}
-          </button>
+          <AiContextExporter defaultScope="hq" />
         </div>
 
         {/* ── Текущий фокус ───────────────────────────────────────────────── */}

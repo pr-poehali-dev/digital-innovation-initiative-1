@@ -3,6 +3,7 @@ import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
 import { passportApi, type PPModuleStatus, type PPModuleCategory, type PPEntityKind, type PPOverlapType, type PPOverlapStatus } from "@/lib/admin-api";
+import AiContextExporter from "@/components/admin/AiContextExporter";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Module = {
@@ -298,29 +299,6 @@ export default function AdminPassportPage() {
     } else toast({ title: "Ошибка", variant: "destructive" });
   }
 
-  function buildAIContext(): string {
-    const lines = [
-      "# Platform Passport — контекст для AI",
-      "",
-      `Всего модулей: ${summary.total_modules} | Сущностей: ${summary.total_entities} | Без owner: ${summary.no_owner_modules} | Нормализация: ${summary.norm_pct}%`,
-      "",
-      "## Модули",
-      ...modules.map(m => `- [${m.status}] ${m.name} (${CAT_LABEL[m.category]}) — owner: ${m.owner_email || "не указан"} — route: ${m.primary_route || "—"}`),
-      "",
-      "## Сущности без source of truth",
-      ...entities.filter(e => !e.source_of_truth_module_id).map(e => `- ${e.name} (${KIND_LABEL[e.kind]}) — owner: ${e.owner_email || "не указан"}`),
-      "",
-      "## Открытые конфликты",
-      ...overlaps.filter(o => o.status === "open").map(o => `- [${OVERLAP_TYPE_LABEL[o.overlap_type]}] ${o.title}`),
-    ];
-    return lines.join("\n");
-  }
-
-  const [copied, setCopied] = useState(false);
-  function copyContext() {
-    navigator.clipboard.writeText(buildAIContext()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  }
-
   // ── Filters ────────────────────────────────────────────────────────────────
   const filteredModules = modules.filter(m => {
     if (catFilter !== "all" && m.category !== catFilter) return false;
@@ -355,11 +333,7 @@ export default function AdminPassportPage() {
               <p className="text-gray-500 text-sm mt-0.5">Реестр модулей, сущностей, owners и связей платформы</p>
             </div>
           </div>
-          <button onClick={copyContext}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${copied ? "bg-emerald-700 text-white" : "bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700"}`}>
-            <Icon name={copied ? "Check" : "Copy"} size={14} />
-            {copied ? "Скопировано!" : "Контекст для AI"}
-          </button>
+          <AiContextExporter defaultScope="passport" />
         </div>
 
         {/* ── Overview cards ────────────────────────────────────────────────── */}
@@ -687,15 +661,7 @@ export default function AdminPassportPage() {
                     <LastUpdated at={notes.updated_at} by={notes.updated_by} />
                   )}
                   <div className="mt-4 pt-4 border-t border-gray-800">
-                    <p className="text-xs text-gray-600 mb-2">AI Context — нажми чтобы скопировать:</p>
-                    <pre className="text-[11px] text-gray-700 bg-gray-800 rounded-lg p-3 overflow-auto max-h-40 leading-relaxed whitespace-pre-wrap">
-                      {buildAIContext()}
-                    </pre>
-                    <button onClick={copyContext}
-                      className={`mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${copied ? "bg-emerald-700 text-white" : "bg-violet-700 hover:bg-violet-600 text-white"}`}>
-                      <Icon name={copied ? "Check" : "Clipboard"} size={12} />
-                      {copied ? "Скопировано!" : "Скопировать контекст"}
-                    </button>
+                    <AiContextExporter defaultScope="passport" variant="button" />
                   </div>
                 </>
               )}

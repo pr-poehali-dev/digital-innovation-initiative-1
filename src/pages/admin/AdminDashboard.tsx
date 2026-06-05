@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
+import AiContextExporter from "@/components/admin/AiContextExporter";
 
 type Card = { label: string; icon: string; href: string; color: string; highlight?: boolean };
 
@@ -66,6 +67,16 @@ export default function AdminDashboard() {
         <CardGroup title="Platform" icon="Layers" cards={PLATFORM} />
         <CardGroup title="Operations" icon="Cpu" cards={OPERATIONS} />
         <CardGroup title="Users & Projects" icon="Users" cards={USERS_AND_PROJECTS} />
+
+        <div className="pt-2 border-t border-gray-800">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Icon name="BrainCircuit" size={13} className="text-gray-600" />
+              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider">AI Context</span>
+            </div>
+          </div>
+          <AiContextExporter defaultScope="full" variant="card" />
+        </div>
       </div>
     </AdminShell>
   );

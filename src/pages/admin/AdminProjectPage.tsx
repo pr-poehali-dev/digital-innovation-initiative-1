@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { useToast } from "@/hooks/use-toast";
+import AiContextExporter from "@/components/admin/AiContextExporter";
 import {
   projectApi,
   type ProjectGapType,
@@ -280,14 +281,17 @@ export default function AdminProjectPage() {
       <div className="p-6 max-w-4xl space-y-8">
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-start gap-4">
-          <div className="w-9 h-9 rounded-xl bg-blue-900 flex items-center justify-center flex-shrink-0">
-            <Icon name="Map" size={18} className="text-blue-300" />
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-4">
+            <div className="w-9 h-9 rounded-xl bg-blue-900 flex items-center justify-center flex-shrink-0">
+              <Icon name="Map" size={18} className="text-blue-300" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white">Архитектурная карта</h1>
+              <p className="text-gray-500 text-sm mt-0.5">As-is → To-be, разрывы, конфликты, волны изменений</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">Архитектурная карта</h1>
-            <p className="text-gray-500 text-sm mt-0.5">As-is → To-be, разрывы, конфликты, волны изменений</p>
-          </div>
+          <AiContextExporter defaultScope="project" />
         </div>
 
         {/* ── As-is / To-be ────────────────────────────────────────────────── */}

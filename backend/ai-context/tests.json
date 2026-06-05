@@ -1,0 +1,7 @@
+{
+  "tests": [
+    { "name": "OPTIONS preflight",     "method": "OPTIONS", "path": "/",                      "expectedStatus": 200 },
+    { "name": "Unauthorized",          "method": "GET",     "path": "/?action=export",         "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" },
+    { "name": "Bad action",            "method": "GET",     "path": "/",                       "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" }
+  ]
+}
