@@ -6,11 +6,11 @@ import { useToast } from "@/hooks/use-toast";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Block = { title: string; content: string; updated_at: string; updated_by: string };
-type Goal = { id: number; title: string; horizon: string; status: HQGoalStatus; criterion: string };
+type Goal = { id: number; title: string; horizon: string; status: HQGoalStatus; criterion: string; updated_at: string; updated_by: string };
 type Decision = { id: number; what: string; why: string; changed: string; decided_at: string; created_at: string; created_by: string };
-type Risk = { id: number; title: string; impact: HQRiskImpact; mitigation: string; status: HQRiskStatus };
-type Rule = { id: number; category: string; rule_text: string; order_index: number };
-type Idea = { id: number; title: string; why: string; priority: string; status: HQIdeaStatus; source: string; created_at: string };
+type Risk = { id: number; title: string; impact: HQRiskImpact; mitigation: string; status: HQRiskStatus; updated_at: string; updated_by: string };
+type Rule = { id: number; category: string; rule_text: string; order_index: number; created_at: string; created_by: string };
+type Idea = { id: number; title: string; why: string; priority: string; status: HQIdeaStatus; source: string; created_at: string; updated_at: string; updated_by: string };
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const GOAL_STATUS: Record<HQGoalStatus, { label: string; color: string }> = {
@@ -40,6 +40,21 @@ const IDEA_PRIORITIES = ["high", "medium", "low"] as const;
 const GOAL_STATUSES: HQGoalStatus[] = ["planned", "on_track", "at_risk", "done"];
 const IDEA_STATUSES: HQIdeaStatus[] = ["new", "considering", "in_plan", "rejected", "done"];
 const RISK_IMPACTS: HQRiskImpact[] = ["high", "medium", "low"];
+
+// ── Last updated helper ───────────────────────────────────────────────────────
+function LastUpdated({ at, by, className = "" }: { at?: string; by?: string; className?: string }) {
+  if (!at || at.startsWith("0001")) return null;
+  const date = new Date(at);
+  if (isNaN(date.getTime())) return null;
+  const fmt = date.toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  return (
+    <p className={`text-[10px] text-gray-700 flex items-center gap-1 ${className}`}>
+      <Icon name="Clock" size={9} />
+      {fmt}
+      {by ? <><span className="mx-0.5">·</span>{by}</> : null}
+    </p>
+  );
+}
 
 // ── Reusable: editable text block ─────────────────────────────────────────────
 function TextBlock({ blockKey, title, icon, iconColor, value, placeholder, updatedAt, updatedBy, onSave }: {
@@ -96,13 +111,7 @@ function TextBlock({ blockKey, title, icon, iconColor, value, placeholder, updat
             <p className={`text-sm leading-relaxed whitespace-pre-wrap ${value ? "text-gray-300" : "text-gray-600 italic"}`}>
               {value || placeholder}
             </p>
-            {updatedAt && updatedAt !== "0001-01-01 00:00:00" && (
-              <p className="text-[10px] text-gray-700 mt-3 flex items-center gap-1">
-                <Icon name="Clock" size={10} />
-                {new Date(updatedAt).toLocaleString("ru-RU", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                {updatedBy && <span className="ml-1 text-gray-700">· {updatedBy}</span>}
-              </p>
-            )}
+            <LastUpdated at={updatedAt} by={updatedBy} className="mt-3" />
           </>
         )}
       </div>
@@ -451,6 +460,7 @@ export default function AdminHQPage() {
                     <p className="text-sm text-gray-200">{g.title}</p>
                     {g.criterion && <p className="text-xs text-gray-500 mt-0.5">✓ {g.criterion}</p>}
                     {g.horizon && <p className="text-xs text-gray-600 mt-0.5">{g.horizon}</p>}
+                    <LastUpdated at={g.updated_at} by={g.updated_by} className="mt-1" />
                   </div>
                   <button onClick={() => cycleGoalStatus(g)}
                     className={`flex-shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-full border transition-all ${GOAL_STATUS[g.status].color}`}>
@@ -496,7 +506,7 @@ export default function AdminHQPage() {
                   </div>
                   {d.why && <p className="text-xs text-gray-500 leading-relaxed">{d.why}</p>}
                   {d.changed && <p className="text-xs text-gray-600 mt-1 italic">{d.changed}</p>}
-                  {d.created_by && <p className="text-[10px] text-gray-700 mt-1.5 flex items-center gap-1"><Icon name="User" size={9} />{d.created_by}</p>}
+                  <LastUpdated at={d.created_at} by={d.created_by} className="mt-1.5" />
                 </div>
               ))}
             </div>
@@ -538,6 +548,7 @@ export default function AdminHQPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-200">{r.title}</p>
                     {r.mitigation && <p className="text-xs text-gray-500 mt-0.5">→ {r.mitigation}</p>}
+                    <LastUpdated at={r.updated_at} by={r.updated_by} className="mt-1" />
                   </div>
                   <button onClick={() => cycleRiskStatus(r)}
                     className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full border font-semibold transition-all ${
@@ -646,6 +657,7 @@ export default function AdminHQPage() {
                     <p className="text-sm text-gray-200">{idea.title}</p>
                     {idea.why && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{idea.why}</p>}
                     {idea.source && <p className="text-xs text-gray-700 mt-0.5">→ {idea.source}</p>}
+                    <LastUpdated at={idea.updated_at} by={idea.updated_by} className="mt-1" />
                   </div>
                   <IdeaStatusSelect
                     value={idea.status}

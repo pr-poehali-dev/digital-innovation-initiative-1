@@ -73,6 +73,43 @@ export const hqApi = {
     hqRequest("/?action=update_idea", { method: "PUT", body: JSON.stringify(d) }),
 };
 
+const PROJECT_BASE = "https://functions.poehali.dev/696f59af-1bfd-4efe-91bf-d8ce4e48ada4";
+
+async function projectRequest(path: string, options: RequestInit = {}) {
+  const token = getAdminToken();
+  const res = await fetch(`${PROJECT_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { "X-Admin-Token": token } : {}), ...(options.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+export type ProjectWaveStatus = "planned" | "in_progress" | "done";
+export type ProjectItemStatus = "todo" | "in_progress" | "done";
+export type ProjectGapType    = "gap" | "conflict" | "duplicate" | "unclear";
+export type ProjectGapStatus  = "open" | "resolved";
+
+export const projectApi = {
+  all: () => projectRequest("/?action=all"),
+  saveSection: (key: string, content: string) =>
+    projectRequest("/?action=save_section", { method: "PUT", body: JSON.stringify({ key, content }) }),
+  addGap: (d: { title: string; description: string; gap_type: ProjectGapType; status: ProjectGapStatus }) =>
+    projectRequest("/?action=add_gap", { method: "POST", body: JSON.stringify(d) }),
+  updateGap: (d: { id: number; title?: string; description?: string; gap_type?: ProjectGapType; status?: ProjectGapStatus }) =>
+    projectRequest("/?action=update_gap", { method: "PUT", body: JSON.stringify(d) }),
+  addDecision: (d: { what: string; why: string; changed: string }) =>
+    projectRequest("/?action=add_decision", { method: "POST", body: JSON.stringify(d) }),
+  addWave: (d: { title: string; goal: string; status: ProjectWaveStatus }) =>
+    projectRequest("/?action=add_wave", { method: "POST", body: JSON.stringify(d) }),
+  updateWave: (d: { id: number; title?: string; goal?: string; status?: ProjectWaveStatus }) =>
+    projectRequest("/?action=update_wave", { method: "PUT", body: JSON.stringify(d) }),
+  addWaveItem: (d: { wave_id: number; title: string }) =>
+    projectRequest("/?action=add_wave_item", { method: "POST", body: JSON.stringify(d) }),
+  updateWaveItem: (d: { id: number; title?: string; status?: ProjectItemStatus }) =>
+    projectRequest("/?action=update_wave_item", { method: "PUT", body: JSON.stringify(d) }),
+};
+
 export const adminApi = {
   async me() {
     return request("?action=me");

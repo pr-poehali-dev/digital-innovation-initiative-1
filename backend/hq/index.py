@@ -63,20 +63,20 @@ def handler(event: dict, context) -> dict:
                 cur.execute(f"SELECT block_key, title, content, updated_at, updated_by FROM {SCHEMA}.hq_blocks ORDER BY id")
                 blocks = {r[0]: {"title": r[1], "content": r[2], "updated_at": str(r[3]), "updated_by": r[4]} for r in cur.fetchall()}
 
-                cur.execute(f"SELECT id, title, horizon, status, criterion, order_index FROM {SCHEMA}.hq_goals ORDER BY order_index, id")
-                goals = [{"id": r[0], "title": r[1], "horizon": r[2], "status": r[3], "criterion": r[4], "order_index": r[5]} for r in cur.fetchall()]
+                cur.execute(f"SELECT id, title, horizon, status, criterion, order_index, updated_at, updated_by FROM {SCHEMA}.hq_goals ORDER BY order_index, id")
+                goals = [{"id": r[0], "title": r[1], "horizon": r[2], "status": r[3], "criterion": r[4], "order_index": r[5], "updated_at": str(r[6]), "updated_by": r[7]} for r in cur.fetchall()]
 
                 cur.execute(f"SELECT id, what, why, changed, decided_at, created_at, created_by FROM {SCHEMA}.hq_decisions ORDER BY decided_at DESC, id DESC LIMIT 20")
                 decisions = [{"id": r[0], "what": r[1], "why": r[2], "changed": r[3], "decided_at": str(r[4]), "created_at": str(r[5]), "created_by": r[6]} for r in cur.fetchall()]
 
-                cur.execute(f"SELECT id, title, impact, mitigation, status FROM {SCHEMA}.hq_risks ORDER BY CASE impact WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id")
-                risks = [{"id": r[0], "title": r[1], "impact": r[2], "mitigation": r[3], "status": r[4]} for r in cur.fetchall()]
+                cur.execute(f"SELECT id, title, impact, mitigation, status, updated_at, updated_by FROM {SCHEMA}.hq_risks ORDER BY CASE impact WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id")
+                risks = [{"id": r[0], "title": r[1], "impact": r[2], "mitigation": r[3], "status": r[4], "updated_at": str(r[5]), "updated_by": r[6]} for r in cur.fetchall()]
 
-                cur.execute(f"SELECT id, category, rule_text, order_index FROM {SCHEMA}.hq_rules ORDER BY category, order_index, id")
-                rules = [{"id": r[0], "category": r[1], "rule_text": r[2], "order_index": r[3]} for r in cur.fetchall()]
+                cur.execute(f"SELECT id, category, rule_text, order_index, created_at, created_by FROM {SCHEMA}.hq_rules ORDER BY category, order_index, id")
+                rules = [{"id": r[0], "category": r[1], "rule_text": r[2], "order_index": r[3], "created_at": str(r[4]), "created_by": r[5]} for r in cur.fetchall()]
 
-                cur.execute(f"SELECT id, title, why, priority, status, source, created_at FROM {SCHEMA}.hq_ideas ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id DESC")
-                ideas = [{"id": r[0], "title": r[1], "why": r[2], "priority": r[3], "status": r[4], "source": r[5], "created_at": str(r[6])} for r in cur.fetchall()]
+                cur.execute(f"SELECT id, title, why, priority, status, source, created_at, updated_at, updated_by FROM {SCHEMA}.hq_ideas ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id DESC")
+                ideas = [{"id": r[0], "title": r[1], "why": r[2], "priority": r[3], "status": r[4], "source": r[5], "created_at": str(r[6]), "updated_at": str(r[7]), "updated_by": r[8]} for r in cur.fetchall()]
 
             return cors({"ok": True, "blocks": blocks, "goals": goals, "decisions": decisions,
                          "risks": risks, "rules": rules, "ideas": ideas})
@@ -102,8 +102,8 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"INSERT INTO {SCHEMA}.hq_goals (title, horizon, status, criterion) VALUES (%s, %s, %s, %s) RETURNING id",
-                    (title, body.get("horizon", ""), body.get("status", "planned"), body.get("criterion", "")),
+                    f"INSERT INTO {SCHEMA}.hq_goals (title, horizon, status, criterion, updated_by) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (title, body.get("horizon", ""), body.get("status", "planned"), body.get("criterion", ""), actor),
                 )
                 new_id = cur.fetchone()[0]
             conn.commit()
@@ -119,9 +119,9 @@ def handler(event: dict, context) -> dict:
                     fields.append(f"{f} = %s")
                     vals.append(body[f])
             if fields:
-                vals += [goal_id]
+                vals += [actor, goal_id]
                 with conn.cursor() as cur:
-                    cur.execute(f"UPDATE {SCHEMA}.hq_goals SET {', '.join(fields)}, updated_at = NOW() WHERE id = %s", vals)
+                    cur.execute(f"UPDATE {SCHEMA}.hq_goals SET {', '.join(fields)}, updated_at = NOW(), updated_by = %s WHERE id = %s", vals)
                 conn.commit()
             return cors({"ok": True})
 
@@ -146,8 +146,8 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"INSERT INTO {SCHEMA}.hq_risks (title, impact, mitigation, status) VALUES (%s, %s, %s, %s) RETURNING id",
-                    (title, body.get("impact", "medium"), body.get("mitigation", ""), body.get("status", "open")),
+                    f"INSERT INTO {SCHEMA}.hq_risks (title, impact, mitigation, status, updated_by) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (title, body.get("impact", "medium"), body.get("mitigation", ""), body.get("status", "open"), actor),
                 )
                 new_id = cur.fetchone()[0]
             conn.commit()
@@ -163,9 +163,9 @@ def handler(event: dict, context) -> dict:
                     fields.append(f"{f} = %s")
                     vals.append(body[f])
             if fields:
-                vals += [risk_id]
+                vals += [actor, risk_id]
                 with conn.cursor() as cur:
-                    cur.execute(f"UPDATE {SCHEMA}.hq_risks SET {', '.join(fields)}, updated_at = NOW() WHERE id = %s", vals)
+                    cur.execute(f"UPDATE {SCHEMA}.hq_risks SET {', '.join(fields)}, updated_at = NOW(), updated_by = %s WHERE id = %s", vals)
                 conn.commit()
             return cors({"ok": True})
 
@@ -176,8 +176,8 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен rule_text"}}, 400)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"INSERT INTO {SCHEMA}.hq_rules (category, rule_text, order_index) VALUES (%s, %s, %s) RETURNING id",
-                    (body.get("category", "general"), rule_text, body.get("order_index", 0)),
+                    f"INSERT INTO {SCHEMA}.hq_rules (category, rule_text, order_index, created_by) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (body.get("category", "general"), rule_text, body.get("order_index", 0), actor),
                 )
                 new_id = cur.fetchone()[0]
             conn.commit()
@@ -190,8 +190,8 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"INSERT INTO {SCHEMA}.hq_ideas (title, why, priority, status, source) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                    (title, body.get("why", ""), body.get("priority", "medium"), "new", body.get("source", "")),
+                    f"INSERT INTO {SCHEMA}.hq_ideas (title, why, priority, status, source, updated_by) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                    (title, body.get("why", ""), body.get("priority", "medium"), "new", body.get("source", ""), actor),
                 )
                 new_id = cur.fetchone()[0]
             conn.commit()
@@ -207,9 +207,9 @@ def handler(event: dict, context) -> dict:
                     fields.append(f"{f} = %s")
                     vals.append(body[f])
             if fields:
-                vals += [idea_id]
+                vals += [actor, idea_id]
                 with conn.cursor() as cur:
-                    cur.execute(f"UPDATE {SCHEMA}.hq_ideas SET {', '.join(fields)}, updated_at = NOW() WHERE id = %s", vals)
+                    cur.execute(f"UPDATE {SCHEMA}.hq_ideas SET {', '.join(fields)}, updated_at = NOW(), updated_by = %s WHERE id = %s", vals)
                 conn.commit()
             return cors({"ok": True})
 
