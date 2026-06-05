@@ -639,40 +639,77 @@ North Star: {profile.get("north_star_name","не задан")}
 Quarter goals: {json.dumps(profile.get("quarter_goals",[]), ensure_ascii=False)}
 """
 
+    # Добавляем контекст квартальных целей и приоритетов из профиля
+    strategy_context = ""
+    if profile.get("quarter_goals"):
+        strategy_context += f"\nКвартальные цели: {json.dumps(profile.get('quarter_goals',[]), ensure_ascii=False)}"
+    if profile.get("priority_themes"):
+        strategy_context += f"\nПриоритетные направления: {json.dumps(profile.get('priority_themes',[]), ensure_ascii=False)}"
+    if profile.get("target_segments"):
+        strategy_context += f"\nЦелевые сегменты: {json.dumps(profile.get('target_segments',[]), ensure_ascii=False)}"
+    if profile.get("non_goals"):
+        strategy_context += f"\nВне скоупа: {json.dumps(profile.get('non_goals',[]), ensure_ascii=False)}"
+
+    # Подсчитываем общий объём данных для оценки confidence
+    total_users = (health_resp.get("health",{}).get("metrics") or [{}])
+    total_users_val = next((m.get("value",0) for m in total_users if m.get("key")=="new_users"), 0) or 0
+    data_volume_note = ""
+    if total_users_val < 10:
+        data_volume_note = f"\n\nВАЖНО: В системе всего {total_users_val} пользователей за период. Это ранняя стадия продукта. Confidence всех выводов должен быть 'low' если данных < 20 пользователей. Давай конкретные выводы о том, ЧТО НУЖНО СДЕЛАТЬ ПРЯМО СЕЙЧАС для построения product-market fit, а не описывай отсутствие данных."
+
     messages = [
         {"role": "system", "content": (
-            "Ты старший продуктовый аналитик. Анализируй данные и давай конкретные, "
-            "цифровые выводы. Отвечай на русском языке строго в JSON формате."
+            "Ты старший продуктовый аналитик и growth стратег. "
+            "Работаешь с реальными данными продукта на русском языке. "
+            "Если данных мало — говоришь честно, но всё равно даёшь конкретные actionable выводы. "
+            "Отвечай строго в JSON формате без markdown."
         )},
         {"role": "user", "content": f"""
-На основе следующих данных продукта сформируй стратегическую сводку.
+Сформируй стратегическую сводку продукта на основе данных.
 
 {context}
+{strategy_context}
+{data_volume_note}
+
+Правила:
+- health_score: 1-10, где 10 = отлично работающий продукт с growth
+- confidence: "high" если данных ≥50 событий, "medium" если 10-50, "low" если <10
+- key_insights: минимум 3, максимум 6
+- recommended_focus: конкретное действие, не абстракция
+- Если данных мало — давай выводы о том что нужно СТРОИТЬ/ИЗМЕРЯТЬ прямо сейчас
 
 Верни JSON строго в формате:
 {{
-  "headline": "одно предложение — главное что происходит с продуктом",
+  "headline": "одно предложение — главное что происходит с продуктом прямо сейчас",
   "period": "{d_from} — {d_to}",
+  "data_maturity": "early|growing|mature",
   "health_score": число от 1 до 10,
-  "health_reasoning": "2-3 предложения почему такой score",
+  "health_reasoning": "2-3 конкретных предложения с цифрами",
   "key_insights": [
-    {{"title": "...", "claim": "...", "confidence": "high|medium|low", "impact": "high|medium|low"}}
+    {{"title": "...", "claim": "конкретное утверждение с цифрой или фактом", "confidence": "high|medium|low", "impact": "high|medium|low"}}
   ],
-  "top_risks": ["...", "...", "..."],
-  "top_opportunities": ["...", "...", "..."],
-  "recommended_focus": "1-2 предложения — что важнее всего делать прямо сейчас"
+  "top_risks": ["конкретный риск с последствием", "...", "..."],
+  "top_opportunities": ["конкретная возможность с метрикой", "...", "..."],
+  "recommended_focus": "1-2 предложения — самое важное действие прямо сейчас с метрикой успеха",
+  "next_actions": ["действие 1", "действие 2", "действие 3"]
 }}
-Только JSON, без markdown, без пояснений.
+Только JSON.
 """}
     ]
 
-    text = call_gpt(messages, max_tokens=3000)
+    text = call_gpt(messages, max_tokens=3500)
     try:
-        # Убираем возможный markdown
-        clean = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        import re
+        # Убираем markdown-обёртки
+        clean = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        clean = re.sub(r'\s*```$', '', clean).strip()
+        # Ищем JSON-блок если есть лишний текст вокруг
+        m = re.search(r'\{[\s\S]*\}', clean)
+        if m:
+            clean = m.group(0)
         ai_data = json.loads(clean)
     except Exception:
-        ai_data = {"raw": text, "error": "parse_failed"}
+        ai_data = {"raw": text, "error": "parse_failed", "headline": "Не удалось разобрать ответ ИИ"}
 
     # Сохраняем отчёт
     _save_report(conn, "ai_summary", d_from, d_to, {}, {}, ai_data, actor["email"])
@@ -740,7 +777,11 @@ Critical open: {support_resp.get("support",{}).get("critical_open",0)}
 
     text = call_gpt(messages, max_tokens=4000)
     try:
-        clean = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        import re
+        clean = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        clean = re.sub(r'\s*```$', '', clean).strip()
+        m = re.search(r'\{[\s\S]*\}', clean)
+        if m: clean = m.group(0)
         ai_data = json.loads(clean)
     except Exception:
         ai_data = {"raw": text, "error": "parse_failed"}
@@ -798,7 +839,11 @@ Period: {d_from} — {d_to}
 
     text = call_gpt(messages, max_tokens=3000)
     try:
-        clean = text.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+        import re
+        clean = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        clean = re.sub(r'\s*```$', '', clean).strip()
+        m = re.search(r'\{[\s\S]*\}', clean)
+        if m: clean = m.group(0)
         ai_data = json.loads(clean)
     except Exception:
         ai_data = {"raw": text, "error": "parse_failed"}

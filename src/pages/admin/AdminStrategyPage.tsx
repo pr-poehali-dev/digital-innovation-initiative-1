@@ -29,7 +29,8 @@ type AISummary = {
   headline?: string; health_score?: number; health_reasoning?: string;
   key_insights?: { title: string; claim: string; confidence: string; impact: string }[];
   top_risks?: string[]; top_opportunities?: string[];
-  recommended_focus?: string; raw?: string; error?: string;
+  recommended_focus?: string; next_actions?: string[];
+  data_maturity?: string; raw?: string; error?: string;
 };
 type Hypothesis = {
   id: number; title: string; problem: string; hypothesis: string;
@@ -462,10 +463,36 @@ export default function AdminStrategyPage() {
                       <p className="text-sm text-violet-200">{aiSummary.recommended_focus}</p>
                     </div>
                   )}
+
+                  {aiSummary.next_actions && aiSummary.next_actions.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-2">Следующие шаги</p>
+                      <div className="space-y-1.5">
+                        {aiSummary.next_actions.map((a, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className="text-violet-500 font-bold flex-shrink-0 mt-0.5">{i+1}.</span>
+                            <span className="text-xs text-gray-300">{a}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {aiSummary.data_maturity && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-600">Зрелость данных:</span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        aiSummary.data_maturity === "mature"  ? "bg-emerald-900/40 text-emerald-400" :
+                        aiSummary.data_maturity === "growing" ? "bg-amber-900/30 text-amber-400" :
+                        "bg-gray-800 text-gray-500"
+                      }`}>{aiSummary.data_maturity}</span>
+                    </div>
+                  )}
                 </div>
               )}
               {aiSummary?.error && (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <p className="text-[10px] text-gray-600 mb-2">Raw response:</p>
                   <p className="text-xs text-gray-500 font-mono whitespace-pre-wrap">{aiSummary.raw}</p>
                 </div>
               )}
@@ -729,9 +756,30 @@ export default function AdminStrategyPage() {
                   </button>
                 </div>
                 {aiSummary && !aiSummary.error && aiSummary.headline && (
-                  <div className="bg-violet-900/20 border border-violet-800/40 rounded-xl p-3 mt-3">
-                    <p className="text-sm text-violet-200 font-medium">{aiSummary.headline}</p>
-                    {aiSummary.recommended_focus && <p className="text-xs text-violet-400/80 mt-1">{aiSummary.recommended_focus}</p>}
+                  <div className="space-y-2 mt-3">
+                    <div className="bg-violet-900/20 border border-violet-800/40 rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <p className="text-sm text-violet-200 font-medium">{aiSummary.headline}</p>
+                        {aiSummary.health_score && (
+                          <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                            aiSummary.health_score >= 7 ? "bg-emerald-900/40 text-emerald-400" :
+                            aiSummary.health_score >= 4 ? "bg-amber-900/30 text-amber-400" : "bg-red-900/30 text-red-400"
+                          }`}>{aiSummary.health_score}/10</span>
+                        )}
+                      </div>
+                      {aiSummary.recommended_focus && <p className="text-xs text-violet-400/80">{aiSummary.recommended_focus}</p>}
+                    </div>
+                    {aiSummary.next_actions && aiSummary.next_actions.length > 0 && (
+                      <div className="bg-gray-800/60 border border-gray-700/60 rounded-xl p-3">
+                        <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-2">Следующие шаги</p>
+                        {aiSummary.next_actions.map((a, i) => (
+                          <div key={i} className="flex items-start gap-1.5 mb-1">
+                            <span className="text-violet-500 font-bold text-[10px] flex-shrink-0 mt-0.5">{i+1}.</span>
+                            <span className="text-xs text-gray-300">{a}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
