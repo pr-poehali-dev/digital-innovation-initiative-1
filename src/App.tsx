@@ -13,6 +13,7 @@ import AdminProjectsPage from "./pages/admin/AdminProjectsPage";
 import AdminProjectDetailPage from "./pages/admin/AdminProjectDetailPage";
 import AdminAuditPage from "./pages/admin/AdminAuditPage";
 import AdminActivityPage from "./pages/admin/AdminActivityPage";
+import AdminPlanPage from "./pages/admin/AdminPlanPage";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
@@ -61,6 +62,7 @@ const App = () => (
               <Route path="/admin/projects/:id" element={<AdminRoute><AdminProjectDetailPage /></AdminRoute>} />
               <Route path="/admin/audit" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
               <Route path="/admin/activity" element={<AdminRoute><AdminActivityPage /></AdminRoute>} />
+              <Route path="/admin/plan" element={<AdminRoute><AdminPlanPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}

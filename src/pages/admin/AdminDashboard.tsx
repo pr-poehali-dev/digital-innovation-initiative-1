@@ -4,9 +4,9 @@ import Icon from "@/components/ui/icon";
 const CARDS = [
   { label: "Пользователи", icon: "Users", href: "/admin/users", color: "text-blue-400" },
   { label: "Проекты", icon: "FolderOpen", href: "/admin/projects", color: "text-purple-400" },
-  { label: "AI-операции", icon: "Sparkles", href: "/admin/ai-runs", color: "text-orange-400" },
-  { label: "Кошелёк", icon: "Wallet", href: "/admin/wallet", color: "text-green-400" },
-  { label: "Аудит", icon: "ClipboardList", href: "/admin/audit", color: "text-red-400" },
+  { label: "План проекта", icon: "ClipboardList", href: "/admin/plan", color: "text-violet-400" },
+  { label: "Аудит", icon: "ShieldCheck", href: "/admin/audit", color: "text-red-400" },
+  { label: "Активность", icon: "Activity", href: "/admin/activity", color: "text-orange-400" },
 ];
 
 export default function AdminDashboard() {
