@@ -23,7 +23,6 @@ import AdminAlertsPage from "./pages/admin/AdminAlertsPage";
 import AdminFlagsPage from "./pages/admin/AdminFlagsPage";
 import AdminTicketsPage from "./pages/admin/AdminTicketsPage";
 import AdminAutomationsPage from "./pages/admin/AdminAutomationsPage";
-import AdminStrategyPage from "./pages/admin/AdminStrategyPage";
 import AdminContentPage from "./pages/admin/AdminContentPage";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
