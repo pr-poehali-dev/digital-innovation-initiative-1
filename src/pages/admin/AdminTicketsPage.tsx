@@ -104,6 +104,42 @@ async function bulkTickets(ids: number[], op: string, extra: Record<string, stri
   return res.json();
 }
 
+// ── Saved Views types + API ───────────────────────────────────────────────────
+
+type ViewFilters = {
+  queue?: string;
+  status?: string;
+  priority?: string;
+  module?: string;
+  search?: string;
+  onlyUnassigned?: boolean;
+};
+
+type SavedView = {
+  id: number;
+  name: string;
+  description: string;
+  scope: "personal" | "shared";
+  filters: ViewFilters;
+  order_index: number;
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  created_by: string;
+  is_mine: boolean;
+};
+
+async function viewsReq(action: string, body?: object) {
+  const method = body ? "POST" : "GET";
+  const url = `${TICKETS_URL}/?action=${action}`;
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json", "X-Admin-Token": getAdminToken() },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  return res.json();
+}
+
 function slaColor(state: string) {
   if (state === "overdue")  return "text-red-400";
   if (state === "due_soon") return "text-amber-400";
@@ -855,6 +891,13 @@ export default function AdminTicketsPage() {
   const [bulkPriority, setBulkPriority] = useState<TicketPriority>("medium");
   const [bulkSaving, setBulkSaving] = useState(false);
 
+  // Saved views state
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [showViews, setShowViews] = useState(false);
+  const [savingView, setSavingView] = useState(false);
+  const [newViewName, setNewViewName] = useState("");
+  const [newViewScope, setNewViewScope] = useState<"personal" | "shared">("personal");
+
   // Load summary + list
   async function loadAll() {
     setLoadingList(true);
@@ -886,6 +929,55 @@ export default function AdminTicketsPage() {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterStatus, filterPriority, queue]);
+
+  // Load saved views on mount
+  useEffect(() => {
+    viewsReq("views_list").then(d => {
+      if (d.ok) setViews(d.views ?? []);
+    });
+   
+  }, []);
+
+  function applyView(v: SavedView) {
+    const f = v.filters;
+    setQueue(f.queue ?? "all");
+    setFilterStatus((f.status ?? "") as TicketStatus | "");
+    setFilterPriority((f.priority ?? "") as TicketPriority | "");
+    setFilterModule(f.module ?? "");
+    setSearch(f.search ?? "");
+    setOnlyUnassigned(f.onlyUnassigned ?? false);
+    setShowViews(false);
+    viewsReq("views_use", { id: v.id });
+  }
+
+  async function saveCurrentView() {
+    if (!newViewName.trim()) return;
+    setSavingView(true);
+    const filters: ViewFilters = {};
+    if (queue && queue !== "all") filters.queue = queue;
+    if (filterStatus)    filters.status = filterStatus;
+    if (filterPriority)  filters.priority = filterPriority;
+    if (filterModule)    filters.module = filterModule;
+    if (search)          filters.search = search;
+    if (onlyUnassigned)  filters.onlyUnassigned = true;
+    const res = await viewsReq("views_create", {
+      name: newViewName.trim(),
+      scope: newViewScope,
+      filters,
+    });
+    setSavingView(false);
+    if (res.ok) {
+      setNewViewName("");
+      const d = await viewsReq("views_list");
+      if (d.ok) setViews(d.views ?? []);
+      toast({ title: "Вид сохранён" });
+    }
+  }
+
+  async function deleteView(id: number) {
+    await viewsReq("views_delete", { id });
+    setViews(vs => vs.filter(v => v.id !== id));
+  }
 
   // Load messages when a ticket is selected
   async function loadMessages(ticketId: number) {
@@ -1028,6 +1120,91 @@ export default function AdminTicketsPage() {
                 )}
               </button>
             ))}
+          </div>
+
+          {/* Saved Views */}
+          <div className="px-4 py-2 border-b border-gray-800/60 flex-shrink-0">
+            <button
+              onClick={() => setShowViews(v => !v)}
+              className={`flex items-center gap-1.5 text-[10px] font-medium transition-colors ${
+                showViews ? "text-violet-400" : "text-gray-600 hover:text-gray-400"
+              }`}
+            >
+              <Icon name="Bookmark" size={11} />
+              Сохранённые виды
+              {views.length > 0 && (
+                <span className="ml-0.5 text-[9px] bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded-full border border-gray-700">
+                  {views.length}
+                </span>
+              )}
+              <Icon name={showViews ? "ChevronUp" : "ChevronDown"} size={10} />
+            </button>
+
+            {showViews && (
+              <div className="mt-2 space-y-1">
+                {/* Existing views */}
+                {views.length === 0 ? (
+                  <p className="text-[10px] text-gray-700 italic py-1">Нет сохранённых видов</p>
+                ) : (
+                  views.map(v => (
+                    <div key={v.id}
+                      className="flex items-center gap-1.5 group rounded-lg px-2 py-1.5 hover:bg-gray-800/60 transition-colors"
+                    >
+                      <button
+                        onClick={() => applyView(v)}
+                        className="flex-1 text-left flex items-center gap-1.5 min-w-0"
+                      >
+                        <Icon
+                          name={v.scope === "shared" ? "Users" : "User"}
+                          size={10}
+                          className={v.scope === "shared" ? "text-violet-500 flex-shrink-0" : "text-gray-600 flex-shrink-0"}
+                        />
+                        <span className="text-[10px] text-gray-300 truncate">{v.name}</span>
+                        {v.use_count > 0 && (
+                          <span className="text-[9px] text-gray-700 flex-shrink-0 ml-auto">{v.use_count}×</span>
+                        )}
+                      </button>
+                      {v.is_mine && (
+                        <button
+                          onClick={() => deleteView(v.id)}
+                          className="opacity-0 group-hover:opacity-100 text-gray-700 hover:text-red-500 transition-all p-0.5"
+                        >
+                          <Icon name="X" size={10} />
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+
+                {/* Save current filters */}
+                <div className="pt-2 border-t border-gray-800 space-y-1.5">
+                  <p className="text-[9px] text-gray-700 uppercase tracking-wide font-semibold">Сохранить текущие фильтры</p>
+                  <input
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+                    placeholder="Название вида..."
+                    value={newViewName}
+                    onChange={e => setNewViewName(e.target.value)}
+                  />
+                  <div className="flex gap-1.5 items-center">
+                    <select
+                      value={newViewScope}
+                      onChange={e => setNewViewScope(e.target.value as "personal" | "shared")}
+                      className="bg-gray-800 border border-gray-700 text-[10px] text-gray-400 rounded px-1.5 py-1 focus:outline-none"
+                    >
+                      <option value="personal">Личный</option>
+                      <option value="shared">Общий</option>
+                    </select>
+                    <button
+                      onClick={saveCurrentView}
+                      disabled={savingView || !newViewName.trim()}
+                      className="flex-1 py-1 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-[10px] font-semibold rounded transition-colors"
+                    >
+                      {savingView ? "..." : "Сохранить"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Filters */}

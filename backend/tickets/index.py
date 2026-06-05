@@ -483,6 +483,104 @@ def handler(event: dict, context) -> dict:
 
             return cors({"ok": True, "updated": len(ids_clean)})
 
+        # ── SAVED VIEWS ───────────────────────────────────────────────────────
+        if action == "views_list":
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT id, name, description, scope, filters,
+                           order_index, use_count, last_used_at,
+                           created_at, created_by, updated_at, updated_by
+                    FROM {S}.ticket_saved_views
+                    WHERE scope = 'shared' OR created_by = %s
+                    ORDER BY scope DESC, order_index, created_at
+                """, (actor,))
+                rows = cur.fetchall()
+            views = [{
+                "id": r[0], "name": r[1], "description": r[2], "scope": r[3],
+                "filters": r[4] if isinstance(r[4], dict) else {},
+                "order_index": r[5], "use_count": r[6],
+                "last_used_at": str(r[7]) if r[7] else None,
+                "created_at": str(r[8]), "created_by": r[9],
+                "updated_at": str(r[10]), "updated_by": r[11],
+                "is_mine": r[9] == actor,
+            } for r in rows]
+            return cors({"ok": True, "views": views})
+
+        if method == "POST" and action == "views_create":
+            name = (body.get("name") or "").strip()
+            if not name:
+                return cors({"ok": False, "error": {"message": "name required"}}, 400)
+            scope       = body.get("scope", "personal")
+            if scope not in ("personal", "shared"):
+                scope = "personal"
+            description = (body.get("description") or "").strip()
+            filters     = body.get("filters") or {}
+            order_index = int(body.get("order_index", 0))
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    INSERT INTO {S}.ticket_saved_views
+                      (name, description, scope, filters, order_index, created_by, updated_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (name, description, scope,
+                      json.dumps(filters, ensure_ascii=False),
+                      order_index, actor, actor))
+                new_id = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "id": new_id})
+
+        if method == "POST" and action == "views_update":
+            vid = body.get("id")
+            if not vid:
+                return cors({"ok": False, "error": {"message": "id required"}}, 400)
+            vid = int(vid)
+            fields, vals = [], []
+            if "name" in body:
+                fields.append("name = %s"); vals.append(body["name"])
+            if "description" in body:
+                fields.append("description = %s"); vals.append(body["description"])
+            if "scope" in body and body["scope"] in ("personal", "shared"):
+                fields.append("scope = %s"); vals.append(body["scope"])
+            if "filters" in body:
+                fields.append("filters = %s"); vals.append(json.dumps(body["filters"], ensure_ascii=False))
+            if "order_index" in body:
+                fields.append("order_index = %s"); vals.append(int(body["order_index"]))
+            if not fields:
+                return cors({"ok": True})
+            fields.append("updated_at = NOW()"); fields.append("updated_by = %s")
+            vals += [actor, vid]
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {S}.ticket_saved_views SET {', '.join(fields)} WHERE id = %s AND created_by = %s",
+                    vals + [actor],
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        if method == "POST" and action == "views_delete":
+            vid = body.get("id")
+            if not vid:
+                return cors({"ok": False, "error": {"message": "id required"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {S}.ticket_saved_views WHERE id = %s AND created_by = %s",
+                    (int(vid), actor),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        if method == "POST" and action == "views_use":
+            vid = body.get("id")
+            if not vid:
+                return cors({"ok": False, "error": {"message": "id required"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {S}.ticket_saved_views SET use_count = use_count + 1, last_used_at = NOW() WHERE id = %s",
+                    (int(vid),),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 
     finally:
