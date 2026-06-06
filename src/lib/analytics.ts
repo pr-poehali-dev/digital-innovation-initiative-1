@@ -169,8 +169,30 @@ export type AnalyticsEvents = {
   // 22. Просмотр страницы карты компетенций
   competency_map_viewed: Record<string, never>;
 
-  // 23. Клик по CTA на странице карты
+  // 23. Клик по CTA на странице карты (shell)
   competency_map_cta_clicked: {
+    cta_href: string;
+  };
+
+  // 27. Клик по компетенции — открытие drilldown
+  competency_map_competency_clicked: {
+    competency_id: number;
+    competency_name: string;
+  };
+
+  // 28. Клик по evidence в drilldown
+  competency_map_evidence_clicked: {
+    evidence_id: number;
+  };
+
+  // 29. Раскрытие/скрытие домена
+  competency_map_domain_expanded: {
+    domain_id: number;
+    expanded: boolean;
+  };
+
+  // 30. CTA из empty state
+  competency_map_empty_cta_clicked: {
     cta_href: string;
   };
 
@@ -411,6 +433,22 @@ export const analytics = {
 
   competencyMapCtaClicked(ctaHref: string) {
     sendEvent("competency_map_cta_clicked", { cta_href: ctaHref });
+  },
+
+  competencyMapCompetencyClicked(competencyId: number, competencyName: string) {
+    sendEvent("competency_map_competency_clicked", { competency_id: competencyId, competency_name: competencyName });
+  },
+
+  competencyMapEvidenceClicked(evidenceId: number) {
+    sendEvent("competency_map_evidence_clicked", { evidence_id: evidenceId });
+  },
+
+  competencyMapDomainExpanded(domainId: number, expanded: boolean) {
+    sendEvent("competency_map_domain_expanded", { domain_id: domainId, expanded });
+  },
+
+  competencyMapEmptyCtaClicked(ctaHref: string) {
+    sendEvent("competency_map_empty_cta_clicked", { cta_href: ctaHref });
   },
 
   // ── Public profile page ────────────────────────────────────────────
