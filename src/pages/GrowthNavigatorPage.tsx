@@ -176,7 +176,7 @@ function OverviewTab({
         {mapState === "no_role" && (
           <div className="space-y-3">
             <p className="text-sm text-slate-600 leading-relaxed">
-              Выберите роль выше — это отправная точка для анализа gaps и формирования плана.
+              Выберите роль выше — это отправная точка для анализа зон роста и формирования плана.
             </p>
             <div className="flex items-center gap-1.5">
               <Icon name="BookOpen" size={12} className="text-slate-400" />
@@ -206,12 +206,12 @@ function OverviewTab({
           <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <p className="text-sm font-semibold text-amber-800">Роль выбрана — нужен план</p>
+                <p className="text-sm font-semibold text-amber-800">Можно собрать первый план развития</p>
                 <p className="text-xs text-amber-700 mt-0.5">
-                  Fit с ролью: <span className="font-bold">{gapSummary.fit_pct}%</span>
+                  Соответствие роли: <span className="font-bold">{gapSummary.fit_pct}%</span>
                   {" · "}{gapSummary.critical_gaps.length > 0
-                    ? `${gapSummary.critical_gaps.length} критичных gaps`
-                    : "Critical gaps закрыты"}
+                    ? `${gapSummary.critical_gaps.length} зон, требующих внимания`
+                    : "Все приоритетные зоны закрыты"}
                 </p>
               </div>
               <button onClick={onGenerate} disabled={generating}
@@ -229,9 +229,9 @@ function OverviewTab({
               <div>
                 <div className="flex items-center gap-2 mb-0.5">
                   <span className={`text-lg font-bold ${gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
-                    {gapSummary.fit_pct}% fit
+                    {gapSummary.fit_pct}% соответствие роли
                   </span>
-                  <span className="text-slate-400 text-sm">с ролью {gapSummary.role_name}</span>
+                  <span className="text-slate-400 text-sm">{gapSummary.role_name}</span>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-slate-500">
                   <span>
@@ -242,7 +242,7 @@ function OverviewTab({
                   </span>
                   {progress.critical_gaps_remaining > 0 && (
                     <span>
-                      <span className="font-semibold text-red-500">{progress.critical_gaps_remaining}</span> критич. gaps
+                      <span className="font-semibold text-red-500">{progress.critical_gaps_remaining}</span> зон внимания
                     </span>
                   )}
                 </div>
@@ -293,8 +293,8 @@ function OverviewTab({
           {gapSummary.quick_wins.length > 0 && (
             <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
               <p className="text-xs font-semibold text-amber-700 mb-2.5 flex items-center gap-1.5">
-                <Icon name="Zap" size={13} /> Быстрые победы
-                <span className="ml-auto text-[10px] font-normal text-amber-600">gap = 1 шаг</span>
+                <Icon name="Zap" size={13} /> Что можно улучшить быстро
+                <span className="ml-auto text-[10px] font-normal text-amber-600">один шаг до цели</span>
               </p>
               {gapSummary.quick_wins.slice(0, 4).map(g => (
                 <div key={g.competency_id} className="flex items-center gap-2 mb-1.5">
@@ -307,8 +307,8 @@ function OverviewTab({
           {gapSummary.critical_gaps.length > 0 && (
             <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
               <p className="text-xs font-semibold text-red-600 mb-2.5 flex items-center gap-1.5">
-                <Icon name="AlertTriangle" size={13} /> Критичные gaps
-                <span className="ml-auto text-[10px] font-normal text-red-500">требуют внимания</span>
+                <Icon name="AlertTriangle" size={13} /> Что мешает двигаться к роли
+                <span className="ml-auto text-[10px] font-normal text-red-500">приоритет закрыть</span>
               </p>
               {gapSummary.critical_gaps.slice(0, 4).map(g => (
                 <div key={g.competency_id} className="flex items-center gap-2 mb-1.5">
@@ -343,10 +343,10 @@ function OverviewTab({
       {gapSummary && progress && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            { l: "Fit с ролью",   v: `${gapSummary.fit_pct}%`,        cls: gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600" },
-            { l: "Покрытие",      v: `${gapSummary.coverage_pct}%`,   cls: "text-violet-600" },
-            { l: "Quick wins",    v: gapSummary.quick_wins.length,     cls: "text-amber-600" },
-            { l: "Evidence/нед",  v: progress.evidence_added_week,    cls: "text-violet-600" },
+            { l: "Соответствие роли", v: `${gapSummary.fit_pct}%`,        cls: gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600" },
+            { l: "Охват",            v: `${gapSummary.coverage_pct}%`,   cls: "text-violet-600" },
+            { l: "Быстрые улучшения", v: gapSummary.quick_wins.length,   cls: "text-amber-600" },
+            { l: "Подтверждений/нед", v: progress.evidence_added_week,   cls: "text-violet-600" },
           ].map(({ l, v, cls }) => (
             <div key={l} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
               <p className={`text-lg font-bold ${cls}`}>{v}</p>
@@ -368,7 +368,7 @@ function GapMapTab({ gapSummary, loadingGap }: { gapSummary: GapSummary | null; 
   if (loadingGap) return <div className="flex justify-center py-10"><Spinner /></div>;
   if (!gapSummary) return (
     <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl">
-      Выберите роль во вкладке «Обзор»
+      Выберите роль во вкладке «Обзор», чтобы увидеть зоны роста
     </div>
   );
 
@@ -384,7 +384,7 @@ function GapMapTab({ gapSummary, loadingGap }: { gapSummary: GapSummary | null; 
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
-        {([["all","Все"], ["critical","Критичные"], ["quick","Quick wins"], ["done","На уровне"]] as const).map(([k, l]) => (
+        {([["all","Все"], ["critical","Зоны внимания"], ["quick","Быстрые улучшения"], ["done","На уровне"]] as const).map(([k, l]) => (
           <button key={k} onClick={() => setFilter(k)}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${filter === k ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
             {l}
@@ -405,8 +405,8 @@ function GapMapTab({ gapSummary, loadingGap }: { gapSummary: GapSummary | null; 
                 <tr className="border-b border-slate-100">
                   <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-4 py-2">Компетенция</th>
                   <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-3 py-2 w-28">Текущий</th>
-                  <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-3 py-2 w-24">Target</th>
-                  <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-3 py-2 w-16">Gap</th>
+                  <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-3 py-2 w-24">Цель</th>
+                  <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-3 py-2 w-16">Разрыв</th>
                   <th className="text-left text-[9px] text-slate-400 font-semibold uppercase px-3 py-2 w-20">Важность</th>
                 </tr>
               </thead>
@@ -418,7 +418,7 @@ function GapMapTab({ gapSummary, loadingGap }: { gapSummary: GapSummary | null; 
                       <td className="px-4 py-2.5">
                         <p className="text-xs font-medium text-slate-800">{g.name}</p>
                         {g.evidence_count > 0 && (
-                          <span className="text-[9px] text-violet-500">{g.evidence_count} evidence</span>
+                          <span className="text-[9px] text-violet-500">{g.evidence_count} подтвержд.</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5"><LevelBadge level={g.current_level} /></td>
@@ -430,7 +430,7 @@ function GapMapTab({ gapSummary, loadingGap }: { gapSummary: GapSummary | null; 
                       </td>
                       <td className="px-3 py-2.5">
                         <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${IMP_COLOR[g.importance] ?? ""}`}>
-                          {g.importance}
+                          {g.importance === "core" ? "ключевая" : g.importance === "important" ? "важная" : "базовая"}
                         </span>
                       </td>
                     </tr>
@@ -479,7 +479,7 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
 
   if (!plan) return (
     <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
-      <p>Выберите роль и нажмите «Обновить план» во вкладке «Обзор»</p>
+      <p>Выберите роль и сформируйте план во вкладке «Обзор»</p>
       <div className="flex items-center justify-center gap-1.5">
         <Icon name="BookOpen" size={12} className="text-slate-400" />
         <p className="text-xs text-slate-400">
@@ -614,13 +614,18 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
                 <div>
                   <label className={lbl}>Тип</label>
                   <select className={inp} value={addForm.item_type} onChange={e => setAddForm(f => ({ ...f, item_type: e.target.value }))}>
-                    {["learn","practice","evidence","reflection"].map(t => <option key={t} value={t}>{t}</option>)}
+                    <option value="learn">Обучение</option>
+                    <option value="practice">Практика</option>
+                    <option value="evidence">Подтверждение</option>
+                    <option value="reflection">Рефлексия</option>
                   </select>
                 </div>
                 <div>
                   <label className={lbl}>Приоритет</label>
                   <select className={inp} value={addForm.priority} onChange={e => setAddForm(f => ({ ...f, priority: e.target.value }))}>
-                    {["high","medium","low"].map(p => <option key={p} value={p}>{p}</option>)}
+                    <option value="high">Высокий</option>
+                    <option value="medium">Средний</option>
+                    <option value="low">Низкий</option>
                   </select>
                 </div>
               </div>
@@ -736,7 +741,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
               { l: "Всего", v: learningProgress.total,     cls: "text-slate-600" },
               { l: "Начато", v: learningProgress.started,  cls: "text-blue-600" },
               { l: "Готово", v: learningProgress.completed, cls: "text-emerald-600" },
-              { l: "Покрыто", v: learningProgress.competencies_covered, cls: "text-violet-600" },
+              { l: "Компетенций", v: learningProgress.competencies_covered, cls: "text-violet-600" },
             ].map(({ l, v, cls }) => (
               <div key={l} className="p-2 bg-slate-50 rounded-xl">
                 <p className={`text-lg font-bold ${cls}`}>{v}</p>
@@ -752,7 +757,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
         <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
           <p className="text-xs font-semibold text-emerald-700 mb-3 flex items-center gap-1.5">
             <Icon name="BadgeCheck" size={14} className="text-emerald-600" />
-            Подтверждённые learning evidence
+            Подтверждения опыта
             <span className="ml-auto text-[10px] font-normal text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
               {evidence.length}
             </span>
@@ -772,7 +777,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
             ))}
           </div>
           <p className="text-[9px] text-emerald-600 mt-2 italic">
-            Завершение курса подтверждает компетенцию, но не меняет уровень автоматически.
+            Завершение курса фиксируется как опыт, но уровень компетенции обновляется через самооценку.
           </p>
         </div>
       )}
@@ -782,7 +787,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
         <div className="space-y-3">
           <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide flex items-center gap-1.5">
             <Icon name="Sparkles" size={13} className="text-violet-500" />
-            Рекомендованные материалы
+            Что изучить сейчас
           </p>
           {learningRecs.map((rec, i) => (
             <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4">
@@ -793,10 +798,10 @@ function PathTab({ plan }: { plan: Plan | null }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                     <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${STRENGTH_BADGE[rec.recommendation_strength] ?? ""}`}>
-                      {rec.recommendation_strength}
+                      {rec.recommendation_strength === "high" ? "важно" : rec.recommendation_strength === "medium" ? "рекомендуется" : "опционально"}
                     </span>
                     {rec.is_required && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200">required</span>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200">обязательно</span>
                     )}
                     <span className="text-[9px] text-slate-400">{rec.competency_name}</span>
                   </div>
@@ -811,7 +816,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
                 </div>
                 <button onClick={() => startRec(rec)}
                   className="flex-shrink-0 text-[10px] px-3 py-1.5 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-800 transition-colors whitespace-nowrap">
-                  Начать
+                  Приступить
                 </button>
               </div>
             </div>
@@ -821,7 +826,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
 
       {!plan && !loading && (
         <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl">
-          Создайте план развития во вкладке «Обзор»
+          Сформируйте план развития во вкладке «Обзор» — тогда здесь появятся материалы для изучения
         </div>
       )}
 
@@ -858,11 +863,11 @@ function PathTab({ plan }: { plan: Plan | null }) {
                       <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${sa.badge}`}>{sa.label}</span>
                       {hasEvidence && (
                         <span className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-600 border-emerald-200">
-                          <Icon name="BadgeCheck" size={9} /> verified
+                          <Icon name="BadgeCheck" size={9} /> подтверждено
                         </span>
                       )}
                       {a.competency_name && <span className="text-[9px] text-violet-500">{a.competency_name}</span>}
-                      <span className="text-[9px] text-slate-400">{a.source === "manual" ? "manual" : a.content_type}</span>
+                      <span className="text-[9px] text-slate-400">{a.source === "manual" ? "добавлено вручную" : a.content_type}</span>
                     </div>
                     <p className={`text-sm font-semibold text-slate-800 ${a.status === "completed" ? "line-through text-slate-400" : ""}`}>
                       {a.content_title}
@@ -1016,7 +1021,7 @@ export default function GrowthNavigatorPage() {
 
   const TABS: { key: Tab; icon: string; label: string }[] = [
     { key: "overview", icon: "LayoutDashboard", label: "Обзор" },
-    { key: "gaps",     icon: "BarChart2",       label: "Карта gaps" },
+    { key: "gaps",     icon: "BarChart2",       label: "Зоны роста" },
     { key: "plan",     icon: "ListTodo",         label: "План" },
     { key: "path",     icon: "Route",            label: "Путь" },
   ];
@@ -1034,7 +1039,7 @@ export default function GrowthNavigatorPage() {
               <div>
                 <h1 className="text-xl font-bold text-slate-900">Навигатор развития</h1>
                 <p className="text-sm text-slate-500">
-                  {plan ? `Роль: ${plan.role_name}` : "Growth Navigator · PM/Operations"}
+                  {plan ? `Целевая роль: ${plan.role_name}` : "Выберите роль — и платформа соберёт план"}
                 </p>
               </div>
             </div>
