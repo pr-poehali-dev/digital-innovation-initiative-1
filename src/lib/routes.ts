@@ -83,9 +83,10 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-// Кошелёк — secondary area (внизу sidebar)
+// Кошелёк + Инструкция — secondary area (внизу sidebar)
 export const NAV_SECONDARY: NavItem[] = [
-  { id: "wallet", label: "Кошелёк", icon: "Wallet", href: ROUTES.wallet, active: true },
+  { id: "wallet", label: "Кошелёк",    icon: "Wallet",   href: ROUTES.wallet, active: true },
+  { id: "guide",  label: "Инструкция", icon: "BookOpen", href: "/guide",       active: true },
 ];
 
 // Нижнее мобильное меню — только самые важные, max 5

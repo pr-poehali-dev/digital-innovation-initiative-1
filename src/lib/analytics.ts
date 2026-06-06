@@ -29,9 +29,9 @@ type LookupResult = "found" | "not_found" | "error";
 
 // --- Карта событий ---
 export type AnalyticsEvents = {
-  // 0. Лендинг — клик по CTA
+  // 0. Лендинг и Guide — клик по CTA
   landing_cta_clicked: {
-    cta_id: string;   // "hero_primary" | "hero_secondary" | "features_card" | "how_it_works" | "platform_open"
+    cta_id: string;   // "hero_start_self_assessment" | "hero_learn_more" | "guide_*" | etc.
     destination: string;
   };
 

@@ -52,6 +52,7 @@ import GrowthNavigatorPage from "./pages/GrowthNavigatorPage";
 import PublicProfileSettingsPage from "./pages/PublicProfileSettingsPage";
 import PublicProfilePage from "./pages/PublicProfilePage";
 import CompetencyMapPage from "./pages/CompetencyMapPage";
+import GuidePage from "./pages/GuidePage";
 
 const queryClient = new QueryClient();
 
@@ -115,6 +116,7 @@ const App = () => (
               <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />
               <Route path="/cabinet/competency-map" element={<ProtectedRoute><CompetencyMapPage /></ProtectedRoute>} />
               <Route path="/cabinet/headquarters" element={<Navigate to="/cabinet" replace />} />
+              <Route path="/guide" element={<GuidePage />} />
               <Route path="/legal/privacy" element={<PrivacyPage />} />
               <Route path="/legal/terms" element={<TermsPage />} />
               <Route path="/legal/offer" element={<OfferPage />} />

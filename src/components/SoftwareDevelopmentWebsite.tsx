@@ -131,6 +131,7 @@ const menuItems = [
   { name: "Возможности", href: "#services" },
   { name: "Как это работает", href: "#how-it-works" },
   { name: "Для кого", href: "#about" },
+  { name: "Инструкция", href: "/guide" },
   { name: "Контакты", href: "#contact" },
 ]
 
