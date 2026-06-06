@@ -7,6 +7,7 @@ import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
 import { Link } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
+import { analytics } from "@/lib/analytics"
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
@@ -190,8 +191,8 @@ const FEATURES = [
     emoji: "📈",
     color: "bg-green-50 border-green-200 hover:border-green-400",
     iconBg: "bg-green-100",
-    title: "Growth-план",
-    desc: "На основе карты компетенций система формирует план развития: что усилить, чего не хватает, куда двигаться дальше.",
+    title: "План развития",
+    desc: "На основе карты компетенций система формирует план: что усилить, чего не хватает, куда двигаться дальше.",
     cta: "Открыть план →",
     link: "/cabinet/growth",
     ctaCls: "bg-green-600 hover:bg-green-700 text-white",
@@ -208,8 +209,8 @@ const HOW_IT_WORKS_STEPS = [
   {
     num: "2",
     color: "bg-violet-100 text-violet-700",
-    title: "Добавляйте сигналы",
-    desc: "Завершили курс — он попадает в карту как верифицированный источник. Ведёте проекты — это усиливает смежные домены.",
+    title: "Фиксируйте опыт и обучение",
+    desc: "Завершили курс — он отмечается в карте. Ведёте проекты — это подтверждает смежные компетенции.",
   },
   {
     num: "3",
@@ -413,7 +414,7 @@ export default function SoftwareDevelopmentWebsite() {
                     href="#services"
                     className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
                   >
-                    <span className="text-foreground text-sm">Карта компетенций, growth-план и проекты — в одном кабинете</span>
+                    <span className="text-foreground text-sm">Карта компетенций, план развития и проекты — в одном кабинете</span>
                     <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                     <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
@@ -431,11 +432,11 @@ export default function SoftwareDevelopmentWebsite() {
                   <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
                     Развивайте компетенции{" "}
                     <span className="inline-block text-slate-600">
-                      и видите реальный прогресс
+                      и отслеживайте реальный прогресс
                     </span>
                   </h1>
                   <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Self-assessment, профессиональный профиль, обучение и проекты — чтобы знать где вы сейчас и куда идти дальше.
+                    Самооценка, профессиональный профиль, обучение и проекты — чтобы знать где вы сейчас и куда идти дальше.
                   </p>
                 </AnimatedGroup>
 
@@ -451,14 +452,14 @@ export default function SoftwareDevelopmentWebsite() {
                   className="mt-10 flex flex-col items-center justify-center gap-3 md:flex-row"
                 >
                   <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
-                    <Link to="/login">
+                    <Link to="/login" onClick={() => analytics.landingCtaClicked("hero_primary", "/login")}>
                       <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
                         <Map className="mr-2 h-4 w-4" />
                         <span className="text-nowrap">Начать self-assessment</span>
                       </Button>
                     </Link>
                   </div>
-                  <a href="#services" key={2}>
+                  <a href="#services" key={2} onClick={() => analytics.landingCtaClicked("hero_secondary", "#services")}>
                     <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
                       <span className="text-nowrap">Узнать подробнее</span>
                     </Button>
@@ -555,11 +556,11 @@ export default function SoftwareDevelopmentWebsite() {
                   <CardDecorator>
                     <BookOpen className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
-                  <h3 className="mt-6 font-medium">Верифицированные источники</h3>
+                  <h3 className="mt-6 font-medium">Обучение подтверждает карту</h3>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Завершили курс или обучение — он становится подтверждённым источником в карте. Это весомее простой самооценки.
+                    Завершили курс или программу — он отмечается в карте как подтверждённый. Это весомее просто самооценки.
                   </p>
                 </CardContent>
               </div>
@@ -612,7 +613,7 @@ export default function SoftwareDevelopmentWebsite() {
             </div>
 
             <div className="mt-8 text-center">
-              <Link to="/login">
+              <Link to="/login" onClick={() => analytics.landingCtaClicked("how_it_works", "/login")}>
                 <Button size="lg" className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-8">
                   Начать self-assessment
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -651,12 +652,12 @@ export default function SoftwareDevelopmentWebsite() {
         <section className="py-16 md:py-24 bg-background">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Платформа</span>
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Что уже доступно</span>
               <h2 className="text-balance text-3xl md:text-4xl font-bold">Одна платформа —{" "}
                 <span className="text-slate-600">весь путь развития</span>
               </h2>
               <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Все модули связаны между собой: самооценка усиливает карту, обучение верифицирует компетенции, проекты подтверждают опыт.
+                Все модули связаны: самооценка наполняет карту, обучение подтверждает компетенции, проекты фиксируют практический опыт.
               </p>
             </div>
             <div className="grid md:grid-cols-2 gap-6">
@@ -672,7 +673,7 @@ export default function SoftwareDevelopmentWebsite() {
                     { icon: <BookOpen className="h-4 w-4" />, text: "Учебный кабинет с верификацией" },
                     { icon: <Users className="h-4 w-4" />, text: "Профессиональный профиль" },
                     { icon: <FolderOpen className="h-4 w-4" />, text: "Проекты и задачи" },
-                    { icon: <TrendingUp className="h-4 w-4" />, text: "Growth-план развития" },
+                    { icon: <TrendingUp className="h-4 w-4" />, text: "План развития по компетенциям" },
                     { icon: <Sparkles className="h-4 w-4" />, text: "Рекомендации по следующему шагу" },
                   ].map((item) => (
                     <li key={item.text} className="flex items-center gap-3 text-sm text-slate-700">
@@ -681,7 +682,7 @@ export default function SoftwareDevelopmentWebsite() {
                     </li>
                   ))}
                 </ul>
-                <Link to="/login" className="mt-6 inline-block">
+                <Link to="/login" className="mt-6 inline-block" onClick={() => analytics.landingCtaClicked("platform_open", "/login")}>
                   <button className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors">
                     Открыть кабинет →
                   </button>

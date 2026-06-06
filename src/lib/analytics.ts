@@ -29,6 +29,12 @@ type LookupResult = "found" | "not_found" | "error";
 
 // --- Карта событий ---
 export type AnalyticsEvents = {
+  // 0. Лендинг — клик по CTA
+  landing_cta_clicked: {
+    cta_id: string;   // "hero_primary" | "hero_secondary" | "features_card" | "how_it_works" | "platform_open"
+    destination: string;
+  };
+
   // 1. Переключение вкладки на VisualsPage
   visuals_source_mode_selected: {
     mode: "task" | "project_files";
@@ -379,6 +385,10 @@ export const analytics = {
       has_active_run: hasActiveRun,
       has_visual_plan: hasVisualPlan,
     });
+  },
+
+  landingCtaClicked(ctaId: string, destination: string) {
+    sendEvent("landing_cta_clicked", { cta_id: ctaId, destination });
   },
 
   projectFilesEmptyState(projectId: number, filesTotalCount: number) {
