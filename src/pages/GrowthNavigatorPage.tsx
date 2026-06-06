@@ -136,158 +136,226 @@ function OverviewTab({
   recommendations: Recommendation[];
   loadingGap: boolean; onGenerate: () => void; generating: boolean;
 }) {
+  // Определяем состояние страницы для однозначного primary CTA
+  const mapState = !selectedRole
+    ? "no_role"
+    : loadingGap
+    ? "loading"
+    : !gapSummary
+    ? "loading"
+    : !progress
+    ? "no_plan"
+    : "ready";
+
   return (
-    <div className="space-y-5">
-      {/* Role selector */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5">
-        <label className="block text-xs font-semibold text-slate-600 mb-2">Целевая роль</label>
-        <div className="flex items-center gap-3 flex-wrap">
-          <select value={selectedRole ?? ""} onChange={e => onRoleChange(Number(e.target.value))}
-            className="flex-1 min-w-[200px] text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-slate-400 bg-white">
-            <option value="">— выберите роль —</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-          {selectedRole && (
-            <button onClick={onGenerate} disabled={generating}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
-              {generating ? <Spinner /> : <Icon name="RefreshCw" size={14} />}
-              {generating ? "Генерирую..." : "Обновить план"}
-            </button>
-          )}
+    <div className="space-y-4">
+
+      {/* ── 1. Status block — всегда наверху, один primary CTA ── */}
+      <div className={`rounded-2xl border-2 p-5 ${
+        mapState === "no_role"  ? "bg-slate-50 border-slate-200" :
+        mapState === "no_plan"  ? "bg-amber-50 border-amber-200" :
+        mapState === "ready"    ? "bg-white border-slate-200" :
+        "bg-white border-slate-200"
+      }`}>
+
+        {/* Роль + смена */}
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+              Целевая роль
+            </label>
+            <select value={selectedRole ?? ""} onChange={e => onRoleChange(Number(e.target.value))}
+              className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-slate-400 bg-white">
+              <option value="">— выберите роль —</option>
+              {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
         </div>
-        {selectedRole && gapSummary && (
-          <p className="text-xs text-slate-500 mt-2">{gapSummary.role_name}</p>
+
+        {/* Состояние + CTA */}
+        {mapState === "no_role" && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Выберите роль выше — это отправная точка для анализа gaps и формирования плана.
+            </p>
+            <div className="flex items-center gap-1.5">
+              <Icon name="BookOpen" size={12} className="text-slate-400" />
+              <p className="text-xs text-slate-400">
+                Не уверены как работает навигатор?{" "}
+                <Link
+                  to="/guide"
+                  state={{ source: "strategy_empty_state" }}
+                  onClick={() => analytics.guideCtaClicked("open_guide", "strategy_empty_state")}
+                  className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
+                >
+                  Откройте инструкцию
+                </Link>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {mapState === "loading" && (
+          <div className="flex items-center gap-2 text-sm text-slate-500 py-2">
+            <Spinner />
+            <span>Анализируем данные...</span>
+          </div>
+        )}
+
+        {mapState === "no_plan" && gapSummary && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Роль выбрана — нужен план</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Fit с ролью: <span className="font-bold">{gapSummary.fit_pct}%</span>
+                  {" · "}{gapSummary.critical_gaps.length > 0
+                    ? `${gapSummary.critical_gaps.length} критичных gaps`
+                    : "Critical gaps закрыты"}
+                </p>
+              </div>
+              <button onClick={onGenerate} disabled={generating}
+                className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
+                {generating ? <Spinner /> : <Icon name="Sparkles" size={14} />}
+                {generating ? "Генерирую..." : "Сформировать план"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mapState === "ready" && gapSummary && progress && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className={`text-lg font-bold ${gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
+                    {gapSummary.fit_pct}% fit
+                  </span>
+                  <span className="text-slate-400 text-sm">с ролью {gapSummary.role_name}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-500">
+                  <span>
+                    <span className="font-semibold text-emerald-600">{progress.done}</span> выполнено
+                  </span>
+                  <span>
+                    <span className="font-semibold text-blue-600">{progress.in_progress}</span> в работе
+                  </span>
+                  {progress.critical_gaps_remaining > 0 && (
+                    <span>
+                      <span className="font-semibold text-red-500">{progress.critical_gaps_remaining}</span> критич. gaps
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button onClick={onGenerate} disabled={generating}
+                className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-sm font-semibold rounded-xl transition-colors">
+                {generating ? <Spinner /> : <Icon name="RefreshCw" size={13} />}
+                {generating ? "Обновляю..." : "Обновить план"}
+              </button>
+            </div>
+
+            {/* Прогресс-бар */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-2 bg-slate-900 rounded-full transition-all" style={{ width: `${progress.done_pct}%` }} />
+              </div>
+              <span className="text-xs font-semibold text-slate-600 w-8 text-right">{progress.done_pct}%</span>
+            </div>
+          </div>
         )}
       </div>
 
-      {loadingGap && <div className="flex justify-center py-8"><Spinner /></div>}
-
-      {!selectedRole && !loadingGap && (
-        <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
-          <p>Выберите целевую роль для начала работы с навигатором</p>
-          <div className="flex items-center justify-center gap-1.5">
-            <Icon name="BookOpen" size={12} className="text-slate-400" />
-            <p className="text-xs text-slate-400">
-              Не уверены как работает план развития?{" "}
-              <Link
-                to="/guide"
-                state={{ source: "strategy_empty_state" }}
-                onClick={() => analytics.guideCtaClicked("open_guide", "strategy_empty_state")}
-                className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
-              >
-                Откройте инструкцию
-              </Link>
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Progress bar */}
-      {progress && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-slate-800">Прогресс плана</p>
-            <span className={`text-2xl font-bold ${progress.done_pct >= 70 ? "text-emerald-600" : progress.done_pct >= 30 ? "text-amber-600" : "text-slate-500"}`}>
-              {progress.done_pct}%
-            </span>
-          </div>
-          <div className="w-full h-2 bg-slate-100 rounded-full mb-4">
-            <div className="h-2 bg-slate-900 rounded-full transition-all" style={{ width: `${progress.done_pct}%` }} />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { l: "Выполнено", v: progress.done,          cls: "text-emerald-600" },
-              { l: "В процессе", v: progress.in_progress,   cls: "text-blue-600" },
-              { l: "Критич. gaps", v: progress.critical_gaps_remaining, cls: progress.critical_gaps_remaining > 0 ? "text-red-500" : "text-slate-400" },
-              { l: "Evidence/нед", v: progress.evidence_added_week, cls: "text-violet-600" },
-            ].map(({ l, v, cls }) => (
-              <div key={l} className="text-center p-3 bg-slate-50 rounded-xl">
-                <p className={`text-xl font-bold ${cls}`}>{v}</p>
-                <p className="text-[10px] text-slate-500 mt-0.5">{l}</p>
+      {/* ── 2. Следующий шаг — если есть ── */}
+      {recommendations.length > 0 && (
+        <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
+          <p className="text-xs font-semibold text-violet-700 mb-3 flex items-center gap-1.5">
+            <Icon name="Sparkles" size={13} /> Следующий шаг
+          </p>
+          <div className="space-y-2">
+            {recommendations.slice(0, 3).map(r => (
+              <div key={r.id} className="flex items-start gap-2.5">
+                <div className="w-5 h-5 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Icon name={ITEM_TYPE_ICON[r.item_type] ?? "Circle"} size={11} className="text-violet-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-800 leading-snug">{r.title}</p>
+                  {r.competency_name && <p className="text-[10px] text-slate-500 mt-0.5">{r.competency_name}</p>}
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Fit summary */}
-      {gapSummary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* ── 3. Приоритеты — quick wins первыми (легко закрыть) ── */}
+      {gapSummary && (gapSummary.quick_wins.length > 0 || gapSummary.critical_gaps.length > 0) && (
+        <div className="grid sm:grid-cols-2 gap-3">
+          {gapSummary.quick_wins.length > 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+              <p className="text-xs font-semibold text-amber-700 mb-2.5 flex items-center gap-1.5">
+                <Icon name="Zap" size={13} /> Быстрые победы
+                <span className="ml-auto text-[10px] font-normal text-amber-600">gap = 1 шаг</span>
+              </p>
+              {gapSummary.quick_wins.slice(0, 4).map(g => (
+                <div key={g.competency_id} className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs text-slate-700 flex-1 truncate">{g.name}</span>
+                  <span className="text-[10px] text-slate-400 flex-shrink-0">{g.current_level}→{g.target_level}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {gapSummary.critical_gaps.length > 0 && (
+            <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+              <p className="text-xs font-semibold text-red-600 mb-2.5 flex items-center gap-1.5">
+                <Icon name="AlertTriangle" size={13} /> Критичные gaps
+                <span className="ml-auto text-[10px] font-normal text-red-500">требуют внимания</span>
+              </p>
+              {gapSummary.critical_gaps.slice(0, 4).map(g => (
+                <div key={g.competency_id} className="flex items-center gap-2 mb-1.5">
+                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${IMP_COLOR[g.importance]}`}>{g.importance}</span>
+                  <span className="text-xs text-slate-700 flex-1 truncate">{g.name}</span>
+                  <span className="text-[10px] text-slate-400 flex-shrink-0">{g.current_level}→{g.target_level}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 4. Сильные стороны — ниже, вторично ── */}
+      {gapSummary && gapSummary.strengths.length > 0 && (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
+          <p className="text-xs font-semibold text-emerald-700 mb-2.5 flex items-center gap-1.5">
+            <Icon name="Star" size={13} /> Сильные стороны
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {gapSummary.strengths.slice(0, 6).map(g => (
+              <div key={g.competency_id} className="flex items-center gap-1.5 bg-white rounded-lg px-2.5 py-1.5 border border-emerald-100">
+                <LevelBadge level={g.current_level} />
+                <span className="text-xs text-slate-700">{g.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. Детали — fit покрытие, Evidence — совсем вниз ── */}
+      {gapSummary && progress && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            { l: "Fit",           v: `${gapSummary.fit_pct}%`,        cls: gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600" },
-            { l: "Покрытие",     v: `${gapSummary.coverage_pct}%`,   cls: "text-violet-600" },
-            { l: "Critical gaps", v: gapSummary.critical_gaps.length,  cls: gapSummary.critical_gaps.length > 0 ? "text-red-500" : "text-slate-400" },
+            { l: "Fit с ролью",   v: `${gapSummary.fit_pct}%`,        cls: gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600" },
+            { l: "Покрытие",      v: `${gapSummary.coverage_pct}%`,   cls: "text-violet-600" },
             { l: "Quick wins",    v: gapSummary.quick_wins.length,     cls: "text-amber-600" },
+            { l: "Evidence/нед",  v: progress.evidence_added_week,    cls: "text-violet-600" },
           ].map(({ l, v, cls }) => (
-            <div key={l} className="bg-white border border-slate-200 rounded-2xl p-4 text-center">
-              <p className={`text-2xl font-bold ${cls}`}>{v}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{l}</p>
+            <div key={l} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
+              <p className={`text-lg font-bold ${cls}`}>{v}</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">{l}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* Sections */}
-      {gapSummary && (
-        <div className="grid sm:grid-cols-2 gap-4">
-          {gapSummary.critical_gaps.length > 0 && (
-            <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
-              <p className="text-xs font-semibold text-red-600 mb-3 flex items-center gap-1.5">
-                <Icon name="AlertTriangle" size={13} /> Критичные gaps
-              </p>
-              {gapSummary.critical_gaps.slice(0, 4).map(g => (
-                <div key={g.competency_id} className="flex items-center gap-2 mb-2">
-                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${IMP_COLOR[g.importance]}`}>{g.importance}</span>
-                  <span className="text-xs text-slate-700 flex-1 truncate">{g.name}</span>
-                  <span className="text-[10px] text-slate-400">{g.current_level}→{g.target_level}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {gapSummary.quick_wins.length > 0 && (
-            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-              <p className="text-xs font-semibold text-amber-700 mb-3 flex items-center gap-1.5">
-                <Icon name="Zap" size={13} /> Quick wins (gap = 1)
-              </p>
-              {gapSummary.quick_wins.slice(0, 4).map(g => (
-                <div key={g.competency_id} className="flex items-center gap-2 mb-2">
-                  <span className="text-xs text-slate-700 flex-1 truncate">{g.name}</span>
-                  <span className="text-[10px] text-slate-400">{g.current_level}→{g.target_level}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {gapSummary.strengths.length > 0 && (
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-              <p className="text-xs font-semibold text-emerald-700 mb-3 flex items-center gap-1.5">
-                <Icon name="Star" size={13} /> Сильные стороны
-              </p>
-              {gapSummary.strengths.slice(0, 4).map(g => (
-                <div key={g.competency_id} className="flex items-center gap-2 mb-2">
-                  <span className="text-xs text-slate-700 flex-1 truncate">{g.name}</span>
-                  <LevelBadge level={g.current_level} />
-                </div>
-              ))}
-            </div>
-          )}
-          {recommendations.length > 0 && (
-            <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
-              <p className="text-xs font-semibold text-violet-700 mb-3 flex items-center gap-1.5">
-                <Icon name="ArrowRight" size={13} /> Следующий шаг
-              </p>
-              {recommendations.slice(0, 3).map(r => (
-                <div key={r.id} className="flex items-start gap-2 mb-2.5">
-                  <Icon name={ITEM_TYPE_ICON[r.item_type] ?? "Circle"} size={13} className="text-violet-400 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-slate-700 truncate">{r.title}</p>
-                    {r.competency_name && <p className="text-[10px] text-slate-500">{r.competency_name}</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
