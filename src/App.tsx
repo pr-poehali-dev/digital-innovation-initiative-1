@@ -47,6 +47,7 @@ import OfferPage from "./pages/legal/OfferPage";
 import RefundPage from "./pages/legal/RefundPage";
 import ConsentPage from "./pages/legal/ConsentPage";
 import ProfessionalPassportPage from "./pages/ProfessionalPassportPage";
+import GrowthNavigatorPage from "./pages/GrowthNavigatorPage";
 
 const queryClient = new QueryClient();
 
@@ -105,6 +106,7 @@ const App = () => (
               <Route path="/cabinet/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
               <Route path="/cabinet/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
               <Route path="/cabinet/profile" element={<ProtectedRoute><ProfessionalPassportPage /></ProtectedRoute>} />
+              <Route path="/cabinet/growth" element={<ProtectedRoute><GrowthNavigatorPage /></ProtectedRoute>} />
               <Route path="/cabinet/headquarters" element={<Navigate to="/cabinet" replace />} />
               <Route path="/legal/privacy" element={<PrivacyPage />} />
               <Route path="/legal/terms" element={<TermsPage />} />

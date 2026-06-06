@@ -745,7 +745,6 @@ def action_visibility_upsert_me(conn, user_id, body):
     conn.commit()
     return resp({"ok": True})
 
-
 # ── Handler ───────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:

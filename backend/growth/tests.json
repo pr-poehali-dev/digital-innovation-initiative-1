@@ -1,0 +1,7 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "gap summary без сессии — 401", "method": "GET", "path": "/?action=professional_growth_gap_summary_me&role_id=1", "expectedStatus": 401},
+    {"name": "plan get без сессии — 401", "method": "GET", "path": "/?action=professional_growth_plan_get_me", "expectedStatus": 401}
+  ]
+}
