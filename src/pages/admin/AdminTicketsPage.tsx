@@ -64,19 +64,19 @@ type Summary = {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const STATUS_CFG: Record<TicketStatus, { label: string; color: string }> = {
-  new:          { label: "New",          color: "text-blue-400 bg-blue-900/30 border-blue-800" },
-  open:         { label: "Open",         color: "text-emerald-400 bg-emerald-900/30 border-emerald-800" },
-  pending:      { label: "Pending",      color: "text-violet-400 bg-violet-900/30 border-violet-800" },
-  waiting_user: { label: "Waiting user", color: "text-amber-400 bg-amber-900/30 border-amber-800" },
-  resolved:     { label: "Resolved",     color: "text-gray-400 bg-gray-800 border-gray-700" },
-  closed:       { label: "Closed",       color: "text-gray-600 bg-gray-900 border-gray-800" },
+  new:          { label: "Новый",       color: "text-blue-400 bg-blue-900/30 border-blue-800" },
+  open:         { label: "Открыт",      color: "text-emerald-400 bg-emerald-900/30 border-emerald-800" },
+  pending:      { label: "В работе",    color: "text-violet-400 bg-violet-900/30 border-violet-800" },
+  waiting_user: { label: "Ждёт ответа", color: "text-amber-400 bg-amber-900/30 border-amber-800" },
+  resolved:     { label: "Решён",       color: "text-gray-400 bg-gray-800 border-gray-700" },
+  closed:       { label: "Закрыт",      color: "text-gray-600 bg-gray-900 border-gray-800" },
 };
 
 const PRIORITY_CFG: Record<TicketPriority, { label: string; color: string; dot: string }> = {
-  low:    { label: "Low",    color: "text-gray-500",   dot: "bg-gray-600" },
-  medium: { label: "Medium", color: "text-blue-400",   dot: "bg-blue-500" },
-  high:   { label: "High",   color: "text-orange-400", dot: "bg-orange-500" },
-  urgent: { label: "Urgent", color: "text-red-400",    dot: "bg-red-500 animate-pulse" },
+  low:    { label: "Низкий",  color: "text-gray-500",   dot: "bg-gray-600" },
+  medium: { label: "Средний", color: "text-blue-400",   dot: "bg-blue-500" },
+  high:   { label: "Высокий", color: "text-orange-400", dot: "bg-orange-500" },
+  urgent: { label: "Срочный", color: "text-red-400",    dot: "bg-red-500 animate-pulse" },
 };
 
 const STATUSES: TicketStatus[]    = ["new", "open", "pending", "waiting_user", "resolved", "closed"];
@@ -147,7 +147,7 @@ function slaColor(state: string) {
 }
 
 function slaLabel(t: Ticket) {
-  if (t.is_overdue) return `+${Math.round(t.age_hours)}h overdue`;
+  if (t.is_overdue) return `+${Math.round(t.age_hours)}ч просрочка`;
   const h = t.age_hours;
   if (!h && h !== 0) return "—";
   if (h < 1) return `${Math.round(h * 60)}m`;

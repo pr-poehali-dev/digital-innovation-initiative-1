@@ -69,10 +69,10 @@ function TicketsSummaryWidget() {
   }, []);
   if (!s) return null;
   const items = [
-    { label: "Open",       value: s.open,       color: "text-emerald-400" },
-    { label: "Urgent",     value: s.urgent,     color: "text-red-400" },
-    { label: "Unassigned", value: s.unassigned, color: "text-amber-400" },
-    { label: "Waiting",    value: s.waiting_user, color: "text-blue-400" },
+    { label: "Открытые",  value: s.open,         color: "text-emerald-400" },
+    { label: "Срочные",   value: s.urgent,       color: "text-red-400" },
+    { label: "Без исп.",  value: s.unassigned,   color: "text-amber-400" },
+    { label: "Ожидают",   value: s.waiting_user, color: "text-blue-400" },
   ];
   return (
     <button onClick={() => navigate("/admin/tickets")}
@@ -80,7 +80,7 @@ function TicketsSummaryWidget() {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
           <Icon name="Ticket" size={13} className="text-sky-400" />
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Support</span>
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Поддержка</span>
         </div>
         <span className="text-[10px] text-gray-700">{s.active} активных</span>
       </div>
@@ -114,26 +114,26 @@ function ContentSummaryWidget() {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
           <Icon name="FileText" size={13} className="text-cyan-400" />
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Content</span>
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Контент</span>
         </div>
         {ms && ms.failed > 0 && (
-          <span className="text-[10px] text-red-400">{ms.failed} failed</span>
+          <span className="text-[10px] text-red-400">{ms.failed} ошибок</span>
         )}
       </div>
       <div className="flex gap-6">
         {cs && (
           <>
-            <div><p className="text-lg font-bold text-emerald-400">{cs.published}</p><p className="text-[10px] text-gray-600">Published</p></div>
-            <div><p className="text-lg font-bold text-amber-400">{cs.review}</p><p className="text-[10px] text-gray-600">Review</p></div>
-            <div><p className="text-lg font-bold text-gray-400">{cs.draft}</p><p className="text-[10px] text-gray-600">Draft</p></div>
+            <div><p className="text-lg font-bold text-emerald-400">{cs.published}</p><p className="text-[10px] text-gray-600">Опубл.</p></div>
+            <div><p className="text-lg font-bold text-amber-400">{cs.review}</p><p className="text-[10px] text-gray-600">На ревью</p></div>
+            <div><p className="text-lg font-bold text-gray-400">{cs.draft}</p><p className="text-[10px] text-gray-600">Черновик</p></div>
           </>
         )}
         {ms && (
           <>
             <div className="border-l border-gray-800 pl-4 ml-2">
-              <p className="text-lg font-bold text-blue-400">{ms.scheduled}</p><p className="text-[10px] text-gray-600">Scheduled</p>
+              <p className="text-lg font-bold text-blue-400">{ms.scheduled}</p><p className="text-[10px] text-gray-600">Запланир.</p>
             </div>
-            <div><p className="text-lg font-bold text-emerald-400">{ms.sent_today}</p><p className="text-[10px] text-gray-600">Sent today</p></div>
+            <div><p className="text-lg font-bold text-emerald-400">{ms.sent_today}</p><p className="text-[10px] text-gray-600">Отправлено</p></div>
           </>
         )}
       </div>
@@ -146,23 +146,23 @@ export default function AdminDashboard() {
     <AdminShell>
       <div className="p-6 max-w-3xl space-y-8">
         <div>
-          <h1 className="text-2xl font-bold text-white">Command Center</h1>
+          <h1 className="text-2xl font-bold text-white">Центр управления</h1>
           <p className="text-gray-500 text-sm mt-1">Управление платформой</p>
         </div>
 
-        <CardGroup title="Platform" icon="Layers" cards={PLATFORM} />
-        <CardGroup title="Operations" icon="Cpu" cards={OPERATIONS} />
+        <CardGroup title="Платформа" icon="Layers" cards={PLATFORM} />
+        <CardGroup title="Операции" icon="Cpu" cards={OPERATIONS} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <TicketsSummaryWidget />
           <ContentSummaryWidget />
         </div>
-        <CardGroup title="Users & Projects" icon="Users" cards={USERS_AND_PROJECTS} />
+        <CardGroup title="Пользователи и проекты" icon="Users" cards={USERS_AND_PROJECTS} />
 
         <div className="pt-2 border-t border-gray-800">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Icon name="BrainCircuit" size={13} className="text-gray-600" />
-              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider">AI Context</span>
+              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider">AI-контекст</span>
             </div>
           </div>
           <AiContextExporter defaultScope="full" variant="card" />

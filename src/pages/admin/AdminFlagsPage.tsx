@@ -28,9 +28,9 @@ type Summary = { enabled: number; disabled: number; planned: number; deprecated:
 const FLAG_STATUSES: OpsFlagStatus[] = ["active", "planned", "deprecated"];
 
 const ST: Record<OpsFlagStatus, { label: string; color: string }> = {
-  active:     { label: "Active",      color: "bg-emerald-900/40 text-emerald-400 border-emerald-800" },
-  planned:    { label: "Planned",     color: "bg-blue-900/40 text-blue-400 border-blue-800" },
-  deprecated: { label: "Deprecated",  color: "bg-gray-800 text-gray-600 border-gray-700" },
+  active:     { label: "Активен",     color: "bg-emerald-900/40 text-emerald-400 border-emerald-800" },
+  planned:    { label: "Запланирован", color: "bg-blue-900/40 text-blue-400 border-blue-800" },
+  deprecated: { label: "Устарел",     color: "bg-gray-800 text-gray-600 border-gray-700" },
 };
 
 const ENVIRONMENTS = ["production", "staging", "development"];
@@ -125,7 +125,7 @@ function AddForm({ onAdd, onCancel }: { onAdd: (item: OpsFlag) => void; onCancel
     <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4 mb-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <label className={labelCls}>Key <span className="text-red-500">*</span></label>
+          <label className={labelCls}>Ключ <span className="text-red-500">*</span></label>
           <input
             className={`${inputCls} font-mono`}
             placeholder="feature_flag_key"
@@ -152,17 +152,17 @@ function AddForm({ onAdd, onCancel }: { onAdd: (item: OpsFlag) => void; onCancel
           />
         </div>
         <div>
-          <label className={labelCls}>Environment</label>
+          <label className={labelCls}>Окружение</label>
           <select className={inputCls} value={form.environment} onChange={e => set("environment", e.target.value)}>
             {ENVIRONMENTS.map(env => <option key={env} value={env}>{env}</option>)}
           </select>
         </div>
         <div>
-          <label className={labelCls}>Owner email</label>
+          <label className={labelCls}>Ответственный</label>
           <input className={inputCls} type="email" placeholder="owner@example.com" value={form.owner_email} onChange={e => set("owner_email", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Rollout % (0–100)</label>
+          <label className={labelCls}>Охват % (0–100)</label>
           <input
             className={inputCls}
             type="number"
@@ -173,7 +173,7 @@ function AddForm({ onAdd, onCancel }: { onAdd: (item: OpsFlag) => void; onCancel
           />
         </div>
         <div>
-          <label className={labelCls}>Notes</label>
+          <label className={labelCls}>Заметки</label>
           <input className={inputCls} placeholder="Дополнительно…" value={form.notes} onChange={e => set("notes", e.target.value)} />
         </div>
         {/* Enabled toggle */}
@@ -323,10 +323,10 @@ export default function AdminFlagsPage() {
   }
 
   const cards = [
-    { label: "Enabled",    value: summary.enabled,    color: "text-emerald-400", icon: "ToggleRight" },
-    { label: "Disabled",   value: summary.disabled,   color: "text-gray-400",    icon: "ToggleLeft" },
-    { label: "Planned",    value: summary.planned,    color: "text-blue-400",    icon: "Clock" },
-    { label: "Deprecated", value: summary.deprecated, color: "text-gray-600",    icon: "Archive" },
+    { label: "Включены",    value: summary.enabled,    color: "text-emerald-400", icon: "ToggleRight" },
+    { label: "Выключены",   value: summary.disabled,   color: "text-gray-400",    icon: "ToggleLeft" },
+    { label: "Запланированы", value: summary.planned,  color: "text-blue-400",    icon: "Clock" },
+    { label: "Устарели",    value: summary.deprecated, color: "text-gray-600",    icon: "Archive" },
   ];
 
   return (

@@ -51,7 +51,7 @@ type Tab = "framework" | "roles" | "usermap" | "content_links";
 // ── Helpers ──────────────────────────────────────────────────────────
 
 const LEVEL_LABELS: Record<number, string> = {
-  0: "—", 1: "Aware", 2: "Working", 3: "Independent", 4: "Advanced", 5: "Leading",
+  0: "—", 1: "Aware (Знакомство)", 2: "Working (Применяю)", 3: "Independent (Самостоятельно)", 4: "Advanced (Экспертно)", 5: "Leading (Веду других)",
 };
 const LEVEL_COLORS: Record<number, string> = {
   0: "bg-gray-800 text-gray-600 border-gray-700",

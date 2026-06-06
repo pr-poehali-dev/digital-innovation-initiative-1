@@ -44,8 +44,8 @@ type Summary = {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const CAT_LABEL: Record<PPModuleCategory, string> = {
-  platform: "Platform", operations: "Operations", content: "Content",
-  analytics: "Analytics", support: "Support", finance: "Finance", domain: "Domain",
+  platform: "Платформа", operations: "Операции", content: "Контент",
+  analytics: "Аналитика", support: "Поддержка", finance: "Финансы", domain: "Домен",
 };
 const CAT_COLOR: Record<PPModuleCategory, string> = {
   platform:   "bg-violet-900/40 text-violet-300 border-violet-800",
@@ -61,6 +61,12 @@ const STATUS_COLOR: Record<string, string> = {
   planned:    "text-blue-400",
   deprecated: "text-gray-600",
   draft:      "text-amber-400",
+};
+const STATUS_LABEL: Record<string, string> = {
+  active:     "Активен",
+  planned:    "Запланировано",
+  deprecated: "Устарел",
+  draft:      "Черновик",
 };
 const OVERLAP_TYPE_LABEL: Record<PPOverlapType, string> = {
   duplicate:          "Дубль",
@@ -143,17 +149,17 @@ function ModuleCard({ m, onStatusChange }: {
         <div className="flex items-center gap-2 flex-shrink-0">
           <button onClick={e => { e.stopPropagation(); onStatusChange(m, MODULE_STATUSES[(MODULE_STATUSES.indexOf(m.status) + 1) % MODULE_STATUSES.length]); }}
             className={`text-[11px] font-medium ${STATUS_COLOR[m.status] || "text-gray-400"}`}>
-            {m.status}
+            {STATUS_LABEL[m.status] ?? m.status}
           </button>
           <Icon name={open ? "ChevronUp" : "ChevronDown"} size={13} className="text-gray-600" />
         </div>
       </button>
       {open && (
         <div className="border-t border-gray-800 px-4 py-3 bg-gray-800/20">
-          <Field label="Owner"    value={m.owner_email} />
-          <Field label="Layer"    value={m.layer} />
-          <Field label="SOT"      value={m.source_of_truth} />
-          <Field label="Notes"    value={m.notes} />
+          <Field label="Ответственный" value={m.owner_email} />
+          <Field label="Слой"          value={m.layer} />
+          <Field label="SOT"           value={m.source_of_truth} />
+          <Field label="Заметки"       value={m.notes} />
           <LastUpdated at={m.updated_at} by={m.updated_by} />
         </div>
       )}
@@ -329,7 +335,7 @@ export default function AdminPassportPage() {
               <Icon name="BookMarked" size={18} className="text-emerald-300" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">Platform Passport</h1>
+              <h1 className="text-2xl font-bold text-white">Паспорт платформы</h1>
               <p className="text-gray-500 text-sm mt-0.5">Реестр модулей, сущностей, owners и связей платформы</p>
             </div>
           </div>
@@ -388,7 +394,7 @@ export default function AdminPassportPage() {
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as PPModuleStatus | "all")}
                 className="bg-gray-900 border border-gray-800 text-gray-400 rounded-lg px-2 py-1.5 text-xs focus:outline-none">
                 <option value="all">Все статусы</option>
-                {MODULE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                {MODULE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
               </select>
               <button onClick={() => setOnlyProblems(v => !v)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${onlyProblems ? "bg-red-900/40 text-red-400 border border-red-900" : "bg-gray-900 text-gray-500 border border-gray-800"}`}>
@@ -488,7 +494,7 @@ export default function AdminPassportPage() {
                     {r.owner_email && <p className="text-xs text-gray-600 mt-0.5">{r.owner_email}</p>}
                     <LastUpdated at={r.updated_at} by={r.updated_by} />
                   </div>
-                  <span className={`text-[11px] font-medium flex-shrink-0 ${STATUS_COLOR[r.status] || "text-gray-500"}`}>{r.status}</span>
+                  <span className={`text-[11px] font-medium flex-shrink-0 ${STATUS_COLOR[r.status] || "text-gray-500"}`}>{STATUS_LABEL[r.status] ?? r.status}</span>
                 </div>
               ))}
             </div>
@@ -547,7 +553,7 @@ export default function AdminPassportPage() {
                     {e.sot_module_name && <p className="text-[10px] text-gray-600">SOT: {e.sot_module_name}</p>}
                     <LastUpdated at={e.updated_at} by={e.updated_by} />
                   </div>
-                  <span className={`text-[11px] font-medium flex-shrink-0 ${STATUS_COLOR[e.status] || "text-gray-500"}`}>{e.status}</span>
+                  <span className={`text-[11px] font-medium flex-shrink-0 ${STATUS_COLOR[e.status] || "text-gray-500"}`}>{STATUS_LABEL[e.status] ?? e.status}</span>
                 </div>
               ))}
             </div>
@@ -566,7 +572,7 @@ export default function AdminPassportPage() {
                   <span className="text-sm text-gray-300 font-medium">{d.to_name}</span>
                   <Badge label={d.dep_type} color="bg-slate-700 text-slate-300 border-slate-600" />
                   <span className={`ml-auto text-[10px] font-medium ${d.criticality === "high" ? "text-red-400" : d.criticality === "medium" ? "text-amber-400" : "text-gray-500"}`}>
-                    {d.criticality}
+                    {{ high: "Высокий", medium: "Средний", low: "Низкий" }[d.criticality] ?? d.criticality}
                   </span>
                 </div>
               ))}

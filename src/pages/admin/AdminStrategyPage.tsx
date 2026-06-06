@@ -156,7 +156,7 @@ function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange, onStartInitia
         <select value={item.status} onChange={e => { e.stopPropagation(); onStatusChange(e.target.value); }}
           onClick={e => e.stopPropagation()}
           className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border-0 focus:outline-none cursor-pointer ${RM_STATUS_CFG[item.status] ?? RM_STATUS_CFG.idea}`}>
-          {["idea","planned","in_progress","done"].map(s => <option key={s} value={s}>{s}</option>)}
+          {[["idea","Идея"],["planned","Запланировано"],["in_progress","В работе"],["done","Готово"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <span className={`text-[9px] font-semibold ${IMPACT_COLOR[item.impact] ?? "text-gray-500"}`}>↑{item.impact}</span>
         <span className={`text-[9px] px-1 py-0.5 rounded ${EFFORT_COLOR[item.effort] ?? ""}`}>{item.effort} eff.</span>
@@ -173,7 +173,7 @@ function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange, onStartInitia
       {onStartInitiative && (
         <button onClick={e => { e.stopPropagation(); onStartInitiative(); }}
           className="w-full text-[9px] font-semibold px-2 py-1 rounded-lg bg-violet-900/20 text-violet-400 hover:bg-violet-800/30 border border-violet-800/40 transition-colors flex items-center justify-center gap-1">
-          <Icon name="Rocket" size={9} /> Start Initiative
+          <Icon name="Rocket" size={9} /> Начать инициативу
         </button>
       )}
     </div>
@@ -1283,9 +1283,9 @@ export default function AdminStrategyPage() {
                 <div className="grid grid-cols-3 gap-4">
                   {(["now","next","later"] as const).map(lane => {
                     const LANE_CFG = {
-                      now:   { label: "Now",   bg: "border-red-800/60 bg-red-900/10",     badge: "bg-red-900/40 text-red-400 border-red-800",     dot: "bg-red-500" },
-                      next:  { label: "Next",  bg: "border-amber-800/60 bg-amber-900/10", badge: "bg-amber-900/30 text-amber-400 border-amber-800", dot: "bg-amber-500" },
-                      later: { label: "Later", bg: "border-gray-700 bg-gray-900/50",       badge: "bg-gray-800 text-gray-400 border-gray-700",      dot: "bg-gray-500" },
+                      now:   { label: "Сейчас", bg: "border-red-800/60 bg-red-900/10",     badge: "bg-red-900/40 text-red-400 border-red-800",     dot: "bg-red-500" },
+                      next:  { label: "Далее",  bg: "border-amber-800/60 bg-amber-900/10", badge: "bg-amber-900/30 text-amber-400 border-amber-800", dot: "bg-amber-500" },
+                      later: { label: "Потом",  bg: "border-gray-700 bg-gray-900/50",       badge: "bg-gray-800 text-gray-400 border-gray-700",      dot: "bg-gray-500" },
                     };
                     const cfg  = LANE_CFG[lane];
                     const items = roadmap[lane] ?? [];
@@ -1526,7 +1526,7 @@ export default function AdminStrategyPage() {
                       setTimeout(() => navigate("/admin/execution"), 1200);
                     }}
                       className="flex items-center gap-2 px-4 py-2 bg-violet-900/30 hover:bg-violet-800/40 text-violet-400 text-xs font-semibold rounded-xl border border-violet-800/40 transition-colors">
-                      <Icon name="Rocket" size={13} /> Create Initiative from Scenario
+                      <Icon name="Rocket" size={13} /> Создать инициативу из сценария
                     </button>
                   </div>
                 </div>
@@ -1708,7 +1708,7 @@ export default function AdminStrategyPage() {
                   placeholder="Название инициативы" />
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {[["lane","Lane",[["now","Now"],["next","Next"],["later","Later"]]], ["impact","Impact",[["high","High"],["medium","Medium"],["low","Low"]]], ["effort","Effort",[["low","Low"],["medium","Medium"],["high","High"]]]].map(([k,lbl,opts]) => (
+                {[["lane","Колонка",[["now","Сейчас"],["next","Далее"],["later","Потом"]]], ["impact","Импакт",[["high","Высокий"],["medium","Средний"],["low","Низкий"]]], ["effort","Усилия",[["low","Низкие"],["medium","Средние"],["high","Высокие"]]]].map(([k,lbl,opts]) => (
                   <div key={String(k)}>
                     <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">{String(lbl)}</label>
                     <select value={(itemForm as Record<string,string>)[String(k)]} onChange={e => setItemForm(f => ({...f, [String(k)]: e.target.value}))}

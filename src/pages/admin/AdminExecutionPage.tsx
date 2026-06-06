@@ -72,11 +72,11 @@ type Watchlist = {
 // ── Config ──────────────────────────────────────────────────────────
 
 const BOARD_COLS: { key: string; label: string; colorCls: string; dotCls: string }[] = [
-  { key: "draft",    label: "Draft",    colorCls: "border-gray-700 bg-gray-900/40",      dotCls: "bg-gray-600" },
-  { key: "planned",  label: "Planned",  colorCls: "border-blue-800/60 bg-blue-900/10",  dotCls: "bg-blue-500" },
-  { key: "active",   label: "Active",   colorCls: "border-violet-800/60 bg-violet-900/10", dotCls: "bg-violet-500" },
-  { key: "at_risk",  label: "At Risk",  colorCls: "border-amber-800/60 bg-amber-900/10", dotCls: "bg-amber-500" },
-  { key: "done",     label: "Done",     colorCls: "border-emerald-800/60 bg-emerald-900/10", dotCls: "bg-emerald-500" },
+  { key: "draft",    label: "Черновик",   colorCls: "border-gray-700 bg-gray-900/40",      dotCls: "bg-gray-600" },
+  { key: "planned",  label: "Запланир.",  colorCls: "border-blue-800/60 bg-blue-900/10",  dotCls: "bg-blue-500" },
+  { key: "active",   label: "Активна",    colorCls: "border-violet-800/60 bg-violet-900/10", dotCls: "bg-violet-500" },
+  { key: "at_risk",  label: "Под риском", colorCls: "border-amber-800/60 bg-amber-900/10", dotCls: "bg-amber-500" },
+  { key: "done",     label: "Готово",     colorCls: "border-emerald-800/60 bg-emerald-900/10", dotCls: "bg-emerald-500" },
 ];
 
 const HEALTH_CFG: Record<string, { dot: string; text: string }> = {
@@ -90,6 +90,17 @@ const PRIORITY_CFG: Record<string, string> = {
   high:     "bg-orange-900/30 text-orange-400 border-orange-800",
   medium:   "bg-gray-800 text-gray-400 border-gray-700",
   low:      "bg-gray-800/40 text-gray-600 border-gray-800",
+};
+
+const PRIORITY_LABELS: Record<string, string> = {
+  critical: "Критический",
+  high:     "Высокий",
+  medium:   "Средний",
+  low:      "Низкий",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  roadmap: "Дорожная карта", scenario: "Сценарий", report: "Отчёт", manual: "Вручную",
 };
 
 const SOURCE_ICON: Record<string, string> = {
@@ -169,14 +180,14 @@ function InitiativeCard({ item, onClick, onStatusChange }: {
 
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${PRIORITY_CFG[item.priority] ?? PRIORITY_CFG.medium}`}>
-          {item.priority}
+          {PRIORITY_LABELS[item.priority] ?? item.priority}
         </span>
         {item.owner && (
           <span className="text-[9px] text-gray-600 truncate max-w-[80px]">{item.owner.split("@")[0]}</span>
         )}
         {days !== null && (
           <span className={`ml-auto text-[9px] font-semibold ${overdue ? "text-red-400" : days < 7 ? "text-amber-400" : "text-gray-600"}`}>
-            {overdue ? `+${Math.abs(days)}d overdue` : `${days}d left`}
+            {overdue ? `+${Math.abs(days)}д просрочка` : `${days}д осталось`}
           </span>
         )}
       </div>
@@ -193,7 +204,7 @@ function InitiativeCard({ item, onClick, onStatusChange }: {
         onClick={e => e.stopPropagation()}
         className="w-full text-[9px] font-semibold bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-400 focus:outline-none cursor-pointer"
       >
-        {["draft","planned","active","at_risk","done"].map(s => <option key={s} value={s}>{s}</option>)}
+        {[["draft","Черновик"],["planned","Запланир."],["active","Активна"],["at_risk","Под риском"],["done","Готово"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
       </select>
     </div>
   );
@@ -272,15 +283,15 @@ function CreateModal({
           {F("title", "Название *", inp("title", "Название инициативы"))}
 
           <div className="grid grid-cols-2 gap-3">
-            {F("priority", "Приоритет", sel("priority", [["critical","Critical"],["high","High"],["medium","Medium"],["low","Low"]]))}
-            {F("owner", "Owner", inp("owner", "email или имя"))}
+            {F("priority", "Приоритет", sel("priority", [["critical","Критический"],["high","Высокий"],["medium","Средний"],["low","Низкий"]]))}
+            {F("owner", "Ответственный", inp("owner", "email или имя"))}
           </div>
 
           {F("source_type", "Источник", sel("source_type", [
-            ["manual","Вручную"], ["roadmap","Из Roadmap"], ["scenario","Из Сценария"],
+            ["manual","Вручную"], ["roadmap","Из дорожной карты"], ["scenario","Из сценария"],
           ]))}
 
-          {form.source_type === "roadmap" && roadmapItems.length > 0 && F("source_id", "Roadmap Item",
+          {form.source_type === "roadmap" && roadmapItems.length > 0 && F("source_id", "Элемент дорожной карты",
             <select value={form.source_id} onChange={e => {
               const item = roadmapItems.find(r => String(r.id) === e.target.value);
               setForm(f => ({ ...f, source_id: e.target.value,
@@ -312,8 +323,8 @@ function CreateModal({
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            {F("baseline_value", "Baseline", inp("baseline_value", "30"))}
-            {F("target_value", "Target", inp("target_value", "45"))}
+            {F("baseline_value", "Стартовое", inp("baseline_value", "30"))}
+            {F("target_value", "Цель", inp("target_value", "45"))}
             {F("unit", "Ед.", inp("unit", "%"))}
           </div>
 
@@ -385,7 +396,7 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${PRIORITY_CFG[initiative.priority] ?? PRIORITY_CFG.medium}`}>
-                {initiative.priority}
+                {PRIORITY_LABELS[initiative.priority] ?? initiative.priority}
               </span>
               <span className="text-[9px] text-gray-600 font-mono">{initiative.status}</span>
               <span className={`flex items-center gap-1 text-[9px] font-semibold ${health.text}`}>
@@ -394,7 +405,7 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
               {initiative.source_type !== "manual" && (
                 <span className="text-[9px] text-gray-700 flex items-center gap-1">
                   <Icon name={SOURCE_ICON[initiative.source_type] ?? "Circle"} size={9} />
-                  {initiative.source_type} #{initiative.source_id}
+                  {SOURCE_LABELS[initiative.source_type] ?? initiative.source_type} #{initiative.source_id}
                 </span>
               )}
             </div>
@@ -419,9 +430,9 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
             <MetricBar baseline={initiative.baseline_value} current={initiative.current_value} target={initiative.target_value} unit={initiative.unit || "%"} />
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
-                { l: "Baseline", v: initiative.baseline_value, cls: "text-gray-500" },
-                { l: "Current",  v: initiative.current_value,  cls: "text-violet-400 font-bold" },
-                { l: "Target",   v: initiative.target_value,   cls: "text-emerald-400" },
+                { l: "Стартовое", v: initiative.baseline_value, cls: "text-gray-500" },
+                { l: "Текущее",  v: initiative.current_value,  cls: "text-violet-400 font-bold" },
+                { l: "Цель",     v: initiative.target_value,   cls: "text-emerald-400" },
               ].map(({ l, v, cls }) => (
                 <div key={l}>
                   <p className="text-[9px] text-gray-600">{l}</p>
@@ -440,10 +451,10 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
           {/* Meta */}
           <div className="grid grid-cols-2 gap-3">
             {[
-              { l: "Owner",   v: initiative.owner || "—" },
-              { l: "Сегмент", v: initiative.target_segment || "—" },
-              { l: "Старт",   v: initiative.start_date || "—" },
-              { l: "Дедлайн", v: initiative.due_date ? (() => { const d = daysUntil(initiative.due_date); return `${initiative.due_date}${d !== null ? ` (${d < 0 ? d+"d overdue" : d+"d"})` : ""}` })() : "—" },
+              { l: "Ответственный", v: initiative.owner || "—" },
+              { l: "Сегмент",       v: initiative.target_segment || "—" },
+              { l: "Старт",         v: initiative.start_date || "—" },
+              { l: "Дедлайн",       v: initiative.due_date ? (() => { const d = daysUntil(initiative.due_date); return `${initiative.due_date}${d !== null ? ` (${d < 0 ? d+"д просрочка" : d+"д"})` : ""}` })() : "—" },
             ].map(({ l, v }) => (
               <div key={l} className="bg-gray-900 border border-gray-800 rounded-xl p-3">
                 <p className="text-[9px] text-gray-600 mb-0.5">{l}</p>
@@ -464,7 +475,7 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
                 <select value={upd.status_after} onChange={e => setUpd(u => ({ ...u, status_after: e.target.value }))}
                   className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 focus:outline-none">
                   <option value="">без изм.</option>
-                  {["draft","planned","active","at_risk","done"].map(s => <option key={s} value={s}>{s}</option>)}
+                  {[["draft","Черновик"],["planned","Запланир."],["active","Активна"],["at_risk","Под риском"],["done","Готово"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
               <div>
@@ -496,14 +507,14 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
                   <div className="flex items-center gap-2 flex-wrap">
                     {u.status_after && <span className="text-[9px] font-semibold text-violet-400">→ {u.status_after}</span>}
                     {u.progress_pct !== null && <span className="text-[9px] text-gray-600">{u.progress_pct}%</span>}
-                    {u.metric_value !== null && <span className="text-[9px] text-gray-600">metric: {u.metric_value}</span>}
+                    {u.metric_value !== null && <span className="text-[9px] text-gray-600">метрика: {u.metric_value}</span>}
                     <span className="text-[9px] text-gray-700 ml-auto">
                       {new Date(u.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
                   {u.next_steps.length > 0 && (
                     <div className="text-[9px] text-gray-600">
-                      Next: {u.next_steps.join(" · ")}
+                      Далее: {u.next_steps.join(" · ")}
                     </div>
                   )}
                 </div>
@@ -554,7 +565,7 @@ function DecisionModal({ prefill, onClose, onSaved }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md mx-4 p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-100">Создать Decision</h3>
+          <h3 className="text-sm font-semibold text-gray-100">Создать решение</h3>
           <button onClick={onClose} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={16} /></button>
         </div>
         <div className="space-y-3">
@@ -569,20 +580,20 @@ function DecisionModal({ prefill, onClose, onSaved }: {
               <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Тип</label>
               <select value={form.decision_type} onChange={e => setForm(f => ({ ...f, decision_type: e.target.value }))}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-300 focus:outline-none focus:border-violet-600">
-                {["priority","scope","owner","metric","process","risk","other"].map(t => <option key={t} value={t}>{t}</option>)}
+                {[["priority","Приоритет"],["scope","Скоп"],["owner","Ответственный"],["metric","Метрика"],["process","Процесс"],["risk","Риск"],["other","Прочее"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Статус</label>
               <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-300 focus:outline-none focus:border-violet-600">
-                {["open","in_progress","decided","done"].map(s => <option key={s} value={s}>{s}</option>)}
+                {[["open","Открыт"],["in_progress","В работе"],["decided","Решено"],["done","Выполнено"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Owner</label>
+              <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Ответственный</label>
               <input value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
                 placeholder="email / имя" />
@@ -640,7 +651,7 @@ function WatchlistModal({ prefill, onClose, onSaved }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md mx-4 p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-100">Создать Watchlist</h3>
+          <h3 className="text-sm font-semibold text-gray-100">Создать наблюдение</h3>
           <button onClick={onClose} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={16} /></button>
         </div>
         <div className="space-y-3">
@@ -802,10 +813,10 @@ export default function AdminExecutionPage() {
   }
 
   const SUMMARY_CARDS = summary ? [
-    { label: "Active",   value: summary.active,   icon: "Activity",      cls: "text-violet-400" },
-    { label: "At Risk",  value: summary.at_risk,  icon: "AlertTriangle", cls: summary.at_risk  > 0 ? "text-amber-400" : "text-gray-400" },
-    { label: "Overdue",  value: summary.overdue,  icon: "Clock",         cls: summary.overdue  > 0 ? "text-red-400"   : "text-gray-400" },
-    { label: "Done 30d", value: summary.done_30d, icon: "CheckCircle2",  cls: "text-emerald-400" },
+    { label: "Активные",     value: summary.active,   icon: "Activity",      cls: "text-violet-400" },
+    { label: "Под риском",   value: summary.at_risk,  icon: "AlertTriangle", cls: summary.at_risk  > 0 ? "text-amber-400" : "text-gray-400" },
+    { label: "Просроченные", value: summary.overdue,  icon: "Clock",         cls: summary.overdue  > 0 ? "text-red-400"   : "text-gray-400" },
+    { label: "Готово 30д",   value: summary.done_30d, icon: "CheckCircle2",  cls: "text-emerald-400" },
   ] : [];
 
   return (
@@ -821,12 +832,12 @@ export default function AdminExecutionPage() {
             {/* View toggle */}
             <div className="flex items-center bg-gray-800 rounded-xl p-1 gap-0.5 flex-wrap">
               {([
-                ["board",      "Kanban",       "Board"],
-                ["list",       "List",         "List"],
-                ["reviews",    "CalendarDays", "Reviews"],
-                ["decisions",  "CheckSquare",  "Decisions"],
-                ["alerts",     "Bell",         "Alerts"],
-                ["watchlists", "Eye",          "Watchlists"],
+                ["board",      "Kanban",       "Доска"],
+                ["list",       "List",         "Список"],
+                ["reviews",    "CalendarDays", "Обзоры"],
+                ["decisions",  "CheckSquare",  "Решения"],
+                ["alerts",     "Bell",         "Алерты"],
+                ["watchlists", "Eye",          "Вотчлисты"],
               ] as const).map(([k, icon, label]) => (
                 <button key={k} onClick={() => setView(k as ViewTab)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${view === k ? "bg-gray-700 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}>
@@ -850,13 +861,13 @@ export default function AdminExecutionPage() {
               <button onClick={generateReview} disabled={generatingReview}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold rounded-xl transition-colors">
                 {generatingReview ? <Spinner /> : <Icon name="CalendarDays" size={13} />}
-                Generate Review
+                Сгенерировать ревью
               </button>
             )}
             {view === "decisions" && (
               <button onClick={() => setShowDecisionModal({})}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
-                <Icon name="Plus" size={13} /> Decision
+                <Icon name="Plus" size={13} /> Решение
               </button>
             )}
             {view === "alerts" && (
@@ -864,13 +875,13 @@ export default function AdminExecutionPage() {
                 disabled={evaluating}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold rounded-xl transition-colors">
                 {evaluating ? <Spinner /> : <Icon name="Zap" size={13} />}
-                Run Evaluate
+                Запустить оценку
               </button>
             )}
             {view === "watchlists" && (
               <button onClick={() => setShowWatchlistModal({})}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
-                <Icon name="Plus" size={13} /> Watchlist
+                <Icon name="Plus" size={13} /> Наблюдение
               </button>
             )}
           </div>
@@ -930,7 +941,7 @@ export default function AdminExecutionPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {["","Инициатива","Статус","Приоритет","Owner","Метрика","Прогресс","Дедлайн","Health"].map(h => (
+                  {["","Инициатива","Статус","Приоритет","Ответственный","Метрика","Прогресс","Дедлайн","Здоровье"].map(h => (
                     <th key={h} className="text-left text-[10px] text-gray-500 font-semibold uppercase tracking-wide px-3 py-2.5">{h}</th>
                   ))}
                 </tr>
@@ -952,7 +963,7 @@ export default function AdminExecutionPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${PRIORITY_CFG[item.priority] ?? PRIORITY_CFG.medium}`}>
-                          {item.priority}
+                          {PRIORITY_LABELS[item.priority] ?? item.priority}
                         </span>
                       </td>
                       <td className="px-3 py-2.5 text-xs text-gray-500 max-w-[80px] truncate">
@@ -975,7 +986,7 @@ export default function AdminExecutionPage() {
                       <td className="px-3 py-2.5">
                         {days !== null ? (
                           <span className={`text-[10px] font-semibold ${overdue ? "text-red-400" : days < 7 ? "text-amber-400" : "text-gray-600"}`}>
-                            {overdue ? `${Math.abs(days)}d overdue` : `${days}d`}
+                            {overdue ? `${Math.abs(days)}д просрочка` : `${days}д`}
                           </span>
                         ) : <span className="text-[10px] text-gray-700">—</span>}
                       </td>
@@ -1027,7 +1038,7 @@ export default function AdminExecutionPage() {
                           {r.status}
                         </span>
                         <span className={`text-[10px] font-semibold ${CONF[r.confidence] ?? "text-gray-500"}`}>
-                          {r.confidence} confidence
+                          {{ high: "высокая", medium: "средняя", low: "низкая" }[r.confidence] ?? r.confidence} уверенность
                         </span>
                       </div>
                       <p className="text-sm font-semibold text-gray-200">{r.title}</p>
@@ -1043,7 +1054,7 @@ export default function AdminExecutionPage() {
                       {r.status === "draft" && (
                         <button onClick={async () => { await api.weeklyReviewPublish(r.id); await loadReviews(); showMsg("Опубликовано"); }}
                           className="text-[10px] px-2.5 py-1.5 bg-violet-900/40 hover:bg-violet-800/50 text-violet-400 border border-violet-800 rounded-lg transition-colors">
-                          Publish
+                          Опубликовать
                         </button>
                       )}
                     </div>
@@ -1070,7 +1081,7 @@ export default function AdminExecutionPage() {
                       <div className="bg-violet-900/20 border border-violet-800/40 rounded-xl p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <Icon name="Sparkles" size={13} className="text-violet-400" />
-                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Executive Summary</p>
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Общий итог</p>
                         </div>
                         <p className="text-sm text-violet-200">{String((reviewDetail.ai_digest as Record<string,unknown>).executive_summary)}</p>
                       </div>
@@ -1080,7 +1091,7 @@ export default function AdminExecutionPage() {
                       {/* Wins */}
                       {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).wins) && (reviewDetail.ai_digest as Record<string,unknown>).wins !== null && (
                         <div className="bg-emerald-900/20 border border-emerald-800/40 rounded-xl p-3">
-                          <p className="text-[10px] text-emerald-400 font-semibold uppercase mb-2">Wins</p>
+                          <p className="text-[10px] text-emerald-400 font-semibold uppercase mb-2">Успехи</p>
                           {((reviewDetail.ai_digest as Record<string,unknown>).wins as string[]).map((w, i) => (
                             <div key={i} className="flex gap-2 mb-1"><span className="text-emerald-500">✓</span><span className="text-xs text-gray-300">{w}</span></div>
                           ))}
@@ -1089,7 +1100,7 @@ export default function AdminExecutionPage() {
                       {/* Risks */}
                       {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).risks) && (
                         <div className="bg-red-900/20 border border-red-800/40 rounded-xl p-3">
-                          <p className="text-[10px] text-red-400 font-semibold uppercase mb-2">Risks</p>
+                          <p className="text-[10px] text-red-400 font-semibold uppercase mb-2">Риски</p>
                           {((reviewDetail.ai_digest as Record<string,unknown>).risks as string[]).map((r, i) => (
                             <div key={i} className="flex gap-2 mb-1"><span className="text-red-500">⚠</span><span className="text-xs text-gray-300">{r}</span></div>
                           ))}
@@ -1100,7 +1111,7 @@ export default function AdminExecutionPage() {
                     {/* Blockers */}
                     {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).blockers) && ((reviewDetail.ai_digest as Record<string,unknown>).blockers as string[]).length > 0 && (
                       <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-3">
-                        <p className="text-[10px] text-amber-400 font-semibold uppercase mb-2">Blockers</p>
+                        <p className="text-[10px] text-amber-400 font-semibold uppercase mb-2">Блокеры</p>
                         {((reviewDetail.ai_digest as Record<string,unknown>).blockers as string[]).map((b, i) => (
                           <div key={i} className="flex gap-2 mb-1"><span className="text-amber-500">⊘</span><span className="text-xs text-gray-300">{b}</span></div>
                         ))}
@@ -1110,7 +1121,7 @@ export default function AdminExecutionPage() {
                     {/* Decisions needed */}
                     {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).decisions_needed) && ((reviewDetail.ai_digest as Record<string,unknown>).decisions_needed as Record<string,unknown>[]).length > 0 && (
                       <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-3">
-                        <p className="text-[10px] text-violet-400 font-semibold uppercase mb-2">Decisions Needed</p>
+                        <p className="text-[10px] text-violet-400 font-semibold uppercase mb-2">Требуются решения</p>
                         {((reviewDetail.ai_digest as Record<string,unknown>).decisions_needed as Record<string,unknown>[]).map((d, i) => (
                           <div key={i} className="flex items-start gap-2 mb-2">
                             <div className="flex-1">
@@ -1124,7 +1135,7 @@ export default function AdminExecutionPage() {
                               decision_type: String(d.type ?? "other"),
                             })}
                               className="text-[9px] px-2 py-0.5 bg-violet-900/30 text-violet-400 border border-violet-800/40 rounded hover:bg-violet-800/40 transition-colors flex-shrink-0">
-                              + Decision
+                              + Решение
                             </button>
                           </div>
                         ))}
@@ -1134,7 +1145,7 @@ export default function AdminExecutionPage() {
                     {/* Next week focus */}
                     {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).next_week_focus) && (
                       <div className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-3">
-                        <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Next Week Focus</p>
+                        <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Фокус на следующей неделе</p>
                         {((reviewDetail.ai_digest as Record<string,unknown>).next_week_focus as string[]).map((f, i) => (
                           <div key={i} className="flex gap-2 mb-1"><span className="text-violet-500">→</span><span className="text-xs text-gray-300">{f}</span></div>
                         ))}
@@ -1151,10 +1162,10 @@ export default function AdminExecutionPage() {
                 {reviewDetail.initiatives && (
                   <div className="grid grid-cols-4 gap-2">
                     {[
-                      { l: "Active",    v: (reviewDetail.initiatives as Record<string,unknown>).total_active,  cls: "text-violet-400" },
-                      { l: "At Risk",   v: (reviewDetail.initiatives as Record<string,unknown>).at_risk,       cls: "text-amber-400" },
-                      { l: "Done week", v: (reviewDetail.initiatives as Record<string,unknown>).done_week,     cls: "text-emerald-400" },
-                      { l: "Overdue",   v: (reviewDetail.initiatives as Record<string,unknown>).overdue,       cls: "text-red-400" },
+                      { l: "Активные",   v: (reviewDetail.initiatives as Record<string,unknown>).total_active,  cls: "text-violet-400" },
+                      { l: "Под риском", v: (reviewDetail.initiatives as Record<string,unknown>).at_risk,       cls: "text-amber-400" },
+                      { l: "Закрыто",    v: (reviewDetail.initiatives as Record<string,unknown>).done_week,     cls: "text-emerald-400" },
+                      { l: "Просрочено", v: (reviewDetail.initiatives as Record<string,unknown>).overdue,       cls: "text-red-400" },
                     ].map(({ l, v, cls }) => (
                       <div key={l} className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-3 text-center">
                         <p className="text-[9px] text-gray-600 mb-0.5">{l}</p>
@@ -1167,7 +1178,7 @@ export default function AdminExecutionPage() {
                 {/* Linked decisions */}
                 {reviewDetail.decisions && reviewDetail.decisions.length > 0 && (
                   <div>
-                    <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Linked Decisions ({reviewDetail.decisions.length})</p>
+                    <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Связанные решения ({reviewDetail.decisions.length})</p>
                     {reviewDetail.decisions.map(d => (
                       <div key={d.id} className="flex items-center gap-2 py-1.5 border-b border-gray-800">
                         <span className={`w-1.5 h-1.5 rounded-full ${d.status === "done" ? "bg-emerald-500" : d.status === "open" ? "bg-amber-500" : "bg-gray-600"}`} />
@@ -1181,12 +1192,12 @@ export default function AdminExecutionPage() {
                 <div className="flex gap-2">
                   <button onClick={() => setShowDecisionModal({ review_id: reviewDetail.id })}
                     className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-xl border border-gray-700 transition-colors">
-                    <Icon name="Plus" size={12} /> Decision
+                    <Icon name="Plus" size={12} /> Решение
                   </button>
                   {reviewDetail.status === "draft" && (
                     <button onClick={async () => { await api.weeklyReviewPublish(reviewDetail.id); await loadReviews(); setReviewDetail(prev => prev ? { ...prev, status: "published" } : null); showMsg("Опубликовано"); }}
                       className="flex items-center gap-2 px-3 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
-                      <Icon name="Globe" size={12} /> Publish
+                      <Icon name="Globe" size={12} /> Опубликовать
                     </button>
                   )}
                 </div>
@@ -1200,7 +1211,7 @@ export default function AdminExecutionPage() {
           <div className="space-y-4">
             {/* Filters */}
             <div className="flex items-center gap-2 flex-wrap">
-              {[["open","Open"],["in_progress","In Progress"],["decided","Decided"],["done","Done"],["all","All"]].map(([v, l]) => (
+              {[["open","Открыт"],["in_progress","В работе"],["decided","Решено"],["done","Выполнено"],["all","Все"]].map(([v, l]) => (
                 <button key={v} onClick={() => { setDecisionsFilter(v); loadDecisions(v); }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${decisionsFilter === v ? "bg-violet-700 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"}`}>
                   {l}
@@ -1208,7 +1219,7 @@ export default function AdminExecutionPage() {
               ))}
               {overdueCount > 0 && (
                 <span className="ml-auto text-xs font-semibold text-red-400 flex items-center gap-1">
-                  <Icon name="Clock" size={12} /> {overdueCount} overdue
+                  <Icon name="Clock" size={12} /> {overdueCount} просрочено
                 </span>
               )}
             </div>
@@ -1224,7 +1235,7 @@ export default function AdminExecutionPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-gray-800">
-                      {["Решение","Тип","Статус","Owner","Дедлайн","Инициатива",""].map(h => (
+                      {["Решение","Тип","Статус","Ответственный","Дедлайн","Инициатива",""].map(h => (
                         <th key={h} className="text-left text-[10px] text-gray-500 font-semibold uppercase tracking-wide px-3 py-2.5">{h}</th>
                       ))}
                     </tr>
@@ -1250,20 +1261,22 @@ export default function AdminExecutionPage() {
                             {d.description && <p className="text-[9px] text-gray-600 truncate">{d.description}</p>}
                           </td>
                           <td className="px-3 py-2.5">
-                            <span className={`text-[10px] font-semibold ${TYPE_COLOR[d.decision_type] ?? "text-gray-500"}`}>{d.decision_type}</span>
+                            <span className={`text-[10px] font-semibold ${TYPE_COLOR[d.decision_type] ?? "text-gray-500"}`}>
+                              {{ priority:"Приоритет", scope:"Скоп", owner:"Ответственный", metric:"Метрика", process:"Процесс", risk:"Риск", other:"Прочее" }[d.decision_type] ?? d.decision_type}
+                            </span>
                           </td>
                           <td className="px-3 py-2.5">
                             <select value={d.status} onChange={async e => { await api.decisionUpdate({ id: d.id, status: e.target.value }); await loadDecisions(decisionsFilter); }}
                               onClick={e => e.stopPropagation()}
                               className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border focus:outline-none cursor-pointer bg-transparent ${STATUS_CFG[d.status] ?? "bg-gray-800 text-gray-500 border-gray-700"}`}>
-                              {["open","in_progress","decided","done"].map(s => <option key={s} value={s} className="bg-gray-900">{s}</option>)}
+                              {[["open","Открыт"],["in_progress","В работе"],["decided","Решено"],["done","Выполнено"]].map(([v,l]) => <option key={v} value={v} className="bg-gray-900">{l}</option>)}
                             </select>
                           </td>
                           <td className="px-3 py-2.5 text-xs text-gray-500">{d.owner || "—"}</td>
                           <td className="px-3 py-2.5">
                             {days !== null ? (
                               <span className={`text-[10px] font-semibold ${overdue ? "text-red-400" : days < 3 ? "text-amber-400" : "text-gray-600"}`}>
-                                {overdue ? `${Math.abs(days)}d over` : `${days}d`}
+                                {overdue ? `${Math.abs(days)}д просрочка` : `${days}д`}
                               </span>
                             ) : <span className="text-[10px] text-gray-700">—</span>}
                           </td>
@@ -1295,11 +1308,11 @@ export default function AdminExecutionPage() {
             {alertsSummary && (
               <div className="grid grid-cols-5 gap-2">
                 {[
-                  { l: "Open",          v: alertsSummary.open,          cls: alertsSummary.open > 0 ? "text-amber-400" : "text-gray-400",    icon: "Bell" },
-                  { l: "Critical",      v: alertsSummary.critical,      cls: alertsSummary.critical > 0 ? "text-red-400" : "text-gray-400",  icon: "AlertOctagon" },
-                  { l: "Acknowledged",  v: alertsSummary.acknowledged,  cls: "text-blue-400",                                                icon: "Eye" },
-                  { l: "Resolved/wk",  v: alertsSummary.resolved_week, cls: "text-emerald-400",                                             icon: "CheckCircle2" },
-                  { l: "With Overdue",  v: alertsSummary.with_overdue,  cls: alertsSummary.with_overdue > 0 ? "text-red-400" : "text-gray-400", icon: "Clock" },
+                  { l: "Открытых",    v: alertsSummary.open,          cls: alertsSummary.open > 0 ? "text-amber-400" : "text-gray-400",    icon: "Bell" },
+                  { l: "Критичных",   v: alertsSummary.critical,      cls: alertsSummary.critical > 0 ? "text-red-400" : "text-gray-400",  icon: "AlertOctagon" },
+                  { l: "Принято",     v: alertsSummary.acknowledged,  cls: "text-blue-400",                                                icon: "Eye" },
+                  { l: "Решено/нед",  v: alertsSummary.resolved_week, cls: "text-emerald-400",                                             icon: "CheckCircle2" },
+                  { l: "Просрочено",  v: alertsSummary.with_overdue,  cls: alertsSummary.with_overdue > 0 ? "text-red-400" : "text-gray-400", icon: "Clock" },
                 ].map(({ l, v, cls, icon }) => (
                   <div key={l} className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center gap-2">
                     <Icon name={icon} size={15} className={cls} />
@@ -1315,11 +1328,11 @@ export default function AdminExecutionPage() {
             {/* Filters */}
             <div className="flex items-center gap-2 flex-wrap">
               {([
-                ["","All"],
-                ["open","Open"],
-                ["acknowledged","Acknowledged"],
-                ["resolved","Resolved"],
-                ["dismissed","Dismissed"],
+                ["","Все"],
+                ["open","Открытые"],
+                ["acknowledged","Принятые"],
+                ["resolved","Решённые"],
+                ["dismissed","Отклонённые"],
               ] as const).map(([v, l]) => (
                 <button key={v} onClick={() => { const f = v ? { status: v } : {}; setAlertsFilter(f); loadAlerts(f); }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${JSON.stringify(alertsFilter) === JSON.stringify(v ? { status: v } : {}) ? "bg-violet-700 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"}`}>
@@ -1334,7 +1347,7 @@ export default function AdminExecutionPage() {
                       sv === "warning"  ? "border-amber-800 text-amber-400 hover:bg-amber-900/20" :
                                           "border-gray-700 text-gray-500 hover:bg-gray-800"
                     } ${alertsFilter.severity === sv ? "bg-gray-800" : ""}`}>
-                    {sv}
+                    {{ critical: "Критичный", warning: "Предупреждение", info: "Инфо" }[sv]}
                   </button>
                 ))}
               </div>
@@ -1344,7 +1357,7 @@ export default function AdminExecutionPage() {
 
             {!loadingAlerts && alerts.length === 0 && (
               <div className="text-center py-10 text-gray-600 text-sm">
-                Алертов нет. Нажмите «Run Evaluate» чтобы проверить watchlists.
+                Алертов нет. Нажмите «Запустить оценку» чтобы проверить наблюдения.
               </div>
             )}
 
@@ -1363,7 +1376,7 @@ export default function AdminExecutionPage() {
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${sev.dot}`} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap mb-1">
-                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${sev.badge}`}>{a.severity}</span>
+                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${sev.badge}`}>{{ critical: "Критичный", warning: "Предупреждение", info: "Инфо" }[a.severity] ?? a.severity}</span>
                             <span className="text-[9px] text-gray-600 font-mono">{a.alert_type}</span>
                             {a.watchlist_name && <span className="text-[9px] text-gray-700">· {a.watchlist_name}</span>}
                             {a.entity_type && <span className="text-[9px] text-violet-500">{a.entity_type}{a.entity_id ? ` #${a.entity_id}` : ""}</span>}
@@ -1372,8 +1385,8 @@ export default function AdminExecutionPage() {
                           <p className="text-[10px] text-gray-500">{a.message}</p>
                           {(a.current_value !== null || a.baseline_value !== null) && (
                             <div className="flex gap-3 mt-1.5">
-                              {a.baseline_value !== null && <span className="text-[9px] text-gray-600">Baseline: {a.baseline_value}</span>}
-                              {a.current_value  !== null && <span className="text-[9px] text-gray-300 font-semibold">Current: {a.current_value}</span>}
+                              {a.baseline_value !== null && <span className="text-[9px] text-gray-600">База: {a.baseline_value}</span>}
+                              {a.current_value  !== null && <span className="text-[9px] text-gray-300 font-semibold">Текущее: {a.current_value}</span>}
                               {a.delta_value    !== null && (
                                 <span className={`text-[9px] font-bold ${a.delta_value < 0 ? "text-red-400" : "text-emerald-400"}`}>
                                   Δ {a.delta_value > 0 ? "+" : ""}{a.delta_value}
@@ -1382,32 +1395,32 @@ export default function AdminExecutionPage() {
                             </div>
                           )}
                           <p className="text-[9px] text-gray-700 mt-1">
-                            Triggered: {new Date(a.first_triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                            {a.last_triggered_at !== a.first_triggered_at && ` · Last: ${new Date(a.last_triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
+                            Сработал: {new Date(a.first_triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            {a.last_triggered_at !== a.first_triggered_at && ` · Послед.: ${new Date(a.last_triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
                           </p>
                         </div>
                         <div className="flex gap-1.5 flex-shrink-0">
                           {a.status === "open" && (
                             <button onClick={async () => { await api.alertUpdate({ id: a.id, status: "acknowledged" }); await loadAlerts(alertsFilter); }}
                               className="text-[9px] px-2 py-1 bg-blue-900/30 text-blue-400 border border-blue-800 rounded-lg hover:bg-blue-800/40 transition-colors">
-                              Ack
+                              Принять
                             </button>
                           )}
                           {(a.status === "open" || a.status === "acknowledged") && (
                             <button onClick={async () => { await api.alertUpdate({ id: a.id, status: "resolved" }); await loadAlerts(alertsFilter); }}
                               className="text-[9px] px-2 py-1 bg-emerald-900/30 text-emerald-400 border border-emerald-800 rounded-lg hover:bg-emerald-800/40 transition-colors">
-                              Resolve
+                              Решить
                             </button>
                           )}
                           {a.status === "open" && (
                             <button onClick={async () => { await api.alertUpdate({ id: a.id, status: "dismissed" }); await loadAlerts(alertsFilter); }}
                               className="text-[9px] px-2 py-1 bg-gray-800 text-gray-500 border border-gray-700 rounded-lg hover:bg-gray-700 transition-colors">
-                              Dismiss
+                              Отклонить
                             </button>
                           )}
                           <button onClick={() => setShowDecisionModal({ title: a.title, description: a.message, decision_type: a.severity === "critical" ? "risk" : "other" })}
                             className="text-[9px] px-2 py-1 bg-violet-900/30 text-violet-400 border border-violet-800 rounded-lg hover:bg-violet-800/40 transition-colors">
-                            + Decision
+                            + Решение
                           </button>
                         </div>
                       </div>
@@ -1423,20 +1436,20 @@ export default function AdminExecutionPage() {
         {view === "watchlists" && (
           <div className="space-y-3">
             {watchlists.length === 0 && (
-              <div className="text-center py-10 text-gray-600 text-sm">Watchlists загружаются...</div>
+              <div className="text-center py-10 text-gray-600 text-sm">Наблюдения загружаются...</div>
             )}
             {watchlists.map(w => (
               <div key={w.id} className={`bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${w.is_system ? "border-violet-800/30" : "border-gray-800"}`}>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     {w.is_system && (
-                      <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-violet-900/40 text-violet-400 border border-violet-800 rounded-full">system</span>
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-violet-900/40 text-violet-400 border border-violet-800 rounded-full">системный</span>
                     )}
                     <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-semibold ${w.status === "active" ? "bg-emerald-900/30 text-emerald-400 border-emerald-800" : "bg-gray-800 text-gray-500 border-gray-700"}`}>
-                      {w.status}
+                      {w.status === "active" ? "Активен" : "Приостановлен"}
                     </span>
                     <span className="text-[9px] text-gray-600">{w.scope_type}</span>
-                    <span className="text-[9px] text-gray-700">· {(w.rules as unknown[]).length} rules</span>
+                    <span className="text-[9px] text-gray-700">· {(w.rules as unknown[]).length} правил</span>
                   </div>
                   <p className="text-sm font-semibold text-gray-200">{w.name}</p>
                   {w.description && <p className="text-[10px] text-gray-600 mt-0.5">{w.description}</p>}
@@ -1445,29 +1458,29 @@ export default function AdminExecutionPage() {
                   {w.active_alerts > 0 && (
                     <div className="text-center">
                       <p className="text-xs font-bold text-amber-400">{w.active_alerts}</p>
-                      <p className="text-[9px] text-gray-600">alerts</p>
+                      <p className="text-[9px] text-gray-600">алертов</p>
                     </div>
                   )}
                   <div className="flex gap-1.5">
                     <button onClick={async () => { setEvaluating(true); await api.alertsEvaluate({ watchlist_id: w.id }); await Promise.all([loadWatchlists(), loadAlerts(alertsFilter)]); setEvaluating(false); showMsg("Оценено"); }}
                       disabled={evaluating || w.status !== "active"}
                       className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors disabled:opacity-40">
-                      Run
+                      Запустить
                     </button>
                     {!w.is_system && (
                       <button onClick={async () => { await api.watchlistUpdate({ id: w.id, status: w.status === "active" ? "paused" : "active" }); await loadWatchlists(); }}
                         className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
-                        {w.status === "active" ? "Pause" : "Resume"}
+                        {w.status === "active" ? "Пауза" : "Возобновить"}
                       </button>
                     )}
                     {w.is_system && (
                       <button onClick={async () => { await api.watchlistUpdate({ id: w.id, status: w.status === "active" ? "paused" : "active" }); await loadWatchlists(); }}
                         className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
-                        {w.status === "active" ? "Pause" : "Resume"}
+                        {w.status === "active" ? "Пауза" : "Возобновить"}
                       </button>
                     )}
                     {!w.is_system && (
-                      <button onClick={async () => { if (confirm("Удалить watchlist?")) { await api.watchlistDelete(w.id); await loadWatchlists(); } }}
+                      <button onClick={async () => { if (confirm("Удалить наблюдение?")) { await api.watchlistDelete(w.id); await loadWatchlists(); } }}
                         className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-red-900/30 text-gray-600 hover:text-red-400 border border-gray-700 rounded-lg transition-colors">
                         <Icon name="Trash2" size={10} />
                       </button>
@@ -1495,7 +1508,7 @@ export default function AdminExecutionPage() {
         <WatchlistModal
           prefill={showWatchlistModal}
           onClose={() => setShowWatchlistModal(null)}
-          onSaved={() => { setShowWatchlistModal(null); loadWatchlists(); showMsg("Watchlist создан"); }}
+          onSaved={() => { setShowWatchlistModal(null); loadWatchlists(); showMsg("Наблюдение создано"); }}
         />
       )}
 

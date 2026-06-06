@@ -79,7 +79,7 @@ type CommSummary = {
 
 const CONTENT_TYPE_CFG: Record<ContentType, { label: string; icon: string; color: string }> = {
   announcement: { label: "Анонс",        icon: "Megaphone",      color: "text-violet-400"  },
-  release_note: { label: "Release Note", icon: "Tag",            color: "text-blue-400"    },
+  release_note: { label: "Что нового",   icon: "Tag",            color: "text-blue-400"    },
   faq:          { label: "FAQ",          icon: "HelpCircle",     color: "text-amber-400"   },
   guide:        { label: "Гайд",         icon: "BookOpen",       color: "text-emerald-400" },
   article:      { label: "Статья",       icon: "FileText",       color: "text-cyan-400"    },
@@ -102,9 +102,9 @@ const COMM_STATUS_CFG: Record<CommStatus, { label: string; badge: string }> = {
 };
 
 const CHANNEL_CFG: Record<CommChannel, { label: string; icon: string; color: string }> = {
-  in_app: { label: "In-app", icon: "Bell", color: "text-violet-400" },
-  email:  { label: "Email",  icon: "Mail", color: "text-blue-400"   },
-  system: { label: "System", icon: "Cpu",  color: "text-amber-400"  },
+  in_app: { label: "В приложении", icon: "Bell", color: "text-violet-400" },
+  email:  { label: "Email",        icon: "Mail", color: "text-blue-400"   },
+  system: { label: "Системное",    icon: "Cpu",  color: "text-amber-400"  },
 };
 
 const EVENT_CFG: Record<string, { label: string; color: string }> = {
@@ -473,7 +473,7 @@ export default function AdminContentPage() {
                   : "text-gray-500 border-transparent hover:text-gray-300"
               }`}
             >
-              {tab === "content" ? "Content" : "Communications"}
+              {tab === "content" ? "Контент" : "Коммуникации"}
             </button>
           ))}
         </div>
@@ -1015,7 +1015,7 @@ function ContentDetailPanel({
       {/* Summary */}
       {item.summary && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wide">Summary</p>
+          <p className="text-xs text-gray-500 mb-1 font-medium uppercase tracking-wide">Аннотация</p>
           <p className="text-sm text-gray-300">{item.summary}</p>
         </div>
       )}
@@ -1023,7 +1023,7 @@ function ContentDetailPanel({
       {/* Body markdown */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Body (Markdown)</p>
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Текст (Markdown)</p>
           {!editingBody && (
             <button
               onClick={onStartEditBody}

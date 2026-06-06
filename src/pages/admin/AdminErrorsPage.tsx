@@ -30,17 +30,17 @@ type Summary = { open: number; critical: number; investigating: number; resolved
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const SEV: Record<OpsErrorSeverity, { label: string; color: string }> = {
-  low:      { label: "Low",      color: "bg-gray-800 text-gray-400 border-gray-700" },
-  medium:   { label: "Medium",   color: "bg-amber-900/40 text-amber-400 border-amber-800" },
-  high:     { label: "High",     color: "bg-orange-900/40 text-orange-400 border-orange-800" },
-  critical: { label: "Critical", color: "bg-red-900/50 text-red-400 border-red-800" },
+  low:      { label: "Низкий",      color: "bg-gray-800 text-gray-400 border-gray-700" },
+  medium:   { label: "Средний",     color: "bg-amber-900/40 text-amber-400 border-amber-800" },
+  high:     { label: "Высокий",     color: "bg-orange-900/40 text-orange-400 border-orange-800" },
+  critical: { label: "Критический", color: "bg-red-900/50 text-red-400 border-red-800" },
 };
 
 const ST: Record<OpsErrorStatus, { label: string; color: string }> = {
-  open:          { label: "Open",          color: "text-red-400" },
-  investigating: { label: "Investigating", color: "text-amber-400" },
-  muted:         { label: "Muted",         color: "text-gray-600" },
-  resolved:      { label: "Resolved",      color: "text-emerald-400" },
+  open:          { label: "Открыта",   color: "text-red-400" },
+  investigating: { label: "Изучается", color: "text-amber-400" },
+  muted:         { label: "Заглушена", color: "text-gray-600" },
+  resolved:      { label: "Решена",    color: "text-emerald-400" },
 };
 
 const SEVERITIES: OpsErrorSeverity[] = ["low", "medium", "high", "critical"];
@@ -135,29 +135,29 @@ function AddForm({ onAdd, onCancel }: AddFormProps) {
           />
         </div>
         <div>
-          <label className={labelCls}>Severity</label>
+          <label className={labelCls}>Критичность</label>
           <select className={inputCls} value={form.severity} onChange={e => set("severity", e.target.value)}>
             {SEVERITIES.map(s => <option key={s} value={s}>{SEV[s].label}</option>)}
           </select>
         </div>
         <div>
-          <label className={labelCls}>Module slug</label>
+          <label className={labelCls}>Модуль</label>
           <input className={inputCls} placeholder="auth, billing, …" value={form.module_slug} onChange={e => set("module_slug", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Source</label>
+          <label className={labelCls}>Источник</label>
           <input className={inputCls} placeholder="backend, frontend, …" value={form.source} onChange={e => set("source", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Environment</label>
+          <label className={labelCls}>Окружение</label>
           <input className={inputCls} placeholder="production, staging, …" value={form.environment} onChange={e => set("environment", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Owner email</label>
+          <label className={labelCls}>Ответственный</label>
           <input className={inputCls} type="email" placeholder="owner@example.com" value={form.owner_email} onChange={e => set("owner_email", e.target.value)} />
         </div>
         <div className="sm:col-span-2">
-          <label className={labelCls}>Details</label>
+          <label className={labelCls}>Детали</label>
           <textarea
             className={`${inputCls} resize-none`}
             rows={3}
@@ -246,10 +246,10 @@ function ErrorRow({
             <p className="leading-relaxed whitespace-pre-wrap text-gray-300">{item.details}</p>
           )}
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-gray-600">
-            <span>First seen: <span className="text-gray-500">{fmtDate(item.first_seen_at)}</span></span>
-            <span>Last seen: <span className="text-gray-500">{fmtDate(item.last_seen_at)}</span></span>
-            {item.owner_email && <span>Owner: <span className="text-gray-500">{item.owner_email}</span></span>}
-            {item.environment && <span>Env: <span className="text-gray-500 font-mono">{item.environment}</span></span>}
+            <span>Первый: <span className="text-gray-500">{fmtDate(item.first_seen_at)}</span></span>
+            <span>Последний: <span className="text-gray-500">{fmtDate(item.last_seen_at)}</span></span>
+            {item.owner_email && <span>Ответственный: <span className="text-gray-500">{item.owner_email}</span></span>}
+            {item.environment && <span>Окружение: <span className="text-gray-500 font-mono">{item.environment}</span></span>}
           </div>
           <LastUpdated at={item.updated_at} by={item.updated_by} />
         </div>
@@ -309,10 +309,10 @@ export default function AdminErrorsPage() {
   }
 
   const cards = [
-    { label: "Open",          value: summary.open,          color: "text-red-400",     icon: "AlertCircle" },
-    { label: "Critical",      value: summary.critical,      color: "text-red-500",     icon: "Flame" },
-    { label: "Investigating", value: summary.investigating, color: "text-amber-400",   icon: "Search" },
-    { label: "Resolved",      value: summary.resolved,      color: "text-emerald-400", icon: "CheckCircle2" },
+    { label: "Открытые",   value: summary.open,          color: "text-red-400",     icon: "AlertCircle" },
+    { label: "Критичные",  value: summary.critical,      color: "text-red-500",     icon: "Flame" },
+    { label: "Изучаются",  value: summary.investigating, color: "text-amber-400",   icon: "Search" },
+    { label: "Решённые",   value: summary.resolved,      color: "text-emerald-400", icon: "CheckCircle2" },
   ];
 
   return (
@@ -358,7 +358,7 @@ export default function AdminErrorsPage() {
             value={sevFilter}
             onChange={e => setSev(e.target.value)}
           >
-            <option value="">Все severity</option>
+            <option value="">Все критичности</option>
             {SEVERITIES.map(s => <option key={s} value={s}>{SEV[s].label}</option>)}
           </select>
           <select

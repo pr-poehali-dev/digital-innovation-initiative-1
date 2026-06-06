@@ -28,17 +28,17 @@ type Summary = { active: number; triggered: number; muted: number; no_owner: num
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const SEV: Record<OpsAlertSeverity, { label: string; color: string }> = {
-  low:      { label: "Low",      color: "bg-gray-800 text-gray-400 border-gray-700" },
-  medium:   { label: "Medium",   color: "bg-amber-900/40 text-amber-400 border-amber-800" },
-  high:     { label: "High",     color: "bg-orange-900/40 text-orange-400 border-orange-800" },
-  critical: { label: "Critical", color: "bg-red-900/50 text-red-400 border-red-800" },
+  low:      { label: "Низкий",      color: "bg-gray-800 text-gray-400 border-gray-700" },
+  medium:   { label: "Средний",     color: "bg-amber-900/40 text-amber-400 border-amber-800" },
+  high:     { label: "Высокий",     color: "bg-orange-900/40 text-orange-400 border-orange-800" },
+  critical: { label: "Критический", color: "bg-red-900/50 text-red-400 border-red-800" },
 };
 
 const ST: Record<OpsAlertStatus, { label: string; color: string }> = {
-  active:    { label: "Active",    color: "text-emerald-400" },
-  triggered: { label: "Triggered", color: "text-red-400" },
-  muted:     { label: "Muted",     color: "text-gray-600" },
-  resolved:  { label: "Resolved",  color: "text-gray-500" },
+  active:    { label: "Активен",  color: "text-emerald-400" },
+  triggered: { label: "Сработал", color: "text-red-400" },
+  muted:     { label: "Заглушен", color: "text-gray-600" },
+  resolved:  { label: "Решён",    color: "text-gray-500" },
 };
 
 const ALERT_SEVERITIES: OpsAlertSeverity[] = ["low", "medium", "high", "critical"];
@@ -131,15 +131,15 @@ function AddForm({ onAdd, onCancel }: { onAdd: (item: OpsAlert) => void; onCance
           />
         </div>
         <div>
-          <label className={labelCls}>Module slug</label>
+          <label className={labelCls}>Модуль</label>
           <input className={inputCls} placeholder="auth, billing, …" value={form.module_slug} onChange={e => set("module_slug", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Channel</label>
+          <label className={labelCls}>Канал</label>
           <input className={inputCls} placeholder="slack, email, pagerduty…" value={form.channel} onChange={e => set("channel", e.target.value)} />
         </div>
         <div className="sm:col-span-2">
-          <label className={labelCls}>Condition</label>
+          <label className={labelCls}>Условие</label>
           <textarea
             className={`${inputCls} resize-none`}
             rows={2}
@@ -149,11 +149,11 @@ function AddForm({ onAdd, onCancel }: { onAdd: (item: OpsAlert) => void; onCance
           />
         </div>
         <div>
-          <label className={labelCls}>Threshold value</label>
+          <label className={labelCls}>Порог</label>
           <input className={inputCls} placeholder="0.05, 500, …" value={form.threshold_value} onChange={e => set("threshold_value", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Window (minutes)</label>
+          <label className={labelCls}>Окно (мин)</label>
           <input
             className={inputCls}
             type="number"
@@ -163,23 +163,23 @@ function AddForm({ onAdd, onCancel }: { onAdd: (item: OpsAlert) => void; onCance
           />
         </div>
         <div>
-          <label className={labelCls}>Severity</label>
+          <label className={labelCls}>Критичность</label>
           <select className={inputCls} value={form.severity} onChange={e => set("severity", e.target.value)}>
             {ALERT_SEVERITIES.map(s => <option key={s} value={s}>{SEV[s].label}</option>)}
           </select>
         </div>
         <div>
-          <label className={labelCls}>Status</label>
+          <label className={labelCls}>Статус</label>
           <select className={inputCls} value={form.status} onChange={e => set("status", e.target.value)}>
             {ALERT_STATUSES.map(s => <option key={s} value={s}>{ST[s].label}</option>)}
           </select>
         </div>
         <div>
-          <label className={labelCls}>Owner email</label>
+          <label className={labelCls}>Ответственный</label>
           <input className={inputCls} type="email" placeholder="owner@example.com" value={form.owner_email} onChange={e => set("owner_email", e.target.value)} />
         </div>
         <div>
-          <label className={labelCls}>Notes</label>
+          <label className={labelCls}>Заметки</label>
           <input className={inputCls} placeholder="Дополнительно…" value={form.notes} onChange={e => set("notes", e.target.value)} />
         </div>
       </div>
@@ -331,10 +331,10 @@ export default function AdminAlertsPage() {
   }
 
   const cards = [
-    { label: "Active",    value: summary.active,    color: "text-emerald-400", icon: "CheckCircle2" },
-    { label: "Triggered", value: summary.triggered, color: "text-red-400",     icon: "Zap" },
-    { label: "Muted",     value: summary.muted,     color: "text-gray-500",    icon: "BellOff" },
-    { label: "No owner",  value: summary.no_owner,  color: "text-amber-400",   icon: "UserX" },
+    { label: "Активные",   value: summary.active,    color: "text-emerald-400", icon: "CheckCircle2" },
+    { label: "Сработали",  value: summary.triggered, color: "text-red-400",     icon: "Zap" },
+    { label: "Заглушены",  value: summary.muted,     color: "text-gray-500",    icon: "BellOff" },
+    { label: "Без владельца", value: summary.no_owner, color: "text-amber-400", icon: "UserX" },
   ];
 
   return (
@@ -380,7 +380,7 @@ export default function AdminAlertsPage() {
             value={sevFilter}
             onChange={e => setSev(e.target.value)}
           >
-            <option value="">Все severity</option>
+            <option value="">Все критичности</option>
             {ALERT_SEVERITIES.map(s => <option key={s} value={s}>{SEV[s].label}</option>)}
           </select>
           <select
