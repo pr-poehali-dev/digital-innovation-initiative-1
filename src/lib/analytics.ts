@@ -184,6 +184,12 @@ export type AnalyticsEvents = {
   public_profile_project_clicked: {
     project_id: number;
   };
+
+  // 26. Клик по внешней ссылке на публичной странице
+  public_profile_external_link_clicked: {
+    link_key: string;
+    link_url: string;
+  };
 };
 
 // --- Ядро ---
@@ -415,6 +421,10 @@ export const analytics = {
 
   publicProfileProjectClicked(projectId: number) {
     sendEvent("public_profile_project_clicked", { project_id: projectId });
+  },
+
+  publicProfileExternalLinkClicked(linkKey: string, linkUrl: string) {
+    sendEvent("public_profile_external_link_clicked", { link_key: linkKey, link_url: linkUrl });
   },
 };
 

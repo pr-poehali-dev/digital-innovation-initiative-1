@@ -2,6 +2,7 @@
   "tests": [
     {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
     {"name": "get_me без сессии — 401", "method": "GET", "path": "/?action=public_profile_get_me", "expectedStatus": 401},
-    {"name": "get_by_slug без slug — 400", "method": "GET", "path": "/?action=public_profile_get_by_slug", "expectedStatus": 400}
+    {"name": "get_by_slug без slug — 400", "method": "GET", "path": "/?action=public_profile_get_by_slug", "expectedStatus": 400},
+    {"name": "signals_get_me без сессии — 401", "method": "GET", "path": "/?action=signals_get_me", "expectedStatus": 401}
   ]
 }

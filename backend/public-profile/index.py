@@ -248,6 +248,180 @@ def build_public_view(conn, user_id: int, settings: dict) -> dict:
     return view
 
 
+# ── Signal normalization layer (W11.5) ────────────────────────────────
+
+def build_signals(conn, user_id: int) -> list:
+    """Нормализованный слой сигналов пользователя для Competency Map и публичного профиля.
+
+    Возвращает список сигналов единого shape:
+      id, type, title, subtitle, description, source_kind,
+      is_verified, confidence, started_at, ended_at, updated_at, tags, meta
+    """
+    signals = []
+
+    # ── Experience ───────────────────────────────────────────────────
+    rows = fetch_all(conn, f"""
+        SELECT id, company_name, title, employment_type,
+               start_date, end_date, is_current, description, updated_at
+        FROM {S}.professional_work_experience
+        WHERE user_id={user_id} AND company_name!='[DELETED]'
+        ORDER BY is_current DESC, start_date DESC NULLS LAST
+    """)
+    for r in rows:
+        signals.append({
+            "id": f"experience:{r[0]}",
+            "type": "experience",
+            "title": r[2] or "",
+            "subtitle": r[1] or "",
+            "description": (r[7] or "")[:300] or None,
+            "source_kind": "user_data",
+            "is_verified": False,
+            "confidence": "medium",
+            "started_at": str(r[4]) if r[4] else None,
+            "ended_at": None if r[6] else (str(r[5]) if r[5] else None),
+            "updated_at": str(r[8]) if r[8] else None,
+            "tags": [r[3]] if r[3] else [],
+            "meta": {"is_current": bool(r[6]), "employment_type": r[3]},
+        })
+
+    # ── Education ────────────────────────────────────────────────────
+    rows = fetch_all(conn, f"""
+        SELECT id, institution, degree, field_of_study,
+               start_date, end_date, is_current, updated_at
+        FROM {S}.professional_education
+        WHERE user_id={user_id} AND institution!='[DELETED]'
+        ORDER BY is_current DESC, start_date DESC NULLS LAST
+    """)
+    for r in rows:
+        subtitle_parts = [p for p in [r[2], r[3]] if p]
+        signals.append({
+            "id": f"education:{r[0]}",
+            "type": "education",
+            "title": r[1] or "",
+            "subtitle": " · ".join(subtitle_parts) or None,
+            "description": None,
+            "source_kind": "user_data",
+            "is_verified": False,
+            "confidence": "medium",
+            "started_at": str(r[4]) if r[4] else None,
+            "ended_at": None if r[6] else (str(r[5]) if r[5] else None),
+            "updated_at": str(r[7]) if r[7] else None,
+            "tags": [r[3]] if r[3] else [],
+            "meta": {"is_current": bool(r[6]), "degree": r[2]},
+        })
+
+    # ── Projects ─────────────────────────────────────────────────────
+    rows = fetch_all(conn, f"""
+        SELECT p.id, p.title, p.description, p.created_at, p.updated_at, pm.role
+        FROM {S}.projects p
+        JOIN {S}.project_members pm ON pm.project_id = p.id
+        WHERE pm.user_id = {user_id} AND p.archived_at IS NULL
+        ORDER BY p.updated_at DESC
+    """)
+    for r in rows:
+        signals.append({
+            "id": f"project:{r[0]}",
+            "type": "project",
+            "title": r[1] or "",
+            "subtitle": r[5] or None,
+            "description": (r[2] or "")[:300] or None,
+            "source_kind": "project",
+            "is_verified": False,
+            "confidence": "medium",
+            "started_at": str(r[3]) if r[3] else None,
+            "ended_at": None,
+            "updated_at": str(r[4]) if r[4] else None,
+            "tags": [],
+            "meta": {"role": r[5], "project_id": r[0]},
+        })
+
+    # ── Competency assessments (уровень >= 1) ─────────────────────────
+    rows = fetch_all(conn, f"""
+        SELECT uc.id, c.name, c.code, d.name as domain_name,
+               uc.current_level, uc.confidence, uc.last_assessed_at, uc.updated_at
+        FROM {S}.professional_user_competencies uc
+        JOIN {S}.professional_competencies c ON c.id = uc.competency_id
+        JOIN {S}.professional_competency_domains d ON d.id = c.domain_id
+        WHERE uc.user_id = {user_id} AND uc.current_level > 0
+        ORDER BY uc.current_level DESC, uc.updated_at DESC
+    """)
+    for r in rows:
+        level = r[4]
+        confidence = r[5] or "low"
+        is_strong = level >= 3
+        signals.append({
+            "id": f"competency:{r[0]}",
+            "type": "competency",
+            "title": r[1] or "",
+            "subtitle": r[3] or None,
+            "description": None,
+            "source_kind": "assessment",
+            "is_verified": confidence in ("medium", "high"),
+            "confidence": confidence,
+            "started_at": None,
+            "ended_at": None,
+            "updated_at": str(r[7]) if r[7] else None,
+            "tags": [r[3]] if r[3] else [],
+            "meta": {
+                "level": level,
+                "code": r[2],
+                "domain": r[3],
+                "is_strength": is_strong,
+            },
+        })
+
+    # ── Learning evidence (verified) ──────────────────────────────────
+    rows = fetch_all(conn, f"""
+        SELECT ev.id, ev.title, ev.description, ev.evidence_type,
+               ev.source_ref, ev.created_at,
+               c.name as competency_name, c.code as competency_code
+        FROM {S}.professional_competency_evidence ev
+        JOIN {S}.professional_user_competencies uc ON uc.id = ev.user_competency_id
+        JOIN {S}.professional_competencies c ON c.id = uc.competency_id
+        WHERE uc.user_id = {user_id}
+        ORDER BY ev.created_at DESC
+    """)
+    for r in rows:
+        is_verified = r[3] == "learning_completion"
+        signals.append({
+            "id": f"evidence:{r[0]}",
+            "type": "evidence",
+            "title": r[1] or "",
+            "subtitle": r[6] or None,
+            "description": (r[2] or "")[:300] or None,
+            "source_kind": "learning",
+            "is_verified": is_verified,
+            "confidence": "high" if is_verified else "low",
+            "started_at": None,
+            "ended_at": None,
+            "updated_at": str(r[5]) if r[5] else None,
+            "tags": [r[6]] if r[6] else [],
+            "meta": {
+                "evidence_type": r[3],
+                "source_ref": r[4],
+                "competency_name": r[6],
+                "competency_code": r[7],
+            },
+        })
+
+    return signals
+
+
+def action_signals_get_me(conn, user_id: int):
+    """W11.5 — нормализованные сигналы пользователя для карты компетенций и аналитики."""
+    signals = build_signals(conn, user_id)
+    summary = {
+        "total": len(signals),
+        "by_type": {},
+        "verified_count": sum(1 for s in signals if s["is_verified"]),
+    }
+    for s in signals:
+        t = s["type"]
+        summary["by_type"][t] = summary["by_type"].get(t, 0) + 1
+
+    return resp({"signals": signals, "summary": summary})
+
+
 # ── Actions ───────────────────────────────────────────────────────────
 
 def action_get_me(conn, user_id: int):
@@ -434,6 +608,8 @@ def handler(event: dict, context) -> dict:
             return action_unpublish_me(conn, user_id)
         if action == "public_profile_preview_me":
             return action_preview_me(conn, user_id)
+        if action == "signals_get_me":
+            return action_signals_get_me(conn, user_id)
 
         return resp({"error": "unknown action"}, 400)
     finally:

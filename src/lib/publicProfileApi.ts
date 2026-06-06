@@ -50,6 +50,35 @@ export type PublicView = {
   projects?: PublicProject[];
 };
 
+// ── Signal normalization layer (W11.5) ────────────────────────────────
+
+export type SignalType = "experience" | "education" | "project" | "competency" | "evidence";
+export type SignalSourceKind = "user_data" | "learning" | "project" | "assessment";
+
+export type NormalizedSignal = {
+  id: string;
+  type: SignalType;
+  title: string;
+  subtitle: string | null;
+  description: string | null;
+  source_kind: SignalSourceKind;
+  is_verified: boolean;
+  confidence: "low" | "medium" | "high" | "none";
+  started_at: string | null;
+  ended_at: string | null;
+  updated_at: string | null;
+  tags: string[];
+  meta: Record<string, unknown>;
+};
+
+export type SignalsSummary = {
+  total: number;
+  by_type: Partial<Record<SignalType, number>>;
+  verified_count: number;
+};
+
+// ─────────────────────────────────────────────────────────────────────
+
 export const publicProfileApi = {
   getMe:         ()             => pGet("public_profile_get_me"),
   upsertMe:      (b: object)    => pPost("public_profile_upsert_me", b),
@@ -59,4 +88,5 @@ export const publicProfileApi = {
   unpublish:     ()             => pPost("public_profile_unpublish_me"),
   previewMe:     ()             => pGet("public_profile_preview_me"),
   getBySlug:     (slug: string) => fetch(`${PUB_URL}/?action=public_profile_get_by_slug&slug=${encodeURIComponent(slug)}`).then(r => r.json()),
+  signalsGetMe:  ()             => pGet("signals_get_me") as Promise<{ signals: NormalizedSignal[]; summary: SignalsSummary }>,
 };
