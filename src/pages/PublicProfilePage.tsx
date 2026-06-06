@@ -230,7 +230,7 @@ export default function PublicProfilePage() {
                 <div className="space-y-3">
                   {view.projects.map((project) => (
                     <div key={project.id}
-                      className="flex gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100"
+                      className="flex gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors"
                       onClick={() => analytics.publicProfileProjectClicked(project.id)}
                     >
                       <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
