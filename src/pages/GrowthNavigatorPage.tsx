@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import { analytics } from "@/lib/analytics";
 import { growthApi } from "@/lib/growthApi";
 import { profApi } from "@/lib/profApi";
 import { bridgeApi } from "@/lib/bridgeApi";
@@ -161,8 +163,22 @@ function OverviewTab({
       {loadingGap && <div className="flex justify-center py-8"><Spinner /></div>}
 
       {!selectedRole && !loadingGap && (
-        <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl">
-          Выберите целевую роль для начала работы с навигатором
+        <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
+          <p>Выберите целевую роль для начала работы с навигатором</p>
+          <div className="flex items-center justify-center gap-1.5">
+            <Icon name="BookOpen" size={12} className="text-slate-400" />
+            <p className="text-xs text-slate-400">
+              Не уверены как работает план развития?{" "}
+              <Link
+                to="/guide"
+                state={{ source: "strategy_empty_state" }}
+                onClick={() => analytics.guideCtaClicked("open_guide", "strategy_empty_state")}
+                className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
+              >
+                Откройте инструкцию
+              </Link>
+            </p>
+          </div>
         </div>
       )}
 
@@ -394,8 +410,22 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
   }
 
   if (!plan) return (
-    <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl">
-      Выберите роль и нажмите «Обновить план» во вкладке «Обзор»
+    <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl space-y-3">
+      <p>Выберите роль и нажмите «Обновить план» во вкладке «Обзор»</p>
+      <div className="flex items-center justify-center gap-1.5">
+        <Icon name="BookOpen" size={12} className="text-slate-400" />
+        <p className="text-xs text-slate-400">
+          Не уверены с чего начать?{" "}
+          <Link
+            to="/guide"
+            state={{ source: "strategy_empty_state" }}
+            onClick={() => analytics.guideCtaClicked("open_guide", "strategy_empty_state")}
+            className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
+          >
+            Откройте инструкцию
+          </Link>
+        </p>
+      </div>
     </div>
   );
 

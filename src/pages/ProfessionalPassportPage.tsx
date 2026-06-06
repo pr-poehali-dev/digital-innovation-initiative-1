@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import { analytics } from "@/lib/analytics";
 import { passportApi } from "@/lib/passportApi";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -688,8 +690,22 @@ function SummaryTab({ completion }: { completion: Completion | null }) {
             <p className="text-[10px] text-slate-400">Обновлено: {new Date(compSnap.last_map_update).toLocaleDateString("ru-RU")}</p>
           )}
           {compSnap.total_assessed === 0 && (
-            <div className="text-center py-4 text-slate-400 text-sm">
-              Карта компетенций пока не заполнена.
+            <div className="text-center py-4 space-y-2">
+              <p className="text-slate-400 text-sm">Карта компетенций пока не заполнена.</p>
+              <div className="flex items-center justify-center gap-1.5">
+                <Icon name="BookOpen" size={12} className="text-slate-400" />
+                <p className="text-xs text-slate-400">
+                  Не знаете, с чего начать?{" "}
+                  <Link
+                    to="/guide"
+                    state={{ source: "profile_empty_state" }}
+                    onClick={() => analytics.guideCtaClicked("open_guide", "profile_empty_state")}
+                    className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
+                  >
+                    Откройте инструкцию
+                  </Link>
+                </p>
+              </div>
             </div>
           )}
         </div>
