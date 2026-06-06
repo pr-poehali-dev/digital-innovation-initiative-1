@@ -43,7 +43,7 @@ export const api = {
 
   initiativesList:    ()              => stratAction("strategy_initiatives_list"),
   initiativesBoard:   ()              => stratAction("strategy_initiatives_board"),
-  initiativeSummary:  ()              => stratAction("strategy_initiatives_summary"),
+  initiativesSummary: ()              => stratAction("strategy_initiatives_summary"),
   initiativeGet:      (id: number)    => fetch(`${STRATEGY_URL}/?action=strategy_initiative_get&id=${id}`, { headers: strategyHdr() }).then(r => r.json()),
   initiativeCreate:   (b: object)     => stratAction("strategy_initiative_create", b),
   initiativeUpdate:   (b: object)     => stratAction("strategy_initiative_update", b),
@@ -66,4 +66,21 @@ export const api = {
   decisionCreate: (b: object) => stratAction("strategy_decision_create", b),
   decisionUpdate: (b: object) => stratAction("strategy_decision_update", b),
   decisionDelete: (id: number) => stratAction("strategy_decision_delete", { id }),
+
+  // W7.3 Watchlists
+  watchlistsList:   ()           => stratAction("strategy_watchlists_list"),
+  watchlistGet:     (id: number) => fetch(`${STRATEGY_URL}/?action=strategy_watchlist_get&id=${id}`, { headers: strategyHdr() }).then(r => r.json()),
+  watchlistCreate:  (b: object)  => stratAction("strategy_watchlist_create", b),
+  watchlistUpdate:  (b: object)  => stratAction("strategy_watchlist_update", b),
+  watchlistDelete:  (id: number) => stratAction("strategy_watchlist_delete", { id }),
+
+  // W7.3 Alerts
+  alertsEvaluate:  (b?: object) => stratAction("strategy_alerts_evaluate", b ?? {}),
+  alertsList:      (p?: Record<string, string>) => {
+    const qs = p ? `&${new URLSearchParams(p).toString()}` : "";
+    return fetch(`${STRATEGY_URL}/?action=strategy_alerts_list${qs}`, { headers: strategyHdr() }).then(r => r.json());
+  },
+  alertGet:        (id: number) => fetch(`${STRATEGY_URL}/?action=strategy_alert_get&id=${id}`, { headers: strategyHdr() }).then(r => r.json()),
+  alertUpdate:     (b: object)  => stratAction("strategy_alert_update", b),
+  alertsSummary:   ()           => stratAction("strategy_alerts_summary"),
 };

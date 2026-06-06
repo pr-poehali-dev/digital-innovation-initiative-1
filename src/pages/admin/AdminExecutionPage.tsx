@@ -50,7 +50,24 @@ type Decision = {
   created_by: string; updated_by: string; created_at: string; updated_at: string;
 };
 
-type ViewTab = "board" | "list" | "reviews" | "decisions";
+type ViewTab = "board" | "list" | "reviews" | "decisions" | "alerts" | "watchlists";
+
+type Alert = {
+  id: number; watchlist_id: number | null; watchlist_name: string;
+  alert_type: string; severity: string; status: string;
+  title: string; message: string; metric_key: string | null;
+  entity_type: string | null; entity_id: number | null;
+  baseline_value: number | null; current_value: number | null; delta_value: number | null;
+  threshold: Record<string, unknown>; evidence: Record<string, unknown>;
+  first_triggered_at: string; last_triggered_at: string;
+  resolved_at: string | null; assigned_to: string | null; created_at: string;
+};
+type AlertSummary = { open: number; critical: number; acknowledged: number; resolved_week: number; with_overdue: number };
+type Watchlist = {
+  id: number; name: string; description: string; scope_type: string;
+  rules: unknown[]; status: string; is_system: boolean;
+  created_by: string; created_at: string; active_alerts: number;
+};
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -595,6 +612,69 @@ function DecisionModal({ prefill, onClose, onSaved }: {
   );
 }
 
+// ── Watchlist Modal ─────────────────────────────────────────────────
+
+function WatchlistModal({ prefill, onClose, onSaved }: {
+  prefill: Partial<Watchlist>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name:        prefill.name        ?? "",
+    description: prefill.description ?? "",
+    scope_type:  prefill.scope_type  ?? "custom",
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    await api.watchlistCreate({ ...form, rules: [] });
+    setSaving(false);
+    onSaved();
+  }
+
+  const inp = "w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md mx-4 p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-100">Создать Watchlist</h3>
+          <button onClick={onClose} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={16} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Название *</label>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className={inp} placeholder="Например: PM/Operations Segment" />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Описание</label>
+            <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              rows={2} className={`${inp} resize-none`} placeholder="Что отслеживаем..." />
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Тип scope</label>
+            <select value={form.scope_type} onChange={e => setForm(f => ({ ...f, scope_type: e.target.value }))}
+              className={inp}>
+              {["global","segment","initiative","roadmap","custom"].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-600">Правила можно настроить в настройках watchlist после создания.</p>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 text-sm rounded-xl transition-colors">Отмена</button>
+          <button onClick={save} disabled={saving || !form.name.trim()}
+            className="flex-1 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
+            {saving ? "Создаю..." : "Создать"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────
 
 export default function AdminExecutionPage() {
@@ -622,6 +702,15 @@ export default function AdminExecutionPage() {
   const [overdueCount, setOverdueCount] = useState(0);
   const [decisionsFilter, setDecisionsFilter] = useState("open");
   const [loadingDecisions, setLoadingDecisions] = useState(false);
+
+  // W7.3: Alerts + Watchlists
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [alertsSummary, setAlertsSummary] = useState<AlertSummary | null>(null);
+  const [alertsFilter, setAlertsFilter] = useState<Record<string, string>>({});
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
+  const [showWatchlistModal, setShowWatchlistModal] = useState<Partial<Watchlist> | null>(null);
 
   function showMsg(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -660,10 +749,25 @@ export default function AdminExecutionPage() {
     setLoadingDecisions(false);
   }, [decisionsFilter]);
 
+  const loadAlerts = useCallback(async (filter: Record<string, string> = alertsFilter) => {
+    setLoadingAlerts(true);
+    const [al, sm] = await Promise.all([api.alertsList(filter), api.alertsSummary()]);
+    setAlerts(al.alerts ?? []);
+    setAlertsSummary(sm.summary ?? null);
+    setLoadingAlerts(false);
+  }, [alertsFilter]);
+
+  const loadWatchlists = useCallback(async () => {
+    const d = await api.watchlistsList();
+    setWatchlists(d.watchlists ?? []);
+  }, []);
+
   useEffect(() => {
-    if (view === "reviews") loadReviews();
-    if (view === "decisions") loadDecisions(decisionsFilter);
-  }, [view, loadReviews, loadDecisions, decisionsFilter]);
+    if (view === "reviews")    loadReviews();
+    if (view === "decisions")  loadDecisions(decisionsFilter);
+    if (view === "alerts")     loadAlerts(alertsFilter);
+    if (view === "watchlists") loadWatchlists();
+  }, [view, loadReviews, loadDecisions, loadAlerts, loadWatchlists, decisionsFilter, alertsFilter]);
 
   async function generateReview() {
     setGeneratingReview(true);
@@ -715,16 +819,24 @@ export default function AdminExecutionPage() {
           </div>
           <div className="flex items-center gap-2">
             {/* View toggle */}
-            <div className="flex items-center bg-gray-800 rounded-xl p-1 gap-0.5">
+            <div className="flex items-center bg-gray-800 rounded-xl p-1 gap-0.5 flex-wrap">
               {([
-                ["board",     "Kanban",       "Board"],
-                ["list",      "List",         "List"],
-                ["reviews",   "CalendarDays", "Reviews"],
-                ["decisions", "CheckSquare",  "Decisions"],
+                ["board",      "Kanban",       "Board"],
+                ["list",       "List",         "List"],
+                ["reviews",    "CalendarDays", "Reviews"],
+                ["decisions",  "CheckSquare",  "Decisions"],
+                ["alerts",     "Bell",         "Alerts"],
+                ["watchlists", "Eye",          "Watchlists"],
               ] as const).map(([k, icon, label]) => (
                 <button key={k} onClick={() => setView(k as ViewTab)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${view === k ? "bg-gray-700 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}>
-                  <Icon name={icon} size={12} />{label}
+                  <Icon name={icon} size={12} />
+                  {label}
+                  {k === "alerts" && alertsSummary && alertsSummary.open > 0 && (
+                    <span className={`text-[9px] font-bold px-1 rounded-full ml-0.5 ${alertsSummary.critical > 0 ? "bg-red-600 text-white" : "bg-amber-600 text-white"}`}>
+                      {alertsSummary.open}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -745,6 +857,20 @@ export default function AdminExecutionPage() {
               <button onClick={() => setShowDecisionModal({})}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
                 <Icon name="Plus" size={13} /> Decision
+              </button>
+            )}
+            {view === "alerts" && (
+              <button onClick={async () => { setEvaluating(true); await api.alertsEvaluate(); await loadAlerts(alertsFilter); setEvaluating(false); showMsg("Оценка завершена"); }}
+                disabled={evaluating}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold rounded-xl transition-colors">
+                {evaluating ? <Spinner /> : <Icon name="Zap" size={13} />}
+                Run Evaluate
+              </button>
+            )}
+            {view === "watchlists" && (
+              <button onClick={() => setShowWatchlistModal({})}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
+                <Icon name="Plus" size={13} /> Watchlist
               </button>
             )}
           </div>
@@ -1162,6 +1288,197 @@ export default function AdminExecutionPage() {
           </div>
         )}
 
+        {/* ── ALERTS TAB ──────────────────────────────────────────── */}
+        {view === "alerts" && (
+          <div className="space-y-4">
+            {/* Summary cards */}
+            {alertsSummary && (
+              <div className="grid grid-cols-5 gap-2">
+                {[
+                  { l: "Open",          v: alertsSummary.open,          cls: alertsSummary.open > 0 ? "text-amber-400" : "text-gray-400",    icon: "Bell" },
+                  { l: "Critical",      v: alertsSummary.critical,      cls: alertsSummary.critical > 0 ? "text-red-400" : "text-gray-400",  icon: "AlertOctagon" },
+                  { l: "Acknowledged",  v: alertsSummary.acknowledged,  cls: "text-blue-400",                                                icon: "Eye" },
+                  { l: "Resolved/wk",  v: alertsSummary.resolved_week, cls: "text-emerald-400",                                             icon: "CheckCircle2" },
+                  { l: "With Overdue",  v: alertsSummary.with_overdue,  cls: alertsSummary.with_overdue > 0 ? "text-red-400" : "text-gray-400", icon: "Clock" },
+                ].map(({ l, v, cls, icon }) => (
+                  <div key={l} className="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center gap-2">
+                    <Icon name={icon} size={15} className={cls} />
+                    <div>
+                      <p className="text-[9px] text-gray-600">{l}</p>
+                      <p className={`text-lg font-bold ${cls}`}>{v}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Filters */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {([
+                ["","All"],
+                ["open","Open"],
+                ["acknowledged","Acknowledged"],
+                ["resolved","Resolved"],
+                ["dismissed","Dismissed"],
+              ] as const).map(([v, l]) => (
+                <button key={v} onClick={() => { const f = v ? { status: v } : {}; setAlertsFilter(f); loadAlerts(f); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${JSON.stringify(alertsFilter) === JSON.stringify(v ? { status: v } : {}) ? "bg-violet-700 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"}`}>
+                  {l}
+                </button>
+              ))}
+              <div className="ml-auto flex gap-2">
+                {(["critical","warning","info"] as const).map(sv => (
+                  <button key={sv} onClick={() => { const f = { severity: sv }; setAlertsFilter(f); loadAlerts(f); }}
+                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-semibold transition-colors border ${
+                      sv === "critical" ? "border-red-800 text-red-400 hover:bg-red-900/20" :
+                      sv === "warning"  ? "border-amber-800 text-amber-400 hover:bg-amber-900/20" :
+                                          "border-gray-700 text-gray-500 hover:bg-gray-800"
+                    } ${alertsFilter.severity === sv ? "bg-gray-800" : ""}`}>
+                    {sv}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {loadingAlerts && <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>}
+
+            {!loadingAlerts && alerts.length === 0 && (
+              <div className="text-center py-10 text-gray-600 text-sm">
+                Алертов нет. Нажмите «Run Evaluate» чтобы проверить watchlists.
+              </div>
+            )}
+
+            {!loadingAlerts && alerts.length > 0 && (
+              <div className="space-y-2">
+                {alerts.map(a => {
+                  const SEV: Record<string, { border: string; badge: string; dot: string }> = {
+                    critical: { border: "border-red-800/50",    badge: "bg-red-900/40 text-red-400 border-red-800",       dot: "bg-red-500" },
+                    warning:  { border: "border-amber-800/50",  badge: "bg-amber-900/40 text-amber-400 border-amber-800",  dot: "bg-amber-500" },
+                    info:     { border: "border-gray-700",      badge: "bg-gray-800 text-gray-400 border-gray-700",        dot: "bg-gray-500" },
+                  };
+                  const sev = SEV[a.severity] ?? SEV.info;
+                  return (
+                    <div key={a.id} className={`bg-gray-900 border ${sev.border} rounded-xl p-4`}>
+                      <div className="flex items-start gap-3">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${sev.dot}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${sev.badge}`}>{a.severity}</span>
+                            <span className="text-[9px] text-gray-600 font-mono">{a.alert_type}</span>
+                            {a.watchlist_name && <span className="text-[9px] text-gray-700">· {a.watchlist_name}</span>}
+                            {a.entity_type && <span className="text-[9px] text-violet-500">{a.entity_type}{a.entity_id ? ` #${a.entity_id}` : ""}</span>}
+                          </div>
+                          <p className="text-xs font-semibold text-gray-200 mb-0.5">{a.title}</p>
+                          <p className="text-[10px] text-gray-500">{a.message}</p>
+                          {(a.current_value !== null || a.baseline_value !== null) && (
+                            <div className="flex gap-3 mt-1.5">
+                              {a.baseline_value !== null && <span className="text-[9px] text-gray-600">Baseline: {a.baseline_value}</span>}
+                              {a.current_value  !== null && <span className="text-[9px] text-gray-300 font-semibold">Current: {a.current_value}</span>}
+                              {a.delta_value    !== null && (
+                                <span className={`text-[9px] font-bold ${a.delta_value < 0 ? "text-red-400" : "text-emerald-400"}`}>
+                                  Δ {a.delta_value > 0 ? "+" : ""}{a.delta_value}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <p className="text-[9px] text-gray-700 mt-1">
+                            Triggered: {new Date(a.first_triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            {a.last_triggered_at !== a.first_triggered_at && ` · Last: ${new Date(a.last_triggered_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
+                          </p>
+                        </div>
+                        <div className="flex gap-1.5 flex-shrink-0">
+                          {a.status === "open" && (
+                            <button onClick={async () => { await api.alertUpdate({ id: a.id, status: "acknowledged" }); await loadAlerts(alertsFilter); }}
+                              className="text-[9px] px-2 py-1 bg-blue-900/30 text-blue-400 border border-blue-800 rounded-lg hover:bg-blue-800/40 transition-colors">
+                              Ack
+                            </button>
+                          )}
+                          {(a.status === "open" || a.status === "acknowledged") && (
+                            <button onClick={async () => { await api.alertUpdate({ id: a.id, status: "resolved" }); await loadAlerts(alertsFilter); }}
+                              className="text-[9px] px-2 py-1 bg-emerald-900/30 text-emerald-400 border border-emerald-800 rounded-lg hover:bg-emerald-800/40 transition-colors">
+                              Resolve
+                            </button>
+                          )}
+                          {a.status === "open" && (
+                            <button onClick={async () => { await api.alertUpdate({ id: a.id, status: "dismissed" }); await loadAlerts(alertsFilter); }}
+                              className="text-[9px] px-2 py-1 bg-gray-800 text-gray-500 border border-gray-700 rounded-lg hover:bg-gray-700 transition-colors">
+                              Dismiss
+                            </button>
+                          )}
+                          <button onClick={() => setShowDecisionModal({ title: a.title, description: a.message, decision_type: a.severity === "critical" ? "risk" : "other" })}
+                            className="text-[9px] px-2 py-1 bg-violet-900/30 text-violet-400 border border-violet-800 rounded-lg hover:bg-violet-800/40 transition-colors">
+                            + Decision
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── WATCHLISTS TAB ──────────────────────────────────────── */}
+        {view === "watchlists" && (
+          <div className="space-y-3">
+            {watchlists.length === 0 && (
+              <div className="text-center py-10 text-gray-600 text-sm">Watchlists загружаются...</div>
+            )}
+            {watchlists.map(w => (
+              <div key={w.id} className={`bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${w.is_system ? "border-violet-800/30" : "border-gray-800"}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    {w.is_system && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 bg-violet-900/40 text-violet-400 border border-violet-800 rounded-full">system</span>
+                    )}
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full border font-semibold ${w.status === "active" ? "bg-emerald-900/30 text-emerald-400 border-emerald-800" : "bg-gray-800 text-gray-500 border-gray-700"}`}>
+                      {w.status}
+                    </span>
+                    <span className="text-[9px] text-gray-600">{w.scope_type}</span>
+                    <span className="text-[9px] text-gray-700">· {(w.rules as unknown[]).length} rules</span>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-200">{w.name}</p>
+                  {w.description && <p className="text-[10px] text-gray-600 mt-0.5">{w.description}</p>}
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {w.active_alerts > 0 && (
+                    <div className="text-center">
+                      <p className="text-xs font-bold text-amber-400">{w.active_alerts}</p>
+                      <p className="text-[9px] text-gray-600">alerts</p>
+                    </div>
+                  )}
+                  <div className="flex gap-1.5">
+                    <button onClick={async () => { setEvaluating(true); await api.alertsEvaluate({ watchlist_id: w.id }); await Promise.all([loadWatchlists(), loadAlerts(alertsFilter)]); setEvaluating(false); showMsg("Оценено"); }}
+                      disabled={evaluating || w.status !== "active"}
+                      className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors disabled:opacity-40">
+                      Run
+                    </button>
+                    {!w.is_system && (
+                      <button onClick={async () => { await api.watchlistUpdate({ id: w.id, status: w.status === "active" ? "paused" : "active" }); await loadWatchlists(); }}
+                        className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
+                        {w.status === "active" ? "Pause" : "Resume"}
+                      </button>
+                    )}
+                    {w.is_system && (
+                      <button onClick={async () => { await api.watchlistUpdate({ id: w.id, status: w.status === "active" ? "paused" : "active" }); await loadWatchlists(); }}
+                        className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
+                        {w.status === "active" ? "Pause" : "Resume"}
+                      </button>
+                    )}
+                    {!w.is_system && (
+                      <button onClick={async () => { if (confirm("Удалить watchlist?")) { await api.watchlistDelete(w.id); await loadWatchlists(); } }}
+                        className="text-[9px] px-2 py-1 bg-gray-800 hover:bg-red-900/30 text-gray-600 hover:text-red-400 border border-gray-700 rounded-lg transition-colors">
+                        <Icon name="Trash2" size={10} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
       </div>
 
       {/* Decision create/edit modal */}
@@ -1170,6 +1487,15 @@ export default function AdminExecutionPage() {
           prefill={showDecisionModal}
           onClose={() => setShowDecisionModal(null)}
           onSaved={() => { setShowDecisionModal(null); loadDecisions(decisionsFilter); showMsg("Решение сохранено"); }}
+        />
+      )}
+
+      {/* Watchlist modal */}
+      {showWatchlistModal !== null && (
+        <WatchlistModal
+          prefill={showWatchlistModal}
+          onClose={() => setShowWatchlistModal(null)}
+          onSaved={() => { setShowWatchlistModal(null); loadWatchlists(); showMsg("Watchlist создан"); }}
         />
       )}
 

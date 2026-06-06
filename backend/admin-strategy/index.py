@@ -1819,6 +1819,446 @@ def action_initiative_metrics_refresh(conn, actor, body, origin):
     return resp({"ok": True, "current_value": current}, origin=origin)
 
 
+# ── W7.3 Watchlists ──────────────────────────────────────────────────
+
+def action_watchlists_list(conn, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT w.id, w.name, w.description, w.scope_type, w.scope_ref,
+               w.rules_json, w.status, w.is_system, w.created_by, w.created_at, w.updated_at,
+               COUNT(a.id) FILTER (WHERE a.status IN ('open','acknowledged')) AS active_alerts
+        FROM {S}.admin_strategy_watchlists w
+        LEFT JOIN {S}.admin_strategy_alerts a ON a.watchlist_id = w.id
+        GROUP BY w.id ORDER BY w.is_system DESC, w.created_at
+    """)
+    return resp({"watchlists": [{
+        "id": r[0], "name": r[1], "description": r[2], "scope_type": r[3], "scope_ref": r[4],
+        "rules": r[5] or [], "status": r[6], "is_system": r[7],
+        "created_by": r[8], "created_at": str(r[9]), "updated_at": str(r[10]),
+        "active_alerts": r[11] or 0,
+    } for r in rows]}, origin=origin)
+
+
+def action_watchlist_get(conn, wid, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id,name,description,scope_type,scope_ref,filters_json,rules_json,status,is_system,created_by,created_at,updated_at
+        FROM {S}.admin_strategy_watchlists WHERE id={wid} LIMIT 1
+    """)
+    if not rows: return resp({"error": "not_found"}, 404, origin)
+    r = rows[0]
+    return resp({"watchlist": {
+        "id": r[0], "name": r[1], "description": r[2], "scope_type": r[3], "scope_ref": r[4],
+        "filters": r[5] or {}, "rules": r[6] or [], "status": r[7], "is_system": r[8],
+        "created_by": r[9], "created_at": str(r[10]), "updated_at": str(r[11]),
+    }}, origin=origin)
+
+
+def action_watchlist_create(conn, actor, body, origin):
+    name = (body.get("name") or "").strip()
+    if not name: return resp({"error": "name required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_watchlists
+              (name, description, scope_type, scope_ref, filters_json, rules_json, status, created_by)
+            VALUES(%s,%s,%s,%s,%s,%s,'active',%s) RETURNING id
+        """, (name, body.get("description",""), body.get("scope_type","custom"),
+              body.get("scope_ref",""),
+              json.dumps(body.get("filters",{}), ensure_ascii=False),
+              json.dumps(body.get("rules",[]), ensure_ascii=False),
+              actor["email"]))
+        wid = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "strategy.watchlist_created", f"id={wid} '{name[:40]}'")
+    return resp({"ok": True, "id": wid}, origin=origin)
+
+
+def action_watchlist_update(conn, actor, body, origin):
+    wid = body.get("id")
+    if not wid: return resp({"error": "id required"}, 400, origin)
+    fields, vals = [], []
+    for k in ["name","description","scope_type","scope_ref"]:
+        if k in body: fields.append(f"{k}=%s"); vals.append(str(body[k])[:256])
+    for k in ["filters","rules"]:
+        if k in body: fields.append(f"{k}_json=%s"); vals.append(json.dumps(body[k], ensure_ascii=False))
+    if "status" in body and body["status"] in ("active","paused"):
+        fields.append("status=%s"); vals.append(body["status"])
+    if not fields: return resp({"ok": True}, origin=origin)
+    fields.append("updated_at=NOW()"); vals.append(int(wid))
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_watchlists SET {','.join(fields)} WHERE id=%s", vals)
+    conn.commit()
+    _audit(conn, actor, "strategy.watchlist_updated", f"id={wid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_watchlist_delete(conn, actor, body, origin):
+    wid = body.get("id")
+    if not wid: return resp({"error": "id required"}, 400, origin)
+    row = _fetch_all(conn, f"SELECT is_system FROM {S}.admin_strategy_watchlists WHERE id={int(wid)} LIMIT 1")
+    if row and row[0][0]: return resp({"error": "system watchlist cannot be deleted"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.admin_strategy_watchlists WHERE id=%s AND is_system=FALSE", (int(wid),))
+    conn.commit()
+    _audit(conn, actor, "strategy.watchlist_deleted", f"id={wid}")
+    return resp({"ok": True}, origin=origin)
+
+
+# ── W7.3 Alerts evaluate ──────────────────────────────────────────────
+
+def _upsert_alert(conn, watchlist_id, alert_type, severity, title, message,
+                  metric_key=None, entity_type=None, entity_id=None,
+                  baseline=None, current=None, delta=None,
+                  threshold_json=None, evidence_json=None):
+    """Создаёт alert или обновляет last_triggered_at/values если уже открыт."""
+    wid_sql  = str(watchlist_id) if watchlist_id else "NULL"
+    et_sql   = f"'{entity_type}'" if entity_type else "NULL"
+    eid_sql  = str(entity_id)      if entity_id   else "NULL"
+    mk_sql   = f"'{metric_key}'"   if metric_key  else "NULL"
+    b_sql    = str(baseline) if baseline is not None else "NULL"
+    c_sql    = str(current)  if current  is not None else "NULL"
+    d_sql    = str(delta)    if delta    is not None else "NULL"
+    th_sql   = f"'{json.dumps(threshold_json or {}, ensure_ascii=False)}'"
+    ev_sql   = f"'{json.dumps(evidence_json  or {}, ensure_ascii=False)}'"
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_alerts
+              (watchlist_id, alert_type, severity, status, title, message,
+               metric_key, entity_type, entity_id, baseline_value, current_value, delta_value,
+               threshold_json, evidence_json, first_triggered_at, last_triggered_at, created_at)
+            VALUES
+              ({wid_sql}, '{alert_type}', '{severity}', 'open', %s, %s,
+               {mk_sql}, {et_sql}, {eid_sql}, {b_sql}, {c_sql}, {d_sql},
+               {th_sql}::jsonb, {ev_sql}::jsonb, NOW(), NOW(), NOW())
+            ON CONFLICT (watchlist_id, alert_type,
+                         COALESCE(entity_type,''), COALESCE(entity_id::text,''), COALESCE(metric_key,''))
+            WHERE status IN ('open','acknowledged')
+            DO UPDATE SET
+                last_triggered_at = NOW(),
+                current_value = EXCLUDED.current_value,
+                delta_value   = EXCLUDED.delta_value,
+                evidence_json = EXCLUDED.evidence_json
+            RETURNING id, (xmax = 0) AS is_new
+        """, (title, message))
+        row = cur.fetchone()
+    return row  # (id, is_new)
+
+
+def _eval_global_health(conn, watchlist_id, rules) -> list:
+    """Метричные правила для global watchlist."""
+    alerts = []
+    today = datetime.date.today()
+    d_from = (today - timedelta(days=7)).isoformat()
+    d_to   = today.isoformat()
+    p_from = (today - timedelta(days=14)).isoformat()
+    p_to   = (today - timedelta(days=8)).isoformat()
+
+    def q1(sql): return (_fetch_one(conn, sql) or [0])[0]
+
+    for rule in rules:
+        metric   = rule.get("metric","")
+        op       = rule.get("operator","")
+        thresh   = rule.get("threshold", 0)
+        severity = rule.get("severity","info")
+        atype    = rule.get("alert_type","metric_drop")
+
+        cur_val = prev_val = None
+
+        if "activation" in metric:
+            new_users = q1(f"SELECT COUNT(*) FROM {S}.users WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'") or 0
+            activated = q1(f"SELECT COUNT(DISTINCT g.user_id) FROM {S}.learning_goals g JOIN {S}.users u ON u.id=g.user_id WHERE u.created_at::date BETWEEN '{d_from}' AND '{d_to}'") or 0
+            cur_val  = round(activated/new_users*100,1) if new_users else None
+            new_p    = q1(f"SELECT COUNT(*) FROM {S}.users WHERE created_at::date BETWEEN '{p_from}' AND '{p_to}'") or 0
+            act_p    = q1(f"SELECT COUNT(DISTINCT g.user_id) FROM {S}.learning_goals g JOIN {S}.users u ON u.id=g.user_id WHERE u.created_at::date BETWEEN '{p_from}' AND '{p_to}'") or 0
+            prev_val = round(act_p/new_p*100,1) if new_p else None
+        elif "stalled" in metric:
+            active  = q1(f"SELECT COUNT(*) FROM {S}.learning_goals WHERE status='active'") or 0
+            stalled = q1(f"SELECT COUNT(*) FROM {S}.learning_goals WHERE status='active' AND NOT EXISTS (SELECT 1 FROM {S}.learning_checkins c WHERE c.goal_id=learning_goals.id AND c.created_at>=NOW()-INTERVAL '14 days')") or 0
+            cur_val = round(stalled/active*100,1) if active else None
+        elif "repeat_ticket" in metric or "repeat" in metric:
+            uniq  = q1(f"SELECT COUNT(DISTINCT requester_email) FROM {S}.admin_tickets WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'") or 0
+            rep   = q1(f"SELECT COUNT(*) FROM (SELECT requester_email FROM {S}.admin_tickets WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}' GROUP BY requester_email HAVING COUNT(*)>=2) x") or 0
+            cur_val = round(rep/uniq*100,1) if uniq else None
+            uniq_p = q1(f"SELECT COUNT(DISTINCT requester_email) FROM {S}.admin_tickets WHERE created_at::date BETWEEN '{p_from}' AND '{p_to}'") or 0
+            rep_p  = q1(f"SELECT COUNT(*) FROM (SELECT requester_email FROM {S}.admin_tickets WHERE created_at::date BETWEEN '{p_from}' AND '{p_to}' GROUP BY requester_email HAVING COUNT(*)>=2) x") or 0
+            prev_val = round(rep_p/uniq_p*100,1) if uniq_p else None
+
+        if cur_val is None:
+            continue
+
+        triggered = False
+        delta = None
+        if op == "below" and cur_val < thresh:
+            triggered = True
+        elif op == "above" and cur_val > thresh:
+            triggered = True
+        elif op == "pct_change_gt" and prev_val is not None and prev_val > 0:
+            delta = round((cur_val - prev_val) / prev_val * 100, 1)
+            if abs(delta) > thresh: triggered = True
+
+        if triggered:
+            delta_d = delta if delta is not None else (round(cur_val - prev_val, 1) if prev_val is not None else None)
+            alerts.append(_upsert_alert(
+                conn, watchlist_id, atype, severity,
+                f"{metric} alert: {cur_val}{'%' if cur_val else ''}",
+                f"Метрика {metric}: текущее={cur_val}, порог={thresh}, delta={delta_d}",
+                metric_key=metric, entity_type="global",
+                baseline=prev_val, current=cur_val, delta=delta_d,
+                threshold_json={"operator": op, "threshold": thresh},
+                evidence_json={"period": f"{d_from}..{d_to}", "sample_date": d_to},
+            ))
+    return alerts
+
+
+def _eval_initiative_risks(conn, watchlist_id, rules) -> list:
+    """Правила по инициативам: overdue, stale, red health."""
+    alerts = []
+    today = datetime.date.today().isoformat()
+
+    for rule in rules:
+        cond     = rule.get("condition","")
+        thresh   = rule.get("threshold", 0)
+        severity = rule.get("severity","warning")
+        atype    = rule.get("alert_type","initiative_overdue")
+
+        if cond == "overdue_days_gt":
+            rows = _fetch_all(conn, f"""
+                SELECT id, title, due_date, health, owner
+                FROM {S}.admin_strategy_initiatives
+                WHERE status IN ('active','planned') AND due_date IS NOT NULL AND due_date < '{today}'
+                LIMIT 20
+            """)
+            for r in rows:
+                days_over = (datetime.date.today() - r[2]).days
+                if days_over > thresh:
+                    alerts.append(_upsert_alert(
+                        conn, watchlist_id, atype, severity,
+                        f"Инициатива просрочена: {r[1][:60]}",
+                        f"Дедлайн: {r[2]}, просрочена на {days_over} дн. Owner: {r[4] or '—'}",
+                        entity_type="initiative", entity_id=r[0],
+                        current=days_over, threshold_json={"condition": cond, "threshold": thresh},
+                        evidence_json={"due_date": str(r[2]), "health": r[3], "owner": r[4]},
+                    ))
+
+        elif cond == "no_updates_days_gt":
+            rows = _fetch_all(conn, f"""
+                SELECT i.id, i.title, i.updated_at, i.health, i.owner
+                FROM {S}.admin_strategy_initiatives i
+                WHERE i.status='active' AND i.updated_at < NOW() - INTERVAL '{thresh} days'
+                LIMIT 20
+            """)
+            for r in rows:
+                days_stale = (datetime.datetime.utcnow() - r[2].replace(tzinfo=None)).days
+                alerts.append(_upsert_alert(
+                    conn, watchlist_id, atype, severity,
+                    f"Нет обновлений: {r[1][:60]}",
+                    f"Последнее обновление {days_stale} дн. назад. Owner: {r[4] or '—'}",
+                    entity_type="initiative", entity_id=r[0],
+                    current=days_stale, threshold_json={"condition": cond, "threshold": thresh},
+                    evidence_json={"last_updated": str(r[2]), "health": r[3]},
+                ))
+
+        elif cond == "health_eq":
+            val = rule.get("value","red")
+            rows = _fetch_all(conn, f"""
+                SELECT id, title, health, owner FROM {S}.admin_strategy_initiatives
+                WHERE status='active' AND health='{val}' LIMIT 20
+            """)
+            for r in rows:
+                alerts.append(_upsert_alert(
+                    conn, watchlist_id, "metric_drop", severity,
+                    f"Health {val.upper()}: {r[1][:60]}",
+                    f"Инициатива в статусе health={val}. Owner: {r[3] or '—'}",
+                    entity_type="initiative", entity_id=r[0],
+                    evidence_json={"health": r[2]},
+                ))
+    return alerts
+
+
+def _eval_decision_followup(conn, watchlist_id, rules) -> list:
+    alerts = []
+    today = datetime.date.today().isoformat()
+    for rule in rules:
+        thresh   = rule.get("threshold", 0)
+        severity = rule.get("severity","warning")
+        rows = _fetch_all(conn, f"""
+            SELECT id, title, due_date, owner FROM {S}.admin_strategy_decisions
+            WHERE status IN ('open','in_progress') AND due_date IS NOT NULL AND due_date < '{today}'
+            LIMIT 20
+        """)
+        for r in rows:
+            days_over = (datetime.date.today() - r[2]).days
+            if days_over > thresh:
+                alerts.append(_upsert_alert(
+                    conn, watchlist_id, "decision_overdue", severity,
+                    f"Decision просрочен: {r[1][:60]}",
+                    f"Дедлайн: {r[2]}, просрочен на {days_over} дн. Owner: {r[3] or '—'}",
+                    entity_type="decision", entity_id=r[0],
+                    current=days_over, threshold_json={"threshold": thresh},
+                    evidence_json={"due_date": str(r[2])},
+                ))
+    return alerts
+
+
+def _eval_roadmap_flow(conn, watchlist_id, rules) -> list:
+    alerts = []
+    for rule in rules:
+        thresh   = rule.get("threshold", 21)
+        severity = rule.get("severity","info")
+        rows = _fetch_all(conn, f"""
+            SELECT id, title, updated_at FROM {S}.admin_strategy_roadmap_items
+            WHERE lane='now' AND status='active'
+              AND updated_at < NOW() - INTERVAL '{thresh} days'
+            LIMIT 10
+        """)
+        for r in rows:
+            days = (datetime.datetime.utcnow() - r[2].replace(tzinfo=None)).days
+            alerts.append(_upsert_alert(
+                conn, watchlist_id, "roadmap_now_stuck", severity,
+                f"Roadmap: застрял в Now ({days}d): {r[1][:60]}",
+                f"Item в lane=Now уже {days} дн. без изменений",
+                entity_type="roadmap", entity_id=r[0],
+                current=days, threshold_json={"threshold": thresh},
+                evidence_json={"last_updated": str(r[2])},
+            ))
+    return alerts
+
+
+def action_alerts_evaluate(conn, actor, body, origin):
+    """Запускает оценку: по одному watchlist или по всем active."""
+    wid_filter = body.get("watchlist_id")
+    if wid_filter:
+        wl_rows = _fetch_all(conn, f"SELECT id,scope_type,rules_json,status FROM {S}.admin_strategy_watchlists WHERE id={int(wid_filter)} LIMIT 1")
+    else:
+        wl_rows = _fetch_all(conn, f"SELECT id,scope_type,rules_json,status FROM {S}.admin_strategy_watchlists WHERE status='active'")
+
+    total_new = 0
+    total_upd = 0
+    for wl in wl_rows:
+        wid, scope, rules, status = wl[0], wl[1], wl[2] or [], wl[3]
+        if status != "active": continue
+        results = []
+        if scope == "global":
+            results = _eval_global_health(conn, wid, rules)
+        elif scope == "initiative":
+            results = _eval_initiative_risks(conn, wid, rules)
+        elif scope == "custom":
+            results = _eval_decision_followup(conn, wid, rules)
+        elif scope == "roadmap":
+            results = _eval_roadmap_flow(conn, wid, rules)
+        conn.commit()
+        for r in results:
+            if r and r[1]: total_new += 1
+            elif r: total_upd += 1
+
+    _audit(conn, actor, "strategy.alerts_evaluated", f"new={total_new} updated={total_upd}")
+    return resp({"ok": True, "new_alerts": total_new, "updated_alerts": total_upd}, origin=origin)
+
+
+def action_alerts_list(conn, qs, origin):
+    conditions = []
+    if qs.get("status"):       conditions.append(f"status='{qs['status']}'")
+    if qs.get("severity"):     conditions.append(f"severity='{qs['severity']}'")
+    if qs.get("alert_type"):   conditions.append(f"alert_type='{qs['alert_type']}'")
+    if qs.get("watchlist_id"): conditions.append(f"watchlist_id={int(qs['watchlist_id'])}")
+    if qs.get("entity_type"):  conditions.append(f"entity_type='{qs['entity_type']}'")
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    rows = _fetch_all(conn, f"""
+        SELECT a.id, a.watchlist_id, w.name, a.alert_type, a.severity, a.status,
+               a.title, a.message, a.metric_key, a.entity_type, a.entity_id,
+               a.baseline_value, a.current_value, a.delta_value,
+               a.threshold_json, a.evidence_json,
+               a.first_triggered_at, a.last_triggered_at, a.resolved_at, a.assigned_to, a.created_at
+        FROM {S}.admin_strategy_alerts a
+        LEFT JOIN {S}.admin_strategy_watchlists w ON w.id = a.watchlist_id
+        {where}
+        ORDER BY
+          CASE a.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+          CASE a.status   WHEN 'open' THEN 0 WHEN 'acknowledged' THEN 1 ELSE 2 END,
+          a.last_triggered_at DESC
+        LIMIT 100
+    """)
+    return resp({"alerts": [{
+        "id": r[0], "watchlist_id": r[1], "watchlist_name": r[2] or "",
+        "alert_type": r[3], "severity": r[4], "status": r[5],
+        "title": r[6], "message": r[7], "metric_key": r[8],
+        "entity_type": r[9], "entity_id": r[10],
+        "baseline_value": float(r[11]) if r[11] is not None else None,
+        "current_value":  float(r[12]) if r[12] is not None else None,
+        "delta_value":    float(r[13]) if r[13] is not None else None,
+        "threshold": r[14] or {}, "evidence": r[15] or {},
+        "first_triggered_at": str(r[16]), "last_triggered_at": str(r[17]),
+        "resolved_at": str(r[18]) if r[18] else None,
+        "assigned_to": r[19], "created_at": str(r[20]),
+    } for r in rows]}, origin=origin)
+
+
+def action_alert_get(conn, aid, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT a.id, a.watchlist_id, w.name, a.alert_type, a.severity, a.status,
+               a.title, a.message, a.metric_key, a.entity_type, a.entity_id,
+               a.baseline_value, a.current_value, a.delta_value,
+               a.threshold_json, a.evidence_json,
+               a.first_triggered_at, a.last_triggered_at, a.resolved_at, a.assigned_to
+        FROM {S}.admin_strategy_alerts a
+        LEFT JOIN {S}.admin_strategy_watchlists w ON w.id = a.watchlist_id
+        WHERE a.id={aid} LIMIT 1
+    """)
+    if not rows: return resp({"error": "not_found"}, 404, origin)
+    r = rows[0]
+    return resp({"alert": {
+        "id": r[0], "watchlist_id": r[1], "watchlist_name": r[2] or "",
+        "alert_type": r[3], "severity": r[4], "status": r[5],
+        "title": r[6], "message": r[7], "metric_key": r[8],
+        "entity_type": r[9], "entity_id": r[10],
+        "baseline_value": float(r[11]) if r[11] is not None else None,
+        "current_value":  float(r[12]) if r[12] is not None else None,
+        "delta_value":    float(r[13]) if r[13] is not None else None,
+        "threshold": r[14] or {}, "evidence": r[15] or {},
+        "first_triggered_at": str(r[16]), "last_triggered_at": str(r[17]),
+        "resolved_at": str(r[18]) if r[18] else None, "assigned_to": r[19],
+    }}, origin=origin)
+
+
+ALERT_STATUSES = ["open","acknowledged","resolved","dismissed"]
+
+def action_alert_update(conn, actor, body, origin):
+    aid = body.get("id")
+    if not aid: return resp({"error": "id required"}, 400, origin)
+    aid = int(aid)
+    new_status = body.get("status","")
+    if new_status not in ALERT_STATUSES:
+        return resp({"error": "invalid status"}, 400, origin)
+    audit_map = {
+        "acknowledged": "strategy.alert_acknowledged",
+        "resolved":     "strategy.alert_resolved",
+        "dismissed":    "strategy.alert_dismissed",
+    }
+    resolved_sql = ", resolved_at=NOW()" if new_status in ("resolved","dismissed") else ""
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_alerts SET status=%s{resolved_sql} WHERE id=%s", (new_status, aid))
+    conn.commit()
+    evt = audit_map.get(new_status, "strategy.alert_updated")
+    _audit(conn, actor, evt, f"id={aid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_alerts_summary(conn, origin):
+    today = datetime.date.today().isoformat()
+    week_ago = (datetime.date.today() - timedelta(days=7)).isoformat()
+    def q1(sql): return (_fetch_one(conn, sql) or [0])[0] or 0
+    return resp({"summary": {
+        "open":         q1(f"SELECT COUNT(*) FROM {S}.admin_strategy_alerts WHERE status='open'"),
+        "critical":     q1(f"SELECT COUNT(*) FROM {S}.admin_strategy_alerts WHERE status='open' AND severity='critical'"),
+        "acknowledged": q1(f"SELECT COUNT(*) FROM {S}.admin_strategy_alerts WHERE status='acknowledged'"),
+        "resolved_week":q1(f"SELECT COUNT(*) FROM {S}.admin_strategy_alerts WHERE status='resolved' AND resolved_at::date >= '{week_ago}'"),
+        "with_overdue": q1(f"""SELECT COUNT(*) FROM {S}.admin_strategy_alerts a
+            WHERE a.status IN ('open','acknowledged') AND a.entity_type IN ('initiative','decision')
+            AND a.entity_id IN (
+                SELECT id FROM {S}.admin_strategy_initiatives WHERE due_date < '{today}'
+                UNION SELECT id FROM {S}.admin_strategy_decisions WHERE due_date < '{today}'
+            )"""),
+    }}, origin=origin)
+
+
 # ── Weekly Reviews ───────────────────────────────────────────────────
 
 def _collect_week_snapshot(conn, week_start: str, week_end: str) -> dict:
@@ -2373,6 +2813,39 @@ def handler(event: dict, context) -> dict:
         if action == "strategy_decision_delete":
             if method != "POST": return resp({"error": "POST required"}, 405, origin)
             return action_decision_delete(conn, actor, body, origin)
+
+        # Watchlists
+        if action == "strategy_watchlists_list":
+            return action_watchlists_list(conn, origin)
+        if action == "strategy_watchlist_get":
+            wid = qs.get("id") or body.get("id")
+            if not wid: return resp({"error": "id required"}, 400, origin)
+            return action_watchlist_get(conn, int(wid), origin)
+        if action == "strategy_watchlist_create":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_watchlist_create(conn, actor, body, origin)
+        if action == "strategy_watchlist_update":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_watchlist_update(conn, actor, body, origin)
+        if action == "strategy_watchlist_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_watchlist_delete(conn, actor, body, origin)
+
+        # Alerts
+        if action == "strategy_alerts_evaluate":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_alerts_evaluate(conn, actor, body, origin)
+        if action == "strategy_alerts_list":
+            return action_alerts_list(conn, qs, origin)
+        if action == "strategy_alert_get":
+            aid = qs.get("id") or body.get("id")
+            if not aid: return resp({"error": "id required"}, 400, origin)
+            return action_alert_get(conn, int(aid), origin)
+        if action == "strategy_alert_update":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_alert_update(conn, actor, body, origin)
+        if action == "strategy_alerts_summary":
+            return action_alerts_summary(conn, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 
