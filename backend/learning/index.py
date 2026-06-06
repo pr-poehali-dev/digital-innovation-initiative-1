@@ -7,6 +7,8 @@ DB = os.environ["DATABASE_URL"]
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
 YANDEX_GPT_API_KEY = os.environ.get("YANDEX_GPT_API_KEY", "")
 YANDEX_FOLDER_ID = os.environ.get("YANDEX_FOLDER_ID", "")
+BRIDGE_URL   = os.environ.get("LEARNING_BRIDGE_URL", "https://functions.poehali.dev/e74b5863-44f8-4ddf-b5b8-6f9dd33434b4")
+BRIDGE_TOKEN = os.environ.get("BRIDGE_SERVICE_TOKEN", "")
 
 
 def cors(body: dict, code: int = 200) -> dict:
@@ -386,14 +388,41 @@ def handler(event: dict, context) -> dict:
             VALID = {"not_started", "studying", "understood", "applied"}
             if not topic_id or new_status not in VALID:
                 return cors({"ok": False, "error": {"message": f"Статус должен быть одним из: {', '.join(VALID)}"}}, 400)
+            topic_title = ""
             with conn.cursor() as cur:
                 cur.execute(
                     f"""UPDATE {SCHEMA}.learning_topics
                         SET status = %s, updated_at = NOW()
-                        WHERE id = %s AND goal_id IN (SELECT id FROM {SCHEMA}.learning_goals WHERE user_id = %s)""",
+                        WHERE id = %s AND goal_id IN (SELECT id FROM {SCHEMA}.learning_goals WHERE user_id = %s)
+                        RETURNING title""",
                     (new_status, topic_id, user_id),
                 )
+                row = cur.fetchone()
+                if row:
+                    topic_title = row[0] or ""
             conn.commit()
+
+            # W9.2.1: fire-and-forget bridge ingest при переходе в applied
+            if new_status == "applied" and topic_title and BRIDGE_URL:
+                try:
+                    payload = json.dumps({
+                        "user_id": user_id,
+                        "content_source": "learning_topics",
+                        "content_id": int(topic_id),
+                        "content_title": topic_title,
+                        "triggered_by": "update_topic.applied",
+                    }).encode()
+                    hdrs = {"Content-Type": "application/json"}
+                    if BRIDGE_TOKEN:
+                        hdrs["X-Service-Token"] = BRIDGE_TOKEN
+                    req = urllib.request.Request(
+                        f"{BRIDGE_URL}?action=learning_completion_ingest",
+                        data=payload, headers=hdrs, method="POST",
+                    )
+                    urllib.request.urlopen(req, timeout=4)
+                except Exception:
+                    pass
+
             return cors({"ok": True})
 
         # ── Weekly check-in: сохранить ────────────────────────────────

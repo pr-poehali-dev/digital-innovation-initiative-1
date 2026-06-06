@@ -48,6 +48,8 @@ import RefundPage from "./pages/legal/RefundPage";
 import ConsentPage from "./pages/legal/ConsentPage";
 import ProfessionalPassportPage from "./pages/ProfessionalPassportPage";
 import GrowthNavigatorPage from "./pages/GrowthNavigatorPage";
+import PublicProfileSettingsPage from "./pages/PublicProfileSettingsPage";
+import PublicProfilePage from "./pages/PublicProfilePage";
 
 const queryClient = new QueryClient();
 
@@ -107,12 +109,14 @@ const App = () => (
               <Route path="/cabinet/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
               <Route path="/cabinet/profile" element={<ProtectedRoute><ProfessionalPassportPage /></ProtectedRoute>} />
               <Route path="/cabinet/growth" element={<ProtectedRoute><GrowthNavigatorPage /></ProtectedRoute>} />
+              <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />
               <Route path="/cabinet/headquarters" element={<Navigate to="/cabinet" replace />} />
               <Route path="/legal/privacy" element={<PrivacyPage />} />
               <Route path="/legal/terms" element={<TermsPage />} />
               <Route path="/legal/offer" element={<OfferPage />} />
               <Route path="/legal/refund" element={<RefundPage />} />
               <Route path="/legal/consent" element={<ConsentPage />} />
+              <Route path="/p/:slug" element={<PublicProfilePage />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>
