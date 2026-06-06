@@ -1,14 +1,15 @@
 // Единый источник правды для роутов и структуры навигации.
 
 export const ROUTES = {
-  home:          "/cabinet",
-  projects:      "/cabinet/projects",
-  learning:      "/cabinet/learning",
-  passport:      "/cabinet/passport",
-  wallet:        "/cabinet/wallet",
-  profile:       "/cabinet/profile",
-  publicProfile: "/cabinet/public-profile",
-  growth:        "/cabinet/growth",
+  home:           "/cabinet",
+  projects:       "/cabinet/projects",
+  learning:       "/cabinet/learning",
+  passport:       "/cabinet/passport",
+  wallet:         "/cabinet/wallet",
+  profile:        "/cabinet/profile",
+  publicProfile:  "/cabinet/public-profile",
+  growth:         "/cabinet/growth",
+  competencyMap:  "/cabinet/competency-map",
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
@@ -60,7 +61,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "TrendingUp",
     items: [
       { id: "growth.navigator", label: "Навигатор развития", icon: "TrendingUp", href: ROUTES.growth, active: true },
-      { id: "growth.map", label: "Карта компетенций", icon: "Map", href: "#", active: false, badge: { text: "Скоро", tone: "neutral" } },
+      { id: "growth.map", label: "Карта компетенций", icon: "Map", href: ROUTES.competencyMap, active: true, badge: { text: "Бета", tone: "info" } },
     ],
   },
   {

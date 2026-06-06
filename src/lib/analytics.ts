@@ -164,6 +164,15 @@ export type AnalyticsEvents = {
     step_id: string;
     step_state: string;
   };
+
+  // ── Competency map ────────────────────────────────────────────────
+  // 22. Просмотр страницы карты компетенций
+  competency_map_viewed: Record<string, never>;
+
+  // 23. Клик по CTA на странице карты
+  competency_map_cta_clicked: {
+    cta_href: string;
+  };
 };
 
 // --- Ядро ---
@@ -375,6 +384,16 @@ export const analytics = {
       step_id: stepId,
       step_state: stepState,
     });
+  },
+
+  // ── Competency map ─────────────────────────────────────────────────
+
+  competencyMapViewed() {
+    sendEvent("competency_map_viewed", {});
+  },
+
+  competencyMapCtaClicked(ctaHref: string) {
+    sendEvent("competency_map_cta_clicked", { cta_href: ctaHref });
   },
 };
 
