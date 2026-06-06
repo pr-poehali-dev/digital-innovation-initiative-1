@@ -223,6 +223,7 @@ export default function GrowthDashboard() {
   const [loadingProjects, setLoadingProjects] = useState(true);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalProgress, setGoalProgress] = useState<Record<number, Progress>>({});
+  const [pubSettings, setPubSettings] = useState<PublicSettings | null>(null);
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -235,7 +236,6 @@ export default function GrowthDashboard() {
       .then(async (d: { goals?: Goal[] }) => {
         const gs = d.goals ?? [];
         setGoals(gs);
-        // Загружаем прогресс для каждой цели
         const progMap: Record<number, Progress> = {};
         await Promise.all(gs.slice(0, 3).map(async (g) => {
           try {
@@ -246,6 +246,11 @@ export default function GrowthDashboard() {
         setGoalProgress(progMap);
       })
       .catch(() => setGoals([]));
+
+    // Загружаем статус публичного профиля для "Ближайших шагов"
+    publicProfileApi.getMe()
+      .then((d: { settings?: PublicSettings }) => setPubSettings(d.settings ?? null))
+      .catch(() => {});
   }, []);
 
   const activeProjects = projects.slice(0, 3);
@@ -267,11 +272,23 @@ export default function GrowthDashboard() {
 
   // Ближайшие шаги: привязаны к реальному состоянию
   const hasLearningGoal = goals.length > 0;
+  const pubIsPublished = pubSettings?.is_published ?? false;
+  const pubHasSlug = Boolean(pubSettings?.public_slug);
+
+  const pubProfileStep = pubIsPublished ? null : {
+    done: false,
+    label: pubHasSlug ? "Опубликовать публичный профиль" : "Создать публичный профиль",
+    href: "/cabinet/public-profile",
+    disabled: false,
+    coming: false,
+  };
+
   const nextSteps = [
     { done: true, label: "Создать аккаунт" },
     { done: projectCount > 0, label: "Создать первый проект", href: "/cabinet/projects", disabled: false, coming: false },
     { done: hasLearningGoal, label: "Поставить учебную цель", href: "/cabinet/learning", disabled: false, coming: false },
     { done: learningDone > 0, label: "Освоить первую тему", href: "/cabinet/learning", disabled: !hasLearningGoal, coming: false },
+    ...(pubProfileStep ? [pubProfileStep] : []),
     { done: false, label: "Заполнить карту компетенций", href: "#", disabled: false, coming: true },
   ];
 
