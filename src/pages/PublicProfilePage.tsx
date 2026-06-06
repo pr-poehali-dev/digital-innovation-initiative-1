@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { publicProfileApi, type PublicView } from "@/lib/publicProfileApi";
+import { analytics } from "@/lib/analytics";
 
 const LEVEL_LABELS: Record<number, string> = {
   1: "Aware", 2: "Working", 3: "Independent", 4: "Advanced", 5: "Leading",
@@ -34,7 +35,12 @@ export default function PublicProfilePage() {
     publicProfileApi.getBySlug(slug).then((d: { error?: string; profile?: PublicView }) => {
       if (d.error === "not_found") { setStatus("not_found"); return; }
       if (d.error === "not_published") { setStatus("private"); return; }
-      if (d.profile) { setView(d.profile); setStatus("ok"); return; }
+      if (d.profile) {
+        setView(d.profile);
+        setStatus("ok");
+        analytics.publicProfileViewed(slug);
+        return;
+      }
       setStatus("not_found");
     }).catch(() => setStatus("not_found"));
   }, [slug]);
@@ -207,6 +213,37 @@ export default function PublicProfilePage() {
                         {(edu.start_date || edu.end_date) && (
                           <p className="text-xs text-slate-400 mt-0.5">
                             {edu.start_date?.slice(0, 4)} — {edu.is_current ? "настоящее время" : edu.end_date?.slice(0, 4)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            </div>
+          )}
+
+          {/* Projects */}
+          {view.projects && view.projects.length > 0 && (
+            <div className="p-6">
+              <Section title="Проекты">
+                <div className="space-y-3">
+                  {view.projects.map((project) => (
+                    <div key={project.id}
+                      className="flex gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100"
+                      onClick={() => analytics.publicProfileProjectClicked(project.id)}
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Icon name="FolderOpen" size={15} className="text-violet-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 leading-tight">{project.title}</p>
+                        {project.description && (
+                          <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">{project.description}</p>
+                        )}
+                        {project.updated_at && (
+                          <p className="text-[11px] text-slate-400 mt-1">
+                            Обновлён {project.updated_at.slice(0, 10)}
                           </p>
                         )}
                       </div>

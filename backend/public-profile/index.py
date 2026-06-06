@@ -107,6 +107,7 @@ def _row_to_settings(r) -> dict:
         "show_contact": r[16], "allow_indexing": r[17],
         "published_at": str(r[18]) if r[18] else None,
         "updated_at": str(r[19]),
+        "show_projects": r[20],
     }
 
 
@@ -116,7 +117,7 @@ def _load_settings(conn, user_id: int) -> dict | None:
                show_headline,show_bio,show_location,show_roles,show_experience,
                show_education,show_links,show_competency_strengths,
                show_verified_evidence_summary,show_availability,show_contact,
-               allow_indexing,published_at,updated_at
+               allow_indexing,published_at,updated_at,show_projects
         FROM {S}.professional_public_profiles WHERE user_id={user_id} LIMIT 1
     """)
     return _row_to_settings(row) if row else None
@@ -227,6 +228,23 @@ def build_public_view(conn, user_id: int, settings: dict) -> dict:
             "competencies_assessed": assessed_count,
         }
 
+    # Projects / Portfolio
+    if settings.get("show_projects"):
+        rows = fetch_all(conn, f"""
+            SELECT p.id, p.title, p.description, p.updated_at
+            FROM {S}.projects p
+            JOIN {S}.project_members pm ON pm.project_id = p.id
+            WHERE pm.user_id = {user_id} AND p.archived_at IS NULL
+            ORDER BY p.updated_at DESC LIMIT 5
+        """)
+        if rows:
+            view["projects"] = [{
+                "id": r[0],
+                "title": r[1],
+                "description": (r[2] or "")[:300] or None,
+                "updated_at": str(r[3]) if r[3] else None,
+            } for r in rows]
+
     return view
 
 
@@ -243,7 +261,7 @@ def action_upsert_me(conn, user_id: int, body: dict):
         "show_headline","show_bio","show_location","show_roles","show_experience",
         "show_education","show_links","show_competency_strengths",
         "show_verified_evidence_summary","show_availability","show_contact",
-        "allow_indexing",
+        "allow_indexing","show_projects",
     ]
     STR_FIELDS = ["public_title","public_summary"]
 
@@ -338,7 +356,7 @@ def action_get_by_slug(conn, slug: str):
                show_headline,show_bio,show_location,show_roles,show_experience,
                show_education,show_links,show_competency_strengths,
                show_verified_evidence_summary,show_availability,show_contact,
-               allow_indexing,published_at,updated_at
+               allow_indexing,published_at,updated_at,show_projects
         FROM {S}.professional_public_profiles WHERE public_slug=%s LIMIT 1
     """, (slug,))
     if not row:

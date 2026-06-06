@@ -173,6 +173,17 @@ export type AnalyticsEvents = {
   competency_map_cta_clicked: {
     cta_href: string;
   };
+
+  // ── Public profile page (публичная сторона) ───────────────────────
+  // 24. Публичный профиль просмотрен посетителем
+  public_profile_viewed: {
+    slug: string;
+  };
+
+  // 25. Клик по проекту на публичной странице
+  public_profile_project_clicked: {
+    project_id: number;
+  };
 };
 
 // --- Ядро ---
@@ -394,6 +405,16 @@ export const analytics = {
 
   competencyMapCtaClicked(ctaHref: string) {
     sendEvent("competency_map_cta_clicked", { cta_href: ctaHref });
+  },
+
+  // ── Public profile page ────────────────────────────────────────────
+
+  publicProfileViewed(slug: string) {
+    sendEvent("public_profile_viewed", { slug });
+  },
+
+  publicProfileProjectClicked(projectId: number) {
+    sendEvent("public_profile_project_clicked", { project_id: projectId });
   },
 };
 

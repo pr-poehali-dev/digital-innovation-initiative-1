@@ -27,8 +27,15 @@ export type PublicSettings = {
   show_roles: boolean; show_experience: boolean; show_education: boolean;
   show_links: boolean; show_competency_strengths: boolean;
   show_verified_evidence_summary: boolean; show_availability: boolean;
-  show_contact: boolean; allow_indexing: boolean;
+  show_contact: boolean; allow_indexing: boolean; show_projects: boolean;
   published_at: string | null; updated_at: string;
+};
+
+export type PublicProject = {
+  id: number;
+  title: string;
+  description: string | null;
+  updated_at: string | null;
 };
 
 export type PublicView = {
@@ -40,6 +47,7 @@ export type PublicView = {
   education?: { institution: string; degree: string; field_of_study: string; start_date: string | null; end_date: string | null; is_current: boolean }[];
   strengths?: { name: string; level: number }[];
   verified_signals?: { learning_evidence_count: number; competencies_assessed: number };
+  projects?: PublicProject[];
 };
 
 export const publicProfileApi = {
@@ -52,4 +60,3 @@ export const publicProfileApi = {
   previewMe:     ()             => pGet("public_profile_preview_me"),
   getBySlug:     (slug: string) => fetch(`${PUB_URL}/?action=public_profile_get_by_slug&slug=${encodeURIComponent(slug)}`).then(r => r.json()),
 };
-
