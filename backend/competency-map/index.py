@@ -352,7 +352,41 @@ def build_competency_map(conn, user_id: int) -> dict:
         for c in top
     ]
 
-    return {"domains": domains_out, "summary": summary}
+    # ── 9. All domains — для self-assessment из empty state ──────────
+    # Возвращаем полный список доменов и компетенций независимо от scoring.
+    # Frontend использует это чтобы показать компетенции даже при empty state.
+    all_domains_out = []
+    for did in sorted(domains_by_id.keys()):
+        domain = domains_by_id[did]
+        comps_in_domain = [
+            {
+                "id": comp_id,
+                "code": comp_data.get("code", ""),
+                "name": comp_data.get("name", ""),
+                "description": comp_data.get("description", ""),
+                "current_level": comp_data.get("current_level", 0),
+                "confidence": comp_data.get("confidence", "none"),
+                "score": comp_data.get("score", 0),
+                "is_verified": comp_data.get("is_verified", False),
+                "evidence_count": comp_data.get("evidence_count", 0),
+                "level_descriptor": comp_data["level_descriptors"].get(
+                    str(comp_data.get("current_level", 0)), ""
+                ),
+                "level_descriptors": comp_data.get("level_descriptors", {}),
+                "sources": comp_data.get("sources", []),
+            }
+            for comp_id, comp_data in competencies_by_id.items()
+            if comp_data["domain_id"] == did
+        ]
+        comps_in_domain.sort(key=lambda c: c.get("sort_order", 0) if "sort_order" in c else 0)
+        all_domains_out.append({
+            "id": did,
+            "code": domain.get("code", ""),
+            "name": domain.get("name", ""),
+            "competencies": comps_in_domain,
+        })
+
+    return {"domains": domains_out, "all_domains": all_domains_out, "summary": summary}
 
 
 def action_competency_map_get_me(conn, user_id: int):

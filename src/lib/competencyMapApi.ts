@@ -50,6 +50,7 @@ export type CompetencyMapSummary = {
 
 export type CompetencyMapResult = {
   domains: CompetencyDomain[];
+  all_domains: CompetencyDomain[];
   summary: CompetencyMapSummary;
 };
 

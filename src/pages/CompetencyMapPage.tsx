@@ -264,9 +264,11 @@ function buildRecs(
 function RecommendationsBlock({
   status,
   data,
+  onAssessClick,
 }: {
   status: "empty" | "partial" | "ready";
   data: CompetencyMapResult;
+  onAssessClick?: () => void;
 }) {
   const recs = buildRecs(status, data);
 
@@ -300,24 +302,38 @@ function RecommendationsBlock({
                 <p className="text-sm font-semibold text-slate-800 leading-tight">{rec.label}</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{rec.desc}</p>
               </div>
-              {rec.href && <Icon name="ChevronRight" size={14} className="text-slate-300 flex-shrink-0 group-hover:text-slate-500 transition-colors" />}
+              {(rec.href || rec.kind === "assess") && <Icon name="ChevronRight" size={14} className="text-slate-300 flex-shrink-0 group-hover:text-slate-500 transition-colors" />}
             </div>
           );
+          const handleClick = rec.href
+            ? () => analytics.competencyMapRecommendationClicked(status, rec.kind, rec.href)
+            : rec.kind === "assess" && onAssessClick
+            ? () => { analytics.competencyMapRecommendationClicked(status, rec.kind, "assess_scroll"); onAssessClick(); }
+            : undefined;
+
           return rec.href
             ? (
               <Link
                 key={i}
                 to={rec.href}
                 className="block hover:bg-slate-50 transition-colors"
-                onClick={() => analytics.competencyMapRecommendationClicked(status, rec.kind, rec.href)}
+                onClick={handleClick}
               >
                 {inner}
               </Link>
             )
-            : (
-              <div key={i} className="block">
+            : handleClick
+            ? (
+              <button
+                key={i}
+                className="block w-full text-left hover:bg-slate-50 transition-colors"
+                onClick={handleClick}
+              >
                 {inner}
-              </div>
+              </button>
+            )
+            : (
+              <div key={i}>{inner}</div>
             );
         })}
       </div>
@@ -428,16 +444,75 @@ export default function CompetencyMapPage() {
           {/* Empty state */}
           {status === "empty" && data && (
             <>
-              <div className="bg-white rounded-2xl border border-slate-200 px-6 py-10 flex flex-col items-center text-center">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 flex items-center justify-center mb-4">
-                  <Icon name="Map" size={28} className="text-emerald-300" />
+              <div className="bg-white rounded-2xl border border-slate-200 px-6 py-8 flex flex-col items-center text-center">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 flex items-center justify-center mb-3">
+                  <Icon name="Map" size={24} className="text-emerald-300" />
                 </div>
-                <h2 className="text-base font-bold text-slate-800 mb-2">Карта пока пустая</h2>
+                <h2 className="text-base font-bold text-slate-800 mb-1.5">Карта пока пустая</h2>
                 <p className="text-sm text-slate-500 leading-relaxed max-w-sm">
-                  Оцените свои компетенции или добавьте обучение — и карта сформируется автоматически.
+                  Раскройте домен и оцените себя по любой компетенции — карта сформируется сразу.
                 </p>
               </div>
-              <RecommendationsBlock status="empty" data={data} />
+
+              <RecommendationsBlock
+                status="empty"
+                data={data}
+                onAssessClick={() => {
+                  // Раскрываем первый домен и прокручиваем к списку
+                  if (data.all_domains.length > 0) {
+                    setExpandedDomains(prev => new Set([...prev, data.all_domains[0].id]));
+                    setTimeout(() => {
+                      document.getElementById("all-domains-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }, 50);
+                  }
+                }}
+              />
+
+              {/* Self-assess entry — все домены доступны для оценки */}
+              {data.all_domains.length > 0 && (
+                <div id="all-domains-list" className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-1">
+                    Все компетенции — выберите и оцените себя
+                  </p>
+                  {data.all_domains.map(domain => {
+                    const isOpen = expandedDomains.has(domain.id);
+                    return (
+                      <div key={domain.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                        <button
+                          onClick={() => toggleDomain(domain.id)}
+                          className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-800">{domain.name}</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{domain.competencies.length} компетенций</p>
+                          </div>
+                          <Icon
+                            name={isOpen ? "ChevronUp" : "ChevronDown"}
+                            size={16}
+                            className="text-slate-400 flex-shrink-0"
+                          />
+                        </button>
+                        {isOpen && (
+                          <div className="border-t border-slate-100 px-3 py-3 space-y-1">
+                            {domain.competencies.map(comp => (
+                              <button
+                                key={comp.id}
+                                onClick={() => setSelected(comp)}
+                                className="flex items-center gap-2 px-3 py-2 rounded-xl border bg-white hover:bg-slate-50 transition-colors text-left w-full group"
+                              >
+                                <span className="w-2 h-2 rounded-full flex-shrink-0 bg-slate-200" />
+                                <span className="text-sm text-slate-700 font-medium flex-1 min-w-0 truncate">{comp.name}</span>
+                                <span className="text-[10px] text-slate-400 flex-shrink-0 group-hover:text-violet-500 transition-colors">оценить</span>
+                                <Icon name="ChevronRight" size={13} className="text-slate-300 flex-shrink-0 group-hover:text-slate-500 transition-colors" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
 
