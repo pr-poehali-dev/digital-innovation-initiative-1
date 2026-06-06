@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
-import { getAdminToken } from "@/lib/admin-api";
+import { STRATEGY_URL, strategyHdr as hdrFn, stratReq, stratAction as roadmapReq, api as stratApi } from "@/lib/strategyApi";
 
-const STRATEGY_URL = "https://functions.poehali.dev/04817687-9635-4376-b40c-816fb73e7eb7";
+function hdr() { return hdrFn(); }
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -71,31 +72,7 @@ type InsightPayload = {
   prefill_description?: string;
 };
 
-// ── API ────────────────────────────────────────────────────────────
-
-function hdr() {
-  return { "Content-Type": "application/json", "X-Admin-Token": getAdminToken() };
-}
-
-async function stratReq(action: string, days: string, extra: Record<string, string> = {}, body?: object) {
-  const qs = new URLSearchParams({ action, days, ...extra }).toString();
-  const res = await fetch(`${STRATEGY_URL}/?${qs}`, {
-    method: body ? "POST" : "GET",
-    headers: hdr(),
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  return res.json();
-}
-
-async function roadmapReq(action: string, body?: object) {
-  const url = `${STRATEGY_URL}/?action=${action}`;
-  const res = await fetch(url, {
-    method: body ? "POST" : "GET",
-    headers: hdr(),
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  return res.json();
-}
+// ── API (via strategyApi.ts) ────────────────────────────────────────
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -140,11 +117,12 @@ const EFFORT_COLOR: Record<string, string> = { high: "bg-red-900/20 text-red-400
 const RM_STATUS_CFG: Record<string, string> = { idea: "bg-gray-800 text-gray-500", planned: "bg-blue-900/40 text-blue-400", in_progress: "bg-violet-900/40 text-violet-400", done: "bg-emerald-900/40 text-emerald-400" };
 const SOURCE_ICON: Record<string, string> = { hypothesis: "Lightbulb", summary: "Sparkles", next_action: "ArrowRight", segment_plan: "Target", manual: "PenLine" };
 
-function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange }: {
+function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange, onStartInitiative }: {
   item: RoadmapItem;
   onMoveLane: (lane: string) => void;
   onDelete: () => void;
   onStatusChange: (status: string) => void;
+  onStartInitiative?: () => void;
 }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 space-y-2 group">
@@ -186,6 +164,12 @@ function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange }: {
           {item.target_metric && <div>📊 {item.target_metric}</div>}
           {item.target_segment && <div>👥 {item.target_segment}</div>}
         </div>
+      )}
+      {onStartInitiative && (
+        <button onClick={e => { e.stopPropagation(); onStartInitiative(); }}
+          className="w-full text-[9px] font-semibold px-2 py-1 rounded-lg bg-violet-900/20 text-violet-400 hover:bg-violet-800/30 border border-violet-800/40 transition-colors flex items-center justify-center gap-1">
+          <Icon name="Rocket" size={9} /> Start Initiative
+        </button>
       )}
     </div>
   );
@@ -294,6 +278,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 // ── Main Page ──────────────────────────────────────────────────────
 
 export default function AdminStrategyPage() {
+  const navigate = useNavigate();
   const [tab, setTab]     = useState<Tab>("overview");
   const [period, setPeriod] = useState<Period>("30");
 
@@ -1161,6 +1146,11 @@ export default function AdminStrategyPage() {
                                 const d = await roadmapReq("strategy_roadmap_list");
                                 setRoadmap(d.roadmap ?? { now: [], next: [], later: [] });
                               }}
+                              onStartInitiative={async () => {
+                                await stratApi.initiativeFromRoadmap({ roadmap_item_id: item.id });
+                                showToast("Инициатива создана → Execution");
+                                setTimeout(() => navigate("/admin/execution"), 1200);
+                              }}
                             />
                           ))}
                           {items.length === 0 && (
@@ -1359,6 +1349,18 @@ export default function AdminStrategyPage() {
                       )}
                     </div>
                   )}
+
+                  {/* Create initiative from scenario */}
+                  <div className="flex justify-end">
+                    <button onClick={async () => {
+                      await stratApi.initiativeFromScenario({ scenario_id: scenarioResult.scenario_id });
+                      showToast("Инициатива создана → Execution");
+                      setTimeout(() => navigate("/admin/execution"), 1200);
+                    }}
+                      className="flex items-center gap-2 px-4 py-2 bg-violet-900/30 hover:bg-violet-800/40 text-violet-400 text-xs font-semibold rounded-xl border border-violet-800/40 transition-colors">
+                      <Icon name="Rocket" size={13} /> Create Initiative from Scenario
+                    </button>
+                  </div>
                 </div>
               )}
 

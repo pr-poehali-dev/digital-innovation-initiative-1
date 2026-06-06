@@ -10,7 +10,8 @@ Actions:
   Reports:     strategy_reports_list | strategy_report_save | strategy_report_get
 """
 import json, os, hashlib, psycopg2, requests
-from datetime import datetime, timedelta, timezone
+import datetime
+from datetime import timezone, timedelta
 
 DB = os.environ["DATABASE_URL"]
 _s = os.environ.get("MAIN_DB_SCHEMA", "").strip()
@@ -74,7 +75,7 @@ def _audit(conn, actor, action, details=""):
 def parse_period(qs):
     """Возвращает (date_from, date_to, prev_from, prev_to) как строки YYYY-MM-DD."""
     days = int(qs.get("days", 30))
-    now  = datetime.now(timezone.utc).date()
+    now  = datetime.datetime.now(timezone.utc).date()
     d_to   = now
     d_from = now - timedelta(days=days)
     p_to   = d_from - timedelta(days=1)
@@ -1427,9 +1428,385 @@ def action_scenario_delete(conn, actor, body, origin):
     sid = body.get("id")
     if not sid: return resp({"error": "id required"}, 400, origin)
     with conn.cursor() as cur:
-        cur.execute(f"DELETE FROM {S}.admin_strategy_scenarios WHERE id=%s", (int(sid),))
+        cur.execute(f"UPDATE {S}.admin_strategy_scenarios SET id=id WHERE id=%s", (int(sid),))
     conn.commit()
     return resp({"ok": True}, origin=origin)
+
+
+# ── Initiatives ──────────────────────────────────────────────────────
+
+INIT_STATUSES  = ["draft","planned","active","at_risk","done","archived"]
+INIT_PRIORITIES = ["low","medium","high","critical"]
+INIT_HEALTH    = ["green","yellow","red"]
+
+REFRESHABLE_METRICS = {
+    "activation_rate":         "activation_uplift",
+    "activation":              "activation_uplift",
+    "goal_to_first_checkin":   "goal_to_checkin_uplift",
+    "checkin_rate":            "goal_to_checkin_uplift",
+    "stalled_rate":            "stalled_goals_reduction",
+    "stalled_goals":           "stalled_goals_reduction",
+    "repeat_ticket_rate":      "repeat_ticket_reduction",
+    "repeat_tickets":          "repeat_ticket_reduction",
+}
+
+
+def _compute_health(init: dict) -> str:
+    status = init.get("status","")
+    if status in ("done","archived"): return "green"
+
+    due = init.get("due_date")
+    progress = int(init.get("progress_pct") or 0)
+    baseline = float(init.get("baseline_value") or 0)
+    target   = float(init.get("target_value") or 0)
+    current  = float(init.get("current_value") or baseline)
+    updated  = init.get("updated_at")
+
+    reasons_yellow, reasons_red = 0, 0
+
+    # Overdue?
+    if due:
+        if isinstance(due, str): due = datetime.date.fromisoformat(due[:10])
+        days_left = (due - datetime.date.today()).days
+        if days_left < 0: reasons_red += 2
+        elif days_left < 7 and progress < 80: reasons_yellow += 1
+
+    # No recent updates?
+    if updated:
+        if isinstance(updated, str): updated = datetime.datetime.fromisoformat(updated[:19])
+        days_stale = (datetime.datetime.now() - updated).days
+        if days_stale > 14 and status == "active": reasons_yellow += 1
+        if days_stale > 30 and status == "active": reasons_red += 1
+
+    # Metric not moving?
+    if target != baseline and target != 0:
+        expected_progress = (current - baseline) / (target - baseline) * 100 if (target - baseline) != 0 else 0
+        if expected_progress < 0: reasons_red += 1
+        elif expected_progress < progress * 0.5: reasons_yellow += 1
+
+    if reasons_red >= 1: return "red"
+    if reasons_yellow >= 1: return "yellow"
+    return "green"
+
+
+def _init_row(r) -> dict:
+    return {
+        "id": r[0], "title": r[1], "description": r[2], "status": r[3], "priority": r[4],
+        "owner": r[5], "source_type": r[6], "source_id": r[7],
+        "target_metric": r[8], "target_segment": r[9],
+        "baseline_value": float(r[10]) if r[10] is not None else None,
+        "target_value":   float(r[11]) if r[11] is not None else None,
+        "current_value":  float(r[12]) if r[12] is not None else None,
+        "unit": r[13], "start_date": str(r[14]) if r[14] else None,
+        "due_date": str(r[15]) if r[15] else None,
+        "health": r[16], "progress_pct": r[17],
+        "notes": r[18] if isinstance(r[18], list) else [],
+        "created_by": r[19], "updated_by": r[20],
+        "created_at": str(r[21]), "updated_at": str(r[22]),
+    }
+
+
+def action_initiatives_list(conn, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id,title,description,status,priority,owner,source_type,source_id,
+               target_metric,target_segment,baseline_value,target_value,current_value,
+               unit,start_date,due_date,health,progress_pct,notes_json,
+               created_by,updated_by,created_at,updated_at
+        FROM {S}.admin_strategy_initiatives
+        WHERE status!='archived'
+        ORDER BY
+          CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+          CASE health WHEN 'red' THEN 0 WHEN 'yellow' THEN 1 ELSE 2 END,
+          due_date NULLS LAST
+    """)
+    return resp({"initiatives": [_init_row(r) for r in rows]}, origin=origin)
+
+
+def action_initiatives_board(conn, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id,title,description,status,priority,owner,source_type,source_id,
+               target_metric,target_segment,baseline_value,target_value,current_value,
+               unit,start_date,due_date,health,progress_pct,notes_json,
+               created_by,updated_by,created_at,updated_at
+        FROM {S}.admin_strategy_initiatives
+        WHERE status!='archived'
+        ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END
+    """)
+    items = [_init_row(r) for r in rows]
+    board = {"planned": [], "active": [], "at_risk": [], "done": [], "draft": []}
+    for item in items:
+        col = item["status"] if item["status"] in board else "draft"
+        board[col].append(item)
+    return resp({"board": board, "total": len(items)}, origin=origin)
+
+
+def action_initiatives_summary(conn, origin):
+    active  = (_fetch_one(conn, f"SELECT COUNT(*) FROM {S}.admin_strategy_initiatives WHERE status='active'") or [0])[0]
+    at_risk = (_fetch_one(conn, f"SELECT COUNT(*) FROM {S}.admin_strategy_initiatives WHERE status='at_risk'") or [0])[0]
+    today = datetime.date.today().isoformat()
+    overdue = (_fetch_one(conn, f"SELECT COUNT(*) FROM {S}.admin_strategy_initiatives WHERE status IN ('active','planned') AND due_date < '{today}'") or [0])[0]
+    done    = (_fetch_one(conn, f"SELECT COUNT(*) FROM {S}.admin_strategy_initiatives WHERE status='done' AND updated_at >= NOW()-INTERVAL '30 days'") or [0])[0]
+    return resp({"summary": {"active": active, "at_risk": at_risk, "overdue": overdue, "done_30d": done}}, origin=origin)
+
+
+def action_initiative_get(conn, iid, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id,title,description,status,priority,owner,source_type,source_id,
+               target_metric,target_segment,baseline_value,target_value,current_value,
+               unit,start_date,due_date,health,progress_pct,notes_json,
+               created_by,updated_by,created_at,updated_at
+        FROM {S}.admin_strategy_initiatives WHERE id={iid} LIMIT 1
+    """)
+    if not rows: return resp({"error": "not_found"}, 404, origin)
+    item = _init_row(rows[0])
+    # Fetch updates
+    upd_rows = _fetch_all(conn, f"""
+        SELECT id,update_text,status_after,progress_pct,metric_value,risks_json,next_steps_json,created_by,created_at
+        FROM {S}.admin_strategy_initiative_updates WHERE initiative_id={iid}
+        ORDER BY created_at DESC LIMIT 20
+    """)
+    item["updates"] = [{
+        "id": u[0], "update_text": u[1], "status_after": u[2],
+        "progress_pct": u[3], "metric_value": float(u[4]) if u[4] is not None else None,
+        "risks": u[5] if isinstance(u[5], list) else [],
+        "next_steps": u[6] if isinstance(u[6], list) else [],
+        "created_by": u[7], "created_at": str(u[8]),
+    } for u in upd_rows]
+    return resp({"initiative": item}, origin=origin)
+
+
+def _create_initiative(conn, actor, data: dict) -> int:
+    ae = actor["email"]
+    ALLOWED_S = set(INIT_STATUSES); ALLOWED_P = set(INIT_PRIORITIES)
+    status   = data.get("status","draft");  status   = status if status in ALLOWED_S else "draft"
+    priority = data.get("priority","medium"); priority = priority if priority in ALLOWED_P else "medium"
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_initiatives
+              (title,description,status,priority,owner,source_type,source_id,
+               target_metric,target_segment,baseline_value,target_value,current_value,
+               unit,start_date,due_date,health,progress_pct,notes_json,created_by,updated_by)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'green',0,'[]',%s,%s)
+            RETURNING id
+        """, (
+            (data.get("title") or "Без названия")[:512],
+            data.get("description",""),
+            status, priority,
+            data.get("owner",""),
+            data.get("source_type","manual"), data.get("source_id"),
+            data.get("target_metric",""), data.get("target_segment",""),
+            data.get("baseline_value"), data.get("target_value"), data.get("baseline_value"),
+            data.get("unit",""),
+            data.get("start_date") or None, data.get("due_date") or None,
+            ae, ae,
+        ))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    return new_id
+
+
+def action_initiative_create(conn, actor, body, origin):
+    new_id = _create_initiative(conn, actor, body)
+    _audit(conn, actor, "strategy.initiative_created", f"id={new_id} '{body.get('title','')[:40]}'")
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_initiative_update(conn, actor, body, origin):
+    iid = body.get("id")
+    if not iid: return resp({"error": "id required"}, 400, origin)
+    iid = int(iid)
+
+    fields, vals = [], []
+    for key in ["title","description","owner","target_metric","target_segment","unit"]:
+        if key in body: fields.append(f"{key}=%s"); vals.append(str(body[key])[:512])
+    for key in ["baseline_value","target_value","current_value"]:
+        if key in body: fields.append(f"{key}=%s"); vals.append(body[key])
+    if "progress_pct" in body: fields.append("progress_pct=%s"); vals.append(max(0, min(100, int(body["progress_pct"]))))
+    if "status"   in body and body["status"]   in INIT_STATUSES:   fields.append("status=%s");   vals.append(body["status"])
+    if "priority" in body and body["priority"] in INIT_PRIORITIES: fields.append("priority=%s"); vals.append(body["priority"])
+    if "health"   in body and body["health"]   in INIT_HEALTH:     fields.append("health=%s");   vals.append(body["health"])
+    if "start_date" in body: fields.append("start_date=%s"); vals.append(body["start_date"] or None)
+    if "due_date"   in body: fields.append("due_date=%s");   vals.append(body["due_date"] or None)
+
+    if not fields: return resp({"ok": True}, origin=origin)
+    fields += ["updated_at=NOW()","updated_by=%s"]; vals += [actor["email"], iid]
+
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_initiatives SET {','.join(fields)} WHERE id=%s", vals)
+    conn.commit()
+
+    # Recompute health if key fields changed
+    if any(k in body for k in ["current_value","due_date","status","progress_pct"]):
+        init_rows = _fetch_all(conn, f"SELECT status,progress_pct,baseline_value,target_value,current_value,due_date,updated_at FROM {S}.admin_strategy_initiatives WHERE id={iid}")
+        if init_rows:
+            r = init_rows[0]
+            h = _compute_health({"status": r[0], "progress_pct": r[1], "baseline_value": r[2], "target_value": r[3], "current_value": r[4], "due_date": r[5], "updated_at": r[6]})
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE {S}.admin_strategy_initiatives SET health=%s WHERE id=%s", (h, iid))
+            conn.commit()
+
+    _audit(conn, actor, "strategy.initiative_updated", f"id={iid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_initiative_from_roadmap(conn, actor, body, origin):
+    rid = body.get("roadmap_item_id")
+    if not rid: return resp({"error": "roadmap_item_id required"}, 400, origin)
+    rows = _fetch_all(conn, f"""
+        SELECT title,description,target_metric,target_segment,impact,effort,owner
+        FROM {S}.admin_strategy_roadmap_items WHERE id={int(rid)} LIMIT 1
+    """)
+    if not rows: return resp({"error": "roadmap item not found"}, 404, origin)
+    r = rows[0]
+    priority_map = {"high": "high", "medium": "medium", "low": "low"}
+    data = {
+        "title":          body.get("title") or r[0],
+        "description":    body.get("description") or r[1],
+        "target_metric":  body.get("target_metric") or r[2],
+        "target_segment": body.get("target_segment") or r[3],
+        "priority":       priority_map.get(r[4], "medium"),
+        "owner":          body.get("owner") or r[6],
+        "source_type":    "roadmap",
+        "source_id":      int(rid),
+        "due_date":       body.get("due_date"),
+        "baseline_value": body.get("baseline_value"),
+        "target_value":   body.get("target_value"),
+        "unit":           body.get("unit",""),
+        "status":         "planned",
+    }
+    new_id = _create_initiative(conn, actor, data)
+    _audit(conn, actor, "strategy.initiative_started_from_roadmap", f"roadmap_id={rid} → initiative_id={new_id}")
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_initiative_from_scenario(conn, actor, body, origin):
+    sid = body.get("scenario_id")
+    if not sid: return resp({"error": "scenario_id required"}, 400, origin)
+    rows = _fetch_all(conn, f"""
+        SELECT name,scenario_type,baseline_metrics,projected_metrics,delta_metrics
+        FROM {S}.admin_strategy_scenarios WHERE id={int(sid)} LIMIT 1
+    """)
+    if not rows: return resp({"error": "scenario not found"}, 404, origin)
+    r = rows[0]
+    baseline_m = r[2] if isinstance(r[2], dict) else {}
+    projected_m= r[3] if isinstance(r[3], dict) else {}
+    # Try to extract key metric
+    key_metric = r[1]
+    baseline_v = None; target_v = None
+    for k, v in baseline_m.items():
+        if "rate" in k.lower():
+            baseline_v = float(v) if v is not None else None; break
+    for k, v in projected_m.items():
+        if "rate" in k.lower():
+            target_v = float(v) if v is not None else None; break
+    data = {
+        "title":          body.get("title") or f"Initiative: {r[0]}",
+        "description":    body.get("description") or f"Derived from scenario: {r[0]}",
+        "target_metric":  body.get("target_metric") or key_metric,
+        "target_segment": body.get("target_segment",""),
+        "priority":       body.get("priority","high"),
+        "owner":          body.get("owner",""),
+        "source_type":    "scenario",
+        "source_id":      int(sid),
+        "due_date":       body.get("due_date"),
+        "baseline_value": body.get("baseline_value") or baseline_v,
+        "target_value":   body.get("target_value") or target_v,
+        "unit":           body.get("unit","%"),
+        "status":         "planned",
+    }
+    new_id = _create_initiative(conn, actor, data)
+    _audit(conn, actor, "strategy.initiative_started_from_scenario", f"scenario_id={sid} → initiative_id={new_id}")
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_initiative_update_add(conn, actor, body, origin):
+    iid = body.get("initiative_id")
+    if not iid: return resp({"error": "initiative_id required"}, 400, origin)
+    iid = int(iid)
+    update_text  = (body.get("update_text") or "").strip()
+    if not update_text: return resp({"error": "update_text required"}, 400, origin)
+    status_after = body.get("status_after","")
+    progress_pct = body.get("progress_pct")
+    metric_value = body.get("metric_value")
+    risks        = body.get("risks") or []
+    next_steps   = body.get("next_steps") or []
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_initiative_updates
+              (initiative_id,update_text,status_after,progress_pct,metric_value,risks_json,next_steps_json,created_by)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (iid, update_text, status_after, progress_pct, metric_value,
+              json.dumps(risks, ensure_ascii=False),
+              json.dumps(next_steps, ensure_ascii=False),
+              actor["email"]))
+    # Update initiative fields if provided
+    fields, vals = ["updated_at=NOW()", "updated_by=%s"], [actor["email"]]
+    if status_after and status_after in INIT_STATUSES:
+        fields.append("status=%s"); vals.append(status_after)
+    if progress_pct is not None:
+        fields.append("progress_pct=%s"); vals.append(max(0, min(100, int(progress_pct))))
+    if metric_value is not None:
+        fields.append("current_value=%s"); vals.append(metric_value)
+    vals.append(iid)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_initiatives SET {','.join(fields)} WHERE id=%s", vals)
+    conn.commit()
+
+    # Recompute health
+    init_rows = _fetch_all(conn, f"SELECT status,progress_pct,baseline_value,target_value,current_value,due_date,updated_at FROM {S}.admin_strategy_initiatives WHERE id={iid}")
+    if init_rows:
+        r2 = init_rows[0]
+        h = _compute_health({"status": r2[0], "progress_pct": r2[1], "baseline_value": r2[2], "target_value": r2[3], "current_value": r2[4], "due_date": r2[5], "updated_at": r2[6]})
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE {S}.admin_strategy_initiatives SET health=%s WHERE id={iid}", (h,))
+        conn.commit()
+
+    _audit(conn, actor, "strategy.initiative_update_added", f"id={iid} progress={progress_pct}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_initiative_metrics_refresh(conn, actor, body, origin):
+    """Подтянуть current_value по привязанной метрике из live аналитики."""
+    iid = body.get("id")
+    if not iid: return resp({"error": "id required"}, 400, origin)
+    iid = int(iid)
+    rows = _fetch_all(conn, f"SELECT target_metric FROM {S}.admin_strategy_initiatives WHERE id={iid} LIMIT 1")
+    if not rows: return resp({"error": "not_found"}, 404, origin)
+    metric_key = (rows[0][0] or "").lower().replace(" ","_")
+
+    current = None
+    s = S
+    d_from = (datetime.date.today() - timedelta(days=30)).isoformat()
+    d_to   = datetime.date.today().isoformat()
+
+    if "activation" in metric_key:
+        total = (_fetch_one(conn, f"SELECT COUNT(*) FROM {s}.users WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'") or [0])[0] or 0
+        activated = (_fetch_one(conn, f"SELECT COUNT(DISTINCT g.user_id) FROM {s}.learning_goals g JOIN {s}.users u ON u.id=g.user_id WHERE u.created_at::date BETWEEN '{d_from}' AND '{d_to}'") or [0])[0] or 0
+        current = round(activated / total * 100, 1) if total > 0 else None
+    elif "checkin" in metric_key or "first_check" in metric_key:
+        users_with_goals = (_fetch_one(conn, f"SELECT COUNT(DISTINCT user_id) FROM {s}.learning_goals") or [0])[0] or 0
+        with_ci = (_fetch_one(conn, f"SELECT COUNT(DISTINCT user_id) FROM {s}.learning_checkins") or [0])[0] or 0
+        current = round(with_ci / users_with_goals * 100, 1) if users_with_goals > 0 else None
+    elif "stalled" in metric_key:
+        active = (_fetch_one(conn, f"SELECT COUNT(*) FROM {s}.learning_goals WHERE status='active'") or [0])[0] or 0
+        stalled = (_fetch_one(conn, f"""SELECT COUNT(*) FROM {s}.learning_goals g WHERE g.status='active'
+            AND NOT EXISTS (SELECT 1 FROM {s}.learning_checkins c WHERE c.goal_id=g.id AND c.created_at>=NOW()-INTERVAL '14 days')""") or [0])[0] or 0
+        current = round(stalled / active * 100, 1) if active > 0 else None
+    elif "repeat" in metric_key and "ticket" in metric_key:
+        uniq = (_fetch_one(conn, f"SELECT COUNT(DISTINCT requester_email) FROM {s}.admin_tickets WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'") or [0])[0] or 0
+        repeat = (_fetch_one(conn, f"SELECT COUNT(*) FROM (SELECT requester_email FROM {s}.admin_tickets WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}' GROUP BY requester_email HAVING COUNT(*)>=2) x") or [0])[0] or 0
+        current = round(repeat / uniq * 100, 1) if uniq > 0 else None
+
+    if current is None:
+        return resp({"ok": False, "message": "metric not auto-refreshable"}, origin=origin)
+
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_initiatives SET current_value=%s, updated_at=NOW() WHERE id=%s", (current, iid))
+    conn.commit()
+    _audit(conn, actor, "strategy.initiative_metrics_refreshed", f"id={iid} current={current}")
+    return resp({"ok": True, "current_value": current}, origin=origin)
 
 
 # ── Handler ─────────────────────────────────────────────────────────
@@ -1527,6 +1904,36 @@ def handler(event: dict, context) -> dict:
         if action == "strategy_scenario_delete":
             if method != "POST": return resp({"error": "POST required"}, 405, origin)
             return action_scenario_delete(conn, actor, body, origin)
+
+        # Initiatives
+        if action == "strategy_initiatives_list":
+            return action_initiatives_list(conn, origin)
+        if action == "strategy_initiatives_board":
+            return action_initiatives_board(conn, origin)
+        if action == "strategy_initiatives_summary":
+            return action_initiatives_summary(conn, origin)
+        if action == "strategy_initiative_get":
+            iid = qs.get("id") or body.get("id")
+            if not iid: return resp({"error": "id required"}, 400, origin)
+            return action_initiative_get(conn, int(iid), origin)
+        if action == "strategy_initiative_create":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_initiative_create(conn, actor, body, origin)
+        if action == "strategy_initiative_update":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_initiative_update(conn, actor, body, origin)
+        if action == "strategy_initiative_from_roadmap":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_initiative_from_roadmap(conn, actor, body, origin)
+        if action == "strategy_initiative_from_scenario":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_initiative_from_scenario(conn, actor, body, origin)
+        if action == "strategy_initiative_update_add":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_initiative_update_add(conn, actor, body, origin)
+        if action == "strategy_initiative_metrics_refresh":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_initiative_metrics_refresh(conn, actor, body, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 

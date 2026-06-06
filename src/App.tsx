@@ -15,6 +15,7 @@ import AdminAuditPage from "./pages/admin/AdminAuditPage";
 import AdminActivityPage from "./pages/admin/AdminActivityPage";
 import AdminPlanPage from "./pages/admin/AdminPlanPage";
 import AdminStrategyPage from "./pages/admin/AdminStrategyPage";
+import AdminExecutionPage from "./pages/admin/AdminExecutionPage";
 import AdminHQPage from "./pages/admin/AdminHQPage";
 import AdminProjectPage from "./pages/admin/AdminProjectPage";
 import AdminPassportPage from "./pages/admin/AdminPassportPage";
@@ -73,6 +74,7 @@ const App = () => (
               <Route path="/admin/activity" element={<AdminRoute><AdminActivityPage /></AdminRoute>} />
               <Route path="/admin/plan" element={<AdminRoute><AdminPlanPage /></AdminRoute>} />
               <Route path="/admin/strategy" element={<AdminRoute><AdminStrategyPage /></AdminRoute>} />
+              <Route path="/admin/execution" element={<AdminRoute><AdminExecutionPage /></AdminRoute>} />
               <Route path="/admin/hq" element={<AdminRoute><AdminHQPage /></AdminRoute>} />
               <Route path="/admin/project" element={<AdminRoute><AdminProjectPage /></AdminRoute>} />
               <Route path="/admin/passport" element={<AdminRoute><AdminPassportPage /></AdminRoute>} />
@@ -81,7 +83,6 @@ const App = () => (
               <Route path="/admin/flags" element={<AdminRoute><AdminFlagsPage /></AdminRoute>} />
               <Route path="/admin/tickets" element={<AdminRoute><AdminTicketsPage /></AdminRoute>} />
               <Route path="/admin/automations" element={<AdminRoute><AdminAutomationsPage /></AdminRoute>} />
-              <Route path="/admin/strategy" element={<AdminRoute><AdminStrategyPage /></AdminRoute>} />
               <Route path="/admin/content" element={<AdminRoute><AdminContentPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
