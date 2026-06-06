@@ -81,6 +81,37 @@ def get_schema():
     return os.environ.get("MAIN_DB_SCHEMA", "public")
 
 
+BRIDGE_URL   = os.environ.get("LEARNING_BRIDGE_URL", "https://functions.poehali.dev/e74b5863-44f8-4ddf-b5b8-6f9dd33434b4")
+BRIDGE_TOKEN = os.environ.get("BRIDGE_SERVICE_TOKEN", "")
+
+
+def _bridge_ingest(user_id: int, content_source: str, content_id: int,
+                   content_title: str, completed_at):
+    """Fire-and-forget: отправляем завершение в learning-bridge."""
+    if not BRIDGE_URL:
+        return
+    try:
+        import urllib.request
+        payload = json.dumps({
+            "user_id": user_id,
+            "content_source": content_source,
+            "content_id": content_id,
+            "content_title": content_title or "",
+            "completed_at": str(completed_at) if completed_at else None,
+            "triggered_by": "education.confirm",
+        }).encode()
+        hdrs = {"Content-Type": "application/json"}
+        if BRIDGE_TOKEN:
+            hdrs["X-Service-Token"] = BRIDGE_TOKEN
+        req = urllib.request.Request(
+            f"{BRIDGE_URL}?action=learning_completion_ingest",
+            data=payload, headers=hdrs, method="POST",
+        )
+        urllib.request.urlopen(req, timeout=4)
+    except Exception:
+        pass  # не блокируем основной поток
+
+
 ALLOWED_ORIGINS = {
     "https://raven.moscow",
     "https://www.raven.moscow",
@@ -507,6 +538,8 @@ def handle_create(conn, user, body, request_id, origin):
     new_id = cur.fetchone()[0]
     conn.commit()
     notify_indexer("upsert", new_id)
+    # W9.2: вручную созданные записи сразу confirmed
+    _bridge_ingest(user["id"], "education_items", new_id, title, None)
     return ok_response({"id": new_id, "title": title, "kind": kind}, request_id, origin)
 
 
@@ -702,6 +735,11 @@ def handle_confirm(conn, user, body, request_id, origin):
     cur.execute(f"UPDATE {schema}.education_items SET {', '.join(sets)} WHERE id = %s", tuple(params))
     conn.commit()
     notify_indexer("upsert", int(item_id))
+
+    # W9.2: fire-and-forget bridge ingest
+    _bridge_ingest(user["id"], "education_items", int(item_id),
+                   body.get("overrides", {}).get("title") or "", None)
+
     return ok_response({"ok": True, "confirmed": True}, request_id, origin)
 
 

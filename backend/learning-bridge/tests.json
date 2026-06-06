@@ -1,0 +1,7 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "ingest без токена — 401", "method": "POST", "path": "/?action=learning_completion_ingest", "expectedStatus": 401},
+    {"name": "sync_status без токена — 401", "method": "GET", "path": "/?action=learning_completion_sync_status", "expectedStatus": 401}
+  ]
+}

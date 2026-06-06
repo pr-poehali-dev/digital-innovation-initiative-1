@@ -3,6 +3,7 @@ import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { growthApi } from "@/lib/growthApi";
 import { profApi } from "@/lib/profApi";
+import { bridgeApi } from "@/lib/bridgeApi";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -71,6 +72,10 @@ type LearningRec = {
 type LearningProgress = {
   total: number; completed: number; started: number;
   skipped: number; done_pct: number; competencies_covered: number;
+};
+type LearningEvidence = {
+  id: number; competency_name: string; title: string;
+  description: string; source_ref: string; created_at: string;
 };
 
 type Tab = "overview" | "gaps" | "plan" | "path";
@@ -556,6 +561,7 @@ function PathTab({ plan }: { plan: Plan | null }) {
   const [assignments, setAssignments]             = useState<LearningAssignment[]>([]);
   const [learningRecs, setLearningRecs]           = useState<LearningRec[]>([]);
   const [learningProgress, setLearningProgress]   = useState<LearningProgress | null>(null);
+  const [evidence, setEvidence]                   = useState<LearningEvidence[]>([]);
   const [loading, setLoading]                     = useState(true);
   const [filter, setFilter]                       = useState<"all"|"recommended"|"started"|"completed">("all");
   const [addManual, setAddManual]                 = useState(false);
@@ -566,14 +572,16 @@ function PathTab({ plan }: { plan: Plan | null }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [lp, lr, pr] = await Promise.all([
+    const [lp, lr, pr, ev] = await Promise.all([
       growthApi.learningPath(),
       growthApi.learningRecs(),
       growthApi.learningProgress(),
+      bridgeApi.evidenceList(),
     ]);
     setAssignments(lp.learning_path ?? []);
     setLearningRecs(lr.recommendations ?? []);
     setLearningProgress(pr.progress ?? null);
+    setEvidence(ev.evidence ?? []);
     setLoading(false);
   }, []);
 
@@ -638,6 +646,36 @@ function PathTab({ plan }: { plan: Plan | null }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* W9.2 Verified Learning Evidence */}
+      {evidence.length > 0 && (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
+          <p className="text-xs font-semibold text-emerald-700 mb-3 flex items-center gap-1.5">
+            <Icon name="BadgeCheck" size={14} className="text-emerald-600" />
+            Подтверждённые learning evidence
+            <span className="ml-auto text-[10px] font-normal text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
+              {evidence.length}
+            </span>
+          </p>
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {evidence.map(ev => (
+              <div key={ev.id} className="flex items-start gap-2 p-2 bg-white rounded-xl border border-emerald-100">
+                <Icon name="CheckCircle2" size={13} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-slate-700 truncate">{ev.title}</p>
+                  <p className="text-[10px] text-slate-500">{ev.competency_name}</p>
+                </div>
+                <span className="text-[9px] text-slate-400 flex-shrink-0">
+                  {new Date(ev.created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[9px] text-emerald-600 mt-2 italic">
+            Завершение курса подтверждает компетенцию, но не меняет уровень автоматически.
+          </p>
         </div>
       )}
 
@@ -711,13 +749,20 @@ function PathTab({ plan }: { plan: Plan | null }) {
 
           {filtered.map(a => {
             const sa = STATUS_A[a.status] ?? STATUS_A.recommended;
+            const hasEvidence = a.status === "completed" && a.competency_id != null &&
+              evidence.some(ev => ev.title.includes(a.content_title.slice(0, 20)));
             return (
-              <div key={a.id} className={`bg-white border border-slate-200 rounded-2xl p-4 ${a.status === "completed" ? "opacity-60" : ""}`}>
+              <div key={a.id} className={`bg-white border rounded-2xl p-4 ${a.status === "completed" ? "opacity-70 border-emerald-200" : "border-slate-200"}`}>
                 <div className="flex items-start gap-3">
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${sa.dot}`} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                       <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${sa.badge}`}>{sa.label}</span>
+                      {hasEvidence && (
+                        <span className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-600 border-emerald-200">
+                          <Icon name="BadgeCheck" size={9} /> verified
+                        </span>
+                      )}
                       {a.competency_name && <span className="text-[9px] text-violet-500">{a.competency_name}</span>}
                       <span className="text-[9px] text-slate-400">{a.source === "manual" ? "manual" : a.content_type}</span>
                     </div>

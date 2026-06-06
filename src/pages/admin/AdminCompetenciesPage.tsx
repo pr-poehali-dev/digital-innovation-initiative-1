@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { profApi } from "@/lib/profApi";
+import { bridgeApi } from "@/lib/bridgeApi";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -760,8 +761,27 @@ function ContentLinksTab() {
   const [editing, setEditing] = useState<Partial<ContentLink> | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [syncStatus, setSyncStatus] = useState<Record<string, number> | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [totalLearningEvidence, setTotalLearningEvidence] = useState<number | null>(null);
 
   function showMsg(m: string) { setToast(m); setTimeout(() => setToast(null), 2000); }
+
+  async function loadSyncStatus() {
+    const d = await bridgeApi.syncStatus();
+    setSyncStatus(d.sync_status ?? {});
+    setTotalLearningEvidence(d.total_learning_evidence ?? null);
+  }
+
+  async function runBackfill() {
+    setBackfilling(true);
+    const d = await bridgeApi.backfill();
+    setBackfilling(false);
+    showMsg(`Backfill: ${d.processed ?? 0} обработано, ${d.skipped ?? 0} пропущено, ${d.failed ?? 0} ошибок`);
+    loadSyncStatus();
+  }
+
+  useEffect(() => { loadSyncStatus(); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -803,6 +823,45 @@ function ContentLinksTab() {
 
   return (
     <div className="space-y-4">
+      {/* W9.2 Sync status */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Icon name="RefreshCw" size={13} className="text-violet-400" />
+          <span className="text-xs font-semibold text-gray-400">Evidence Sync</span>
+        </div>
+        {syncStatus && (
+          <div className="flex gap-3 flex-wrap">
+            {[
+              ["processed", "Обработано", "text-emerald-400"],
+              ["skipped",   "Пропущено",  "text-gray-500"],
+              ["failed",    "Ошибок",     "text-red-400"],
+            ].map(([k, l, cls]) => syncStatus[k] != null ? (
+              <span key={k} className="flex items-center gap-1 text-[10px]">
+                <span className={`font-bold ${cls}`}>{syncStatus[k]}</span>
+                <span className="text-gray-600">{l}</span>
+              </span>
+            ) : null)}
+            {totalLearningEvidence !== null && (
+              <span className="flex items-center gap-1 text-[10px]">
+                <span className="font-bold text-violet-400">{totalLearningEvidence}</span>
+                <span className="text-gray-600">learning evidence всего</span>
+              </span>
+            )}
+          </div>
+        )}
+        <div className="ml-auto flex gap-2">
+          <button onClick={runBackfill} disabled={backfilling}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-900/30 hover:bg-violet-800/40 disabled:opacity-40 text-violet-400 border border-violet-800 rounded-lg text-[10px] font-semibold transition-colors">
+            {backfilling ? <div className="w-3 h-3 border border-violet-400 border-t-transparent rounded-full animate-spin" /> : <Icon name="Zap" size={11} />}
+            Backfill
+          </button>
+          <button onClick={() => bridgeApi.replay().then(() => { showMsg("Replay запущен"); loadSyncStatus(); })}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg text-[10px] font-semibold transition-colors">
+            <Icon name="RotateCcw" size={11} /> Replay failed
+          </button>
+        </div>
+      </div>
+
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <select value={filterComp ?? ""} onChange={e => setFilterComp(Number(e.target.value) || null)}
