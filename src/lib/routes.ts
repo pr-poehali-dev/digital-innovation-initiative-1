@@ -25,6 +25,7 @@ export const NAV_ITEMS = [
   { label: "Дипломы и сертификаты",    icon: "Award",           href: ROUTES.passport,     exact: false, active: true  },
   { label: "Кошелёк",                  icon: "Wallet",          href: ROUTES.wallet,       exact: false, active: true  },
   // Штаб Траектории — платформенный раздел, живёт в /admin/hq, не в пользовательском меню
+  { label: "Профессиональный профиль",  icon: "UserCircle",      href: "/cabinet/profile", exact: false, active: true  },
   // Неактивные (скоро):
   { label: "Карта компетенций",        icon: "Map",             href: "#", exact: false, active: false },
   { label: "Навигатор развития",       icon: "TrendingUp",      href: "#", exact: false, active: false },

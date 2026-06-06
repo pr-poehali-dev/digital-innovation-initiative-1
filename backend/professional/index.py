@@ -393,16 +393,438 @@ def action_competency_gap_summary(conn, qs):
     }})
 
 
+# ── W8.2 Passport ────────────────────────────────────────────────────
+
+PASSPORT_FIELDS = [
+    "full_name","headline","short_bio","country","city","timezone",
+    "primary_role","years_experience","career_stage","avatar_url",
+]
+PASSPORT_JSON_FIELDS = [
+    "languages_json","secondary_roles_json","target_roles_json",
+    "development_interests_json","industries_json","work_preferences_json",
+    "career_goals_json","links_json",
+]
+PASSPORT_JSON_KEYS = [f.replace("_json","") for f in PASSPORT_JSON_FIELDS]
+
+
+def _get_user_id(conn, session_id: str):
+    row = fetch_one(conn,
+        f"SELECT user_id FROM {S}.sessions WHERE id=%s AND expires_at>NOW() LIMIT 1",
+        (session_id,))
+    return row[0] if row else None
+
+
+def action_passport_get_me(conn, user_id):
+    row = fetch_one(conn, f"""
+        SELECT id,full_name,headline,short_bio,country,city,timezone,
+               languages_json,primary_role,secondary_roles_json,years_experience,career_stage,
+               target_roles_json,development_interests_json,industries_json,
+               work_preferences_json,career_goals_json,links_json,avatar_url,
+               created_at,updated_at
+        FROM {S}.professional_passports WHERE user_id=%s LIMIT 1
+    """, (user_id,))
+    if not row:
+        return resp({"passport": None})
+    return resp({"passport": {
+        "id": row[0], "full_name": row[1], "headline": row[2], "short_bio": row[3],
+        "country": row[4], "city": row[5], "timezone": row[6],
+        "languages": row[7] or [], "primary_role": row[8],
+        "secondary_roles": row[9] or [], "years_experience": row[10],
+        "career_stage": row[11],
+        "target_roles": row[12] or [], "development_interests": row[13] or [],
+        "industries": row[14] or [], "work_preferences": row[15] or {},
+        "career_goals": row[16] or [], "links": row[17] or {},
+        "avatar_url": row[18],
+        "created_at": str(row[19]), "updated_at": str(row[20]),
+    }})
+
+
+def action_passport_upsert_me(conn, user_id, body):
+    # Check exists
+    exists = fetch_one(conn, f"SELECT id FROM {S}.professional_passports WHERE user_id=%s LIMIT 1", (user_id,))
+    if exists:
+        fields, vals = [], []
+        for f in PASSPORT_FIELDS:
+            if f in body:
+                fields.append(f"{f}=%s"); vals.append(body[f])
+        for f, key in zip(PASSPORT_JSON_FIELDS, PASSPORT_JSON_KEYS):
+            if key in body:
+                fields.append(f"{f}=%s"); vals.append(json.dumps(body[key], ensure_ascii=False))
+        if fields:
+            fields.append("updated_at=NOW()"); vals.append(user_id)
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE {S}.professional_passports SET {','.join(fields)} WHERE user_id=%s", vals)
+            conn.commit()
+    else:
+        # Insert
+        cols, phs, vals = ["user_id"], ["%s"], [user_id]
+        for f in PASSPORT_FIELDS:
+            if f in body:
+                cols.append(f); phs.append("%s"); vals.append(body[f])
+        for f, key in zip(PASSPORT_JSON_FIELDS, PASSPORT_JSON_KEYS):
+            if key in body:
+                cols.append(f); phs.append("%s"); vals.append(json.dumps(body[key], ensure_ascii=False))
+        with conn.cursor() as cur:
+            cur.execute(f"INSERT INTO {S}.professional_passports ({','.join(cols)}) VALUES ({','.join(phs)})", vals)
+        conn.commit()
+    return resp({"ok": True})
+
+
+def action_passport_completion_me(conn, user_id):
+    """Детерминистичный расчёт % заполненности."""
+    p = fetch_one(conn, f"""
+        SELECT full_name,headline,short_bio,primary_role,
+               languages_json,target_roles_json,development_interests_json,
+               links_json,career_goals_json,years_experience,career_stage
+        FROM {S}.professional_passports WHERE user_id=%s LIMIT 1
+    """, (user_id,))
+    edu_cnt  = (fetch_one(conn, f"SELECT COUNT(*) FROM {S}.professional_education WHERE user_id=%s", (user_id,)) or [0])[0]
+    work_cnt = (fetch_one(conn, f"SELECT COUNT(*) FROM {S}.professional_work_experience WHERE user_id=%s", (user_id,)) or [0])[0]
+    vis      = fetch_one(conn, f"SELECT profile_visibility FROM {S}.professional_visibility_settings WHERE user_id=%s LIMIT 1", (user_id,))
+
+    blocks = []
+    pct = 0
+
+    # Basic profile (30%)
+    basic_score = 0
+    if p:
+        if p[0]: basic_score += 8   # full_name
+        if p[1]: basic_score += 7   # headline
+        if p[2]: basic_score += 5   # short_bio
+        if p[3]: basic_score += 5   # primary_role
+        if p[10]: basic_score += 3  # career_stage
+        if p[9]:  basic_score += 2  # years_experience
+    blocks.append({"key":"basic","label":"Базовый профиль","score":basic_score,"max":30,"done": basic_score>=20})
+    pct += basic_score
+
+    # Career direction (20%)
+    dir_score = 0
+    if p:
+        if p[5] and (p[5] if isinstance(p[5], list) else []):  dir_score += 7   # target_roles
+        if p[6] and (p[6] if isinstance(p[6], list) else []):  dir_score += 7   # dev interests
+        if p[8] and (p[8] if isinstance(p[8], list) else []):  dir_score += 6   # career_goals
+    blocks.append({"key":"direction","label":"Направление развития","score":dir_score,"max":20,"done": dir_score>=14})
+    pct += dir_score
+
+    # Education (15%)
+    edu_score = min(15, edu_cnt * 15)
+    blocks.append({"key":"education","label":"Образование","score":edu_score,"max":15,"done": edu_cnt > 0})
+    pct += edu_score
+
+    # Work experience (20%)
+    work_score = min(20, work_cnt * 10)
+    blocks.append({"key":"experience","label":"Опыт работы","score":work_score,"max":20,"done": work_cnt > 0})
+    pct += work_score
+
+    # Visibility (10%)
+    vis_score = 10 if vis else 0
+    blocks.append({"key":"visibility","label":"Настройки видимости","score":vis_score,"max":10,"done": vis is not None})
+    pct += vis_score
+
+    # Links (5%)
+    links_score = 0
+    if p and p[7] and isinstance(p[7], dict) and p[7]:
+        links_score = 5
+    blocks.append({"key":"links","label":"Ссылки / портфолио","score":links_score,"max":5,"done": links_score > 0})
+    pct += links_score
+
+    missing = [b["label"] for b in blocks if not b["done"]]
+    next_step = missing[0] if missing else None
+
+    return resp({"completion": {"total_pct": min(pct, 100), "blocks": blocks, "missing": missing, "next_step": next_step}})
+
+
+def action_passport_summary_me(conn, user_id):
+    """Read-only срез: компетенции из W8.1 + passport meta."""
+    passport = action_passport_get_me(conn, user_id)
+    # Competency snapshot
+    comp_rows = fetch_all(conn, f"""
+        SELECT uc.competency_id, c.name, uc.current_level, COUNT(ev.id) as ev_count
+        FROM {S}.professional_user_competencies uc
+        JOIN {S}.professional_competencies c ON c.id=uc.competency_id
+        LEFT JOIN {S}.professional_competency_evidence ev ON ev.user_competency_id=uc.id
+        WHERE uc.user_id={user_id} AND uc.current_level>0
+        GROUP BY uc.competency_id, c.name, uc.current_level
+        ORDER BY uc.current_level DESC
+    """)
+    total_assessed = len(comp_rows)
+    total_evidence = sum(r[3] or 0 for r in comp_rows)
+    strengths = [{"name": r[1], "level": r[2]} for r in comp_rows if r[2] >= 3][:5]
+    assessed_levels = [r[2] for r in comp_rows]
+    avg_level = round(sum(assessed_levels)/len(assessed_levels), 1) if assessed_levels else 0
+    last_update = fetch_one(conn, f"SELECT MAX(updated_at) FROM {S}.professional_user_competencies WHERE user_id={user_id}")
+    return resp({
+        "summary": {
+            "passport": passport.get("body", "{}"),
+            "competency_snapshot": {
+                "total_assessed": total_assessed,
+                "total_evidence": total_evidence,
+                "average_level": avg_level,
+                "strengths": strengths,
+                "last_map_update": str(last_update[0]) if last_update and last_update[0] else None,
+            }
+        }
+    })
+
+
+# ── Education CRUD ────────────────────────────────────────────────────
+
+def action_education_list_me(conn, user_id):
+    rows = fetch_all(conn, f"""
+        SELECT id,institution,degree,field_of_study,start_date,end_date,is_current,description,created_at
+        FROM {S}.professional_education WHERE user_id={user_id} ORDER BY start_date DESC NULLS LAST, created_at DESC
+    """)
+    return resp({"education": [{
+        "id": r[0], "institution": r[1], "degree": r[2], "field_of_study": r[3],
+        "start_date": str(r[4]) if r[4] else None, "end_date": str(r[5]) if r[5] else None,
+        "is_current": r[6], "description": r[7], "created_at": str(r[8]),
+    } for r in rows]})
+
+
+def action_education_upsert_me(conn, user_id, body):
+    eid = body.get("id")
+    inst = (body.get("institution") or "").strip()
+    if not inst: return resp({"error": "institution required"}, 400)
+    sd = body.get("start_date") or None
+    ed = body.get("end_date") or None
+    if eid:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {S}.professional_education
+                SET institution=%s,degree=%s,field_of_study=%s,start_date=%s,end_date=%s,
+                    is_current=%s,description=%s,updated_at=NOW()
+                WHERE id=%s AND user_id=%s
+            """, (inst, body.get("degree",""), body.get("field_of_study",""),
+                  sd, ed, bool(body.get("is_current")), body.get("description",""),
+                  int(eid), user_id))
+        conn.commit()
+        return resp({"ok": True, "id": eid})
+    else:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {S}.professional_education
+                    (user_id,institution,degree,field_of_study,start_date,end_date,is_current,description)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+            """, (user_id, inst, body.get("degree",""), body.get("field_of_study",""),
+                  sd, ed, bool(body.get("is_current")), body.get("description","")))
+            new_id = cur.fetchone()[0]
+        conn.commit()
+        return resp({"ok": True, "id": new_id})
+
+
+def action_education_delete_me(conn, user_id, body):
+    eid = body.get("id")
+    if not eid: return resp({"error": "id required"}, 400)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.professional_education SET institution=institution WHERE id=%s AND user_id=%s RETURNING id",
+                    (int(eid), user_id))
+        if not cur.fetchone(): return resp({"error": "not found"}, 404)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.professional_education SET updated_at=NOW() WHERE id=%s", (int(eid),))
+    # soft delete via description mark — actually hard delete is ok here
+    # We can't use DELETE per platform rules, so we mark with empty institution
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.professional_education SET institution='[DELETED]' WHERE id=%s AND user_id=%s", (int(eid), user_id))
+    conn.commit()
+    return resp({"ok": True})
+
+
+# ── Work Experience CRUD ──────────────────────────────────────────────
+
+def action_work_list_me(conn, user_id):
+    rows = fetch_all(conn, f"""
+        SELECT id,company_name,title,employment_type,start_date,end_date,
+               is_current,description,achievements_json,skills_json,created_at
+        FROM {S}.professional_work_experience WHERE user_id={user_id}
+        ORDER BY is_current DESC, start_date DESC NULLS LAST
+    """)
+    return resp({"work_experience": [{
+        "id": r[0], "company_name": r[1], "title": r[2], "employment_type": r[3],
+        "start_date": str(r[4]) if r[4] else None, "end_date": str(r[5]) if r[5] else None,
+        "is_current": r[6], "description": r[7],
+        "achievements": r[8] or [], "skills": r[9] or [], "created_at": str(r[10]),
+    } for r in rows]})
+
+
+def action_work_upsert_me(conn, user_id, body):
+    wid = body.get("id")
+    comp = (body.get("company_name") or "").strip()
+    title = (body.get("title") or "").strip()
+    if not comp or not title: return resp({"error": "company_name and title required"}, 400)
+    ach = json.dumps(body.get("achievements", []), ensure_ascii=False)
+    skills = json.dumps(body.get("skills", []), ensure_ascii=False)
+    sd = body.get("start_date") or None
+    ed = body.get("end_date") or None
+    if wid:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {S}.professional_work_experience
+                SET company_name=%s,title=%s,employment_type=%s,start_date=%s,end_date=%s,
+                    is_current=%s,description=%s,achievements_json=%s::jsonb,skills_json=%s::jsonb,updated_at=NOW()
+                WHERE id=%s AND user_id=%s
+            """, (comp, title, body.get("employment_type","full_time"), sd, ed,
+                  bool(body.get("is_current")), body.get("description",""),
+                  ach, skills, int(wid), user_id))
+        conn.commit()
+        return resp({"ok": True, "id": wid})
+    else:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {S}.professional_work_experience
+                    (user_id,company_name,title,employment_type,start_date,end_date,
+                     is_current,description,achievements_json,skills_json)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb) RETURNING id
+            """, (user_id, comp, title, body.get("employment_type","full_time"),
+                  sd, ed, bool(body.get("is_current")), body.get("description",""), ach, skills))
+            new_id = cur.fetchone()[0]
+        conn.commit()
+        return resp({"ok": True, "id": new_id})
+
+
+def action_work_delete_me(conn, user_id, body):
+    wid = body.get("id")
+    if not wid: return resp({"error": "id required"}, 400)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.professional_work_experience SET company_name='[DELETED]' WHERE id=%s AND user_id=%s",
+                    (int(wid), user_id))
+    conn.commit()
+    return resp({"ok": True})
+
+
+# ── Visibility ────────────────────────────────────────────────────────
+
+def action_visibility_get_me(conn, user_id):
+    row = fetch_one(conn, f"""
+        SELECT profile_visibility,talent_directory_opt_in,show_competency_map,
+               show_contact,show_experience_details,available_for_roles,availability_note,updated_at
+        FROM {S}.professional_visibility_settings WHERE user_id={user_id} LIMIT 1
+    """)
+    if not row:
+        return resp({"visibility": {
+            "profile_visibility": "private", "talent_directory_opt_in": False,
+            "show_competency_map": False, "show_contact": False,
+            "show_experience_details": True, "available_for_roles": False,
+            "availability_note": None, "updated_at": None,
+        }})
+    return resp({"visibility": {
+        "profile_visibility": row[0], "talent_directory_opt_in": row[1],
+        "show_competency_map": row[2], "show_contact": row[3],
+        "show_experience_details": row[4], "available_for_roles": row[5],
+        "availability_note": row[6], "updated_at": str(row[7]) if row[7] else None,
+    }})
+
+
+def action_visibility_upsert_me(conn, user_id, body):
+    exists = fetch_one(conn, f"SELECT id FROM {S}.professional_visibility_settings WHERE user_id={user_id} LIMIT 1")
+    vis = body.get("profile_visibility","private")
+    if vis not in ("private","limited","opt_in_public"): vis = "private"
+    if exists:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {S}.professional_visibility_settings
+                SET profile_visibility=%s,talent_directory_opt_in=%s,show_competency_map=%s,
+                    show_contact=%s,show_experience_details=%s,available_for_roles=%s,
+                    availability_note=%s,updated_at=NOW()
+                WHERE user_id=%s
+            """, (vis, bool(body.get("talent_directory_opt_in")),
+                  bool(body.get("show_competency_map")), bool(body.get("show_contact")),
+                  bool(body.get("show_experience_details",True)),
+                  bool(body.get("available_for_roles")),
+                  body.get("availability_note"), user_id))
+    else:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {S}.professional_visibility_settings
+                    (user_id,profile_visibility,talent_directory_opt_in,show_competency_map,
+                     show_contact,show_experience_details,available_for_roles,availability_note)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
+            """, (user_id, vis, bool(body.get("talent_directory_opt_in")),
+                  bool(body.get("show_competency_map")), bool(body.get("show_contact")),
+                  bool(body.get("show_experience_details",True)),
+                  bool(body.get("available_for_roles")), body.get("availability_note")))
+    conn.commit()
+    return resp({"ok": True})
+
+
 # ── Handler ───────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
-    """W8.1 Professional Competency Map."""
+    """W8.1+W8.2 Professional Competency Map + Passport."""
     headers = event.get("headers") or {}
     method  = event.get("httpMethod", "GET")
 
     if method == "OPTIONS":
         return resp({}, 200)
 
+    qs     = event.get("queryStringParameters") or {}
+    action = qs.get("action", "")
+    body   = {}
+    if event.get("body"):
+        try:
+            body = json.loads(event["body"])
+        except Exception:
+            pass
+
+    # W8.2 passport actions use session-based auth (user)
+    PASSPORT_ACTIONS = {
+        "professional_passport_get_me", "professional_passport_upsert_me",
+        "professional_passport_completion_me", "professional_passport_summary_me",
+        "professional_education_list_me", "professional_education_upsert_me", "professional_education_delete_me",
+        "professional_work_experience_list_me", "professional_work_experience_upsert_me", "professional_work_experience_delete_me",
+        "professional_visibility_get_me", "professional_visibility_upsert_me",
+    }
+
+    is_passport_action = action in PASSPORT_ACTIONS
+
+    # Session auth for passport actions
+    if is_passport_action:
+        session_id = headers.get("x-session-id") or headers.get("X-Session-Id") or ""
+        if not session_id:
+            return resp({"error": "unauthorized"}, 401)
+        conn = psycopg2.connect(DB)
+        try:
+            user_id = _get_user_id(conn, session_id)
+            if not user_id:
+                return resp({"error": "unauthorized"}, 401)
+            # Passport
+            if action == "professional_passport_get_me":
+                return action_passport_get_me(conn, user_id)
+            if action == "professional_passport_upsert_me":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_passport_upsert_me(conn, user_id, body)
+            if action == "professional_passport_completion_me":
+                return action_passport_completion_me(conn, user_id)
+            if action == "professional_passport_summary_me":
+                return action_passport_summary_me(conn, user_id)
+            # Education
+            if action == "professional_education_list_me":
+                return action_education_list_me(conn, user_id)
+            if action == "professional_education_upsert_me":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_education_upsert_me(conn, user_id, body)
+            if action == "professional_education_delete_me":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_education_delete_me(conn, user_id, body)
+            # Work
+            if action == "professional_work_experience_list_me":
+                return action_work_list_me(conn, user_id)
+            if action == "professional_work_experience_upsert_me":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_work_upsert_me(conn, user_id, body)
+            if action == "professional_work_experience_delete_me":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_work_delete_me(conn, user_id, body)
+            # Visibility
+            if action == "professional_visibility_get_me":
+                return action_visibility_get_me(conn, user_id)
+            if action == "professional_visibility_upsert_me":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_visibility_upsert_me(conn, user_id, body)
+            return resp({"error": "unknown action"}, 400)
+        finally:
+            conn.close()
+
+    # Admin token auth for framework/competency actions
     token = headers.get("X-Admin-Token") or headers.get("x-admin-token") or ""
     if not token:
         return resp({"error": "unauthorized"}, 401)
@@ -412,15 +834,6 @@ def handler(event: dict, context) -> dict:
         actor = get_admin(conn, token)
         if not actor:
             return resp({"error": "unauthorized"}, 401)
-
-        qs     = event.get("queryStringParameters") or {}
-        action = qs.get("action", "")
-        body   = {}
-        if event.get("body"):
-            try:
-                body = json.loads(event["body"])
-            except Exception:
-                pass
 
         # Framework
         if action == "professional_domains_list":
@@ -448,7 +861,7 @@ def handler(event: dict, context) -> dict:
             if method != "POST": return resp({"error": "POST required"}, 405)
             return action_role_profile_targets_upsert(conn, body)
 
-        # User Map
+        # User Map (admin)
         if action == "professional_user_competency_map_get":
             return action_user_competency_map_get(conn, qs)
         if action == "professional_user_competency_upsert":
