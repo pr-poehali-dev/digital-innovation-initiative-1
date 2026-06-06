@@ -488,6 +488,24 @@ export default function CompetencyMapPage() {
                 }}
               />
 
+              {/* Guide helper — secondary, под списком доменов */}
+              <div className="flex items-center justify-center gap-2 py-1">
+                <Icon name="BookOpen" size={13} className="text-slate-400 flex-shrink-0" />
+                <p className="text-xs text-slate-400">
+                  Не знаете, с чего начать?{" "}
+                  <Link
+                    to="/guide"
+                    onClick={() => {
+                      analytics.guideOpened("competency_map_empty_state");
+                      analytics.guideCtaClicked("open_guide", "competency_map_empty_state");
+                    }}
+                    className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
+                  >
+                    Откройте инструкцию
+                  </Link>
+                </p>
+              </div>
+
               {/* Self-assess entry — все домены доступны для оценки */}
               {data.all_domains.length > 0 && (
                 <div id="all-domains-list" className="space-y-2">

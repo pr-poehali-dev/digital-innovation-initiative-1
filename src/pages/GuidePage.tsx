@@ -5,8 +5,8 @@ import { analytics } from "@/lib/analytics";
 
 // ── Analytics ────────────────────────────────────────────────────────────
 
-function trackCta(ctaId: string, dest: string) {
-  analytics.landingCtaClicked(`guide_${ctaId}`, dest);
+function trackCta(ctaId: string) {
+  analytics.guideCtaClicked(ctaId, "guide_page");
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────
@@ -323,7 +323,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 export default function GuidePage() {
   useEffect(() => {
-    analytics.landingCtaClicked("guide_opened", "/guide");
+    analytics.guideOpened("direct");
   }, []);
 
   return (
@@ -341,7 +341,7 @@ export default function GuidePage() {
             <Link to="/login" className="text-sm text-slate-500 hover:text-slate-800 transition-colors">Войти</Link>
             <Link
               to="/cabinet/competency-map"
-              onClick={() => trackCta("nav_cta", "/cabinet/competency-map")}
+              onClick={() => trackCta("nav_cta")}
               className="px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-xl hover:bg-slate-700 transition-colors"
             >
               Начать
@@ -367,7 +367,7 @@ export default function GuidePage() {
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
             <Link
               to="/cabinet/competency-map"
-              onClick={() => trackCta("hero_primary", "/cabinet/competency-map")}
+              onClick={() => trackCta("hero_primary")}
               className="px-6 py-3 bg-slate-800 text-white font-semibold rounded-xl hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
             >
               <Icon name="Map" size={16} />
@@ -469,7 +469,7 @@ export default function GuidePage() {
                     <h3 className="font-bold text-slate-800">{step.title}</h3>
                     <Link
                       to={step.link}
-                      onClick={() => trackCta(`step_${i + 1}`, step.link)}
+                      onClick={() => trackCta(`step_${i + 1}`)}
                       className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors whitespace-nowrap flex items-center gap-1"
                     >
                       {step.linkLabel}
@@ -498,7 +498,7 @@ export default function GuidePage() {
               <Link
                 key={i}
                 to={mod.link}
-                onClick={() => trackCta(`module_${mod.title.toLowerCase().replace(/ /g, "_")}`, mod.link)}
+                onClick={() => trackCta(`module_${mod.title.toLowerCase().replace(/ /g, "_")}`)}
                 className={`group border-2 rounded-2xl p-5 transition-all hover:shadow-md ${mod.color}`}
               >
                 <div className="flex items-center gap-3 mb-3">
@@ -553,7 +553,7 @@ export default function GuidePage() {
                 </ol>
                 <Link
                   to={sc.cta.link}
-                  onClick={() => trackCta(`scenario_${i + 1}`, sc.cta.link)}
+                  onClick={() => trackCta(`scenario_${i + 1}`)}
                   className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 transition-colors bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-50"
                 >
                   {sc.cta.label}
@@ -590,7 +590,7 @@ export default function GuidePage() {
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
               to="/cabinet/competency-map"
-              onClick={() => trackCta("results_cta_primary", "/cabinet/competency-map")}
+              onClick={() => trackCta("results_cta_primary")}
               className="px-6 py-3 bg-white text-slate-800 font-semibold rounded-xl hover:bg-slate-100 transition-colors flex items-center justify-center gap-2"
             >
               <Icon name="Map" size={16} />
@@ -598,7 +598,7 @@ export default function GuidePage() {
             </Link>
             <Link
               to="/cabinet"
-              onClick={() => trackCta("results_cta_secondary", "/cabinet")}
+              onClick={() => trackCta("results_cta_secondary")}
               className="px-6 py-3 bg-white/10 text-white font-semibold rounded-xl hover:bg-white/20 transition-colors border border-white/20"
             >
               Перейти в кабинет
@@ -624,7 +624,7 @@ export default function GuidePage() {
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
               to="/cabinet/competency-map"
-              onClick={() => trackCta("final_primary", "/cabinet/competency-map")}
+              onClick={() => trackCta("final_primary")}
               className="px-8 py-3.5 bg-slate-800 text-white font-semibold rounded-xl hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
             >
               <Icon name="Map" size={16} />
@@ -632,7 +632,7 @@ export default function GuidePage() {
             </Link>
             <Link
               to="/cabinet"
-              onClick={() => trackCta("final_secondary", "/cabinet")}
+              onClick={() => trackCta("final_secondary")}
               className="px-8 py-3.5 bg-white border border-slate-200 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 transition-colors"
             >
               Перейти в кабинет

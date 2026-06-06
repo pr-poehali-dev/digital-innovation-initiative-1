@@ -29,10 +29,21 @@ type LookupResult = "found" | "not_found" | "error";
 
 // --- Карта событий ---
 export type AnalyticsEvents = {
-  // 0. Лендинг и Guide — клик по CTA
+  // 0. Лендинг — клик по CTA
   landing_cta_clicked: {
-    cta_id: string;   // "hero_start_self_assessment" | "hero_learn_more" | "guide_*" | etc.
+    cta_id: string;   // "hero_start_self_assessment" | "hero_learn_more" | etc.
     destination: string;
+  };
+
+  // 0b. Guide — открытие страницы
+  guide_opened: {
+    source: string;  // "direct" | "competency_map_empty_state" | "sidebar" | "landing_nav" | etc.
+  };
+
+  // 0c. Guide — клик по CTA внутри guide или ссылке на guide
+  guide_cta_clicked: {
+    cta_id: string;   // "open_guide" | "hero_primary" | "step_1" | "module_*" | "scenario_*" | etc.
+    source: string;   // откуда кликнули: "competency_map_empty_state" | "guide_page" | etc.
   };
 
   // 1. Переключение вкладки на VisualsPage
@@ -389,6 +400,14 @@ export const analytics = {
 
   landingCtaClicked(ctaId: string, destination: string) {
     sendEvent("landing_cta_clicked", { cta_id: ctaId, destination });
+  },
+
+  guideOpened(source: string) {
+    sendEvent("guide_opened", { source });
+  },
+
+  guideCtaClicked(ctaId: string, source: string) {
+    sendEvent("guide_cta_clicked", { cta_id: ctaId, source });
   },
 
   projectFilesEmptyState(projectId: number, filesTotalCount: number) {
