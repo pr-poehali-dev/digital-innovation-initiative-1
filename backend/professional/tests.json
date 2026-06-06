@@ -1,0 +1,7 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "domains без токена — 401", "method": "GET", "path": "/?action=professional_domains_list", "expectedStatus": 401},
+    {"name": "competencies без токена — 401", "method": "GET", "path": "/?action=professional_competencies_list", "expectedStatus": 401}
+  ]
+}

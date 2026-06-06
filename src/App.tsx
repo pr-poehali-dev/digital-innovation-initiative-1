@@ -25,6 +25,7 @@ import AdminFlagsPage from "./pages/admin/AdminFlagsPage";
 import AdminTicketsPage from "./pages/admin/AdminTicketsPage";
 import AdminAutomationsPage from "./pages/admin/AdminAutomationsPage";
 import AdminContentPage from "./pages/admin/AdminContentPage";
+import AdminCompetenciesPage from "./pages/admin/AdminCompetenciesPage";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
@@ -84,6 +85,7 @@ const App = () => (
               <Route path="/admin/tickets" element={<AdminRoute><AdminTicketsPage /></AdminRoute>} />
               <Route path="/admin/automations" element={<AdminRoute><AdminAutomationsPage /></AdminRoute>} />
               <Route path="/admin/content" element={<AdminRoute><AdminContentPage /></AdminRoute>} />
+              <Route path="/admin/competencies" element={<AdminRoute><AdminCompetenciesPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}
