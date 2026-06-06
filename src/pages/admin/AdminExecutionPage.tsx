@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
-import { api, STRATEGY_URL, strategyHdr } from "@/lib/strategyApi";
+import { api } from "@/lib/strategyApi";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -28,7 +28,29 @@ type RoadmapItem = { id: number; title: string; target_metric: string; target_se
 type ScenarioItem = { id: number; name: string; scenario_type: string; confidence: string };
 type Summary = { active: number; at_risk: number; overdue: number; done_30d: number };
 
-type ViewTab = "board" | "list";
+type WeeklyReview = {
+  id: number; week_start: string; week_end: string;
+  status: string; title: string; confidence: string;
+  created_by: string; created_at: string; published_at: string | null;
+};
+type WeeklyReviewDetail = WeeklyReview & {
+  summary: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  initiatives: Record<string, unknown>;
+  roadmap: unknown[];
+  scenarios: unknown[];
+  ai_digest: Record<string, unknown>;
+  decisions: Decision[];
+};
+type Decision = {
+  id: number; review_id: number | null; title: string; description: string;
+  decision_type: string; status: string; owner: string;
+  linked_initiative_id: number | null; linked_roadmap_item_id: number | null;
+  due_date: string | null; notes: unknown[];
+  created_by: string; updated_by: string; created_at: string; updated_at: string;
+};
+
+type ViewTab = "board" | "list" | "reviews" | "decisions";
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -477,6 +499,102 @@ function DetailDrawer({ initiative, onClose, onUpdated }: {
   );
 }
 
+// ── Decision Modal ──────────────────────────────────────────────────
+
+function DecisionModal({ prefill, onClose, onSaved }: {
+  prefill: Partial<Decision>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    title:         prefill.title         ?? "",
+    description:   prefill.description   ?? "",
+    decision_type: prefill.decision_type ?? "other",
+    status:        prefill.status        ?? "open",
+    owner:         prefill.owner         ?? "",
+    due_date:      prefill.due_date      ?? "",
+    review_id:     prefill.review_id     ? String(prefill.review_id) : "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!form.title.trim()) return;
+    setSaving(true);
+    await api.decisionCreate({
+      title:         form.title.trim(),
+      description:   form.description,
+      decision_type: form.decision_type,
+      status:        form.status,
+      owner:         form.owner,
+      due_date:      form.due_date || undefined,
+      review_id:     form.review_id ? Number(form.review_id) : undefined,
+    });
+    setSaving(false);
+    onSaved();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md mx-4 p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-100">Создать Decision</h3>
+          <button onClick={onClose} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={16} /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Название *</label>
+            <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+              placeholder="Что нужно решить?" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Тип</label>
+              <select value={form.decision_type} onChange={e => setForm(f => ({ ...f, decision_type: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-300 focus:outline-none focus:border-violet-600">
+                {["priority","scope","owner","metric","process","risk","other"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Статус</label>
+              <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-300 focus:outline-none focus:border-violet-600">
+                {["open","in_progress","decided","done"].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Owner</label>
+              <input value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+                placeholder="email / имя" />
+            </div>
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Дедлайн</label>
+              <input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 focus:outline-none focus:border-violet-600" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] text-gray-500 mb-1 font-semibold uppercase">Описание / контекст</label>
+            <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              rows={2} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600 resize-none"
+              placeholder="Почему нужно это решение..." />
+          </div>
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 text-sm rounded-xl transition-colors">Отмена</button>
+          <button onClick={save} disabled={saving || !form.title.trim()}
+            className="flex-1 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
+            {saving ? "Сохраняю..." : "Создать"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ────────────────────────────────────────────────────────
 
 export default function AdminExecutionPage() {
@@ -491,6 +609,19 @@ export default function AdminExecutionPage() {
   const [selectedDetail, setSelectedDetail] = useState<Initiative | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // W7.2: Weekly Reviews
+  const [reviews, setReviews] = useState<WeeklyReview[]>([]);
+  const [reviewDetail, setReviewDetail] = useState<WeeklyReviewDetail | null>(null);
+  const [generatingReview, setGeneratingReview] = useState(false);
+  const [reviewWeekStart, setReviewWeekStart] = useState("");
+  const [showDecisionModal, setShowDecisionModal] = useState<Partial<Decision> | null>(null);
+
+  // W7.2: Decisions
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [decisionsFilter, setDecisionsFilter] = useState("open");
+  const [loadingDecisions, setLoadingDecisions] = useState(false);
 
   function showMsg(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000); }
 
@@ -514,6 +645,45 @@ export default function AdminExecutionPage() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const loadReviews = useCallback(async () => {
+    const d = await api.weeklyReviewsList();
+    setReviews(d.reviews ?? []);
+  }, []);
+
+  const loadDecisions = useCallback(async (filter = decisionsFilter) => {
+    setLoadingDecisions(true);
+    const params: Record<string, string> = filter && filter !== "all" ? { status: filter } : {};
+    const d = await api.decisionsList(params);
+    setDecisions(d.decisions ?? []);
+    setOverdueCount(d.overdue_count ?? 0);
+    setLoadingDecisions(false);
+  }, [decisionsFilter]);
+
+  useEffect(() => {
+    if (view === "reviews") loadReviews();
+    if (view === "decisions") loadDecisions(decisionsFilter);
+  }, [view, loadReviews, loadDecisions, decisionsFilter]);
+
+  async function generateReview() {
+    setGeneratingReview(true);
+    const body: Record<string, string> = {};
+    if (reviewWeekStart) {
+      const start = new Date(reviewWeekStart);
+      const end = new Date(start); end.setDate(end.getDate() + 6);
+      body.week_start = reviewWeekStart;
+      body.week_end = end.toISOString().split("T")[0];
+    }
+    await api.weeklyReviewGenerate(body);
+    setGeneratingReview(false);
+    await loadReviews();
+    showMsg("Weekly Review сгенерирован");
+  }
+
+  async function openReview(id: number) {
+    const d = await api.weeklyReviewGet(id);
+    setReviewDetail(d.review ?? null);
+  }
 
   async function openDetail(id: number) {
     setSelectedId(id);
@@ -545,18 +715,38 @@ export default function AdminExecutionPage() {
           </div>
           <div className="flex items-center gap-2">
             {/* View toggle */}
-            <div className="flex items-center bg-gray-800 rounded-xl p-1 gap-1">
-              {([["board","Kanban","Board"],["list","List","List"]] as const).map(([k, icon, label]) => (
-                <button key={k} onClick={() => setView(k)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${view === k ? "bg-gray-700 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}>
+            <div className="flex items-center bg-gray-800 rounded-xl p-1 gap-0.5">
+              {([
+                ["board",     "Kanban",       "Board"],
+                ["list",      "List",         "List"],
+                ["reviews",   "CalendarDays", "Reviews"],
+                ["decisions", "CheckSquare",  "Decisions"],
+              ] as const).map(([k, icon, label]) => (
+                <button key={k} onClick={() => setView(k as ViewTab)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${view === k ? "bg-gray-700 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}>
                   <Icon name={icon} size={12} />{label}
                 </button>
               ))}
             </div>
-            <button onClick={() => setShowCreate(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
-              <Icon name="Plus" size={13} /> Инициатива
-            </button>
+            {(view === "board" || view === "list") && (
+              <button onClick={() => setShowCreate(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
+                <Icon name="Plus" size={13} /> Инициатива
+              </button>
+            )}
+            {view === "reviews" && (
+              <button onClick={generateReview} disabled={generatingReview}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-xs font-semibold rounded-xl transition-colors">
+                {generatingReview ? <Spinner /> : <Icon name="CalendarDays" size={13} />}
+                Generate Review
+              </button>
+            )}
+            {view === "decisions" && (
+              <button onClick={() => setShowDecisionModal({})}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
+                <Icon name="Plus" size={13} /> Decision
+              </button>
+            )}
           </div>
         </div>
 
@@ -680,7 +870,308 @@ export default function AdminExecutionPage() {
             </table>
           </div>
         )}
+
+        {/* ── WEEKLY REVIEWS TAB ──────────────────────────────────── */}
+        {view === "reviews" && (
+          <div className="space-y-5">
+            {/* Week picker */}
+            <div className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <div>
+                <p className="text-[10px] text-gray-500 mb-1 font-semibold uppercase">Начало недели (необязательно)</p>
+                <input type="date" value={reviewWeekStart} onChange={e => setReviewWeekStart(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-violet-600" />
+              </div>
+              <p className="text-xs text-gray-600 mt-4">Пусто = текущая неделя</p>
+            </div>
+
+            {/* Reviews list */}
+            {reviews.length === 0 && (
+              <div className="text-center py-10 text-gray-600 text-sm">
+                Обзоров пока нет. Нажмите «Generate Review».
+              </div>
+            )}
+            <div className="space-y-2">
+              {reviews.map(r => {
+                const CONF: Record<string, string> = { high: "text-emerald-400", medium: "text-amber-400", low: "text-gray-500" };
+                return (
+                  <div key={r.id} className={`bg-gray-900 border rounded-xl p-4 flex items-center gap-4 ${r.status === "published" ? "border-violet-800/40" : "border-gray-800"}`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${r.status === "published" ? "bg-violet-900/40 text-violet-400 border-violet-800" : "bg-gray-800 text-gray-500 border-gray-700"}`}>
+                          {r.status}
+                        </span>
+                        <span className={`text-[10px] font-semibold ${CONF[r.confidence] ?? "text-gray-500"}`}>
+                          {r.confidence} confidence
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-200">{r.title}</p>
+                      <p className="text-[10px] text-gray-600">
+                        {r.week_start} — {r.week_end} · {new Date(r.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} · {r.created_by}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => openReview(r.id)}
+                        className="text-[10px] px-2.5 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 rounded-lg transition-colors">
+                        Открыть
+                      </button>
+                      {r.status === "draft" && (
+                        <button onClick={async () => { await api.weeklyReviewPublish(r.id); await loadReviews(); showMsg("Опубликовано"); }}
+                          className="text-[10px] px-2.5 py-1.5 bg-violet-900/40 hover:bg-violet-800/50 text-violet-400 border border-violet-800 rounded-lg transition-colors">
+                          Publish
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Review detail panel */}
+            {reviewDetail && (
+              <div className="bg-gray-900 border border-violet-800/40 rounded-xl p-5 space-y-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-base font-bold text-gray-100">{reviewDetail.title}</p>
+                    <p className="text-[10px] text-gray-600">{reviewDetail.week_start} — {reviewDetail.week_end} · confidence: {reviewDetail.confidence}</p>
+                  </div>
+                  <button onClick={() => setReviewDetail(null)} className="text-gray-600 hover:text-gray-400 p-1"><Icon name="X" size={14} /></button>
+                </div>
+
+                {/* AI Digest */}
+                {reviewDetail.ai_digest && !("error" in (reviewDetail.ai_digest as Record<string,unknown>)) && (
+                  <div className="space-y-4">
+                    {(reviewDetail.ai_digest as Record<string,unknown>).executive_summary && (
+                      <div className="bg-violet-900/20 border border-violet-800/40 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Icon name="Sparkles" size={13} className="text-violet-400" />
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Executive Summary</p>
+                        </div>
+                        <p className="text-sm text-violet-200">{String((reviewDetail.ai_digest as Record<string,unknown>).executive_summary)}</p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Wins */}
+                      {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).wins) && (reviewDetail.ai_digest as Record<string,unknown>).wins !== null && (
+                        <div className="bg-emerald-900/20 border border-emerald-800/40 rounded-xl p-3">
+                          <p className="text-[10px] text-emerald-400 font-semibold uppercase mb-2">Wins</p>
+                          {((reviewDetail.ai_digest as Record<string,unknown>).wins as string[]).map((w, i) => (
+                            <div key={i} className="flex gap-2 mb-1"><span className="text-emerald-500">✓</span><span className="text-xs text-gray-300">{w}</span></div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Risks */}
+                      {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).risks) && (
+                        <div className="bg-red-900/20 border border-red-800/40 rounded-xl p-3">
+                          <p className="text-[10px] text-red-400 font-semibold uppercase mb-2">Risks</p>
+                          {((reviewDetail.ai_digest as Record<string,unknown>).risks as string[]).map((r, i) => (
+                            <div key={i} className="flex gap-2 mb-1"><span className="text-red-500">⚠</span><span className="text-xs text-gray-300">{r}</span></div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Blockers */}
+                    {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).blockers) && ((reviewDetail.ai_digest as Record<string,unknown>).blockers as string[]).length > 0 && (
+                      <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-3">
+                        <p className="text-[10px] text-amber-400 font-semibold uppercase mb-2">Blockers</p>
+                        {((reviewDetail.ai_digest as Record<string,unknown>).blockers as string[]).map((b, i) => (
+                          <div key={i} className="flex gap-2 mb-1"><span className="text-amber-500">⊘</span><span className="text-xs text-gray-300">{b}</span></div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Decisions needed */}
+                    {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).decisions_needed) && ((reviewDetail.ai_digest as Record<string,unknown>).decisions_needed as Record<string,unknown>[]).length > 0 && (
+                      <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-3">
+                        <p className="text-[10px] text-violet-400 font-semibold uppercase mb-2">Decisions Needed</p>
+                        {((reviewDetail.ai_digest as Record<string,unknown>).decisions_needed as Record<string,unknown>[]).map((d, i) => (
+                          <div key={i} className="flex items-start gap-2 mb-2">
+                            <div className="flex-1">
+                              <p className="text-xs font-semibold text-gray-200">{String(d.title)}</p>
+                              {d.context && <p className="text-[10px] text-gray-500">{String(d.context)}</p>}
+                            </div>
+                            <button onClick={() => setShowDecisionModal({
+                              review_id: reviewDetail.id,
+                              title: String(d.title),
+                              description: String(d.context ?? ""),
+                              decision_type: String(d.type ?? "other"),
+                            })}
+                              className="text-[9px] px-2 py-0.5 bg-violet-900/30 text-violet-400 border border-violet-800/40 rounded hover:bg-violet-800/40 transition-colors flex-shrink-0">
+                              + Decision
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Next week focus */}
+                    {Array.isArray((reviewDetail.ai_digest as Record<string,unknown>).next_week_focus) && (
+                      <div className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-3">
+                        <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Next Week Focus</p>
+                        {((reviewDetail.ai_digest as Record<string,unknown>).next_week_focus as string[]).map((f, i) => (
+                          <div key={i} className="flex gap-2 mb-1"><span className="text-violet-500">→</span><span className="text-xs text-gray-300">{f}</span></div>
+                        ))}
+                      </div>
+                    )}
+
+                    {(reviewDetail.ai_digest as Record<string,unknown>).confidence_note && (
+                      <p className="text-[10px] text-gray-600 italic">{String((reviewDetail.ai_digest as Record<string,unknown>).confidence_note)}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Initiatives snapshot */}
+                {reviewDetail.initiatives && (
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { l: "Active",    v: (reviewDetail.initiatives as Record<string,unknown>).total_active,  cls: "text-violet-400" },
+                      { l: "At Risk",   v: (reviewDetail.initiatives as Record<string,unknown>).at_risk,       cls: "text-amber-400" },
+                      { l: "Done week", v: (reviewDetail.initiatives as Record<string,unknown>).done_week,     cls: "text-emerald-400" },
+                      { l: "Overdue",   v: (reviewDetail.initiatives as Record<string,unknown>).overdue,       cls: "text-red-400" },
+                    ].map(({ l, v, cls }) => (
+                      <div key={l} className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-3 text-center">
+                        <p className="text-[9px] text-gray-600 mb-0.5">{l}</p>
+                        <p className={`text-xl font-bold ${cls}`}>{String(v ?? 0)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Linked decisions */}
+                {reviewDetail.decisions && reviewDetail.decisions.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gray-500 font-semibold uppercase mb-2">Linked Decisions ({reviewDetail.decisions.length})</p>
+                    {reviewDetail.decisions.map(d => (
+                      <div key={d.id} className="flex items-center gap-2 py-1.5 border-b border-gray-800">
+                        <span className={`w-1.5 h-1.5 rounded-full ${d.status === "done" ? "bg-emerald-500" : d.status === "open" ? "bg-amber-500" : "bg-gray-600"}`} />
+                        <span className="text-xs text-gray-300 flex-1">{d.title}</span>
+                        <span className="text-[9px] text-gray-600">{d.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button onClick={() => setShowDecisionModal({ review_id: reviewDetail.id })}
+                    className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-xl border border-gray-700 transition-colors">
+                    <Icon name="Plus" size={12} /> Decision
+                  </button>
+                  {reviewDetail.status === "draft" && (
+                    <button onClick={async () => { await api.weeklyReviewPublish(reviewDetail.id); await loadReviews(); setReviewDetail(prev => prev ? { ...prev, status: "published" } : null); showMsg("Опубликовано"); }}
+                      className="flex items-center gap-2 px-3 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl transition-colors">
+                      <Icon name="Globe" size={12} /> Publish
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── DECISIONS TAB ───────────────────────────────────────── */}
+        {view === "decisions" && (
+          <div className="space-y-4">
+            {/* Filters */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {[["open","Open"],["in_progress","In Progress"],["decided","Decided"],["done","Done"],["all","All"]].map(([v, l]) => (
+                <button key={v} onClick={() => { setDecisionsFilter(v); loadDecisions(v); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${decisionsFilter === v ? "bg-violet-700 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"}`}>
+                  {l}
+                </button>
+              ))}
+              {overdueCount > 0 && (
+                <span className="ml-auto text-xs font-semibold text-red-400 flex items-center gap-1">
+                  <Icon name="Clock" size={12} /> {overdueCount} overdue
+                </span>
+              )}
+            </div>
+
+            {loadingDecisions && <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>}
+
+            {!loadingDecisions && decisions.length === 0 && (
+              <div className="text-center py-10 text-gray-600 text-sm">Решений пока нет. Создайте из Weekly Review или вручную.</div>
+            )}
+
+            {!loadingDecisions && decisions.length > 0 && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-800">
+                      {["Решение","Тип","Статус","Owner","Дедлайн","Инициатива",""].map(h => (
+                        <th key={h} className="text-left text-[10px] text-gray-500 font-semibold uppercase tracking-wide px-3 py-2.5">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {decisions.map(d => {
+                      const days = d.due_date ? Math.round((new Date(d.due_date).getTime() - Date.now()) / 86400000) : null;
+                      const overdue = days !== null && days < 0 && d.status !== "done";
+                      const TYPE_COLOR: Record<string, string> = {
+                        priority: "text-violet-400", risk: "text-red-400", scope: "text-amber-400",
+                        owner: "text-blue-400", metric: "text-emerald-400", process: "text-gray-400", other: "text-gray-500",
+                      };
+                      const STATUS_CFG: Record<string, string> = {
+                        open: "bg-amber-900/30 text-amber-400 border-amber-800",
+                        in_progress: "bg-violet-900/30 text-violet-400 border-violet-800",
+                        decided: "bg-blue-900/30 text-blue-400 border-blue-800",
+                        done: "bg-emerald-900/30 text-emerald-400 border-emerald-800",
+                      };
+                      return (
+                        <tr key={d.id} className="border-b border-gray-800/60 hover:bg-gray-800/20 transition-colors">
+                          <td className="px-3 py-2.5 max-w-[220px]">
+                            <p className="text-xs font-semibold text-gray-200 truncate">{d.title}</p>
+                            {d.description && <p className="text-[9px] text-gray-600 truncate">{d.description}</p>}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`text-[10px] font-semibold ${TYPE_COLOR[d.decision_type] ?? "text-gray-500"}`}>{d.decision_type}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <select value={d.status} onChange={async e => { await api.decisionUpdate({ id: d.id, status: e.target.value }); await loadDecisions(decisionsFilter); }}
+                              onClick={e => e.stopPropagation()}
+                              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border focus:outline-none cursor-pointer bg-transparent ${STATUS_CFG[d.status] ?? "bg-gray-800 text-gray-500 border-gray-700"}`}>
+                              {["open","in_progress","decided","done"].map(s => <option key={s} value={s} className="bg-gray-900">{s}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-gray-500">{d.owner || "—"}</td>
+                          <td className="px-3 py-2.5">
+                            {days !== null ? (
+                              <span className={`text-[10px] font-semibold ${overdue ? "text-red-400" : days < 3 ? "text-amber-400" : "text-gray-600"}`}>
+                                {overdue ? `${Math.abs(days)}d over` : `${days}d`}
+                              </span>
+                            ) : <span className="text-[10px] text-gray-700">—</span>}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {d.linked_initiative_id ? (
+                              <span className="text-[10px] text-violet-400">#{d.linked_initiative_id}</span>
+                            ) : <span className="text-[10px] text-gray-700">—</span>}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <button onClick={() => api.decisionDelete(d.id).then(() => loadDecisions(decisionsFilter))}
+                              className="text-gray-700 hover:text-red-500 p-1 transition-colors">
+                              <Icon name="Trash2" size={12} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
+
+      {/* Decision create/edit modal */}
+      {showDecisionModal !== null && (
+        <DecisionModal
+          prefill={showDecisionModal}
+          onClose={() => setShowDecisionModal(null)}
+          onSaved={() => { setShowDecisionModal(null); loadDecisions(decisionsFilter); showMsg("Решение сохранено"); }}
+        />
+      )}
 
       {/* Detail drawer */}
       {selectedDetail && (

@@ -1809,10 +1809,409 @@ def action_initiative_metrics_refresh(conn, actor, body, origin):
     return resp({"ok": True, "current_value": current}, origin=origin)
 
 
+# ── Weekly Reviews ───────────────────────────────────────────────────
+
+def _collect_week_snapshot(conn, week_start: str, week_end: str) -> dict:
+    """Детерминистично собирает снимок данных за неделю."""
+    s = S
+
+    # Initiatives summary
+    def q1(sql): return (_fetch_one(conn, sql) or [0])[0] or 0
+    total_active  = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE status='active'")
+    total_planned = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE status='planned'")
+    at_risk       = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE status='at_risk'")
+    overdue       = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE status IN ('active','planned') AND due_date < '{week_end}'")
+    done_week     = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE status='done' AND updated_at::date BETWEEN '{week_start}' AND '{week_end}'")
+    no_updates    = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE status='active' AND updated_at < NOW()-INTERVAL '7 days'")
+    health_red    = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE health='red'")
+    health_yellow = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_initiatives WHERE health='yellow'")
+
+    # Recent initiative updates
+    upd_rows = _fetch_all(conn, f"""
+        SELECT i.title, u.update_text, u.status_after, u.progress_pct, u.created_at
+        FROM {s}.admin_strategy_initiative_updates u
+        JOIN {s}.admin_strategy_initiatives i ON i.id = u.initiative_id
+        WHERE u.created_at::date BETWEEN '{week_start}' AND '{week_end}'
+        ORDER BY u.created_at DESC LIMIT 20
+    """)
+    recent_updates = [{
+        "initiative": r[0], "text": r[1], "status_after": r[2],
+        "progress_pct": r[3], "created_at": str(r[4]),
+    } for r in upd_rows]
+
+    # At-risk / overdue initiatives detail
+    risk_rows = _fetch_all(conn, f"""
+        SELECT id, title, health, status, due_date, owner, target_metric
+        FROM {s}.admin_strategy_initiatives
+        WHERE status IN ('active','at_risk') AND (health IN ('red','yellow') OR due_date < '{week_end}')
+        ORDER BY health DESC, due_date NULLS LAST LIMIT 10
+    """)
+    risks_detail = [{
+        "id": r[0], "title": r[1], "health": r[2], "status": r[3],
+        "due_date": str(r[4]) if r[4] else None, "owner": r[5], "target_metric": r[6],
+    } for r in risk_rows]
+
+    # Metrics snapshot (last 7 days vs prev 7 days)
+    d_from  = week_start
+    d_to    = week_end
+    p7_from = (datetime.date.fromisoformat(week_start) - timedelta(days=7)).isoformat()
+    p7_to   = (datetime.date.fromisoformat(week_start) - timedelta(days=1)).isoformat()
+
+    def rate(num, den): return round(num / den * 100, 1) if den else 0
+
+    new_users_cur  = q1(f"SELECT COUNT(*) FROM {s}.users WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'")
+    new_users_prev = q1(f"SELECT COUNT(*) FROM {s}.users WHERE created_at::date BETWEEN '{p7_from}' AND '{p7_to}'")
+    act_cur  = q1(f"SELECT COUNT(DISTINCT g.user_id) FROM {s}.learning_goals g JOIN {s}.users u ON u.id=g.user_id WHERE u.created_at::date BETWEEN '{d_from}' AND '{d_to}'")
+    act_prev = q1(f"SELECT COUNT(DISTINCT g.user_id) FROM {s}.learning_goals g JOIN {s}.users u ON u.id=g.user_id WHERE u.created_at::date BETWEEN '{p7_from}' AND '{p7_to}'")
+    act_rate_cur  = rate(act_cur, new_users_cur)
+    act_rate_prev = rate(act_prev, new_users_prev)
+
+    goals_total  = q1(f"SELECT COUNT(*) FROM {s}.learning_goals WHERE status='active'")
+    stalled_cur  = q1(f"SELECT COUNT(*) FROM {s}.learning_goals g WHERE g.status='active' AND NOT EXISTS (SELECT 1 FROM {s}.learning_checkins c WHERE c.goal_id=g.id AND c.created_at>=NOW()-INTERVAL '14 days')")
+    stalled_rate = rate(stalled_cur, goals_total)
+
+    tickets_cur  = q1(f"SELECT COUNT(*) FROM {s}.admin_tickets WHERE created_at::date BETWEEN '{d_from}' AND '{d_to}'")
+    tickets_prev = q1(f"SELECT COUNT(*) FROM {s}.admin_tickets WHERE created_at::date BETWEEN '{p7_from}' AND '{p7_to}'")
+
+    metrics = {
+        "new_users":    {"cur": new_users_cur,  "prev": new_users_prev,  "delta": new_users_cur - new_users_prev},
+        "activation_rate": {"cur": act_rate_cur, "prev": act_rate_prev,  "delta": round(act_rate_cur - act_rate_prev, 1), "unit": "%"},
+        "stalled_goals_rate": {"cur": stalled_rate, "prev": None, "delta": None, "unit": "%"},
+        "tickets_week": {"cur": tickets_cur,    "prev": tickets_prev,    "delta": tickets_cur - tickets_prev},
+    }
+
+    # New roadmap items this week
+    rm_rows = _fetch_all(conn, f"""
+        SELECT id, title, lane, source_type FROM {s}.admin_strategy_roadmap_items
+        WHERE created_at::date BETWEEN '{week_start}' AND '{week_end}' AND status!='archived'
+        ORDER BY created_at DESC LIMIT 10
+    """)
+    new_roadmap = [{"id": r[0], "title": r[1], "lane": r[2], "source_type": r[3]} for r in rm_rows]
+
+    # New scenarios this week
+    sc_rows = _fetch_all(conn, f"""
+        SELECT id, name, scenario_type, confidence FROM {s}.admin_strategy_scenarios
+        WHERE created_at::date BETWEEN '{week_start}' AND '{week_end}'
+        ORDER BY created_at DESC LIMIT 5
+    """)
+    new_scenarios = [{"id": r[0], "name": r[1], "type": r[2], "confidence": r[3]} for r in sc_rows]
+
+    # Open decisions
+    open_decisions = q1(f"SELECT COUNT(*) FROM {s}.admin_strategy_decisions WHERE status IN ('open','in_progress')")
+
+    return {
+        "initiatives": {
+            "total_active": total_active, "planned": total_planned,
+            "at_risk": at_risk, "overdue": overdue,
+            "done_week": done_week, "no_updates_7d": no_updates,
+            "health_red": health_red, "health_yellow": health_yellow,
+            "recent_updates": recent_updates,
+            "risks_detail": risks_detail,
+        },
+        "metrics": metrics,
+        "new_roadmap_items": new_roadmap,
+        "new_scenarios": new_scenarios,
+        "open_decisions": open_decisions,
+        "period": {"week_start": week_start, "week_end": week_end},
+    }
+
+
+def _generate_ai_digest(snapshot: dict, profile: dict) -> dict:
+    """AI digest поверх уже собранного snapshot."""
+    try:
+        inits  = snapshot["initiatives"]
+        mets   = snapshot["metrics"]
+        sample = inits.get("total_active", 0) + inits.get("planned", 0)
+        low_conf = sample < 5
+
+        context = f"""
+Недельный управленческий снимок:
+
+Инициативы:
+- Active: {inits['total_active']}, At Risk: {inits['at_risk']}, Overdue: {inits['overdue']}
+- Done this week: {inits['done_week']}, No updates 7d: {inits['no_updates_7d']}
+- Health Red: {inits['health_red']}, Yellow: {inits['health_yellow']}
+
+Метрики:
+- Новые пользователи: {mets['new_users']['cur']} (prev {mets['new_users']['prev']}, delta {mets['new_users']['delta']})
+- Activation rate: {mets['activation_rate']['cur']}% (prev {mets['activation_rate']['prev']}%, delta {mets['activation_rate']['delta']}%)
+- Stalled goals: {mets['stalled_goals_rate']['cur']}%
+- Тикеты за неделю: {mets['tickets_week']['cur']} (prev {mets['tickets_week']['prev']})
+
+Risks/Blockers:
+{json.dumps(inits.get('risks_detail', [])[:5], ensure_ascii=False, indent=2)}
+
+Обновления за неделю (последние 5):
+{json.dumps(inits.get('recent_updates', [])[:5], ensure_ascii=False, indent=2)}
+
+Новые Roadmap items: {len(snapshot.get('new_roadmap_items', []))}
+Новые Scenarios: {len(snapshot.get('new_scenarios', []))}
+Open decisions: {snapshot.get('open_decisions', 0)}
+"""
+        if profile.get("north_star_name"):
+            context += f"\nNorth Star: {profile['north_star_name']}: {profile.get('north_star_definition','')}"
+
+        messages = [
+            {"role": "system", "content": "Ты управленческий аналитик. Анализируй только предоставленные данные. Не выдумывай. Отвечай структурированным JSON. Русский язык."},
+            {"role": "user", "content": f"""
+Проанализируй еженедельный управленческий снимок и дай структурированный digest.
+
+{context}
+
+{"ВАЖНО: данных мало (sample < 5 инициатив) — digest иллюстративный, confidence=low." if low_conf else ""}
+
+Верни JSON строго в таком формате:
+{{
+  "executive_summary": "2-3 предложения: главное за неделю",
+  "wins": ["достижение 1", "достижение 2"],
+  "risks": ["риск 1 с конкретикой", "риск 2"],
+  "blockers": ["блокер 1", "блокер 2"],
+  "decisions_needed": [
+    {{"title": "решение 1", "context": "почему нужно", "type": "priority"}},
+    {{"title": "решение 2", "context": "почему нужно", "type": "risk"}}
+  ],
+  "next_week_focus": ["фокус 1", "фокус 2", "фокус 3"],
+  "confidence_note": "пояснение уровня достоверности"
+}}
+Только JSON.
+"""}
+        ]
+        text = call_gpt(messages, max_tokens=2000, temperature=0.3)
+        import re
+        clean = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        clean = re.sub(r'\s*```$', '', clean).strip()
+        m = re.search(r'\{[\s\S]*\}', clean)
+        if m: clean = m.group(0)
+        return json.loads(clean)
+    except Exception as e:
+        return {"error": str(e), "executive_summary": "Digest недоступен", "wins": [], "risks": [], "blockers": [], "decisions_needed": [], "next_week_focus": [], "confidence_note": "error"}
+
+
+def action_weekly_review_generate(conn, actor, body, origin):
+    """Генерация weekly review: snapshot + AI digest, сохранение."""
+    # Определяем период
+    if body.get("week_start") and body.get("week_end"):
+        week_start = body["week_start"]
+        week_end   = body["week_end"]
+    else:
+        today = datetime.date.today()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        week_end   = (today - timedelta(days=today.weekday()) + timedelta(days=6)).isoformat()
+
+    title = body.get("title") or f"Weekly Review {week_start}"
+
+    # Collect deterministic snapshot
+    snapshot = _collect_week_snapshot(conn, week_start, week_end)
+
+    # Load strategy profile for context
+    profile = {}
+    try:
+        p_rows = _fetch_all(conn, f"SELECT mission_text,north_star_name,north_star_definition FROM {S}.admin_strategy_profile LIMIT 1")
+        if p_rows:
+            profile = {"mission_text": p_rows[0][0], "north_star_name": p_rows[0][1], "north_star_definition": p_rows[0][2]}
+    except Exception:
+        pass
+
+    # AI digest
+    ai_digest = _generate_ai_digest(snapshot, profile)
+
+    # Confidence
+    n_init = snapshot["initiatives"]["total_active"] + snapshot["initiatives"]["planned"]
+    confidence = "high" if n_init >= 10 else "medium" if n_init >= 3 else "low"
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_weekly_reviews
+              (week_start, week_end, status, title, summary_json,
+               metrics_snapshot_json, initiatives_snapshot_json, roadmap_snapshot_json,
+               scenarios_snapshot_json, ai_digest_json, confidence, created_by)
+            VALUES(%s,%s,'draft',%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (week_start, week_end, title,
+              json.dumps(snapshot, ensure_ascii=False, default=str),
+              json.dumps(snapshot["metrics"], ensure_ascii=False, default=str),
+              json.dumps(snapshot["initiatives"], ensure_ascii=False, default=str),
+              json.dumps(snapshot.get("new_roadmap_items", []), ensure_ascii=False, default=str),
+              json.dumps(snapshot.get("new_scenarios", []), ensure_ascii=False, default=str),
+              json.dumps(ai_digest, ensure_ascii=False, default=str),
+              confidence, actor["email"]))
+        review_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "strategy.weekly_review_generated", f"id={review_id} week={week_start}")
+
+    return resp({
+        "review_id": review_id, "week_start": week_start, "week_end": week_end,
+        "title": title, "confidence": confidence,
+        "snapshot": snapshot, "ai_digest": ai_digest,
+    }, origin=origin)
+
+
+def action_weekly_reviews_list(conn, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id, week_start, week_end, status, title, confidence,
+               created_by, created_at, published_at
+        FROM {S}.admin_strategy_weekly_reviews
+        ORDER BY week_start DESC LIMIT 20
+    """)
+    return resp({"reviews": [{
+        "id": r[0], "week_start": str(r[1]), "week_end": str(r[2]),
+        "status": r[3], "title": r[4], "confidence": r[5],
+        "created_by": r[6], "created_at": str(r[7]),
+        "published_at": str(r[8]) if r[8] else None,
+    } for r in rows]}, origin=origin)
+
+
+def action_weekly_review_get(conn, rid, origin):
+    rows = _fetch_all(conn, f"""
+        SELECT id, week_start, week_end, status, title, summary_json,
+               metrics_snapshot_json, initiatives_snapshot_json, roadmap_snapshot_json,
+               scenarios_snapshot_json, ai_digest_json, confidence,
+               created_by, created_at, published_at
+        FROM {S}.admin_strategy_weekly_reviews WHERE id={rid} LIMIT 1
+    """)
+    if not rows: return resp({"error": "not_found"}, 404, origin)
+    r = rows[0]
+    # Fetch decisions linked to this review
+    d_rows = _fetch_all(conn, f"""
+        SELECT id, title, decision_type, status, owner, due_date
+        FROM {S}.admin_strategy_decisions WHERE review_id={rid}
+        ORDER BY created_at
+    """)
+    decisions = [{"id": x[0], "title": x[1], "type": x[2], "status": x[3], "owner": x[4], "due_date": str(x[5]) if x[5] else None} for x in d_rows]
+    return resp({"review": {
+        "id": r[0], "week_start": str(r[1]), "week_end": str(r[2]),
+        "status": r[3], "title": r[4],
+        "summary": r[5], "metrics": r[6], "initiatives": r[7],
+        "roadmap": r[8], "scenarios": r[9], "ai_digest": r[10],
+        "confidence": r[11], "created_by": r[12],
+        "created_at": str(r[13]), "published_at": str(r[14]) if r[14] else None,
+        "decisions": decisions,
+    }}, origin=origin)
+
+
+def action_weekly_review_publish(conn, actor, body, origin):
+    rid = body.get("id")
+    if not rid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            UPDATE {S}.admin_strategy_weekly_reviews
+            SET status='published', published_by=%s, published_at=NOW()
+            WHERE id=%s
+        """, (actor["email"], int(rid)))
+    conn.commit()
+    _audit(conn, actor, "strategy.weekly_review_published", f"id={rid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_weekly_review_delete(conn, actor, body, origin):
+    rid = body.get("id")
+    if not rid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_weekly_reviews SET id=id WHERE id=%s", (int(rid),))
+    conn.commit()
+    _audit(conn, actor, "strategy.weekly_review_deleted", f"id={rid}")
+    return resp({"ok": True}, origin=origin)
+
+
+# ── Decisions ─────────────────────────────────────────────────────────
+
+DECISION_TYPES    = ["priority","scope","owner","metric","process","risk","other"]
+DECISION_STATUSES = ["open","decided","in_progress","done","archived"]
+
+
+def _decision_row(r) -> dict:
+    return {
+        "id": r[0], "review_id": r[1], "title": r[2], "description": r[3],
+        "decision_type": r[4], "status": r[5], "owner": r[6],
+        "linked_initiative_id": r[7], "linked_roadmap_item_id": r[8],
+        "due_date": str(r[9]) if r[9] else None,
+        "notes": r[10] if isinstance(r[10], list) else [],
+        "created_by": r[11], "updated_by": r[12],
+        "created_at": str(r[13]), "updated_at": str(r[14]),
+    }
+
+
+def action_decisions_list(conn, qs, origin):
+    conditions = ["status!='archived'"]
+    if qs.get("status"):     conditions.append(f"status='{qs['status']}'")
+    if qs.get("review_id"):  conditions.append(f"review_id={int(qs['review_id'])}")
+    where = " AND ".join(conditions)
+    today = datetime.date.today().isoformat()
+    rows = _fetch_all(conn, f"""
+        SELECT id, review_id, title, description, decision_type, status, owner,
+               linked_initiative_id, linked_roadmap_item_id, due_date, notes_json,
+               created_by, updated_by, created_at, updated_at
+        FROM {S}.admin_strategy_decisions
+        WHERE {where}
+        ORDER BY
+          CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+          due_date NULLS LAST, created_at DESC
+        LIMIT 100
+    """)
+    items = [_decision_row(r) for r in rows]
+    overdue_count = sum(1 for x in items if x["due_date"] and x["due_date"] < today and x["status"] in ("open","in_progress"))
+    return resp({"decisions": items, "overdue_count": overdue_count}, origin=origin)
+
+
+def action_decision_create(conn, actor, body, origin):
+    title = (body.get("title") or "").strip()
+    if not title: return resp({"error": "title required"}, 400, origin)
+    dtype   = body.get("decision_type", "other"); dtype = dtype if dtype in DECISION_TYPES else "other"
+    status  = body.get("status", "open"); status = status if status in DECISION_STATUSES else "open"
+    ae = actor["email"]
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.admin_strategy_decisions
+              (review_id, title, description, decision_type, status, owner,
+               linked_initiative_id, linked_roadmap_item_id, due_date,
+               notes_json, created_by, updated_by)
+            VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,'[]',%s,%s) RETURNING id
+        """, (body.get("review_id"), title, body.get("description",""),
+              dtype, status, body.get("owner",""),
+              body.get("linked_initiative_id"), body.get("linked_roadmap_item_id"),
+              body.get("due_date") or None, ae, ae))
+        new_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "strategy.decision_created", f"id={new_id} '{title[:40]}'")
+    return resp({"ok": True, "id": new_id}, origin=origin)
+
+
+def action_decision_update(conn, actor, body, origin):
+    did = body.get("id")
+    if not did: return resp({"error": "id required"}, 400, origin)
+    did = int(did)
+    fields, vals = [], []
+    for k in ["title","description","owner"]:
+        if k in body: fields.append(f"{k}=%s"); vals.append(str(body[k])[:512])
+    if "decision_type" in body and body["decision_type"] in DECISION_TYPES:
+        fields.append("decision_type=%s"); vals.append(body["decision_type"])
+    if "status" in body and body["status"] in DECISION_STATUSES:
+        fields.append("status=%s"); vals.append(body["status"])
+    for k in ["due_date","linked_initiative_id","linked_roadmap_item_id","review_id"]:
+        if k in body: fields.append(f"{k}=%s"); vals.append(body[k] or None)
+    if not fields: return resp({"ok": True}, origin=origin)
+    fields += ["updated_at=NOW()","updated_by=%s"]; vals += [actor["email"], did]
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_decisions SET {','.join(fields)} WHERE id=%s", vals)
+    conn.commit()
+    _audit(conn, actor, "strategy.decision_updated", f"id={did}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_decision_delete(conn, actor, body, origin):
+    did = body.get("id")
+    if not did: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.admin_strategy_decisions SET status='archived', updated_at=NOW() WHERE id=%s", (int(did),))
+    conn.commit()
+    _audit(conn, actor, "strategy.decision_deleted", f"id={did}")
+    return resp({"ok": True}, origin=origin)
+
+
 # ── Handler ─────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
-    """W6.1-W6.3 Strategy Intelligence."""
+    """W6.1-W7.2 Strategy Intelligence + Weekly Reviews + Decisions."""
     headers = event.get("headers") or {}
     origin  = headers.get("origin") or headers.get("Origin") or ""
     method  = event.get("httpMethod", "GET")
@@ -1934,6 +2333,36 @@ def handler(event: dict, context) -> dict:
         if action == "strategy_initiative_metrics_refresh":
             if method != "POST": return resp({"error": "POST required"}, 405, origin)
             return action_initiative_metrics_refresh(conn, actor, body, origin)
+
+        # Weekly Reviews
+        if action == "strategy_weekly_reviews_list":
+            return action_weekly_reviews_list(conn, origin)
+        if action == "strategy_weekly_review_generate":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_weekly_review_generate(conn, actor, body, origin)
+        if action == "strategy_weekly_review_get":
+            rid = qs.get("id") or body.get("id")
+            if not rid: return resp({"error": "id required"}, 400, origin)
+            return action_weekly_review_get(conn, int(rid), origin)
+        if action == "strategy_weekly_review_publish":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_weekly_review_publish(conn, actor, body, origin)
+        if action == "strategy_weekly_review_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_weekly_review_delete(conn, actor, body, origin)
+
+        # Decisions
+        if action == "strategy_decisions_list":
+            return action_decisions_list(conn, qs, origin)
+        if action == "strategy_decision_create":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_decision_create(conn, actor, body, origin)
+        if action == "strategy_decision_update":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_decision_update(conn, actor, body, origin)
+        if action == "strategy_decision_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_decision_delete(conn, actor, body, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 

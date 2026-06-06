@@ -52,4 +52,18 @@ export const api = {
   initiativeFromScenario:  (b: object) => stratAction("strategy_initiative_from_scenario", b),
   initiativeUpdateAdd:     (b: object) => stratAction("strategy_initiative_update_add", b),
   initiativeMetricsRefresh: (id: number) => stratAction("strategy_initiative_metrics_refresh", { id }),
+
+  weeklyReviewsList:    ()           => stratAction("strategy_weekly_reviews_list"),
+  weeklyReviewGenerate: (b: object)  => stratAction("strategy_weekly_review_generate", b),
+  weeklyReviewGet:      (id: number) => fetch(`${STRATEGY_URL}/?action=strategy_weekly_review_get&id=${id}`, { headers: strategyHdr() }).then(r => r.json()),
+  weeklyReviewPublish:  (id: number) => stratAction("strategy_weekly_review_publish", { id }),
+  weeklyReviewDelete:   (id: number) => stratAction("strategy_weekly_review_delete", { id }),
+
+  decisionsList:  (params?: Record<string, string>) => {
+    const qs = params ? `&${new URLSearchParams(params).toString()}` : "";
+    return fetch(`${STRATEGY_URL}/?action=strategy_decisions_list${qs}`, { headers: strategyHdr() }).then(r => r.json());
+  },
+  decisionCreate: (b: object) => stratAction("strategy_decision_create", b),
+  decisionUpdate: (b: object) => stratAction("strategy_decision_update", b),
+  decisionDelete: (id: number) => stratAction("strategy_decision_delete", { id }),
 };
