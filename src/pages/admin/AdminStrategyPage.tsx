@@ -38,10 +38,15 @@ type Hypothesis = {
   expected_impact: string; effort: string; target_metric: string;
   target_segment: string; evidence: string; how_to_measure: string;
 };
+type StrategicPillar = { id: string; title: string; description: string };
+type Guardrail       = { title: string; description: string };
 type Profile = {
+  vision_text: string; product_thesis: string;
   mission_text: string; north_star_name: string; north_star_definition: string;
   target_segments: string[]; quarter_goals: string[];
   priority_themes: string[]; non_goals: string[];
+  strategic_pillars: StrategicPillar[];
+  guardrails: Guardrail[];
 };
 type RoadmapItem = {
   id: number; title: string; description: string;
@@ -177,9 +182,27 @@ function RoadmapCard({ item, onMoveLane, onDelete, onStatusChange, onStartInitia
 
 // ── Profile Editor ─────────────────────────────────────────────────
 
+const PILLAR_ICONS: Record<string, string> = {
+  identity: "User", competency: "BrainCircuit", navigator: "Compass",
+  practice: "Briefcase", proof: "BadgeCheck", discovery: "Telescope",
+};
+const PILLAR_COLORS: Record<string, string> = {
+  identity: "border-violet-800/50 bg-violet-900/10",
+  competency: "border-blue-800/50 bg-blue-900/10",
+  navigator: "border-emerald-800/50 bg-emerald-900/10",
+  practice: "border-amber-800/50 bg-amber-900/10",
+  proof: "border-teal-800/50 bg-teal-900/10",
+  discovery: "border-pink-800/50 bg-pink-900/10",
+};
+const GUARDRAIL_ICONS: Record<string, string> = {
+  "Consent-first": "ShieldCheck", "Explainability": "SearchCode",
+  "Evidence > Claims": "ClipboardCheck", "Growth, not labeling": "TrendingUp", "Human Dignity": "Heart",
+};
+
 function ProfileEditor({ profile, onSave }: { profile: Profile; onSave: (p: Profile) => void }) {
   const [form, setForm] = useState<Profile>(profile);
   const [saving, setSaving] = useState(false);
+  const [section, setSection] = useState<"vision" | "core" | "pillars" | "guardrails" | "roadmap">("vision");
 
   useEffect(() => { setForm(profile); }, [profile]);
 
@@ -188,10 +211,13 @@ function ProfileEditor({ profile, onSave }: { profile: Profile; onSave: (p: Prof
     const res = await fetch(`${STRATEGY_URL}/?action=strategy_profile_update`, {
       method: "POST", headers: hdr(),
       body: JSON.stringify({
+        vision_text: form.vision_text, product_thesis: form.product_thesis,
         mission_text: form.mission_text, north_star_name: form.north_star_name,
         north_star_definition: form.north_star_definition,
         target_segments: form.target_segments, quarter_goals: form.quarter_goals,
         priority_themes: form.priority_themes, non_goals: form.non_goals,
+        strategic_pillars: form.strategic_pillars,
+        guardrails: form.guardrails,
       }),
     });
     setSaving(false);
@@ -223,35 +249,128 @@ function ProfileEditor({ profile, onSave }: { profile: Profile; onSave: (p: Prof
     );
   }
 
+  const SECTIONS = [
+    { key: "vision",     label: "Видение", icon: "Telescope" },
+    { key: "core",       label: "Миссия / North Star", icon: "Star" },
+    { key: "pillars",    label: "Стратегические столпы", icon: "Columns3" },
+    { key: "guardrails", label: "Принципы", icon: "ShieldCheck" },
+    { key: "roadmap",    label: "Цели и приоритеты", icon: "ListTodo" },
+  ] as const;
+
   return (
     <div className="space-y-5">
-      <div>
-        <label className={lbl}>Миссия продукта</label>
-        <textarea className={`${inp} resize-none`} rows={3} value={form.mission_text}
-          onChange={e => setForm(f => ({ ...f, mission_text: e.target.value }))}
-          placeholder="Зачем существует этот продукт..." />
+      {/* Section nav */}
+      <div className="flex gap-1.5 flex-wrap border-b border-gray-800 pb-3">
+        {SECTIONS.map(s => (
+          <button key={s.key} onClick={() => setSection(s.key)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${section === s.key ? "bg-violet-700 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"}`}>
+            <Icon name={s.icon} size={11} />{s.label}
+          </button>
+        ))}
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className={lbl}>North Star метрика</label>
-          <input className={inp} value={form.north_star_name}
-            onChange={e => setForm(f => ({ ...f, north_star_name: e.target.value }))}
-            placeholder="Например: завершённые цели обучения" />
+
+      {/* Vision */}
+      {section === "vision" && (
+        <div className="space-y-4">
+          <div className="bg-violet-900/20 border border-violet-800/40 rounded-xl p-4">
+            <p className="text-[10px] text-violet-400 font-semibold uppercase mb-3">Видение платформы</p>
+            <textarea className={`${inp} resize-none`} rows={4} value={form.vision_text}
+              onChange={e => setForm(f => ({ ...f, vision_text: e.target.value }))}
+              placeholder="Глобальная платформа раскрытия профессионального потенциала..." />
+          </div>
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-[10px] text-gray-400 font-semibold uppercase mb-3">Продуктовый тезис</p>
+            <p className="text-[10px] text-gray-600 mb-2">Что мы строим? Чем это НЕ является?</p>
+            <textarea className={`${inp} resize-none`} rows={5} value={form.product_thesis}
+              onChange={e => setForm(f => ({ ...f, product_thesis: e.target.value }))}
+              placeholder="Мы строим Professional Operating System — профессиональную операционную систему человека. Не просто LMS, не просто job board..." />
+          </div>
         </div>
-        <div>
-          <label className={lbl}>Определение North Star</label>
-          <input className={inp} value={form.north_star_definition}
-            onChange={e => setForm(f => ({ ...f, north_star_definition: e.target.value }))}
-            placeholder="Пользователи, достигшие цели за 90 дней" />
+      )}
+
+      {/* Core */}
+      {section === "core" && (
+        <div className="space-y-4">
+          <div>
+            <label className={lbl}>Миссия продукта</label>
+            <textarea className={`${inp} resize-none`} rows={3} value={form.mission_text}
+              onChange={e => setForm(f => ({ ...f, mission_text: e.target.value }))}
+              placeholder="Зачем существует этот продукт..." />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={lbl}>North Star метрика</label>
+              <input className={inp} value={form.north_star_name}
+                onChange={e => setForm(f => ({ ...f, north_star_name: e.target.value }))}
+                placeholder="Professionals with Verified Growth" />
+            </div>
+            <div>
+              <label className={lbl}>Определение North Star</label>
+              <input className={inp} value={form.north_star_definition}
+                onChange={e => setForm(f => ({ ...f, north_star_definition: e.target.value }))}
+                placeholder="Пользователи с подтверждённой картой компетенций и карьерным результатом за 90 дней" />
+            </div>
+          </div>
+          {listField("Целевые сегменты", form.target_segments, "target_segments")}
         </div>
-      </div>
-      {listField("Целевые сегменты", form.target_segments, "target_segments")}
-      {listField("Цели на квартал", form.quarter_goals, "quarter_goals")}
-      {listField("Приоритетные направления", form.priority_themes, "priority_themes")}
-      {listField("Вне скоупа (non-goals)", form.non_goals, "non_goals")}
+      )}
+
+      {/* Pillars */}
+      {section === "pillars" && (
+        <div className="space-y-3">
+          <p className="text-[10px] text-gray-500">6 стратегических столпов платформы</p>
+          <div className="grid grid-cols-2 gap-3">
+            {form.strategic_pillars.map((p, i) => (
+              <div key={i} className={`border rounded-xl p-4 space-y-2 ${PILLAR_COLORS[p.id] ?? "border-gray-800 bg-gray-900"}`}>
+                <div className="flex items-center gap-2">
+                  <Icon name={PILLAR_ICONS[p.id] ?? "Circle"} size={14} className="text-gray-400 flex-shrink-0" />
+                  <input className="bg-transparent border-none text-sm font-semibold text-gray-200 focus:outline-none w-full"
+                    value={p.title}
+                    onChange={e => setForm(f => ({ ...f, strategic_pillars: f.strategic_pillars.map((x, j) => j === i ? { ...x, title: e.target.value } : x) }))} />
+                </div>
+                <textarea className="w-full bg-transparent text-xs text-gray-500 resize-none focus:outline-none focus:text-gray-300 transition-colors" rows={3}
+                  value={p.description}
+                  onChange={e => setForm(f => ({ ...f, strategic_pillars: f.strategic_pillars.map((x, j) => j === i ? { ...x, description: e.target.value } : x) }))} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Guardrails */}
+      {section === "guardrails" && (
+        <div className="space-y-3">
+          <p className="text-[10px] text-gray-500">Принципы, которые не нарушаем</p>
+          {form.guardrails.map((g, i) => (
+            <div key={i} className="flex gap-4 bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center">
+                <Icon name={GUARDRAIL_ICONS[g.title] ?? "Shield"} size={15} className="text-violet-400" />
+              </div>
+              <div className="flex-1 space-y-1.5">
+                <input className="w-full bg-transparent border-b border-gray-700 text-xs font-semibold text-gray-200 pb-1 focus:outline-none focus:border-violet-600"
+                  value={g.title}
+                  onChange={e => setForm(f => ({ ...f, guardrails: f.guardrails.map((x, j) => j === i ? { ...x, title: e.target.value } : x) }))} />
+                <textarea className="w-full bg-transparent text-xs text-gray-500 resize-none focus:outline-none focus:text-gray-300 transition-colors" rows={2}
+                  value={g.description}
+                  onChange={e => setForm(f => ({ ...f, guardrails: f.guardrails.map((x, j) => j === i ? { ...x, description: e.target.value } : x) }))} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Roadmap */}
+      {section === "roadmap" && (
+        <div className="space-y-5">
+          {listField("Цели на квартал", form.quarter_goals, "quarter_goals")}
+          {listField("Приоритетные направления", form.priority_themes, "priority_themes")}
+          {listField("Вне скоупа (non-goals)", form.non_goals, "non_goals")}
+        </div>
+      )}
+
       <button onClick={save} disabled={saving}
         className="px-5 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
-        {saving ? "Сохраняю..." : "Сохранить профиль"}
+        {saving ? "Сохраняю..." : "Сохранить"}
       </button>
     </div>
   );
@@ -289,8 +408,10 @@ export default function AdminStrategyPage() {
   const [learning,   setLearning]   = useState<LearningData | null>(null);
   const [support,    setSupport]    = useState<SupportData | null>(null);
   const [profile,    setProfile]    = useState<Profile>({
+    vision_text: "", product_thesis: "",
     mission_text: "", north_star_name: "", north_star_definition: "",
     target_segments: [], quarter_goals: [], priority_themes: [], non_goals: [],
+    strategic_pillars: [], guardrails: [],
   });
 
   const [aiSummary,      setAiSummary]      = useState<AISummary | null>(null);
@@ -553,6 +674,20 @@ export default function AdminStrategyPage() {
                 </button>
               </div>
 
+              {/* Vision banner */}
+              {profile.vision_text && (
+                <div className="bg-gradient-to-br from-violet-950/60 to-indigo-950/60 border border-violet-800/50 rounded-2xl px-6 py-5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Icon name="Telescope" size={13} className="text-violet-400" />
+                    <p className="text-[10px] text-violet-400 font-semibold uppercase tracking-wide">Видение платформы</p>
+                  </div>
+                  <p className="text-sm text-violet-200 leading-relaxed">{profile.vision_text}</p>
+                  {profile.product_thesis && (
+                    <p className="text-xs text-violet-400/60 mt-2 italic">{profile.product_thesis.split('.')[0]}.</p>
+                  )}
+                </div>
+              )}
+
               {profile.north_star_name && (
                 <div className="bg-violet-900/20 border border-violet-800/60 rounded-xl px-5 py-4">
                   <p className="text-[10px] text-violet-400 font-semibold uppercase tracking-wide mb-1">North Star</p>
@@ -560,6 +695,39 @@ export default function AdminStrategyPage() {
                   {profile.north_star_definition && (
                     <p className="text-xs text-violet-400/70 mt-1">{profile.north_star_definition}</p>
                   )}
+                </div>
+              )}
+
+              {/* Strategic Pillars */}
+              {profile.strategic_pillars && profile.strategic_pillars.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-3">Стратегические столпы</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {profile.strategic_pillars.map((p) => (
+                      <div key={p.id} className={`border rounded-xl p-3 ${PILLAR_COLORS[p.id] ?? "border-gray-800 bg-gray-900"}`}>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <Icon name={PILLAR_ICONS[p.id] ?? "Circle"} size={12} className="text-gray-400 flex-shrink-0" />
+                          <p className="text-[10px] font-semibold text-gray-300">{p.title}</p>
+                        </div>
+                        <p className="text-[9px] text-gray-600 leading-relaxed">{p.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Guardrails */}
+              {profile.guardrails && profile.guardrails.length > 0 && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <p className="text-[10px] text-gray-500 font-semibold uppercase tracking-wide mb-3">Принципы платформы</p>
+                  <div className="flex flex-wrap gap-2">
+                    {profile.guardrails.map((g) => (
+                      <div key={g.title} className="flex items-center gap-1.5 bg-gray-800/60 border border-gray-700/60 rounded-lg px-2.5 py-1.5" title={g.description}>
+                        <Icon name={GUARDRAIL_ICONS[g.title] ?? "Shield"} size={11} className="text-violet-400 flex-shrink-0" />
+                        <span className="text-[10px] font-semibold text-gray-400">{g.title}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

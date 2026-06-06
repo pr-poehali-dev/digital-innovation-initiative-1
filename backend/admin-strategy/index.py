@@ -117,7 +117,9 @@ def action_profile_get(conn, origin):
             SELECT mission_text, north_star_name, north_star_definition,
                    target_segments_json, quarter_goals_json,
                    priority_themes_json, non_goals_json,
-                   updated_by, updated_at
+                   updated_by, updated_at,
+                   vision_text, product_thesis,
+                   strategic_pillars_json, guardrails_json
             FROM {S}.admin_strategy_profiles WHERE workspace_key='default' LIMIT 1
         """)
         row = cur.fetchone()
@@ -129,23 +131,31 @@ def action_profile_get(conn, origin):
         "quarter_goals":          row[4] or [], "priority_themes": row[5] or [],
         "non_goals":              row[6] or [], "updated_by":       row[7],
         "updated_at":             str(row[8]) if row[8] else None,
+        "vision_text":            row[9]  or "",
+        "product_thesis":         row[10] or "",
+        "strategic_pillars":      row[11] or [],
+        "guardrails":             row[12] or [],
     }}, origin=origin)
 
 
 def action_profile_update(conn, actor, body, origin):
     fields, vals = [], []
     for f, col in [
-        ("mission_text",          "mission_text"),
-        ("north_star_name",       "north_star_name"),
+        ("mission_text",    "mission_text"),
+        ("north_star_name", "north_star_name"),
         ("north_star_definition", "north_star_definition"),
+        ("vision_text",     "vision_text"),
+        ("product_thesis",  "product_thesis"),
     ]:
         if f in body:
             fields.append(f"{col} = %s"); vals.append(body[f])
     for f, col in [
-        ("target_segments",  "target_segments_json"),
-        ("quarter_goals",    "quarter_goals_json"),
-        ("priority_themes",  "priority_themes_json"),
-        ("non_goals",        "non_goals_json"),
+        ("target_segments",   "target_segments_json"),
+        ("quarter_goals",     "quarter_goals_json"),
+        ("priority_themes",   "priority_themes_json"),
+        ("non_goals",         "non_goals_json"),
+        ("strategic_pillars", "strategic_pillars_json"),
+        ("guardrails",        "guardrails_json"),
     ]:
         if f in body:
             fields.append(f"{col} = %s")
