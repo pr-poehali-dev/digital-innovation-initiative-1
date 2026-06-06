@@ -212,10 +212,10 @@ function PublicProfileCard() {
       ) : isPublished && slug ? (
         <div className="space-y-3">
           {/* URL row */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 min-w-0">
             <Icon name="Link" size={12} className="text-slate-400 flex-shrink-0" />
-            <span className="text-xs text-slate-500 flex-1 truncate">
-              raven.moscow/p/<span className="font-semibold text-slate-700">{slug}</span>
+            <span className="text-xs text-slate-500 flex-1 min-w-0 truncate">
+              {window.location.hostname}/p/<span className="font-semibold text-slate-700">{slug}</span>
             </span>
           </div>
           {/* Trust signal */}

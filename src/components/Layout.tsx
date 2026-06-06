@@ -24,14 +24,27 @@ const STORAGE_KEY = "cabinet_sidebar_sections_v1";
 
 function loadOpenSections(): Record<string, boolean> {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Валидируем: ожидаем Record<string, boolean>
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const safe: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "boolean") safe[k] = v;
+    }
+    return safe;
   } catch {
     return {};
   }
 }
 
 function saveOpenSections(state: Record<string, boolean>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage может быть недоступен (private mode, quota exceeded)
+  }
 }
 
 // ── Badge ─────────────────────────────────────────────────────────────────
@@ -83,7 +96,17 @@ function SubItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   ].join(" ");
 
   if (!item.active || item.href === "#") {
-    return <div className={cls} title={collapsed ? item.label : undefined}>{inner}</div>;
+    return (
+      <div
+        className={cls}
+        title={collapsed ? item.label : undefined}
+        aria-disabled="true"
+        role="menuitem"
+        tabIndex={-1}
+      >
+        {inner}
+      </div>
+    );
   }
 
   return (
@@ -115,6 +138,8 @@ function SectionGroup({
     return <SubItem item={section.items[0]} collapsed={collapsed} />;
   }
 
+  const sectionItemsId = `sidebar-section-${section.key}`;
+
   return (
     <div className="space-y-0.5">
       {/* Section header */}
@@ -122,9 +147,10 @@ function SectionGroup({
         <button
           onClick={canCollapse ? onToggle : undefined}
           aria-expanded={canCollapse ? isOpen : undefined}
+          aria-controls={canCollapse ? sectionItemsId : undefined}
           className={[
             "w-full flex items-center justify-between px-3 pt-3 pb-1",
-            canCollapse ? "cursor-pointer group" : "cursor-default",
+            canCollapse ? "cursor-pointer group focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 rounded" : "cursor-default",
           ].join(" ")}
         >
           <span className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${
@@ -145,6 +171,9 @@ function SectionGroup({
 
       {/* Items — animated reveal */}
       <div
+        id={sectionItemsId}
+        role="group"
+        aria-label={section.label}
         className={[
           "space-y-0.5 overflow-hidden transition-all duration-200",
           !collapsed && canCollapse

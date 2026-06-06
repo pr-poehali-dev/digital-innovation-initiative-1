@@ -68,25 +68,42 @@ function ConfirmModal({ title, body, confirmLabel, confirmCls, onConfirm, onClos
   onClose: () => void;
   loading: boolean;
 }) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Focus trap: фокус на кнопку Отмена при открытии, Escape закрывает
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !loading) onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [loading, onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4" onClick={onClose}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-modal-title"
+      aria-describedby="confirm-modal-desc"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4"
+      onClick={onClose}
+    >
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0" aria-hidden="true">
             <Icon name="Globe" size={18} className="text-slate-600" />
           </div>
           <div>
-            <p className="text-base font-bold text-slate-900">{title}</p>
-            <p className="text-sm text-slate-500 mt-1 leading-relaxed">{body}</p>
+            <p id="confirm-modal-title" className="text-base font-bold text-slate-900">{title}</p>
+            <p id="confirm-modal-desc" className="text-sm text-slate-500 mt-1 leading-relaxed">{body}</p>
           </div>
         </div>
         <div className="flex gap-2 pt-1">
-          <button onClick={onClose} disabled={loading}
-            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-40">
+          <button ref={cancelRef} onClick={onClose} disabled={loading}
+            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-slate-400">
             Отмена
           </button>
           <button onClick={onConfirm} disabled={loading}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-40 ${confirmCls}`}>
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-offset-1 ${confirmCls}`}>
             {loading ? <Spinner size={4} /> : null}
             {confirmLabel}
           </button>
@@ -99,18 +116,44 @@ function ConfirmModal({ title, body, confirmLabel, confirmCls, onConfirm, onClos
 // ── Manual copy fallback dialog ───────────────────────────────────────
 
 function ManualCopyDialog({ url, onClose }: { url: string; onClose: () => void }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.select(); }, []);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // Выделяем текст, focus trap, Escape закрывает
+  useEffect(() => {
+    inputRef.current?.select();
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      // Возвращаем фокус на кнопку копирования если возможно
+    };
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4" onClick={onClose}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="manual-copy-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4"
+      onClick={onClose}
+    >
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <p className="text-base font-bold text-slate-900">Скопируйте ссылку вручную</p>
+        <p id="manual-copy-title" className="text-base font-bold text-slate-900">Скопируйте ссылку вручную</p>
         <p className="text-sm text-slate-500">Автокопирование недоступно в этом браузере.</p>
-        <input ref={ref} readOnly value={url}
-          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:border-violet-400 select-all"
+        <input
+          ref={inputRef}
+          readOnly
+          value={url}
+          aria-label="Публичная ссылка профиля"
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 focus:outline-none focus:border-violet-400"
           onFocus={e => e.target.select()}
         />
-        <button onClick={onClose} className="w-full py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-xl hover:bg-slate-800 transition-colors">
+        <button
+          ref={closeRef}
+          onClick={onClose}
+          className="w-full py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-xl hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-600 focus:ring-offset-1"
+        >
           Закрыть
         </button>
       </div>
@@ -467,13 +510,14 @@ export default function PublicProfileSettingsPage() {
 
             {/* URL row (only when has slug) */}
             {hasSlug && pubUrl && (
-              <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2.5 mb-4">
+              <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2.5 mb-4 min-w-0">
                 <Icon name="Link" size={13} className="text-slate-400 flex-shrink-0" />
-                <span className="text-sm text-slate-600 flex-1 truncate font-mono">
+                <span className="text-sm text-slate-600 flex-1 min-w-0 truncate font-mono break-all">
                   {pubUrl.replace(/^https?:\/\//, "")}
                 </span>
                 <button onClick={handleCopyLink}
-                  className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors flex-shrink-0">
+                  aria-label="Скопировать публичную ссылку"
+                  className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-slate-300">
                   <Icon name="Copy" size={12} />
                   Копировать
                 </button>
@@ -483,25 +527,28 @@ export default function PublicProfileSettingsPage() {
             {/* Publish / Unpublish */}
             <div className="flex gap-2">
               {!isPublished ? (
-                <button
-                  onClick={() => setModal("publish")}
-                  disabled={!hasSlug}
-                  title={!hasSlug ? "Сначала создайте адрес страницы" : undefined}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors"
-                >
-                  <Icon name="Globe" size={14} />
-                  Опубликовать
-                </button>
+                /* Wrapper span нужен чтобы title работал на disabled кнопке */
+                <span className="flex-1" title={!hasSlug ? "Сначала создайте адрес страницы ниже" : undefined}>
+                  <button
+                    onClick={() => setModal("publish")}
+                    disabled={!hasSlug}
+                    aria-disabled={!hasSlug}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-600 focus:ring-offset-1"
+                  >
+                    <Icon name="Globe" size={14} />
+                    Опубликовать
+                  </button>
+                </span>
               ) : (
                 <button onClick={() => setModal("unpublish")}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors">
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300">
                   <Icon name="EyeOff" size={14} />
                   Снять с публикации
                 </button>
               )}
               {isPublished && pubUrl && (
                 <a href={pubUrl} target="_blank" rel="noreferrer"
-                  className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-sm font-medium rounded-xl transition-colors">
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-sm font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300">
                   <Icon name="ExternalLink" size={14} />
                   Открыть
                 </a>
