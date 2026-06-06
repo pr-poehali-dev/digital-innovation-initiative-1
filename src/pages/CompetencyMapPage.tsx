@@ -495,8 +495,8 @@ export default function CompetencyMapPage() {
                   Не знаете, с чего начать?{" "}
                   <Link
                     to="/guide"
+                    state={{ source: "competency_map_empty_state" }}
                     onClick={() => {
-                      analytics.guideOpened("competency_map_empty_state");
                       analytics.guideCtaClicked("open_guide", "competency_map_empty_state");
                     }}
                     className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"

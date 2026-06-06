@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { analytics } from "@/lib/analytics";
 
@@ -322,9 +322,12 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function GuidePage() {
+  const location = useLocation();
+  const source = (location.state as { source?: string } | null)?.source ?? "direct";
+
   useEffect(() => {
-    analytics.guideOpened("direct");
-  }, []);
+    analytics.guideOpened(source);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen bg-slate-50">
