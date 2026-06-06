@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
@@ -15,6 +15,23 @@ function isItemActive(pathname: string, item: NavItem): boolean {
 
 function isSectionActive(pathname: string, section: NavSection): boolean {
   return section.items.some(item => isItemActive(pathname, item));
+}
+
+// Секции с collapsible поведением (только многопунктовые, не одиночные)
+const COLLAPSIBLE_SECTIONS = new Set(["profile", "growth", "learning"]);
+
+const STORAGE_KEY = "cabinet_sidebar_sections_v1";
+
+function loadOpenSections(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveOpenSections(state: Record<string, boolean>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 // ── Badge ─────────────────────────────────────────────────────────────────
@@ -78,25 +95,69 @@ function SubItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
 
 // ── Section ──────────────────────────────────────────────────────────────
 
-function SectionGroup({ section, collapsed }: { section: NavSection; collapsed: boolean }) {
+function SectionGroup({
+  section,
+  collapsed,
+  isOpen,
+  onToggle,
+}: {
+  section: NavSection;
+  collapsed: boolean;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
   const location = useLocation();
   const active = isSectionActive(location.pathname, section);
+  const canCollapse = !collapsed && COLLAPSIBLE_SECTIONS.has(section.key);
 
-  if (section.singleItem) {
+  // Single-item sections (Обзор, Практика) — render as flat item
+  if (section.singleItem || section.items.length === 1) {
     return <SubItem item={section.items[0]} collapsed={collapsed} />;
   }
 
   return (
     <div className="space-y-0.5">
+      {/* Section header */}
       {!collapsed && (
-        <p className={`px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider ${active ? "text-slate-500" : "text-slate-400"}`}>
-          {section.label}
-        </p>
+        <button
+          onClick={canCollapse ? onToggle : undefined}
+          aria-expanded={canCollapse ? isOpen : undefined}
+          className={[
+            "w-full flex items-center justify-between px-3 pt-3 pb-1",
+            canCollapse ? "cursor-pointer group" : "cursor-default",
+          ].join(" ")}
+        >
+          <span className={`text-[10px] font-bold uppercase tracking-wider transition-colors ${
+            active ? "text-slate-500" : "text-slate-400"
+          } ${canCollapse ? "group-hover:text-slate-600" : ""}`}>
+            {section.label}
+          </span>
+          {canCollapse && (
+            <Icon
+              name="ChevronDown"
+              size={12}
+              className={`text-slate-300 transition-transform duration-200 ${isOpen ? "rotate-0" : "-rotate-90"}`}
+            />
+          )}
+        </button>
       )}
       {collapsed && <div className="my-1 mx-2 border-t border-slate-100" title={section.label} />}
-      {section.items.map(item => (
-        <SubItem key={item.id} item={item} collapsed={collapsed} />
-      ))}
+
+      {/* Items — animated reveal */}
+      <div
+        className={[
+          "space-y-0.5 overflow-hidden transition-all duration-200",
+          !collapsed && canCollapse
+            ? isOpen
+              ? "max-h-96 opacity-100"
+              : "max-h-0 opacity-0"
+            : "max-h-96 opacity-100",
+        ].join(" ")}
+      >
+        {section.items.map(item => (
+          <SubItem key={item.id} item={item} collapsed={collapsed} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -109,6 +170,39 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Состояние раскрытия секций — инициализируем из localStorage
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const saved = loadOpenSections();
+    // По умолчанию все collapsible секции открыты
+    const defaults: Record<string, boolean> = {};
+    COLLAPSIBLE_SECTIONS.forEach(k => { defaults[k] = true; });
+    return { ...defaults, ...saved };
+  });
+
+  // Автоматически раскрываем активную секцию при навигации
+  useEffect(() => {
+    const activeSection = NAV_SECTIONS.find(s => isSectionActive(location.pathname, s));
+    if (activeSection && COLLAPSIBLE_SECTIONS.has(activeSection.key)) {
+      setOpenSections(prev => {
+        if (prev[activeSection.key]) return prev; // уже открыта, не трогаем
+        const next = { ...prev, [activeSection.key]: true };
+        saveOpenSections(next);
+        return next;
+      });
+    }
+  }, [location.pathname]);
+
+  const toggleSection = useCallback((key: string) => {
+    setOpenSections(prev => {
+      // Нельзя закрыть активную секцию
+      const section = NAV_SECTIONS.find(s => s.key === key);
+      if (section && isSectionActive(location.pathname, section)) return prev;
+      const next = { ...prev, [key]: !prev[key] };
+      saveOpenSections(next);
+      return next;
+    });
+  }, [location.pathname]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -158,7 +252,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Primary nav */}
         <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
           {NAV_SECTIONS.map(section => (
-            <SectionGroup key={section.key} section={section} collapsed={collapsed} />
+            <SectionGroup
+              key={section.key}
+              section={section}
+              collapsed={collapsed}
+              isOpen={openSections[section.key] ?? true}
+              onToggle={() => toggleSection(section.key)}
+            />
           ))}
         </nav>
 
