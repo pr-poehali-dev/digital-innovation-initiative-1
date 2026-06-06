@@ -217,7 +217,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* ── Mobile bottom nav ── */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-20 h-16">
+      <nav
+        className="lg:hidden bg-white border-t border-slate-200 z-50 h-16"
+        style={{
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+          transform: "translateZ(0)",
+          WebkitTransform: "translateZ(0)",
+        }}
+      >
         <div className="flex items-center justify-around h-full px-2">
           {MOBILE_NAV.map(item => {
             const isActive = item.href === "/cabinet"
