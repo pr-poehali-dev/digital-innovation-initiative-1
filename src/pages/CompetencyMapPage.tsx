@@ -47,6 +47,11 @@ function DrilldownPanel({
       await competencyMapApi.selfAssess(comp.id, pendingLevel);
       setSaved(true);
       analytics.competencyMapSelfAssessed(comp.id, comp.name, pendingLevel);
+      competencyMapApi.track("competency_map_self_assessed", null, {
+        competency_id: comp.id,
+        competency_name: comp.name,
+        level: pendingLevel,
+      });
       onAssessed(comp.id, pendingLevel);
       setTimeout(() => { setSaved(false); setPendingLevel(null); }, 1500);
     } finally {
@@ -306,9 +311,16 @@ function RecommendationsBlock({
             </div>
           );
           const handleClick = rec.href
-            ? () => analytics.competencyMapRecommendationClicked(status, rec.kind, rec.href)
+            ? () => {
+                analytics.competencyMapRecommendationClicked(status, rec.kind, rec.href);
+                competencyMapApi.track("competency_map_recommendation_clicked", status, { rec_kind: rec.kind, rec_href: rec.href });
+              }
             : rec.kind === "assess" && onAssessClick
-            ? () => { analytics.competencyMapRecommendationClicked(status, rec.kind, "assess_scroll"); onAssessClick(); }
+            ? () => {
+                analytics.competencyMapRecommendationClicked(status, rec.kind, "assess_scroll");
+                competencyMapApi.track("competency_map_recommendation_clicked", status, { rec_kind: rec.kind, rec_href: "assess_scroll" });
+                onAssessClick();
+              }
             : undefined;
 
           return rec.href
@@ -359,6 +371,12 @@ export default function CompetencyMapPage() {
           total === 0 ? "empty" : total < 3 ? "partial" : "ready";
         setStatus(mapStatus);
         analytics.competencyMapLoaded(mapStatus, result.summary);
+        // W15.1: дублируем в DB event store (fire-and-forget)
+        if (!quiet) competencyMapApi.track("competency_map_loaded", mapStatus, {
+          total_competencies: result.summary.total_competencies,
+          verified_count: result.summary.verified_count,
+          domains_covered: result.summary.domains_covered,
+        });
         const firstTwo = result.domains.slice(0, 2).map(d => d.id);
         setExpandedDomains(prev => prev.size > 0 ? prev : new Set(firstTwo));
       })
@@ -396,6 +414,8 @@ export default function CompetencyMapPage() {
       } else {
         next.add(id);
         analytics.competencyMapDomainExpanded(id, true);
+        // W15.1: первое раскрытие домена — engagement сигнал
+        competencyMapApi.track("competency_map_domain_expanded", status !== "loading" ? status as string : null, { domain_id: id });
       }
       return next;
     });

@@ -65,4 +65,17 @@ export const competencyMapApi = {
       headers: sessionHdr(),
       body: JSON.stringify({ competency_id: competencyId, level }),
     }).then(r => r.json()),
+
+  track: (
+    eventName: string,
+    mapStatus: string | null,
+    props: Record<string, unknown> = {},
+  ): void => {
+    // Fire-and-forget — не блокируем UI, ошибки игнорируем
+    fetch(`${MAP_URL}/?action=competency_map_track`, {
+      method: "POST",
+      headers: sessionHdr(),
+      body: JSON.stringify({ event: eventName, map_status: mapStatus, props }),
+    }).catch(() => {/* silent */});
+  },
 };

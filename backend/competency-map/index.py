@@ -449,6 +449,122 @@ def action_self_assess(conn, user_id: int, body: dict):
     return resp({"ok": True, "competency_id": competency_id, "level": level})
 
 
+def action_track_event(conn, user_id: int, body: dict):
+    """W15.1 — Запись события карты в DB для adoption-аналитики.
+
+    Принимает: event (str), map_status (str|None), props (dict|None).
+    Разрешённые события: competency_map_loaded, competency_map_self_assessed,
+    competency_map_recommendation_clicked, competency_map_domain_expanded,
+    competency_map_competency_clicked.
+    Пишет в competency_map_events. Возвращает ok сразу.
+    """
+    ALLOWED = {
+        "competency_map_loaded",
+        "competency_map_self_assessed",
+        "competency_map_recommendation_clicked",
+        "competency_map_domain_expanded",
+        "competency_map_competency_clicked",
+    }
+    event_name = body.get("event", "")
+    if event_name not in ALLOWED:
+        return resp({"error": "unknown event"}, 400)
+
+    map_status = body.get("map_status") or body.get("status") or None
+    props = body.get("props") or {}
+    # Собираем props из тела если переданы плоско
+    for k in ("level", "competency_id", "competency_name", "domain_id", "rec_kind", "rec_href"):
+        if k in body and k not in props:
+            props[k] = body[k]
+
+    import json as _json
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.competency_map_events (user_id, event, map_status, props_json)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, event_name, map_status, _json.dumps(props)))
+    conn.commit()
+    return resp({"ok": True})
+
+
+def action_adoption_stats(conn):
+    """W15.2 — Adoption funnel: агрегация по competency_map_events для дашборда.
+
+    Возвращает воронку: loaded → domain_expanded → competency_clicked → self_assessed.
+    Плюс: распределение по статусам, CTR рекомендаций, retention (повторные визиты).
+    """
+    # Воронка по уникальным пользователям
+    funnel = fetch_all(conn, f"""
+        SELECT event, COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_events
+        FROM {S}.competency_map_events
+        GROUP BY event
+        ORDER BY unique_users DESC
+    """)
+
+    # Распределение статусов при первом открытии карты
+    status_dist = fetch_all(conn, f"""
+        SELECT map_status, COUNT(DISTINCT user_id) as users
+        FROM {S}.competency_map_events
+        WHERE event = 'competency_map_loaded'
+          AND map_status IS NOT NULL
+          AND id IN (
+              SELECT MIN(id) FROM {S}.competency_map_events
+              WHERE event = 'competency_map_loaded'
+              GROUP BY user_id
+          )
+        GROUP BY map_status
+        ORDER BY users DESC
+    """)
+
+    # Self-assessment conversion: кто loaded → кто self_assessed
+    conversion = fetch_one(conn, f"""
+        SELECT
+            COUNT(DISTINCT l.user_id) as loaded_users,
+            COUNT(DISTINCT s.user_id) as assessed_users,
+            CASE WHEN COUNT(DISTINCT l.user_id) > 0
+                 THEN ROUND(100.0 * COUNT(DISTINCT s.user_id) / COUNT(DISTINCT l.user_id), 1)
+                 ELSE 0 END as conversion_pct
+        FROM (SELECT DISTINCT user_id FROM {S}.competency_map_events WHERE event = 'competency_map_loaded') l
+        LEFT JOIN (SELECT DISTINCT user_id FROM {S}.competency_map_events WHERE event = 'competency_map_self_assessed') s
+          ON s.user_id = l.user_id
+    """)
+
+    # Recommendation CTR
+    rec_stats = fetch_one(conn, f"""
+        SELECT
+            (SELECT COUNT(DISTINCT user_id) FROM {S}.competency_map_events WHERE event = 'competency_map_loaded') as shown_to_users,
+            COUNT(DISTINCT user_id) as clicked_users,
+            COUNT(*) as total_clicks
+        FROM {S}.competency_map_events WHERE event = 'competency_map_recommendation_clicked'
+    """)
+
+    # Динамика по дням (последние 14 дней)
+    daily = fetch_all(conn, f"""
+        SELECT DATE(created_at) as day,
+               COUNT(DISTINCT user_id) as dau,
+               COUNT(*) as events
+        FROM {S}.competency_map_events
+        WHERE created_at >= NOW() - INTERVAL '14 days'
+        GROUP BY DATE(created_at)
+        ORDER BY day DESC
+    """)
+
+    return resp({
+        "funnel": [{"event": r[0], "unique_users": r[1], "total_events": r[2]} for r in funnel],
+        "status_distribution": [{"status": r[0], "users": r[1]} for r in status_dist],
+        "self_assess_conversion": {
+            "loaded_users": conversion[0] if conversion else 0,
+            "assessed_users": conversion[1] if conversion else 0,
+            "conversion_pct": float(conversion[2]) if conversion else 0.0,
+        },
+        "recommendation_ctr": {
+            "shown_to_users": rec_stats[0] if rec_stats else 0,
+            "clicked_users": rec_stats[1] if rec_stats else 0,
+            "total_clicks": rec_stats[2] if rec_stats else 0,
+        },
+        "daily_activity": [{"day": str(r[0]), "dau": r[1], "events": r[2]} for r in daily],
+    })
+
+
 def handler(event: dict, context) -> dict:
     """W12 Competency Map — агрегация сигналов в объяснимую карту компетенций."""
     headers = event.get("headers") or {}
@@ -477,6 +593,13 @@ def handler(event: dict, context) -> dict:
         if action == "competency_map_self_assess":
             body = json.loads(event.get("body") or "{}")
             return action_self_assess(conn, user_id, body)
+
+        if action == "competency_map_track":
+            body = json.loads(event.get("body") or "{}")
+            return action_track_event(conn, user_id, body)
+
+        if action == "competency_map_adoption_stats":
+            return action_adoption_stats(conn)
 
         return resp({"error": "unknown action"}, 400)
     finally:
