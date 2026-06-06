@@ -1,11 +1,11 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
-import { ArrowRight, ChevronRight, Menu, X, Zap, FileText, Sparkles, Upload, BookOpen, Layers, GraduationCap, Map, Target, Users, Briefcase, Clock, Brain } from "lucide-react"
+import { ArrowRight, ChevronRight, Menu, X, Map, Target, BookOpen, Briefcase, TrendingUp, CheckCircle, LayoutGrid, Sparkles, Users, FolderOpen } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
 import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
 
 const buttonVariants = cva(
@@ -131,6 +131,119 @@ const menuItems = [
   { name: "Как это работает", href: "#how-it-works" },
   { name: "Для кого", href: "#about" },
   { name: "Контакты", href: "#contact" },
+]
+
+// ── Контент лендинга ──────────────────────────────────────────────────
+
+const FEATURES = [
+  {
+    emoji: "🗺",
+    color: "bg-emerald-50 border-emerald-200 hover:border-emerald-400",
+    iconBg: "bg-emerald-100",
+    title: "Карта компетенций",
+    desc: "Оцените текущий уровень по доменам. Карта формируется из вашей самооценки, обучения и проектов — и обновляется автоматически.",
+    cta: "Открыть карту →",
+    link: "/cabinet/competency-map",
+    ctaCls: "bg-emerald-600 hover:bg-emerald-700 text-white",
+  },
+  {
+    emoji: "🎯",
+    color: "bg-violet-50 border-violet-200 hover:border-violet-400",
+    iconBg: "bg-violet-100",
+    title: "Self-assessment",
+    desc: "Оцените себя по любой компетенции прямо в карте. Первый шаг — всегда честная самооценка, не тест и не форма.",
+    cta: "Оценить себя →",
+    link: "/cabinet/competency-map",
+    ctaCls: "bg-violet-600 hover:bg-violet-700 text-white",
+  },
+  {
+    emoji: "📚",
+    color: "bg-blue-50 border-blue-200 hover:border-blue-400",
+    iconBg: "bg-blue-100",
+    title: "Учебный кабинет",
+    desc: "Добавляйте завершённые курсы и обучение — они становятся верифицированными сигналами в вашей карте компетенций.",
+    cta: "Перейти →",
+    link: "/cabinet/learning",
+    ctaCls: "bg-blue-600 hover:bg-blue-700 text-white",
+  },
+  {
+    emoji: "👤",
+    color: "bg-indigo-50 border-indigo-200 hover:border-indigo-400",
+    iconBg: "bg-indigo-100",
+    title: "Профессиональный профиль",
+    desc: "Заполните профиль: опыт работы, образование, цели. Профиль усиливает карту и формирует публичную страницу.",
+    cta: "Заполнить профиль →",
+    link: "/cabinet/profile",
+    ctaCls: "bg-indigo-600 hover:bg-indigo-700 text-white",
+  },
+  {
+    emoji: "📁",
+    color: "bg-orange-50 border-orange-200 hover:border-orange-400",
+    iconBg: "bg-orange-100",
+    title: "Проекты",
+    desc: "Фиксируйте проекты с участием — они дают сигналы в карту по смежным доменам и подтверждают практический опыт.",
+    cta: "Мои проекты →",
+    link: "/cabinet/projects",
+    ctaCls: "bg-orange-600 hover:bg-orange-700 text-white",
+  },
+  {
+    emoji: "📈",
+    color: "bg-green-50 border-green-200 hover:border-green-400",
+    iconBg: "bg-green-100",
+    title: "Growth-план",
+    desc: "На основе карты компетенций система формирует план развития: что усилить, чего не хватает, куда двигаться дальше.",
+    cta: "Открыть план →",
+    link: "/cabinet/growth",
+    ctaCls: "bg-green-600 hover:bg-green-700 text-white",
+  },
+]
+
+const HOW_IT_WORKS_STEPS = [
+  {
+    num: "1",
+    color: "bg-emerald-100 text-emerald-700",
+    title: "Оцените компетенции",
+    desc: "Раскройте любой домен и выставьте уровень по нужным компетенциям. Карта формируется сразу — никаких анкет.",
+  },
+  {
+    num: "2",
+    color: "bg-violet-100 text-violet-700",
+    title: "Добавляйте сигналы",
+    desc: "Завершили курс — он попадает в карту как верифицированный источник. Ведёте проекты — это усиливает смежные домены.",
+  },
+  {
+    num: "3",
+    color: "bg-blue-100 text-blue-700",
+    title: "Получайте рекомендации",
+    desc: "Система подсказывает что развить дальше, где низкая уверенность и какой следующий шаг имеет смысл именно для вас.",
+  },
+]
+
+const FOR_WHOM = [
+  {
+    icon: <TrendingUp className="h-6 w-6 text-emerald-600" />,
+    bg: "bg-emerald-50",
+    title: "Руководители проектов",
+    desc: "Оцените свой уровень по ключевым PM-компетенциям, зафиксируйте сильные стороны и зоны роста с конкретными следующими шагами.",
+  },
+  {
+    icon: <BookOpen className="h-6 w-6 text-blue-600" />,
+    bg: "bg-blue-50",
+    title: "Специалисты в росте",
+    desc: "Стройте карьерный план опираясь на реальную картину компетенций, а не ощущения. Видите где вы сейчас и куда двигаться.",
+  },
+  {
+    icon: <Briefcase className="h-6 w-6 text-violet-600" />,
+    bg: "bg-violet-50",
+    title: "Профессионалы с опытом",
+    desc: "Переводите накопленный опыт в структурированный профиль. Подтверждайте компетенции через проекты и обучение.",
+  },
+  {
+    icon: <Target className="h-6 w-6 text-orange-600" />,
+    bg: "bg-orange-50",
+    title: "Те, кто меняет направление",
+    desc: "Видите какие компетенции уже есть и что нужно добрать для нового вектора. Growth-план помогает двигаться не вслепую.",
+  },
 ]
 
 const HeroHeader = () => {
@@ -300,7 +413,7 @@ export default function SoftwareDevelopmentWebsite() {
                     href="#services"
                     className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
                   >
-                    <span className="text-foreground text-sm">Траектория — личный кабинет развития и обучения с AI</span>
+                    <span className="text-foreground text-sm">Карта компетенций, growth-план и проекты — в одном кабинете</span>
                     <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                     <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
@@ -316,13 +429,13 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
 
                   <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
-                    Траектория —{" "}
+                    Развивайте компетенции{" "}
                     <span className="inline-block text-slate-600">
-                      ваш путь развития с AI
+                      и видите реальный прогресс
                     </span>
                   </h1>
                   <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Личный кабинет развития и обучения: проекты, компетенции, карьерный план — AI помогает на каждом шаге.
+                    Self-assessment, профессиональный профиль, обучение и проекты — чтобы знать где вы сейчас и куда идти дальше.
                   </p>
                 </AnimatedGroup>
 
@@ -340,12 +453,12 @@ export default function SoftwareDevelopmentWebsite() {
                   <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
                     <Link to="/login">
                       <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        <span className="text-nowrap">Открыть кабинет</span>
+                        <Map className="mr-2 h-4 w-4" />
+                        <span className="text-nowrap">Начать self-assessment</span>
                       </Button>
                     </Link>
                   </div>
-                  <a href="#about" key={2}>
+                  <a href="#services" key={2}>
                     <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
                       <span className="text-nowrap">Узнать подробнее</span>
                     </Button>
@@ -383,77 +496,16 @@ export default function SoftwareDevelopmentWebsite() {
           </div>
         </section>
 
-        {/* ── Блок сценариев ── */}
+        {/* ── Возможности ── */}
         <section id="services" className="py-16 md:py-24 bg-background">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">С чего начать</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Что вы хотите сделать?</h2>
-              <p className="mt-3 text-muted-foreground">Выберите сценарий — система проведёт по всем шагам</p>
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Возможности</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Всё для роста — в одном кабинете</h2>
+              <p className="mt-3 text-muted-foreground">Откройте любой модуль и начните с того, что важнее прямо сейчас</p>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                {
-                  emoji: "✨",
-                  color: "bg-orange-50 border-orange-200 hover:border-orange-400",
-                  iconBg: "bg-orange-100",
-                  title: "Создать презентацию",
-                  desc: "Загрузите материалы — AI соберёт PPTX с текстом, структурой и схемами",
-                  cta: "Начать →",
-                  link: "/cabinet",
-                  ctaCls: "bg-orange-600 hover:bg-orange-700 text-white",
-                },
-                {
-                  emoji: "🛡",
-                  color: "bg-blue-50 border-blue-200 hover:border-blue-400",
-                  iconBg: "bg-blue-100",
-                  title: "Проверить готовую",
-                  desc: "Загрузите PPTX — AI найдёт ошибки, противоречия и несоответствия критериям",
-                  cta: "Проверить →",
-                  link: "/cabinet",
-                  ctaCls: "bg-blue-600 hover:bg-blue-700 text-white",
-                },
-                {
-                  emoji: "🔧",
-                  color: "bg-violet-50 border-violet-200 hover:border-violet-400",
-                  iconBg: "bg-violet-100",
-                  title: "Исправить замечания",
-                  desc: "После аудита — AI составит план правок и создаст улучшенную версию",
-                  cta: "Исправить →",
-                  link: "/cabinet",
-                  ctaCls: "bg-violet-600 hover:bg-violet-700 text-white",
-                },
-                {
-                  emoji: "📚",
-                  color: "bg-green-50 border-green-200 hover:border-green-400",
-                  iconBg: "bg-green-100",
-                  title: "Загрузить материалы",
-                  desc: "Конспекты, статьи, стандарты, шаблоны — всё станет базой для AI",
-                  cta: "Загрузить →",
-                  link: "/cabinet",
-                  ctaCls: "bg-green-600 hover:bg-green-700 text-white",
-                },
-                {
-                  emoji: "🎨",
-                  color: "bg-pink-50 border-pink-200 hover:border-pink-400",
-                  iconBg: "bg-pink-100",
-                  title: "Добавить визуалы",
-                  desc: "Схемы, диаграммы, таймлайны — AI вставит их прямо в слайды",
-                  cta: "Открыть →",
-                  link: "/cabinet/visuals",
-                  ctaCls: "bg-pink-600 hover:bg-pink-700 text-white",
-                },
-                {
-                  emoji: "🔍",
-                  color: "bg-slate-50 border-slate-200 hover:border-slate-400",
-                  iconBg: "bg-slate-100",
-                  title: "Найти в материалах",
-                  desc: "Умный поиск по всем документам проекта — без ручного просмотра",
-                  cta: "Искать →",
-                  link: "/cabinet",
-                  ctaCls: "bg-slate-700 hover:bg-slate-800 text-white",
-                },
-              ].map((s) => (
+              {FEATURES.map((s) => (
                 <Link
                   key={s.title}
                   to={s.link}
@@ -477,25 +529,23 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center">
               <h2 className="text-balance text-4xl font-semibold lg:text-5xl">
-                Всё для учёбы — <span className="text-slate-600">в одном месте</span>
+                Карта компетенций — <span className="text-slate-600">живая, не статичная</span>
               </h2>
               <p className="mt-4 text-muted-foreground">
-                Собирай базу знаний, задавай умные задания AI и получай зачёты, дипломы и презентации — всё с учётом твоих стандартов.
+                Строится из реальных сигналов: самооценки, завершённого обучения и проектов. Обновляется автоматически.
               </p>
             </div>
             <Card className="mx-auto mt-8 grid max-w-sm divide-y overflow-hidden shadow-zinc-950/5 border-slate-200 *:text-center md:mt-16 md:max-w-full md:grid-cols-3 md:divide-x md:divide-y-0">
               <div className="group shadow-zinc-950/5">
                 <CardHeader className="pb-3">
                   <CardDecorator>
-                    <Upload className="size-6 text-slate-800" aria-hidden />
+                    <LayoutGrid className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
-
-                  <h3 className="mt-6 font-medium">База знаний студента</h3>
+                  <h3 className="mt-6 font-medium">Self-assessment</h3>
                 </CardHeader>
-
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Храни конспекты, лекции, статьи, раздаточные материалы в одном месте. Всё доступно для AI в любой момент.
+                    Оцените уровень по каждой компетенции прямо в карте. Это первый и самый быстрый сигнал — без тестов и форм.
                   </p>
                 </CardContent>
               </div>
@@ -505,13 +555,11 @@ export default function SoftwareDevelopmentWebsite() {
                   <CardDecorator>
                     <BookOpen className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
-
-                  <h3 className="mt-6 font-medium">Умные задания AI</h3>
+                  <h3 className="mt-6 font-medium">Верифицированные источники</h3>
                 </CardHeader>
-
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Скажи: «Подготовь диплом по теме X, учти стандарт IPMO, возьми структуру из моей презентации» — AI соберёт всё по твоей формуле.
+                    Завершили курс или обучение — он становится подтверждённым источником в карте. Это весомее простой самооценки.
                   </p>
                 </CardContent>
               </div>
@@ -519,15 +567,13 @@ export default function SoftwareDevelopmentWebsite() {
               <div className="group shadow-zinc-950/5">
                 <CardHeader className="pb-3">
                   <CardDecorator>
-                    <Sparkles className="size-6 text-slate-800" aria-hidden />
+                    <FolderOpen className="size-6 text-slate-800" aria-hidden />
                   </CardDecorator>
-
-                  <h3 className="mt-6 font-medium">Правки и версии</h3>
+                  <h3 className="mt-6 font-medium">Проекты как опыт</h3>
                 </CardHeader>
-
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Получил черновик — дай правки. AI сохраняет историю версий и дорабатывает пока не устроит результат.
+                    Участие в проектах усиливает смежные домены карты. Практический опыт виден отдельным источником.
                   </p>
                 </CardContent>
               </div>
@@ -541,107 +587,37 @@ export default function SoftwareDevelopmentWebsite() {
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Как это работает</span>
               <h2 className="text-balance text-3xl md:text-4xl font-semibold">
-                Задавай задание AI как <span className="text-slate-600">формулу из своих материалов</span>
+                От пустой карты до <span className="text-slate-600">понятного плана роста</span>
               </h2>
               <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
-                Загрузи стандарты, презентации-образцы и материалы по теме — AI соберёт всё в один результат по твоим правилам.
+                Три шага — и у вас есть карта компетенций, рекомендации и следующий конкретный шаг.
               </p>
             </div>
 
-            <div className="grid md:grid-cols-5 gap-6 items-stretch">
-              {/* Левая часть: документы */}
-              <div className="md:col-span-2 space-y-3">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">📁 В кабинете загружено</p>
-                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-950/30 flex items-center justify-center flex-shrink-0">
-                    <BookOpen className="h-4 w-4 text-purple-600" />
+            <div className="grid md:grid-cols-3 gap-6">
+              {HOW_IT_WORKS_STEPS.map((step, i) => (
+                <div key={i} className="relative bg-background rounded-2xl border border-slate-200 p-6">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold mb-5 ${step.color}`}>
+                    {step.num}
                   </div>
-                  <div>
-                    <p className="text-sm font-medium">Стандарт IPMO.pdf</p>
-                    <p className="text-xs text-slate-500">Роль: нормативный документ</p>
-                  </div>
+                  <h3 className="font-semibold text-slate-800 mb-2">{step.title}</h3>
+                  <p className="text-sm text-slate-600 leading-relaxed">{step.desc}</p>
+                  {i < HOW_IT_WORKS_STEPS.length - 1 && (
+                    <div className="hidden md:block absolute top-10 -right-3 z-10">
+                      <ChevronRight className="h-5 w-5 text-slate-300" />
+                    </div>
+                  )}
                 </div>
-                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950/30 flex items-center justify-center flex-shrink-0">
-                    <Layers className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Прошлая презентация.pptx</p>
-                    <p className="text-xs text-slate-500">Роль: образец структуры и стиля</p>
-                  </div>
-                </div>
-                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-950/30 flex items-center justify-center flex-shrink-0">
-                    <FileText className="h-4 w-4 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Конспект лекций.docx</p>
-                    <p className="text-xs text-slate-500">Роль: содержательный материал</p>
-                  </div>
-                </div>
-                <div className="border border-slate-200 rounded-xl p-3.5 bg-card flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-green-100 dark:bg-green-950/30 flex items-center justify-center flex-shrink-0">
-                    <FileText className="h-4 w-4 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Статьи по теме.pdf</p>
-                    <p className="text-xs text-slate-500">Роль: содержательный материал</p>
-                  </div>
-                </div>
-              </div>
+              ))}
+            </div>
 
-              {/* Правая часть: промпт */}
-              <div className="md:col-span-3 space-y-4">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">✨ Промпт для AI</p>
-                <div className="border-2 border-slate-800 rounded-2xl bg-slate-900 text-white p-6 shadow-xl">
-                  <p className="text-sm leading-relaxed font-mono">
-                    Подготовь <span className="bg-slate-700 px-1.5 py-0.5 rounded text-yellow-300 font-semibold">дипломную работу</span> на тему{" "}
-                    <span className="bg-slate-700 px-1.5 py-0.5 rounded text-blue-300 font-semibold">«Цифровая трансформация управления проектами»</span>.
-                    <br /><br />
-                    Учти стандарт <span className="bg-slate-700 px-1.5 py-0.5 rounded text-purple-300 font-semibold">IPMO</span>,
-                    возьми структуру и стиль оформления из <span className="bg-slate-700 px-1.5 py-0.5 rounded text-cyan-300 font-semibold">прилагаемой презентации</span>.
-                    <br /><br />
-                    Используй <span className="bg-slate-700 px-1.5 py-0.5 rounded text-green-300 font-semibold">мои материалы</span> как содержательную базу и
-                    <span className="bg-slate-700 px-1.5 py-0.5 rounded text-orange-300 font-semibold"> дополни актуальными источниками из интернета</span>.
-                    <br /><br />
-                    Объём — 60 страниц, академический стиль, добавь введение, 3 главы, заключение и список литературы.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
-                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
-                  </div>
-                  <span>AI анализирует все 4 документа + ищет дополнения в сети</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
-                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
-                  </div>
-                  <span>Предлагает 1-3 варианта структуры на выбор</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
-                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
-                  </div>
-                  <span>Генерирует диплом + презентацию защиты по стилю образца</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-slate-600 pl-2">
-                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <ChevronRight className="h-3.5 w-3.5 text-green-600" />
-                  </div>
-                  <span>Принимает правки и сохраняет историю версий</span>
-                </div>
-
-                <div className="pt-4">
-                  <Link to="/cabinet">
-                    <Button size="lg" className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-6">
-                      Открыть кабинет
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Button>
-                  </Link>
-                </div>
-              </div>
+            <div className="mt-8 text-center">
+              <Link to="/login">
+                <Button size="lg" className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-8">
+                  Начать self-assessment
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
             </div>
           </div>
         </section>
@@ -650,40 +626,15 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Для кого</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Траектория для каждого,{" "}
-                <span className="text-slate-600">кто развивается</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Для тех,{" "}
+                <span className="text-slate-600">кто управляет своим развитием</span>
               </h2>
               <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Неважно — студент, преподаватель или специалист. Траектория адаптируется под ваши цели.
+                Не важно на каком этапе карьеры вы находитесь — Траектория помогает видеть реальную картину и двигаться вперёд.
               </p>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {[
-                {
-                  icon: <GraduationCap className="h-6 w-6 text-blue-600" />,
-                  bg: "bg-blue-50",
-                  title: "Студенты",
-                  desc: "Загружайте конспекты и стандарты, создавайте дипломы и презентации с AI, поддерживайте знания тестами.",
-                },
-                {
-                  icon: <BookOpen className="h-6 w-6 text-violet-600" />,
-                  bg: "bg-violet-50",
-                  title: "Преподаватели",
-                  desc: "Формируйте учебные материалы, создавайте задания и методические презентации по своим стандартам.",
-                },
-                {
-                  icon: <Target className="h-6 w-6 text-green-600" />,
-                  bg: "bg-green-50",
-                  title: "Методисты",
-                  desc: "Выстраивайте образовательные треки, собирайте базы знаний и проверяйте соответствие требованиям.",
-                },
-                {
-                  icon: <Briefcase className="h-6 w-6 text-orange-600" />,
-                  bg: "bg-orange-50",
-                  title: "Специалисты",
-                  desc: "Развивайте компетенции, планируйте карьерный рост и собирайте подтверждения своей квалификации.",
-                },
-              ].map((item) => (
+              {FOR_WHOM.map((item) => (
                 <div key={item.title} className="bg-background rounded-2xl border border-slate-200 p-6 flex flex-col gap-4">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${item.bg}`}>
                     {item.icon}
@@ -705,7 +656,7 @@ export default function SoftwareDevelopmentWebsite() {
                 <span className="text-slate-600">весь путь развития</span>
               </h2>
               <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Сейчас уже работает модуль учебных проектов. Траектория расширяется с каждым месяцем.
+                Все модули связаны между собой: самооценка усиливает карту, обучение верифицирует компетенции, проекты подтверждают опыт.
               </p>
             </div>
             <div className="grid md:grid-cols-2 gap-6">
@@ -713,16 +664,16 @@ export default function SoftwareDevelopmentWebsite() {
               <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-6">
                 <div className="flex items-center gap-2 mb-5">
                   <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                  <span className="text-sm font-semibold text-green-700">Доступно сейчас</span>
+                  <span className="text-sm font-semibold text-green-700">Работает сейчас</span>
                 </div>
                 <ul className="space-y-3">
                   {[
-                    { icon: <FileText className="h-4 w-4" />, text: "Учебные проекты и презентации" },
-                    { icon: <Upload className="h-4 w-4" />, text: "Загрузка материалов и документов" },
-                    { icon: <Sparkles className="h-4 w-4" />, text: "AI-генерация по вашим материалам" },
-                    { icon: <Layers className="h-4 w-4" />, text: "Визуалы: схемы, диаграммы, таймлайны" },
-                    { icon: <Zap className="h-4 w-4" />, text: "Аудит и проверка презентаций" },
-                    { icon: <BookOpen className="h-4 w-4" />, text: "Чат с документом по вашим файлам" },
+                    { icon: <Map className="h-4 w-4" />, text: "Карта компетенций с self-assessment" },
+                    { icon: <BookOpen className="h-4 w-4" />, text: "Учебный кабинет с верификацией" },
+                    { icon: <Users className="h-4 w-4" />, text: "Профессиональный профиль" },
+                    { icon: <FolderOpen className="h-4 w-4" />, text: "Проекты и задачи" },
+                    { icon: <TrendingUp className="h-4 w-4" />, text: "Growth-план развития" },
+                    { icon: <Sparkles className="h-4 w-4" />, text: "Рекомендации по следующему шагу" },
                   ].map((item) => (
                     <li key={item.text} className="flex items-center gap-3 text-sm text-slate-700">
                       <span className="text-green-600 flex-shrink-0">{item.icon}</span>
@@ -737,28 +688,27 @@ export default function SoftwareDevelopmentWebsite() {
                 </Link>
               </div>
 
-              {/* В разработке */}
+              {/* Как связано */}
               <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-6">
                 <div className="flex items-center gap-2 mb-5">
-                  <Clock className="h-4 w-4 text-slate-400" />
-                  <span className="text-sm font-semibold text-slate-500">Готовится к запуску</span>
+                  <CheckCircle className="h-4 w-4 text-violet-500" />
+                  <span className="text-sm font-semibold text-slate-700">Как всё связано</span>
                 </div>
-                <ul className="space-y-3">
+                <ul className="space-y-4">
                   {[
-                    { icon: <GraduationCap className="h-4 w-4" />, text: "Дипломы и сертификаты — хранение и учёт" },
-                    { icon: <Brain className="h-4 w-4" />, text: "Тесты для поддержания знаний" },
-                    { icon: <Map className="h-4 w-4" />, text: "Карта компетенций" },
-                    { icon: <Target className="h-4 w-4" />, text: "План развития и карьерный трек" },
-                    { icon: <Users className="h-4 w-4" />, text: "Профессиональный профиль" },
-                    { icon: <Briefcase className="h-4 w-4" />, text: "Взаимодействие с работодателями" },
-                  ].map((item) => (
-                    <li key={item.text} className="flex items-center gap-3 text-sm text-slate-500">
-                      <span className="text-slate-400 flex-shrink-0">{item.icon}</span>
-                      {item.text}
+                    { from: "Self-assessment", arrow: "→", to: "карта компетенций наполняется" },
+                    { from: "Завершили курс", arrow: "→", to: "verified-источник в карте" },
+                    { from: "Ведёте проект", arrow: "→", to: "сигнал по смежным доменам" },
+                    { from: "Карта компетенций", arrow: "→", to: "growth-план и рекомендации" },
+                    { from: "Growth-план", arrow: "→", to: "конкретные задачи и обучение" },
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span className="font-semibold text-slate-700 flex-shrink-0">{item.from}</span>
+                      <span className="text-slate-400 flex-shrink-0">{item.arrow}</span>
+                      <span className="text-slate-600">{item.to}</span>
                     </li>
                   ))}
                 </ul>
-                <p className="mt-6 text-xs text-slate-400">Следите за обновлениями — Траектория расширяется каждый месяц.</p>
               </div>
             </div>
           </div>
@@ -774,7 +724,7 @@ export default function SoftwareDevelopmentWebsite() {
             <div className="space-y-4 sm:col-span-2 lg:col-span-1">
               <Logo />
               <p className="text-sm text-muted-foreground max-w-xs">
-                Траектория — личный кабинет развития и обучения с AI. Учёба, компетенции, карьерный план и проекты — всё в одном месте.
+                Траектория — платформа для осознанного профессионального развития. Карта компетенций, growth-план, обучение и проекты — в одном кабинете.
               </p>
             </div>
 
