@@ -17,6 +17,7 @@ Session-auth actions:
 """
 import json
 import os
+import hashlib
 
 DB = os.environ["DATABASE_URL"]
 S  = os.environ.get("MAIN_DB_SCHEMA", "public")
@@ -32,7 +33,7 @@ def resp(body: dict, code: int = 200) -> dict:
         "headers": {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, X-Session-Id",
+            "Access-Control-Allow-Headers": "Content-Type, X-Session-Id, X-Admin-Token",
             "Content-Type": "application/json",
         },
         "body": json.dumps(body, ensure_ascii=False, default=str),
@@ -49,6 +50,18 @@ def fetch_all(conn, sql, params=None):
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+def get_admin_actor(conn, token: str):
+    """Проверяет admin-token через таблицу admin_sessions (SHA256-hash)."""
+    if not token:
+        return None
+    h = hashlib.sha256(token.encode()).hexdigest()
+    row = fetch_one(conn,
+        f"SELECT actor_email, actor_role FROM {S}.admin_sessions "
+        f"WHERE session_token_hash=%s AND expires_at>NOW() AND revoked_at IS NULL LIMIT 1",
+        (h,))
+    return {"email": row[0], "role": row[1]} if row else None
 
 
 def get_user_id(conn, session_id: str):
@@ -638,13 +651,22 @@ def handler(event: dict, context) -> dict:
     qs     = event.get("queryStringParameters") or {}
     action = qs.get("action", "")
 
-    session_id = headers.get("x-session-id") or headers.get("X-Session-Id") or ""
-    if not session_id:
-        return resp({"error": "unauthorized"}, 401)
-
     import psycopg2  # lazy — чтобы OPTIONS отдавал 200 без DB
     conn = psycopg2.connect(DB)
     try:
+        # ── Admin-token actions (без session) ─────────────────────────
+        admin_token = headers.get("x-admin-token") or headers.get("X-Admin-Token") or ""
+        if action == "competency_map_adoption_stats":
+            actor = get_admin_actor(conn, admin_token)
+            if not actor:
+                return resp({"error": "unauthorized"}, 401)
+            return action_adoption_stats(conn, qs)
+
+        # ── Session-auth actions ──────────────────────────────────────
+        session_id = headers.get("x-session-id") or headers.get("X-Session-Id") or ""
+        if not session_id:
+            return resp({"error": "unauthorized"}, 401)
+
         user_id = get_user_id(conn, session_id)
         if not user_id:
             return resp({"error": "unauthorized"}, 401)
@@ -659,9 +681,6 @@ def handler(event: dict, context) -> dict:
         if action == "competency_map_track":
             body = json.loads(event.get("body") or "{}")
             return action_track_event(conn, user_id, body)
-
-        if action == "competency_map_adoption_stats":
-            return action_adoption_stats(conn, qs)
 
         return resp({"error": "unknown action"}, 400)
     finally:

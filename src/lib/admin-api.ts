@@ -44,9 +44,12 @@ async function hqRequest(path: string, options: RequestInit = {}) {
 
 const MAP_BASE = "https://functions.poehali.dev/d54f275a-1abc-4018-82e9-0d27e4a041b5";
 
-function sessionHdr() {
-  const sid = localStorage.getItem("session_id") || "";
-  return sid ? { "X-Session-Id": sid, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+function adminHdr() {
+  const token = getAdminToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { "X-Admin-Token": token } : {}),
+  };
 }
 
 export type AdoptionSummary = {
@@ -98,7 +101,7 @@ export const adoptionApi = {
     if (params.to_date)         qs.set("to_date",           params.to_date);
     if (params.exclude_internal !== undefined)
       qs.set("exclude_internal", params.exclude_internal ? "true" : "false");
-    const res = await fetch(`${MAP_BASE}/?${qs}`, { headers: sessionHdr() });
+    const res = await fetch(`${MAP_BASE}/?${qs}`, { headers: adminHdr() });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, data };
   },
