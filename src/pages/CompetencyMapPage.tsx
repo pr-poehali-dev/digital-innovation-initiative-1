@@ -94,7 +94,7 @@ function DrilldownPanel({
                   >
                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${src.is_verified ? "bg-emerald-100" : "bg-slate-100"}`}>
                       <Icon
-                        name={src.is_verified ? "BadgeCheck" : src.kind === "assessment" ? "ClipboardCheck" : "FileText"}
+                        name={src.is_verified ? "BadgeCheck" : src.kind === "assessment" ? "ClipboardCheck" : src.kind === "project" ? "FolderOpen" : "FileText"}
                         size={13}
                         className={src.is_verified ? "text-emerald-600" : "text-slate-500"}
                       />
@@ -170,9 +170,10 @@ export default function CompetencyMapPage() {
       .then(result => {
         setData(result);
         const total = result.summary.total_competencies;
-        if (total === 0) setStatus("empty");
-        else if (total < 3) setStatus("partial");
-        else setStatus("ready");
+        const mapStatus: "empty" | "partial" | "ready" =
+          total === 0 ? "empty" : total < 3 ? "partial" : "ready";
+        setStatus(mapStatus);
+        analytics.competencyMapLoaded(mapStatus, result.summary);
         // раскрываем первые 2 домена сразу
         const firstTwo = result.domains.slice(0, 2).map(d => d.id);
         setExpandedDomains(new Set(firstTwo));

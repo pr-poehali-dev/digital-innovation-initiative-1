@@ -169,10 +169,7 @@ export type AnalyticsEvents = {
   // 22. Просмотр страницы карты компетенций
   competency_map_viewed: Record<string, never>;
 
-  // 23. Клик по CTA на странице карты (shell)
-  competency_map_cta_clicked: {
-    cta_href: string;
-  };
+  // 23. (deprecated — shell era, removed W13.5)
 
   // 27. Клик по компетенции — открытие drilldown
   competency_map_competency_clicked: {
@@ -194,6 +191,14 @@ export type AnalyticsEvents = {
   // 30. CTA из empty state
   competency_map_empty_cta_clicked: {
     cta_href: string;
+  };
+
+  // 31. Карта загружена — операционный сигнал
+  competency_map_loaded: {
+    status: "empty" | "partial" | "ready";
+    total_competencies: number;
+    verified_count: number;
+    domains_covered: number;
   };
 
   // ── Public profile page (публичная сторона) ───────────────────────
@@ -431,10 +436,6 @@ export const analytics = {
     sendEvent("competency_map_viewed", {});
   },
 
-  competencyMapCtaClicked(ctaHref: string) {
-    sendEvent("competency_map_cta_clicked", { cta_href: ctaHref });
-  },
-
   competencyMapCompetencyClicked(competencyId: number, competencyName: string) {
     sendEvent("competency_map_competency_clicked", { competency_id: competencyId, competency_name: competencyName });
   },
@@ -449,6 +450,18 @@ export const analytics = {
 
   competencyMapEmptyCtaClicked(ctaHref: string) {
     sendEvent("competency_map_empty_cta_clicked", { cta_href: ctaHref });
+  },
+
+  competencyMapLoaded(
+    status: "empty" | "partial" | "ready",
+    summary: { total_competencies: number; verified_count: number; domains_covered: number },
+  ) {
+    sendEvent("competency_map_loaded", {
+      status,
+      total_competencies: summary.total_competencies,
+      verified_count: summary.verified_count,
+      domains_covered: summary.domains_covered,
+    });
   },
 
   // ── Public profile page ────────────────────────────────────────────

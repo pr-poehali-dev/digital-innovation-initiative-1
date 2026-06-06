@@ -146,6 +146,39 @@ def build_competency_map(conn, user_id: int) -> dict:
             "is_verified": r[2] == "learning_completion",
         })
 
+    # ── 4b. Project signals — слабый вклад (SCORE_PROJECT = +1) ─────
+    # Логика v1: если у пользователя есть активные проекты,
+    # применяем project signal к компетенциям тех доменов,
+    # где у пользователя уже есть хотя бы один assessment/evidence.
+    # Это предотвращает "магическое" появление компетенций из воздуха.
+    project_rows = fetch_all(conn, f"""
+        SELECT p.id, p.title, p.updated_at
+        FROM {S}.projects p
+        JOIN {S}.project_members pm ON pm.project_id = p.id
+        WHERE pm.user_id = {user_id} AND p.archived_at IS NULL
+        ORDER BY p.updated_at DESC LIMIT 5
+    """)
+    project_signals: list[dict] = []
+    for r in project_rows:
+        project_signals.append({
+            "id": r[0],
+            "title": r[1] or "Проект",
+            "updated_at": str(r[2]) if r[2] else None,
+        })
+
+    # Домены в которых у пользователя уже есть сигналы (assessment или evidence)
+    domains_with_signals: set[int] = set()
+    for comp_id, comp_data in competencies_by_id.items():
+        if comp_id in uc_by_comp or comp_id in evidence_by_comp:
+            domains_with_signals.add(comp_data["domain_id"])
+
+    # project_boost_by_comp: competency_id → список проектных source-записей
+    project_boost_by_comp: dict[int, list] = {}
+    if project_signals and domains_with_signals:
+        for comp_id, comp_data in competencies_by_id.items():
+            if comp_data["domain_id"] in domains_with_signals:
+                project_boost_by_comp[comp_id] = project_signals
+
     # ── 5. Scoring ───────────────────────────────────────────────────
     for comp_id, comp in competencies_by_id.items():
         score = 0
@@ -182,6 +215,20 @@ def build_competency_map(conn, user_id: int) -> dict:
                 "date": ev["created_at"],
                 "evidence_id": ev["id"],
                 "description": ev["description"] or None,
+            })
+
+        # project boost — слабый сигнал, только для доменов с existing signals
+        proj_boosts = project_boost_by_comp.get(comp_id, [])
+        if proj_boosts and source_types:  # не даём проектам "создавать" компетенции с нуля
+            score += SCORE_PROJECT
+            source_types.add("project")
+            # показываем только первый проект как source (не спамим)
+            p = proj_boosts[0]
+            sources.append({
+                "kind": "project",
+                "label": f"Проект: {p['title']}",
+                "is_verified": False,
+                "date": p["updated_at"],
             })
 
         comp["score"] = score
