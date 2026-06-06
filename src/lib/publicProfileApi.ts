@@ -43,11 +43,14 @@ export type PublicView = {
 };
 
 export const publicProfileApi = {
-  getMe:         ()            => pGet("public_profile_get_me"),
-  upsertMe:      (b: object)   => pPost("public_profile_upsert_me", b),
+  getMe:         ()             => pGet("public_profile_get_me"),
+  upsertMe:      (b: object)    => pPost("public_profile_upsert_me", b),
   generateSlug:  (hint?: string) => pPost("public_profile_generate_slug_me", hint ? { hint } : {}),
-  publish:       ()            => pPost("public_profile_publish_me"),
-  unpublish:     ()            => pPost("public_profile_unpublish_me"),
-  previewMe:     ()            => pGet("public_profile_preview_me"),
+  checkSlug:     (slug: string) => pGet("public_profile_slug_check", { slug }),
+  publish:       ()             => pPost("public_profile_publish_me"),
+  unpublish:     ()             => pPost("public_profile_unpublish_me"),
+  previewMe:     ()             => pGet("public_profile_preview_me"),
   getBySlug:     (slug: string) => fetch(`${PUB_URL}/?action=public_profile_get_by_slug&slug=${encodeURIComponent(slug)}`).then(r => r.json()),
 };
+
+export const PUBLIC_BASE_URL = window.location.origin;
