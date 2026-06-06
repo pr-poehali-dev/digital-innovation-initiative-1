@@ -83,8 +83,12 @@ def yookassa_create_payment(amount_rub: int, idempotency_key: str, user_id: int,
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"YooKassa HTTP {e.code}: {error_body}")
 
 
 def handler(event: dict, context) -> dict:
@@ -172,7 +176,12 @@ def handler(event: dict, context) -> dict:
                 payment_db_id = cur.fetchone()[0]
             conn.commit()
 
-            yk_payment = yookassa_create_payment(amount_rub, idempotency_key, user["id"], payment_db_id)
+            print(f"[wallet] creating YK payment: shop={SHOP_ID!r} amount={amount_rub} return_url={RETURN_URL}?payment_id={payment_db_id}")
+            try:
+                yk_payment = yookassa_create_payment(amount_rub, idempotency_key, user["id"], payment_db_id)
+            except RuntimeError as e:
+                print(f"[wallet] YK error: {e}")
+                return cors({"error": "payment_gateway_error", "detail": str(e)}, 502)
 
             provider_payment_id = yk_payment.get("id")
             confirmation_url = yk_payment.get("confirmation", {}).get("confirmation_url", "")
