@@ -52,7 +52,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "UserCircle",
     items: [
       { id: "profile.professional", label: "Профессиональный профиль", icon: "IdCard", href: ROUTES.profile, active: true },
-      { id: "profile.public", label: "Публичный профиль", icon: "Globe", href: ROUTES.publicProfile, active: true, badge: { text: "new", tone: "success" } },
+      { id: "profile.public", label: "Публичный профиль", icon: "Globe", href: ROUTES.publicProfile, active: true },
     ],
   },
   {
