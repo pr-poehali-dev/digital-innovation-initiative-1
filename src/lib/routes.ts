@@ -1,40 +1,97 @@
-// Единый источник правды для роутов приложения.
-// Используется в Layout (меню десктоп + мобиль) и App.tsx.
+// Единый источник правды для роутов и структуры навигации.
 
 export const ROUTES = {
-  home: "/cabinet",
-  projects: "/cabinet/projects",
-  learning: "/cabinet/learning",
-  passport: "/cabinet/passport",
-  wallet: "/cabinet/wallet",
-  headquarters: "/cabinet/headquarters",
-  // Будущие маршруты (пока не существуют, не добавлять в меню):
-  // competencies: "/cabinet/competencies",
-  // development: "/cabinet/development",
-  // profile: "/cabinet/profile",
-  // settings: "/cabinet/settings",
+  home:          "/cabinet",
+  projects:      "/cabinet/projects",
+  learning:      "/cabinet/learning",
+  passport:      "/cabinet/passport",
+  wallet:        "/cabinet/wallet",
+  profile:       "/cabinet/profile",
+  publicProfile: "/cabinet/public-profile",
+  growth:        "/cabinet/growth",
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
 
-// Навигационные пункты — десктопное боковое меню
-export const NAV_ITEMS = [
-  { label: "Главная",                  icon: "LayoutDashboard", href: ROUTES.home,         exact: true, active: true  },
-  { label: "Проекты и презентации",    icon: "FolderOpen",      href: ROUTES.projects,     exact: false, active: true  },
-  { label: "Учебный кабинет",          icon: "GraduationCap",   href: ROUTES.learning,     exact: false, active: true  },
-  { label: "Дипломы и сертификаты",    icon: "Award",           href: ROUTES.passport,     exact: false, active: true  },
-  { label: "Кошелёк",                  icon: "Wallet",          href: ROUTES.wallet,       exact: false, active: true  },
-  // Штаб Траектории — платформенный раздел, живёт в /admin/hq, не в пользовательском меню
-  { label: "Профессиональный профиль",  icon: "UserCircle",      href: "/cabinet/profile", exact: false, active: true  },
-  { label: "Навигатор развития",        icon: "TrendingUp",      href: "/cabinet/growth",  exact: false, active: true  },
-  // Неактивные (скоро):
-  { label: "Карта компетенций",        icon: "Map",             href: "#", exact: false, active: false },
-] as const;
+// ── Секции sidebar ─────────────────────────────────────────────────────────
 
-// Нижнее мобильное меню — только активные маршруты, max 5
+export type NavSectionKey = "overview" | "profile" | "growth" | "learning" | "practice";
+
+export interface NavItem {
+  id: string;
+  label: string;
+  icon: string;
+  href: string;
+  exact?: boolean;
+  active: boolean;
+  badge?: { text: string; tone: "neutral" | "success" | "info" };
+}
+
+export interface NavSection {
+  key: NavSectionKey;
+  label: string;
+  icon: string;
+  singleItem?: boolean;
+  items: NavItem[];
+}
+
+export const NAV_SECTIONS: NavSection[] = [
+  {
+    key: "overview",
+    label: "Обзор",
+    icon: "LayoutDashboard",
+    singleItem: true,
+    items: [
+      { id: "overview", label: "Обзор", icon: "LayoutDashboard", href: ROUTES.home, exact: true, active: true },
+    ],
+  },
+  {
+    key: "profile",
+    label: "Профиль",
+    icon: "UserCircle",
+    items: [
+      { id: "profile.professional", label: "Профессиональный профиль", icon: "IdCard", href: ROUTES.profile, active: true },
+      { id: "profile.public", label: "Публичный профиль", icon: "Globe", href: ROUTES.publicProfile, active: true, badge: { text: "new", tone: "success" } },
+    ],
+  },
+  {
+    key: "growth",
+    label: "Развитие",
+    icon: "TrendingUp",
+    items: [
+      { id: "growth.navigator", label: "Навигатор развития", icon: "TrendingUp", href: ROUTES.growth, active: true },
+      { id: "growth.map", label: "Карта компетенций", icon: "Map", href: "#", active: false, badge: { text: "Скоро", tone: "neutral" } },
+    ],
+  },
+  {
+    key: "learning",
+    label: "Обучение",
+    icon: "GraduationCap",
+    items: [
+      { id: "learning.main", label: "Учебный кабинет", icon: "GraduationCap", href: ROUTES.learning, active: true },
+      { id: "learning.diplomas", label: "Дипломы и сертификаты", icon: "Award", href: ROUTES.passport, active: true },
+    ],
+  },
+  {
+    key: "practice",
+    label: "Практика",
+    icon: "FolderOpen",
+    items: [
+      { id: "practice.projects", label: "Проекты и презентации", icon: "FolderOpen", href: ROUTES.projects, active: true },
+    ],
+  },
+];
+
+// Кошелёк — secondary area (внизу sidebar)
+export const NAV_SECONDARY: NavItem[] = [
+  { id: "wallet", label: "Кошелёк", icon: "Wallet", href: ROUTES.wallet, active: true },
+];
+
+// Нижнее мобильное меню — только самые важные, max 5
 export const MOBILE_NAV = [
-  { label: "Главная",   icon: "LayoutDashboard", href: ROUTES.home         },
-  { label: "Проекты",  icon: "FolderOpen",      href: ROUTES.projects     },
-  { label: "Обучение", icon: "GraduationCap",   href: ROUTES.learning     },
-  { label: "Кошелёк",  icon: "Wallet",          href: ROUTES.wallet       },
+  { label: "Обзор",    icon: "LayoutDashboard", href: ROUTES.home     },
+  { label: "Профиль",  icon: "UserCircle",      href: ROUTES.profile  },
+  { label: "Рост",     icon: "TrendingUp",      href: ROUTES.growth   },
+  { label: "Обучение", icon: "GraduationCap",   href: ROUTES.learning },
+  { label: "Кошелёк",  icon: "Wallet",          href: ROUTES.wallet   },
 ] as const;
