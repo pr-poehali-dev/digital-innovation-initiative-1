@@ -1,10 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { projectsApi, learningApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { publicProfileApi, type PublicSettings } from "@/lib/publicProfileApi";
+import {
+  buildDashboardTasks,
+  selectNextSteps,
+  selectQuickActions,
+  type DashboardFacts,
+  type DashboardTask,
+} from "@/lib/dashboardModel";
 
 type Goal = {
   id: number;
@@ -87,6 +94,48 @@ function ProgressArc({ value, total }: { value: number; total: number }) {
           <div className="text-xs text-slate-400 mt-1">Появится после первых шагов</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── NextStepRow ──────────────────────────────────────────────────────────
+
+function NextStepRow({ task, onNavigate }: {
+  task: DashboardTask;
+  onNavigate: (href: string) => void;
+}) {
+  const isDone    = task.state === "done";
+  const isComing  = task.state === "coming";
+  const isBlocked = task.state === "blocked";
+  const isActive  = task.state === "available" && Boolean(task.href);
+
+  return (
+    <div
+      className={`flex items-start gap-2.5 p-2 rounded-lg transition-colors ${isActive ? "hover:bg-slate-50 cursor-pointer" : ""}`}
+      onClick={() => { if (isActive && task.href) onNavigate(task.href); }}
+    >
+      <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border ${
+        isDone    ? "bg-indigo-600 border-indigo-600" :
+        isComing  ? "border-slate-200 bg-slate-50" :
+        isBlocked ? "border-slate-200 bg-slate-50" :
+                    "border-slate-300"
+      }`}>
+        {isDone    && <Icon name="Check" size={10} className="text-white" />}
+        {isComing  && <Icon name="Clock" size={9}  className="text-slate-300" />}
+        {isBlocked && <Icon name="Lock" size={9}   className="text-slate-300" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className={`text-sm leading-tight block ${
+          isDone    ? "text-slate-400 line-through" :
+          isComing || isBlocked ? "text-slate-400" :
+                                  "text-slate-700"
+        }`}>
+          {task.title}
+        </span>
+        {isComing  && <span className="text-[10px] text-slate-400">Скоро</span>}
+        {isBlocked && <span className="text-[10px] text-slate-400">Сначала выполните предыдущий шаг</span>}
+      </div>
+      {isActive && <Icon name="ChevronRight" size={14} className="text-slate-300 flex-shrink-0 mt-0.5" />}
     </div>
   );
 }
@@ -270,27 +319,28 @@ export default function GrowthDashboard() {
   const devValue = Math.round(Math.min(baseScore + projectScore + learningScore, 10));
   const devTotal = 10;
 
-  // Ближайшие шаги: привязаны к реальному состоянию
+  // Dashboard model — единый builder, никакой логики в JSX
   const hasLearningGoal = goals.length > 0;
-  const pubIsPublished = pubSettings?.is_published ?? false;
-  const pubHasSlug = Boolean(pubSettings?.public_slug);
 
-  const pubProfileStep = pubIsPublished ? null : {
-    done: false,
-    label: pubHasSlug ? "Опубликовать публичный профиль" : "Создать публичный профиль",
-    href: "/cabinet/public-profile",
-    disabled: false,
-    coming: false,
+  const dashboardFacts: DashboardFacts = {
+    publicProfile: {
+      slug: pubSettings?.public_slug ?? null,
+      isPublished: pubSettings?.is_published ?? false,
+    },
+    projectCount,
+    hasLearningGoal,
+    learningDone,
   };
 
-  const nextSteps = [
-    { done: true, label: "Создать аккаунт" },
-    { done: projectCount > 0, label: "Создать первый проект", href: "/cabinet/projects", disabled: false, coming: false },
-    { done: hasLearningGoal, label: "Поставить учебную цель", href: "/cabinet/learning", disabled: false, coming: false },
-    { done: learningDone > 0, label: "Освоить первую тему", href: "/cabinet/learning", disabled: !hasLearningGoal, coming: false },
-    ...(pubProfileStep ? [pubProfileStep] : []),
-    { done: false, label: "Заполнить карту компетенций", href: "#", disabled: false, coming: true },
-  ];
+  const dashboardTasks = useMemo(
+    () => buildDashboardTasks(dashboardFacts),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pubSettings?.public_slug, pubSettings?.is_published, projectCount, hasLearningGoal, learningDone],
+  );
+
+  const nextStepsTasks = selectNextSteps(dashboardTasks);
+  const nextStepsIds = nextStepsTasks.map(t => t.id);
+  const quickActionsTasks = selectQuickActions(dashboardTasks, nextStepsIds);
 
   // AI-инсайт: учитывает и проекты, и обучение
   const aiInsight = goals.length > 0 && learningPct > 0
@@ -488,48 +538,17 @@ export default function GrowthDashboard() {
             </div>
           </div>
 
-          {/* Ближайшие шаги — реальные, кликабельные */}
+          {/* Ближайшие шаги — из dashboardModel */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
-              <span className="text-xs text-slate-400">{nextSteps.filter(s => s.done).length}/{nextSteps.length}</span>
+              <span className="text-xs text-slate-400">
+                {nextStepsTasks.filter(t => t.state === "done").length}/{nextStepsTasks.length}
+              </span>
             </div>
             <div className="space-y-1.5">
-              {nextSteps.map((s, i) => (
-                <div
-                  key={i}
-                  className={`flex items-start gap-2.5 p-2 rounded-lg transition-colors ${
-                    !s.done && !s.coming && !s.disabled && s.href
-                      ? "hover:bg-slate-50 cursor-pointer"
-                      : ""
-                  }`}
-                  onClick={() => {
-                    if (!s.done && !s.coming && !s.disabled && s.href) navigate(s.href);
-                  }}
-                >
-                  <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border ${
-                    s.done
-                      ? "bg-indigo-600 border-indigo-600"
-                      : s.coming
-                      ? "border-slate-200 bg-slate-50"
-                      : "border-slate-300"
-                  }`}>
-                    {s.done && <Icon name="Check" size={10} className="text-white" />}
-                    {s.coming && <Icon name="Clock" size={9} className="text-slate-300" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className={`text-sm leading-tight block ${
-                      s.done ? "text-slate-400 line-through" : s.disabled || s.coming ? "text-slate-400" : "text-slate-700"
-                    }`}>
-                      {s.label}
-                    </span>
-                    {s.coming && <span className="text-[10px] text-slate-400">Скоро</span>}
-                    {s.disabled && !s.coming && <span className="text-[10px] text-slate-400">Сначала создайте проект</span>}
-                  </div>
-                  {!s.done && !s.coming && !s.disabled && s.href && (
-                    <Icon name="ChevronRight" size={14} className="text-slate-300 flex-shrink-0 mt-0.5" />
-                  )}
-                </div>
+              {nextStepsTasks.map(task => (
+                <NextStepRow key={task.id} task={task} onNavigate={navigate} />
               ))}
             </div>
           </div>
@@ -607,33 +626,27 @@ export default function GrowthDashboard() {
           {/* Публичный профиль */}
           <PublicProfileCard />
 
-          {/* Быстрые действия */}
+          {/* Быстрые действия — из dashboardModel + evergreen */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <h3 className="text-sm font-semibold text-slate-800 mb-4">Быстрые действия</h3>
             <div className="grid grid-cols-2 gap-2.5">
-              {[
-                { label: "Загрузить материалы", icon: "Upload", href: "/cabinet/projects", color: "bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100", active: true },
-                { label: "Создать проект", icon: "Plus", href: "/cabinet/projects", color: "bg-violet-50 text-violet-700 border-violet-100 hover:bg-violet-100", active: true },
-                { label: "Пройти тест", icon: "ClipboardCheck", href: "#", color: "", active: false, coming: true },
-                { label: "Карта компетенций", icon: "Map", href: "#", color: "", active: false, coming: true },
-              ].map(a => (
-                <Link
-                  key={a.label}
-                  to={a.active ? a.href : "#"}
-                  onClick={e => !a.active && e.preventDefault()}
-                  className={`flex items-center gap-2.5 p-3.5 rounded-xl border transition-all ${
-                    a.active
-                      ? `${a.color} hover:shadow-sm cursor-pointer`
-                      : "border-slate-100 bg-slate-50 text-slate-400 cursor-default"
-                  }`}
-                >
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${a.active ? "bg-white/70" : "bg-white"}`}>
-                    <Icon name={a.icon} size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold leading-tight">{a.label}</div>
-                    {a.coming && <div className="text-[10px] text-slate-400 mt-0.5">Скоро</div>}
-                  </div>
+              {/* Evergreen действия — всегда полезны */}
+              <Link to="/cabinet/projects"
+                className="flex items-center gap-2.5 p-3.5 rounded-xl border bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:shadow-sm transition-all">
+                <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center flex-shrink-0"><Icon name="Upload" size={16} /></div>
+                <div className="min-w-0"><div className="text-xs font-semibold leading-tight">Загрузить материалы</div></div>
+              </Link>
+              <Link to="/cabinet/learning"
+                className="flex items-center gap-2.5 p-3.5 rounded-xl border bg-violet-50 text-violet-700 border-violet-100 hover:bg-violet-100 hover:shadow-sm transition-all">
+                <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center flex-shrink-0"><Icon name="GraduationCap" size={16} /></div>
+                <div className="min-w-0"><div className="text-xs font-semibold leading-tight">Учебный кабинет</div></div>
+              </Link>
+              {/* Динамические из модели (не дублируя nextSteps) */}
+              {quickActionsTasks.map(task => (
+                <Link key={task.id} to={task.href ?? "#"}
+                  className="flex items-center gap-2.5 p-3.5 rounded-xl border bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:shadow-sm transition-all">
+                  <div className="w-8 h-8 rounded-lg bg-white/70 flex items-center justify-center flex-shrink-0"><Icon name="Plus" size={16} /></div>
+                  <div className="min-w-0"><div className="text-xs font-semibold leading-tight">{task.title}</div></div>
                 </Link>
               ))}
             </div>
