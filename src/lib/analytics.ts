@@ -107,6 +107,63 @@ export type AnalyticsEvents = {
     project_id: number;
     files_count_total: number;
   };
+
+  // ── Public profile activation funnel ──────────────────────────────
+  // 10. Просмотр страницы настроек публичного профиля
+  public_profile_settings_viewed: {
+    has_slug: boolean;
+    is_published: boolean;
+  };
+
+  // 11. Slug сохранён
+  public_profile_slug_saved: {
+    slug_length: number;
+  };
+
+  // 12. Ошибка проверки slug (сеть)
+  public_profile_slug_check_failed: Record<string, never>;
+
+  // 13. Открыт confirm publish
+  public_profile_publish_confirm_opened: {
+    has_slug: boolean;
+  };
+
+  // 14. Профиль опубликован
+  public_profile_published: Record<string, never>;
+
+  // 15. Открыт confirm unpublish
+  public_profile_unpublish_confirm_opened: Record<string, never>;
+
+  // 16. Профиль снят с публикации
+  public_profile_unpublished: Record<string, never>;
+
+  // 17. Клик «Скопировать ссылку»
+  public_profile_copy_link_clicked: {
+    source: "dashboard_card" | "settings_page";
+  };
+
+  // 18. Ссылка успешно скопирована
+  public_profile_copy_link_succeeded: {
+    source: "dashboard_card" | "settings_page";
+    copy_method: "clipboard" | "execCommand";
+  };
+
+  // 19. Автокопирование не удалось (открыт manual dialog)
+  public_profile_copy_link_failed: {
+    source: "dashboard_card" | "settings_page";
+  };
+
+  // 20. Клик «Открыть» публичную страницу
+  public_profile_open_link_clicked: {
+    source: "settings_page";
+    is_published: boolean;
+  };
+
+  // 21. Клик по шагу из «Ближайших шагов»
+  dashboard_next_step_clicked: {
+    step_id: string;
+    step_state: string;
+  };
 };
 
 // --- Ядро ---
@@ -255,6 +312,68 @@ export const analytics = {
     sendEvent("project_files_empty_state_shown", {
       project_id: projectId,
       files_count_total: filesTotalCount,
+    });
+  },
+
+  // ── Public profile ─────────────────────────────────────────────────
+
+  publicProfileSettingsViewed(hasSlug: boolean, isPublished: boolean) {
+    sendEvent("public_profile_settings_viewed", {
+      has_slug: hasSlug,
+      is_published: isPublished,
+    });
+  },
+
+  publicProfileSlugSaved(slugLength: number) {
+    sendEvent("public_profile_slug_saved", { slug_length: slugLength });
+  },
+
+  publicProfileSlugCheckFailed() {
+    sendEvent("public_profile_slug_check_failed", {});
+  },
+
+  publicProfilePublishConfirmOpened(hasSlug: boolean) {
+    sendEvent("public_profile_publish_confirm_opened", { has_slug: hasSlug });
+  },
+
+  publicProfilePublished() {
+    sendEvent("public_profile_published", {});
+  },
+
+  publicProfileUnpublishConfirmOpened() {
+    sendEvent("public_profile_unpublish_confirm_opened", {});
+  },
+
+  publicProfileUnpublished() {
+    sendEvent("public_profile_unpublished", {});
+  },
+
+  publicProfileCopyLinkClicked(source: "dashboard_card" | "settings_page") {
+    sendEvent("public_profile_copy_link_clicked", { source });
+  },
+
+  publicProfileCopyLinkSucceeded(
+    source: "dashboard_card" | "settings_page",
+    copyMethod: "clipboard" | "execCommand",
+  ) {
+    sendEvent("public_profile_copy_link_succeeded", { source, copy_method: copyMethod });
+  },
+
+  publicProfileCopyLinkFailed(source: "dashboard_card" | "settings_page") {
+    sendEvent("public_profile_copy_link_failed", { source });
+  },
+
+  publicProfileOpenLinkClicked(isPublished: boolean) {
+    sendEvent("public_profile_open_link_clicked", {
+      source: "settings_page",
+      is_published: isPublished,
+    });
+  },
+
+  dashboardNextStepClicked(stepId: string, stepState: string) {
+    sendEvent("dashboard_next_step_clicked", {
+      step_id: stepId,
+      step_state: stepState,
     });
   },
 };

@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { publicProfileApi, type PublicSettings, type PublicView } from "@/lib/publicProfileApi";
+import { buildPublicProfileUrl, getPublicBaseUrl } from "@/lib/publicProfileUrl";
+import { analytics } from "@/lib/analytics";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-const APP_ORIGIN = window.location.origin;
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]{1,2}$/;
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -202,6 +203,7 @@ function SlugEditor({ settings, isPublished, onSaved }: {
         setState(d.available ? "available" : "taken");
       } catch {
         setState("check-error");
+        analytics.publicProfileSlugCheckFailed();
       }
     }, 400);
   }
@@ -213,8 +215,9 @@ function SlugEditor({ settings, isPublished, onSaved }: {
     try {
       const d = await publicProfileApi.generateSlug(value) as { public_slug?: string; public_url?: string };
       if (d.public_slug) {
-        onSaved(d.public_slug, d.public_url ?? `${APP_ORIGIN}/p/${d.public_slug}`);
+        onSaved(d.public_slug, d.public_url ?? buildPublicProfileUrl(d.public_slug));
         setState("saved");
+        analytics.publicProfileSlugSaved(d.public_slug.length);
       }
     } finally {
       setSaving(false);
@@ -234,7 +237,7 @@ function SlugEditor({ settings, isPublished, onSaved }: {
   const status = statusMap[state];
   const canSave = state === "available" && !saving;
   const showWarn = isPublished && value !== currentSlug && value && state === "available";
-  const previewUrl = value ? `${APP_ORIGIN}/p/${value}` : null;
+  const previewUrl = value ? buildPublicProfileUrl(value) : null;
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5 mb-5 space-y-3">
@@ -242,7 +245,7 @@ function SlugEditor({ settings, isPublished, onSaved }: {
 
       {/* Input */}
       <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus-within:border-violet-400 focus-within:bg-white transition-colors">
-        <span className="text-xs text-slate-400 whitespace-nowrap flex-shrink-0">{APP_ORIGIN}/p/</span>
+        <span className="text-xs text-slate-400 whitespace-nowrap flex-shrink-0">{getPublicBaseUrl()}/p/</span>
         <input
           value={value}
           onChange={e => handleChange(e.target.value)}
@@ -388,9 +391,15 @@ export default function PublicProfileSettingsPage() {
       publicProfileApi.getMe(),
       publicProfileApi.previewMe(),
     ]);
-    setSettings(sm.settings ?? null);
+    const s = sm.settings ?? null;
+    setSettings(s);
     setPreview(pv.preview ?? null);
     setLoading(false);
+    // settings_viewed — один раз при загрузке
+    analytics.publicProfileSettingsViewed(
+      Boolean(s?.public_slug),
+      Boolean(s?.is_published),
+    );
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -413,8 +422,13 @@ export default function PublicProfileSettingsPage() {
     setPublishing(true);
     try {
       const d = await publicProfileApi.publish() as { settings?: PublicSettings; error?: string };
-      if (d.settings) { setSettings(d.settings); showMsg("Профиль опубликован"); }
-      else showMsg(d.error ?? "Не удалось опубликовать", "err");
+      if (d.settings) {
+        setSettings(d.settings);
+        showMsg("Профиль опубликован");
+        analytics.publicProfilePublished();
+      } else {
+        showMsg(d.error ?? "Не удалось опубликовать", "err");
+      }
     } finally { setPublishing(false); setModal(null); }
   }
 
@@ -425,16 +439,25 @@ export default function PublicProfileSettingsPage() {
       if (d.ok !== false) {
         setSettings(s => s ? { ...s, is_published: false, published_at: null } : s);
         showMsg("Профиль скрыт");
-      } else showMsg(d.error ?? "Не удалось снять с публикации", "err");
+        analytics.publicProfileUnpublished();
+      } else {
+        showMsg(d.error ?? "Не удалось снять с публикации", "err");
+      }
     } finally { setPublishing(false); setModal(null); }
   }
 
   async function handleCopyLink() {
-    const url = settings?.public_url ?? `${APP_ORIGIN}/p/${settings?.public_slug}`;
+    const url = settings?.public_url ?? buildPublicProfileUrl(settings!.public_slug);
+    analytics.publicProfileCopyLinkClicked("settings_page");
     const result = await copyToClipboard(url);
     if (result === "error") {
+      analytics.publicProfileCopyLinkFailed("settings_page");
       setShowManualCopy(true);
     } else {
+      analytics.publicProfileCopyLinkSucceeded(
+        "settings_page",
+        result === "ok" ? "clipboard" : "execCommand",
+      );
       showMsg("Ссылка скопирована");
     }
   }
@@ -462,7 +485,7 @@ export default function PublicProfileSettingsPage() {
 
   const isPublished = settings?.is_published ?? false;
   const hasSlug = Boolean(settings?.public_slug);
-  const pubUrl = settings?.public_url ?? (hasSlug ? `${APP_ORIGIN}/p/${settings!.public_slug}` : null);
+  const pubUrl = settings?.public_url ?? (hasSlug ? buildPublicProfileUrl(settings!.public_slug) : null);
 
   const TOGGLE_SECTIONS = [
     { key: "show_headline",                  label: "Заголовок / специализация",       desc: undefined },
@@ -531,7 +554,7 @@ export default function PublicProfileSettingsPage() {
                 /* Wrapper span нужен чтобы title работал на disabled кнопке */
                 <span className="flex-1" title={!hasSlug ? "Сначала создайте адрес страницы ниже" : undefined}>
                   <button
-                    onClick={() => setModal("publish")}
+                    onClick={() => { setModal("publish"); analytics.publicProfilePublishConfirmOpened(hasSlug); }}
                     disabled={!hasSlug}
                     aria-disabled={!hasSlug}
                     className="w-full flex items-center justify-center gap-2 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-600 focus:ring-offset-1"
@@ -541,14 +564,19 @@ export default function PublicProfileSettingsPage() {
                   </button>
                 </span>
               ) : (
-                <button onClick={() => setModal("unpublish")}
+                <button
+                  onClick={() => { setModal("unpublish"); analytics.publicProfileUnpublishConfirmOpened(); }}
                   className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300">
                   <Icon name="EyeOff" size={14} />
                   Снять с публикации
                 </button>
               )}
               {isPublished && pubUrl && (
-                <a href={pubUrl} target="_blank" rel="noreferrer"
+                <a
+                  href={pubUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => analytics.publicProfileOpenLinkClicked(isPublished)}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-sm font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300">
                   <Icon name="ExternalLink" size={14} />
                   Открыть

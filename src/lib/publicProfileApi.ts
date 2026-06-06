@@ -53,4 +53,3 @@ export const publicProfileApi = {
   getBySlug:     (slug: string) => fetch(`${PUB_URL}/?action=public_profile_get_by_slug&slug=${encodeURIComponent(slug)}`).then(r => r.json()),
 };
 
-export const PUBLIC_BASE_URL = window.location.origin;

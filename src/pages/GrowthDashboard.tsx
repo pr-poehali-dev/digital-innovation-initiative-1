@@ -5,6 +5,8 @@ import { projectsApi, learningApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { publicProfileApi, type PublicSettings } from "@/lib/publicProfileApi";
+import { buildPublicProfileUrl } from "@/lib/publicProfileUrl";
+import { analytics } from "@/lib/analytics";
 import {
   buildDashboardTasks,
   selectNextSteps,
@@ -112,7 +114,12 @@ function NextStepRow({ task, onNavigate }: {
   return (
     <div
       className={`flex items-start gap-2.5 p-2 rounded-lg transition-colors ${isActive ? "hover:bg-slate-50 cursor-pointer" : ""}`}
-      onClick={() => { if (isActive && task.href) onNavigate(task.href); }}
+      onClick={() => {
+        if (isActive && task.href) {
+          analytics.dashboardNextStepClicked(task.id, task.state);
+          onNavigate(task.href);
+        }
+      }}
     >
       <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border ${
         isDone    ? "bg-indigo-600 border-indigo-600" :
@@ -169,11 +176,13 @@ function PublicProfileCard() {
 
   async function copyLink() {
     if (!settings || settings === "loading") return;
-    const url = settings.public_url ?? `${window.location.origin}/p/${settings.public_slug}`;
+    const url = settings.public_url ?? buildPublicProfileUrl((settings as PublicSettings).public_slug);
     if (!url) return;
+    analytics.publicProfileCopyLinkClicked("dashboard_card");
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(url);
+        analytics.publicProfileCopyLinkSucceeded("dashboard_card", "clipboard");
       } else {
         const el = document.createElement("textarea");
         el.value = url;
@@ -183,11 +192,12 @@ function PublicProfileCard() {
         el.select();
         document.execCommand("copy");
         document.body.removeChild(el);
+        analytics.publicProfileCopyLinkSucceeded("dashboard_card", "execCommand");
       }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // fallback: молча не ломаем — пользователь может скопировать из поля вручную
+      analytics.publicProfileCopyLinkFailed("dashboard_card");
     }
   }
 
@@ -232,7 +242,7 @@ function PublicProfileCard() {
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 min-w-0">
             <Icon name="Link" size={12} className="text-slate-400 flex-shrink-0" />
             <span className="text-xs text-slate-500 flex-1 min-w-0 truncate">
-              {window.location.origin}/p/<span className="font-semibold text-slate-700">{slug}</span>
+              {buildPublicProfileUrl(slug)}
             </span>
           </div>
           {/* Trust signal */}
