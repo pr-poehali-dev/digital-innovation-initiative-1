@@ -167,11 +167,28 @@ function PublicProfileCard() {
       .catch(() => {});
   }, [settings]);
 
-  function copyLink() {
-    if (!settings || settings === "loading" || !settings.public_url) return;
-    navigator.clipboard.writeText(settings.public_url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function copyLink() {
+    if (!settings || settings === "loading") return;
+    const url = settings.public_url ?? `${window.location.origin}/p/${settings.public_slug}`;
+    if (!url) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = url;
+        el.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
+        document.body.appendChild(el);
+        el.focus();
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback: молча не ломаем — пользователь может скопировать из поля вручную
+    }
   }
 
   const isLoading = settings === "loading";
@@ -215,7 +232,7 @@ function PublicProfileCard() {
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 min-w-0">
             <Icon name="Link" size={12} className="text-slate-400 flex-shrink-0" />
             <span className="text-xs text-slate-500 flex-1 min-w-0 truncate">
-              {window.location.hostname}/p/<span className="font-semibold text-slate-700">{slug}</span>
+              {window.location.origin}/p/<span className="font-semibold text-slate-700">{slug}</span>
             </span>
           </div>
           {/* Trust signal */}

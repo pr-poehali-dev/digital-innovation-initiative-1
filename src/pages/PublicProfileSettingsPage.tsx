@@ -163,7 +163,7 @@ function ManualCopyDialog({ url, onClose }: { url: string; onClose: () => void }
 
 // ── Slug editor ───────────────────────────────────────────────────────
 
-type SlugState = "idle" | "checking" | "available" | "taken" | "invalid" | "saved";
+type SlugState = "idle" | "checking" | "available" | "taken" | "invalid" | "saved" | "check-error";
 
 function SlugEditor({ settings, isPublished, onSaved }: {
   settings: PublicSettings | null;
@@ -201,7 +201,7 @@ function SlugEditor({ settings, isPublished, onSaved }: {
         const d = await publicProfileApi.checkSlug(s) as { available?: boolean };
         setState(d.available ? "available" : "taken");
       } catch {
-        setState("available"); // если проверка упала — даём попробовать сохранить
+        setState("check-error");
       }
     }, 400);
   }
@@ -222,16 +222,17 @@ function SlugEditor({ settings, isPublished, onSaved }: {
   }
 
   const statusMap: Record<SlugState, { icon: string; cls: string; text: string } | null> = {
-    idle:      null,
-    checking:  { icon: "Loader2", cls: "text-slate-400", text: "Проверяю..." },
-    available: { icon: "CheckCircle2", cls: "text-emerald-500", text: "Доступен" },
-    taken:     { icon: "XCircle", cls: "text-red-500", text: "Уже занят" },
-    invalid:   { icon: "AlertCircle", cls: "text-amber-500", text: "Только латиница, цифры и дефис" },
-    saved:     { icon: "CheckCircle2", cls: "text-emerald-500", text: "Сохранён" },
+    idle:         null,
+    checking:     { icon: "Loader2",      cls: "text-slate-400",  text: "Проверяю..." },
+    available:    { icon: "CheckCircle2", cls: "text-emerald-500", text: "Доступен" },
+    taken:        { icon: "XCircle",      cls: "text-red-500",     text: "Уже занят" },
+    invalid:      { icon: "AlertCircle",  cls: "text-amber-500",   text: "Только латиница, цифры и дефис" },
+    saved:        { icon: "CheckCircle2", cls: "text-emerald-500", text: "Сохранён" },
+    "check-error":{ icon: "AlertCircle",  cls: "text-amber-500",   text: "Не удалось проверить — попробуйте ещё раз" },
   };
 
   const status = statusMap[state];
-  const canSave = (state === "available" || (!value && state === "idle")) && !saving;
+  const canSave = state === "available" && !saving;
   const showWarn = isPublished && value !== currentSlug && value && state === "available";
   const previewUrl = value ? `${APP_ORIGIN}/p/${value}` : null;
 
