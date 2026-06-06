@@ -95,13 +95,28 @@ function ProgressArc({ value, total }: { value: number; total: number }) {
 
 function PublicProfileCard() {
   const [settings, setSettings] = useState<PublicSettings | null | "loading">("loading");
+  const [evidenceCount, setEvidenceCount] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     publicProfileApi.getMe()
-      .then((d: { settings?: PublicSettings }) => setSettings(d.settings ?? null))
+      .then((d: { settings?: PublicSettings }) => {
+        setSettings(d.settings ?? null);
+      })
       .catch(() => setSettings(null));
   }, []);
+
+  // Загружаем preview только если профиль опубликован — берём verified_signals оттуда
+  useEffect(() => {
+    if (settings === "loading" || settings === null) return;
+    if (!(settings as PublicSettings).is_published) return;
+    publicProfileApi.previewMe()
+      .then((d: { preview?: { verified_signals?: { learning_evidence_count?: number } } }) => {
+        const count = d.preview?.verified_signals?.learning_evidence_count;
+        setEvidenceCount(count ?? null);
+      })
+      .catch(() => {});
+  }, [settings]);
 
   function copyLink() {
     if (!settings || settings === "loading" || !settings.public_url) return;
@@ -154,6 +169,13 @@ function PublicProfileCard() {
               raven.moscow/p/<span className="font-semibold text-slate-700">{slug}</span>
             </span>
           </div>
+          {/* Trust signal */}
+          {evidenceCount !== null && evidenceCount > 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <Icon name="BadgeCheck" size={13} className="text-emerald-500 flex-shrink-0" />
+              <span>Подтверждений обучения: <span className="font-semibold text-slate-600">{evidenceCount}</span></span>
+            </div>
+          )}
           {/* Actions */}
           <div className="flex gap-2">
             <a
