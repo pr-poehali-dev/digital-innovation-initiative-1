@@ -201,6 +201,26 @@ export type AnalyticsEvents = {
     domains_covered: number;
   };
 
+  // 32. Self-assessment: пользователь сохранил уровень компетенции
+  competency_map_self_assessed: {
+    competency_id: number;
+    competency_name: string;
+    level: number;
+  };
+
+  // 33. Рекомендация показана (fired при рендере блока)
+  competency_map_recommendation_shown: {
+    map_status: "empty" | "partial" | "ready";
+    rec_count: number;
+  };
+
+  // 34. Клик по рекомендации
+  competency_map_recommendation_clicked: {
+    map_status: string;
+    rec_kind: string;
+    rec_href: string;
+  };
+
   // ── Public profile page (публичная сторона) ───────────────────────
   // 24. Публичный профиль просмотрен посетителем
   public_profile_viewed: {
@@ -462,6 +482,22 @@ export const analytics = {
       verified_count: summary.verified_count,
       domains_covered: summary.domains_covered,
     });
+  },
+
+  competencyMapSelfAssessed(competencyId: number, competencyName: string, level: number) {
+    sendEvent("competency_map_self_assessed", {
+      competency_id: competencyId,
+      competency_name: competencyName,
+      level,
+    });
+  },
+
+  competencyMapRecommendationShown(mapStatus: "empty" | "partial" | "ready", recCount: number) {
+    sendEvent("competency_map_recommendation_shown", { map_status: mapStatus, rec_count: recCount });
+  },
+
+  competencyMapRecommendationClicked(mapStatus: string, recKind: string, recHref: string) {
+    sendEvent("competency_map_recommendation_clicked", { map_status: mapStatus, rec_kind: recKind, rec_href: recHref });
   },
 
   // ── Public profile page ────────────────────────────────────────────

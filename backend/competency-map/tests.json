@@ -2,6 +2,7 @@
   "tests": [
     {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
     {"name": "competency_map_get_me без сессии — 401", "method": "GET", "path": "/?action=competency_map_get_me", "expectedStatus": 401},
-    {"name": "unknown action — 400", "method": "GET", "path": "/?action=unknown&x-session-id=fake", "expectedStatus": 401}
+    {"name": "self_assess без сессии — 401", "method": "POST", "path": "/?action=competency_map_self_assess", "body": {"competency_id": 1, "level": 3}, "expectedStatus": 401},
+    {"name": "unknown action без сессии — 401", "method": "GET", "path": "/?action=unknown", "expectedStatus": 401}
   ]
 }

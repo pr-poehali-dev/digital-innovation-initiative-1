@@ -57,4 +57,11 @@ export const competencyMapApi = {
   getMe: (): Promise<CompetencyMapResult> =>
     fetch(`${MAP_URL}/?action=competency_map_get_me`, { headers: sessionHdr() })
       .then(r => r.json()),
+
+  selfAssess: (competencyId: number, level: number): Promise<{ ok: boolean }> =>
+    fetch(`${MAP_URL}/?action=competency_map_self_assess`, {
+      method: "POST",
+      headers: sessionHdr(),
+      body: JSON.stringify({ competency_id: competencyId, level }),
+    }).then(r => r.json()),
 };

@@ -179,6 +179,53 @@ def build_competency_map(conn, user_id: int) -> dict:
             if comp_data["domain_id"] in domains_with_signals:
                 project_boost_by_comp[comp_id] = project_signals
 
+    # ── 4c. Education confirmed signals ──────────────────────────────
+    # Логика v1: подтверждённые education_items дают +1 pt к компетенциям
+    # доменов где уже есть сигнал. Если есть competencies_json — маппим точно,
+    # иначе используем как общий domain-boost (так же как project).
+    edu_rows = fetch_all(conn, f"""
+        SELECT id, kind, title, competencies_json, confirmed_at
+        FROM {S}.education_items
+        WHERE user_id = {user_id} AND is_confirmed = true
+        ORDER BY confirmed_at DESC LIMIT 10
+    """)
+    edu_signals: list[dict] = []
+    edu_by_competency: dict[int, list] = {}  # competency_id → edu items (из competencies_json)
+    for r in edu_rows:
+        item = {
+            "id": r[0],
+            "kind": r[1] or "course",
+            "title": r[2] or "Подтверждённое обучение",
+            "confirmed_at": str(r[4]) if r[4] else None,
+        }
+        comp_json_raw = r[3]  # TEXT или None
+        parsed_ids = []
+        if comp_json_raw:
+            try:
+                import json as _json
+                comp_json = _json.loads(comp_json_raw) if isinstance(comp_json_raw, str) else comp_json_raw
+                if isinstance(comp_json, list):
+                    for c in comp_json:
+                        cid = c if isinstance(c, int) else (c.get("id") if isinstance(c, dict) else None)
+                        if cid:
+                            parsed_ids.append(int(cid))
+            except Exception:
+                pass
+        if parsed_ids:
+            for cid in parsed_ids:
+                if cid not in edu_by_competency:
+                    edu_by_competency[cid] = []
+                edu_by_competency[cid].append(item)
+        else:
+            edu_signals.append(item)
+
+    # edu_boost_by_comp: competency_id → edu items (domain-level)
+    edu_boost_by_comp: dict[int, list] = {}
+    if edu_signals and domains_with_signals:
+        for comp_id, comp_data in competencies_by_id.items():
+            if comp_data["domain_id"] in domains_with_signals:
+                edu_boost_by_comp[comp_id] = edu_signals
+
     # ── 5. Scoring ───────────────────────────────────────────────────
     for comp_id, comp in competencies_by_id.items():
         score = 0
@@ -222,13 +269,37 @@ def build_competency_map(conn, user_id: int) -> dict:
         if proj_boosts and source_types:  # не даём проектам "создавать" компетенции с нуля
             score += SCORE_PROJECT
             source_types.add("project")
-            # показываем только первый проект как source (не спамим)
             p = proj_boosts[0]
             sources.append({
                 "kind": "project",
                 "label": f"Проект: {p['title']}",
                 "is_verified": False,
                 "date": p["updated_at"],
+            })
+
+        # education confirmed — точный маппинг (из competencies_json)
+        exact_edu = edu_by_competency.get(comp_id, [])
+        for edu in exact_edu[:3]:
+            score += SCORE_PROJECT  # +1 pt, не verified
+            source_types.add("education_confirmed")
+            sources.append({
+                "kind": "education_confirmed",
+                "label": f"Образование: {edu['title']}",
+                "is_verified": False,
+                "date": edu["confirmed_at"],
+            })
+
+        # education confirmed — domain-level boost (без точного маппинга)
+        edu_boosts = edu_boost_by_comp.get(comp_id, [])
+        if edu_boosts and source_types and not exact_edu:
+            score += SCORE_PROJECT  # +1 pt
+            source_types.add("education_confirmed")
+            e = edu_boosts[0]
+            sources.append({
+                "kind": "education_confirmed",
+                "label": f"Образование: {e['title']}",
+                "is_verified": False,
+                "date": e["confirmed_at"],
             })
 
         comp["score"] = score
@@ -290,6 +361,60 @@ def action_competency_map_get_me(conn, user_id: int):
     return resp(result)
 
 
+def action_self_assess(conn, user_id: int, body: dict):
+    """W14.1 — Self-assessment: пользователь выставляет уровень компетенции сам.
+
+    Принимает: competency_id (int), level (0-5).
+    Создаёт или обновляет professional_user_competencies.current_level.
+    Confidence при self-assess = 'low' (пересчитывается scoring'ом при следующем get_me).
+    """
+    competency_id = body.get("competency_id")
+    level = body.get("level")
+    if competency_id is None or level is None:
+        return resp({"error": "competency_id and level required"}, 400)
+    try:
+        competency_id = int(competency_id)
+        level = int(level)
+    except (TypeError, ValueError):
+        return resp({"error": "invalid competency_id or level"}, 400)
+    if level < 0 or level > 5:
+        return resp({"error": "level must be 0-5"}, 400)
+
+    # Проверяем что компетенция существует
+    row = fetch_one(conn, f"""
+        SELECT id FROM {S}.professional_competencies
+        WHERE id = %s AND status = 'active'
+    """, (competency_id,))
+    if not row:
+        return resp({"error": "competency not found"}, 404)
+
+    with conn.cursor() as cur:
+        if level == 0:
+            # level=0 означает "убрать оценку" — удаляем запись если нет evidence
+            cur.execute(f"""
+                DELETE FROM {S}.professional_user_competencies
+                WHERE user_id = %s AND competency_id = %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM {S}.professional_competency_evidence ev
+                      WHERE ev.user_competency_id = professional_user_competencies.id
+                  )
+            """, (user_id, competency_id))
+        else:
+            cur.execute(f"""
+                INSERT INTO {S}.professional_user_competencies
+                    (user_id, competency_id, current_level, confidence, last_assessed_at, updated_at)
+                VALUES (%s, %s, %s, 'low', NOW(), NOW())
+                ON CONFLICT (user_id, competency_id)
+                DO UPDATE SET
+                    current_level = EXCLUDED.current_level,
+                    last_assessed_at = NOW(),
+                    updated_at = NOW()
+                RETURNING id
+            """, (user_id, competency_id, level))
+    conn.commit()
+    return resp({"ok": True, "competency_id": competency_id, "level": level})
+
+
 def handler(event: dict, context) -> dict:
     """W12 Competency Map — агрегация сигналов в объяснимую карту компетенций."""
     headers = event.get("headers") or {}
@@ -314,6 +439,10 @@ def handler(event: dict, context) -> dict:
 
         if action == "competency_map_get_me":
             return action_competency_map_get_me(conn, user_id)
+
+        if action == "competency_map_self_assess":
+            body = json.loads(event.get("body") or "{}")
+            return action_self_assess(conn, user_id, body)
 
         return resp({"error": "unknown action"}, 400)
     finally:
