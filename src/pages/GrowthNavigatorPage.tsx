@@ -51,6 +51,27 @@ type Recommendation = {
   gap_value: number | null; importance: string | null; why: string;
 };
 type RoleProfile = { id: number; name: string; description: string };
+type LearningAssignment = {
+  id: number; plan_item_id: number | null; competency_id: number | null;
+  competency_name: string; content_type: string; content_id: number | null;
+  content_title: string; content_url: string;
+  recommendation_strength: string; is_required: boolean;
+  source: string; status: string; reason_text: string;
+  progress_pct: number | null; assigned_at: string;
+  started_at: string | null; completed_at: string | null; link_id: number | null;
+};
+type LearningRec = {
+  plan_item_id: number; competency_id: number; competency_name: string;
+  current_level: number; gap_value: number; importance: string;
+  link_id: number; content_type: string; content_id: number | null;
+  content_title: string; content_url: string;
+  recommendation_strength: string; is_required: boolean; match_reason: string;
+  why: string;
+};
+type LearningProgress = {
+  total: number; completed: number; started: number;
+  skipped: number; done_pct: number; competencies_covered: number;
+};
 
 type Tab = "overview" | "gaps" | "plan" | "path";
 
@@ -519,96 +540,270 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
 
 // ── Learning Path Tab ─────────────────────────────────────────────────
 
-function PathTab({ recommendations, plan }: { recommendations: Recommendation[]; plan: Plan | null }) {
-  const allItems = plan?.items ?? [];
-  const byComp = allItems.reduce<Record<string, PlanItem[]>>((acc, item) => {
-    const key = item.competency_name || "Общие";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(item);
-    return acc;
-  }, {});
+const STATUS_A: Record<string, { label: string; dot: string; badge: string }> = {
+  recommended: { label: "Рекомендовано", dot: "bg-slate-300", badge: "bg-slate-100 text-slate-600 border-slate-200" },
+  started:     { label: "Начато",        dot: "bg-blue-400",  badge: "bg-blue-100 text-blue-700 border-blue-200" },
+  completed:   { label: "Выполнено",     dot: "bg-emerald-400", badge: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  skipped:     { label: "Пропущено",     dot: "bg-slate-200", badge: "bg-slate-100 text-slate-400 border-slate-200" },
+};
+const STRENGTH_BADGE: Record<string, string> = {
+  high:   "bg-rose-50 text-rose-600 border-rose-200",
+  medium: "bg-amber-50 text-amber-600 border-amber-200",
+  low:    "bg-slate-50 text-slate-500 border-slate-200",
+};
 
-  const TYPE_COLORS: Record<string, string> = {
-    learn:      "bg-blue-50 border-blue-200 text-blue-700",
-    practice:   "bg-violet-50 border-violet-200 text-violet-700",
-    evidence:   "bg-teal-50 border-teal-200 text-teal-700",
-    reflection: "bg-amber-50 border-amber-200 text-amber-700",
-  };
+function PathTab({ plan }: { plan: Plan | null }) {
+  const [assignments, setAssignments]             = useState<LearningAssignment[]>([]);
+  const [learningRecs, setLearningRecs]           = useState<LearningRec[]>([]);
+  const [learningProgress, setLearningProgress]   = useState<LearningProgress | null>(null);
+  const [loading, setLoading]                     = useState(true);
+  const [filter, setFilter]                       = useState<"all"|"recommended"|"started"|"completed">("all");
+  const [addManual, setAddManual]                 = useState(false);
+  const [manualForm, setManualForm]               = useState({ content_title: "", content_url: "", content_type: "other" });
+  const [toast, setToast]                         = useState<string | null>(null);
+
+  function showMsg(m: string) { setToast(m); setTimeout(() => setToast(null), 2000); }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [lp, lr, pr] = await Promise.all([
+      growthApi.learningPath(),
+      growthApi.learningRecs(),
+      growthApi.learningProgress(),
+    ]);
+    setAssignments(lp.learning_path ?? []);
+    setLearningRecs(lr.recommendations ?? []);
+    setLearningProgress(pr.progress ?? null);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function startRec(rec: LearningRec) {
+    await growthApi.learningStart({
+      link_id: rec.link_id, content_type: rec.content_type, content_id: rec.content_id,
+      content_title: rec.content_title, content_url: rec.content_url,
+      plan_item_id: rec.plan_item_id, competency_id: rec.competency_id,
+      recommendation_strength: rec.recommendation_strength,
+      is_required: rec.is_required, reason_text: rec.why,
+    });
+    await load();
+    showMsg("Начато");
+  }
+
+  async function setStatus(a: LearningAssignment, status: string) {
+    if (status === "started")   await growthApi.learningStart({ id: a.id });
+    if (status === "completed") await growthApi.learningComplete({ id: a.id });
+    if (status === "skipped")   await growthApi.learningSkip({ id: a.id });
+    await load();
+  }
+
+  async function addManualItem() {
+    if (!manualForm.content_title.trim()) return;
+    await growthApi.learningAddManual(manualForm);
+    setAddManual(false);
+    setManualForm({ content_title: "", content_url: "", content_type: "other" });
+    await load();
+    showMsg("Материал добавлен");
+  }
+
+  const filtered = assignments.filter(a => filter === "all" || a.status === filter);
+  const inp = "w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-slate-400 bg-white";
+  const lbl = "block text-xs font-semibold text-slate-600 mb-1.5";
 
   return (
     <div className="space-y-5">
-      {/* Next recommended steps */}
-      {recommendations.length > 0 && (
-        <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-5 text-white">
-          <p className="text-xs font-semibold text-slate-300 uppercase mb-3 flex items-center gap-2">
-            <Icon name="Compass" size={13} /> Рекомендуемые шаги прямо сейчас
-          </p>
-          <div className="space-y-3">
-            {recommendations.map((r, i) => (
-              <div key={r.id} className="flex items-start gap-3">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-xs font-bold text-slate-300 flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white">{r.title}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{r.why}</p>
-                </div>
-                <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0 ${
-                  r.priority === "high" ? "bg-red-900/40 text-red-300 border-red-800" : "bg-slate-700 text-slate-300 border-slate-600"
-                }`}>{r.priority}</span>
+      {/* Learning progress summary */}
+      {learningProgress && learningProgress.total > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-semibold text-slate-800">Прогресс обучения</p>
+            <span className={`text-xl font-bold ${learningProgress.done_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
+              {learningProgress.done_pct}%
+            </span>
+          </div>
+          <div className="w-full h-1.5 bg-slate-100 rounded-full mb-3">
+            <div className="h-1.5 bg-emerald-500 rounded-full" style={{ width: `${learningProgress.done_pct}%` }} />
+          </div>
+          <div className="grid grid-cols-4 gap-2 text-center">
+            {[
+              { l: "Всего", v: learningProgress.total,     cls: "text-slate-600" },
+              { l: "Начато", v: learningProgress.started,  cls: "text-blue-600" },
+              { l: "Готово", v: learningProgress.completed, cls: "text-emerald-600" },
+              { l: "Покрыто", v: learningProgress.competencies_covered, cls: "text-violet-600" },
+            ].map(({ l, v, cls }) => (
+              <div key={l} className="p-2 bg-slate-50 rounded-xl">
+                <p className={`text-lg font-bold ${cls}`}>{v}</p>
+                <p className="text-[9px] text-slate-500">{l}</p>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Learning path by competency */}
-      {Object.entries(byComp).map(([compName, items]) => {
-        const done = items.filter(i => i.status === "done").length;
-        return (
-          <div key={compName} className="bg-white border border-slate-200 rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold text-slate-800">{compName}</p>
-              <span className="text-[10px] text-slate-400">{done}/{items.length} выполнено</span>
-            </div>
-            <div className="flex items-center gap-2 mb-3">
-              {items.map((item, idx) => (
-                <div key={item.id} className="flex items-center gap-2">
-                  <div className={`relative group flex items-center justify-center w-8 h-8 rounded-full border-2 cursor-default ${
-                    item.status === "done" ? "bg-emerald-100 border-emerald-300" :
-                    item.status === "in_progress" ? "bg-blue-100 border-blue-300" :
-                    "bg-slate-100 border-slate-200"
-                  }`}>
-                    <Icon name={ITEM_TYPE_ICON[item.item_type] ?? "Circle"} size={13} className={
-                      item.status === "done" ? "text-emerald-600" :
-                      item.status === "in_progress" ? "text-blue-600" : "text-slate-400"
-                    } />
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 w-40 bg-slate-900 text-white text-[9px] rounded-lg p-2">
-                      {item.title}
-                    </div>
+      {/* Recommended content — не начатые из resolver */}
+      {learningRecs.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide flex items-center gap-1.5">
+            <Icon name="Sparkles" size={13} className="text-violet-500" />
+            Рекомендованные материалы
+          </p>
+          {learningRecs.map((rec, i) => (
+            <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-violet-50 border border-violet-200 flex items-center justify-center">
+                  <Icon name="BookOpen" size={14} className="text-violet-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                    <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${STRENGTH_BADGE[rec.recommendation_strength] ?? ""}`}>
+                      {rec.recommendation_strength}
+                    </span>
+                    {rec.is_required && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200">required</span>
+                    )}
+                    <span className="text-[9px] text-slate-400">{rec.competency_name}</span>
                   </div>
-                  {idx < items.length - 1 && (
-                    <div className={`h-0.5 w-4 ${item.status === "done" ? "bg-emerald-300" : "bg-slate-200"}`} />
+                  <p className="text-sm font-semibold text-slate-800">{rec.content_title}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{rec.why}</p>
+                  {rec.content_url && (
+                    <a href={rec.content_url} target="_blank" rel="noreferrer"
+                      className="text-[10px] text-violet-500 hover:underline mt-0.5 block truncate max-w-xs">
+                      {rec.content_url}
+                    </a>
                   )}
                 </div>
-              ))}
+                <button onClick={() => startRec(rec)}
+                  className="flex-shrink-0 text-[10px] px-3 py-1.5 bg-slate-900 text-white font-semibold rounded-xl hover:bg-slate-800 transition-colors whitespace-nowrap">
+                  Начать
+                </button>
+              </div>
             </div>
-            <div className="space-y-1.5">
-              {items.map(item => (
-                <div key={item.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs ${TYPE_COLORS[item.item_type] ?? "bg-slate-50 border-slate-200 text-slate-600"}`}>
-                  <Icon name={ITEM_TYPE_ICON[item.item_type] ?? "Circle"} size={11} className="flex-shrink-0" />
-                  <span className={`flex-1 ${item.status === "done" ? "line-through opacity-60" : ""}`}>{item.title}</span>
-                  {item.status === "done" && <Icon name="CheckCircle2" size={11} className="text-emerald-500 flex-shrink-0" />}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+          ))}
+        </div>
+      )}
 
-      {!plan && (
+      {!plan && !loading && (
         <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl">
           Создайте план развития во вкладке «Обзор»
         </div>
       )}
+
+      {/* My assignments */}
+      {assignments.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex gap-1.5">
+              {(["all","recommended","started","completed"] as const).map(f => (
+                <button key={f} onClick={() => setFilter(f)}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-colors ${filter === f ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                  {f === "all" ? "Все" : STATUS_A[f]?.label ?? f}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setAddManual(true)}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors">
+              <Icon name="Plus" size={12} /> Добавить материал
+            </button>
+          </div>
+
+          {loading && <div className="flex justify-center py-4"><Spinner /></div>}
+
+          {filtered.map(a => {
+            const sa = STATUS_A[a.status] ?? STATUS_A.recommended;
+            return (
+              <div key={a.id} className={`bg-white border border-slate-200 rounded-2xl p-4 ${a.status === "completed" ? "opacity-60" : ""}`}>
+                <div className="flex items-start gap-3">
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${sa.dot}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${sa.badge}`}>{sa.label}</span>
+                      {a.competency_name && <span className="text-[9px] text-violet-500">{a.competency_name}</span>}
+                      <span className="text-[9px] text-slate-400">{a.source === "manual" ? "manual" : a.content_type}</span>
+                    </div>
+                    <p className={`text-sm font-semibold text-slate-800 ${a.status === "completed" ? "line-through text-slate-400" : ""}`}>
+                      {a.content_title}
+                    </p>
+                    {a.reason_text && <p className="text-[10px] text-slate-500 mt-0.5 italic">{a.reason_text}</p>}
+                    {a.content_url && (
+                      <a href={a.content_url} target="_blank" rel="noreferrer"
+                        className="text-[10px] text-violet-500 hover:underline mt-0.5 block truncate max-w-xs">
+                        {a.content_url}
+                      </a>
+                    )}
+                    {a.completed_at && (
+                      <p className="text-[9px] text-slate-400 mt-1">
+                        Завершено: {new Date(a.completed_at).toLocaleDateString("ru-RU")}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    {a.status === "recommended" && (
+                      <button onClick={() => setStatus(a, "started")}
+                        className="text-[9px] px-2 py-1 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
+                        Начать
+                      </button>
+                    )}
+                    {a.status === "started" && (
+                      <button onClick={() => setStatus(a, "completed")}
+                        className="text-[9px] px-2 py-1 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors">
+                        Готово
+                      </button>
+                    )}
+                    {a.status !== "completed" && a.status !== "skipped" && (
+                      <button onClick={() => setStatus(a, "skipped")}
+                        className="text-[9px] px-2 py-1 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">
+                        Пропустить
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {filtered.length === 0 && !loading && (
+            <div className="text-center py-6 text-slate-400 text-sm">Нет материалов по фильтру</div>
+          )}
+        </div>
+      )}
+
+      {/* Add manual modal */}
+      {addManual && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAddManual(false)}>
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900">Добавить материал</h3>
+              <button onClick={() => setAddManual(false)}><Icon name="X" size={18} className="text-slate-400" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className={lbl}>Название *</label>
+                <input className={inp} value={manualForm.content_title} onChange={e => setManualForm(f => ({ ...f, content_title: e.target.value }))} placeholder="Название курса, книги, практики..." />
+              </div>
+              <div>
+                <label className={lbl}>URL (необязательно)</label>
+                <input className={inp} value={manualForm.content_url} onChange={e => setManualForm(f => ({ ...f, content_url: e.target.value }))} placeholder="https://..." />
+              </div>
+              <div>
+                <label className={lbl}>Тип</label>
+                <select className={inp} value={manualForm.content_type} onChange={e => setManualForm(f => ({ ...f, content_type: e.target.value }))}>
+                  {["course","book","article","practice","video","other"].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setAddManual(false)} className="flex-1 px-4 py-2.5 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl">Отмена</button>
+              <button onClick={addManualItem} disabled={!manualForm.content_title.trim()}
+                className="flex-1 px-4 py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-xl disabled:opacity-40">
+                Добавить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="fixed bottom-24 right-4 px-4 py-2 bg-emerald-600 text-white text-sm rounded-xl shadow-lg z-50">{toast}</div>}
     </div>
   );
 }
@@ -738,7 +933,7 @@ export default function GrowthNavigatorPage() {
               )}
               {tab === "gaps" && <GapMapTab gapSummary={gapSummary} loadingGap={loadingGap} />}
               {tab === "plan" && <PlanTab plan={plan} onRefresh={loadPlan} />}
-              {tab === "path" && <PathTab recommendations={recommendations} plan={plan} />}
+              {tab === "path" && <PathTab plan={plan} />}
             </>
           )}
         </div>

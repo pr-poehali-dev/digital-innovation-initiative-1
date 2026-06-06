@@ -34,8 +34,18 @@ type GapSummary = {
   recommended_next: { id: number; name: string; gap: number; importance: string }[];
 };
 type User = { id: number; name: string; email: string };
+type ContentLink = {
+  id: number; competency_id: number; competency_name: string;
+  content_type: string; content_id: number | null;
+  content_title: string; content_url: string;
+  level_min: number | null; level_max: number | null;
+  gap_min: number | null; gap_max: number | null;
+  recommendation_strength: string; is_required: boolean;
+  match_reason: string; sort_order: number; created_by: string; created_at: string;
+};
+type CatalogItem = { id: number; title: string; kind: string; content_type: string; module: string };
 
-type Tab = "framework" | "roles" | "usermap";
+type Tab = "framework" | "roles" | "usermap" | "content_links";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -739,15 +749,255 @@ function EvidenceModal({ item, userId, onClose, onSaved }: {
   );
 }
 
+// ── Content Links Tab ─────────────────────────────────────────────────
+
+function ContentLinksTab() {
+  const [links, setLinks] = useState<ContentLink[]>([]);
+  const [competencies, setCompetencies] = useState<{ id: number; name: string; domain_name: string }[]>([]);
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [filterComp, setFilterComp] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Partial<ContentLink> | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState("");
+
+  function showMsg(m: string) { setToast(m); setTimeout(() => setToast(null), 2000); }
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [ll, cc] = await Promise.all([
+      profApi.contentLinksList(filterComp ?? undefined),
+      profApi.competenciesList(),
+    ]);
+    setLinks((ll.content_links ?? []).filter((l: ContentLink) => l.content_title !== "[DELETED]"));
+    setCompetencies(cc.competencies ?? []);
+    setLoading(false);
+  }, [filterComp]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    profApi.contentCatalog({ q: catalogSearch, limit: "30" }).then(d => setCatalog(d.catalog ?? []));
+  }, [catalogSearch]);
+
+  async function save() {
+    if (!editing?.competency_id || !editing?.content_title?.trim()) return;
+    await profApi.contentLinkUpsert(editing);
+    setEditing(null);
+    await load();
+    showMsg("Сохранено");
+  }
+
+  async function del(id: number) {
+    await profApi.contentLinkDelete(id);
+    await load();
+  }
+
+  const STRENGTH_CFG: Record<string, { cls: string }> = {
+    high:   { cls: "bg-emerald-900/30 text-emerald-400 border-emerald-800" },
+    medium: { cls: "bg-amber-900/30 text-amber-400 border-amber-800" },
+    low:    { cls: "bg-gray-800 text-gray-500 border-gray-700" },
+  };
+  const inp = "w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600";
+  const lbl = "block text-[10px] text-gray-500 mb-1 font-semibold uppercase";
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <select value={filterComp ?? ""} onChange={e => setFilterComp(Number(e.target.value) || null)}
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-600">
+          <option value="">— Все компетенции —</option>
+          {competencies.map(c => (
+            <option key={c.id} value={c.id}>{c.domain_name}: {c.name}</option>
+          ))}
+        </select>
+        <button onClick={() => setEditing({ recommendation_strength: "medium", is_required: false })}
+          className="flex items-center gap-2 px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs font-semibold rounded-xl">
+          <Icon name="Plus" size={13} /> Добавить привязку
+        </button>
+        <span className="text-xs text-gray-600 ml-auto">{links.length} привязок</span>
+      </div>
+
+      {loading && <div className="flex justify-center py-8"><div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" /></div>}
+
+      {!loading && links.length === 0 && (
+        <div className="text-center py-10 text-gray-600 text-sm border border-dashed border-gray-800 rounded-xl">
+          Нет привязок. Добавьте связь между компетенцией и учебным материалом.
+        </div>
+      )}
+
+      {/* Links grouped by competency */}
+      {!loading && links.length > 0 && (() => {
+        const grouped = links.reduce<Record<string, ContentLink[]>>((acc, l) => {
+          const key = l.competency_name;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(l);
+          return acc;
+        }, {});
+        return Object.entries(grouped).map(([compName, items]) => (
+          <div key={compName} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
+              <p className="text-xs font-semibold text-gray-400">{compName}</p>
+              <span className="text-[9px] text-gray-600">{items.length} материалов</span>
+            </div>
+            {items.map(lk => (
+              <div key={lk.id} className="px-4 py-3 flex items-start gap-3 border-b border-gray-800/50 last:border-0 hover:bg-gray-800/30 group">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                    <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${STRENGTH_CFG[lk.recommendation_strength]?.cls ?? ""}`}>
+                      {lk.recommendation_strength}
+                    </span>
+                    {lk.is_required && (
+                      <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded border bg-red-900/30 text-red-400 border-red-800">required</span>
+                    )}
+                    <span className="text-[9px] text-gray-600 font-mono">{lk.content_type}</span>
+                    {(lk.level_min != null || lk.level_max != null) && (
+                      <span className="text-[9px] text-gray-600">lvl {lk.level_min ?? "?"}-{lk.level_max ?? "?"}</span>
+                    )}
+                    {(lk.gap_min != null || lk.gap_max != null) && (
+                      <span className="text-[9px] text-gray-600">gap {lk.gap_min ?? "?"}-{lk.gap_max ?? "?"}</span>
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-gray-200">{lk.content_title}</p>
+                  {lk.content_url && (
+                    <a href={lk.content_url} target="_blank" rel="noreferrer"
+                      className="text-[10px] text-violet-400 hover:underline truncate block max-w-xs">
+                      {lk.content_url}
+                    </a>
+                  )}
+                  {lk.match_reason && <p className="text-[9px] text-gray-600 mt-0.5 italic">{lk.match_reason}</p>}
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
+                  <button onClick={() => setEditing({ ...lk })} className="p-1.5 text-gray-600 hover:text-violet-400 transition-colors">
+                    <Icon name="Pencil" size={12} />
+                  </button>
+                  <button onClick={() => del(lk.id)} className="p-1.5 text-gray-600 hover:text-red-500 transition-colors">
+                    <Icon name="Trash2" size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ));
+      })()}
+
+      {/* Edit/Create modal */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setEditing(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg mx-4 p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-100">{editing.id ? "Редактировать" : "Новая"} привязка контента</h3>
+              <button onClick={() => setEditing(null)}><Icon name="X" size={16} className="text-gray-600" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className={lbl}>Компетенция *</label>
+                <select className={inp} value={editing.competency_id ?? ""} onChange={e => setEditing(f => ({ ...f!, competency_id: Number(e.target.value) }))}>
+                  <option value="">— выберите —</option>
+                  {competencies.map(c => <option key={c.id} value={c.id}>{c.domain_name}: {c.name}</option>)}
+                </select>
+              </div>
+              {/* Catalog picker */}
+              <div>
+                <label className={lbl}>Поиск в каталоге (необязательно)</label>
+                <input className={inp} placeholder="Название материала..." value={catalogSearch}
+                  onChange={e => setCatalogSearch(e.target.value)} />
+                {catalog.length > 0 && (
+                  <div className="mt-1 border border-gray-700 rounded-lg overflow-hidden max-h-32 overflow-y-auto">
+                    {catalog.map(ci => (
+                      <button key={`${ci.content_type}-${ci.id}`}
+                        onClick={() => {
+                          setEditing(f => ({
+                            ...f!,
+                            content_type: ci.content_type,
+                            content_id: ci.id,
+                            content_title: ci.title,
+                          }));
+                          setCatalogSearch("");
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-800 border-b border-gray-800/50 last:border-0">
+                        <p className="text-xs text-gray-200">{ci.title}</p>
+                        <p className="text-[9px] text-gray-600">{ci.content_type} · {ci.kind}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className={lbl}>Название материала *</label>
+                <input className={inp} value={editing.content_title ?? ""} onChange={e => setEditing(f => ({ ...f!, content_title: e.target.value }))} placeholder="Название курса, модуля, практики..." />
+              </div>
+              <div>
+                <label className={lbl}>URL (необязательно)</label>
+                <input className={inp} value={editing.content_url ?? ""} onChange={e => setEditing(f => ({ ...f!, content_url: e.target.value }))} placeholder="https://..." />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={lbl}>Тип контента</label>
+                  <select className={inp} value={editing.content_type ?? "admin_content"} onChange={e => setEditing(f => ({ ...f!, content_type: e.target.value }))}>
+                    {["admin_content","education_item","course","module","lesson","practice","assessment","other"].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={lbl}>Сила рекомендации</label>
+                  <select className={inp} value={editing.recommendation_strength ?? "medium"} onChange={e => setEditing(f => ({ ...f!, recommendation_strength: e.target.value }))}>
+                    {["high","medium","low"].map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  ["level_min","Lvl от"], ["level_max","Lvl до"],
+                  ["gap_min","Gap от"],  ["gap_max","Gap до"],
+                ].map(([k, l]) => (
+                  <div key={k}>
+                    <label className={lbl}>{l}</label>
+                    <input type="number" min={0} max={5} className={inp}
+                      value={(editing[k as keyof ContentLink] as number) ?? ""}
+                      onChange={e => setEditing(f => ({ ...f!, [k]: e.target.value ? Number(e.target.value) : null }))} />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className={lbl}>Причина рекомендации</label>
+                <textarea rows={2} className={`${inp} resize-none`} value={editing.match_reason ?? ""}
+                  onChange={e => setEditing(f => ({ ...f!, match_reason: e.target.value }))}
+                  placeholder="Почему этот материал подходит для данной компетенции..." />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={!!editing.is_required} onChange={e => setEditing(f => ({ ...f!, is_required: e.target.checked }))} className="w-4 h-4 accent-violet-600" />
+                <span className="text-sm text-gray-300">Обязательный материал</span>
+              </label>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setEditing(null)} className="flex-1 px-4 py-2 bg-gray-800 text-gray-400 text-sm rounded-xl">Отмена</button>
+              <button onClick={save} disabled={!editing.competency_id || !editing.content_title?.trim()}
+                className="flex-1 px-4 py-2 bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold rounded-xl">
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && <div className="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium z-50 bg-emerald-900 text-emerald-300 border border-emerald-700">{toast}</div>}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────
 
 export default function AdminCompetenciesPage() {
   const [tab, setTab] = useState<Tab>("framework");
 
   const TABS: { key: Tab; icon: string; label: string; desc: string }[] = [
-    { key: "framework",  icon: "Layers",        label: "Фреймворк",      desc: "Домены и компетенции" },
-    { key: "roles",      icon: "Briefcase",      label: "Ролевые профили", desc: "Targets по ролям" },
-    { key: "usermap",    icon: "UserCheck",      label: "Карта пользователя", desc: "Уровни и gap-анализ" },
+    { key: "framework",    icon: "Layers",      label: "Фреймворк",       desc: "Домены и компетенции" },
+    { key: "roles",        icon: "Briefcase",    label: "Ролевые профили", desc: "Targets по ролям" },
+    { key: "usermap",      icon: "UserCheck",    label: "Карта пользователя", desc: "Уровни и gap-анализ" },
+    { key: "content_links",icon: "Link",         label: "Контент",         desc: "Привязка материалов" },
   ];
 
   return (
@@ -775,9 +1025,10 @@ export default function AdminCompetenciesPage() {
         </div>
 
         {/* Content */}
-        {tab === "framework" && <FrameworkTab />}
-        {tab === "roles"     && <RolesTab />}
-        {tab === "usermap"   && <UserMapTab />}
+        {tab === "framework"     && <FrameworkTab />}
+        {tab === "roles"         && <RolesTab />}
+        {tab === "usermap"       && <UserMapTab />}
+        {tab === "content_links" && <ContentLinksTab />}
       </div>
     </AdminShell>
   );

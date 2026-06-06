@@ -35,4 +35,12 @@ export const profApi = {
   evidenceDelete:         (id: number)          => profPost("professional_competency_evidence_delete", { id }),
   gapSummary:             (user_id: number, role_id: number) =>
     profGet("professional_competency_gap_summary", { user_id: String(user_id), role_id: String(role_id) }),
+
+  // W9.1 Content Links (admin)
+  contentLinksList:   (competency_id?: number)  =>
+    profGet("professional_competency_content_links_list", competency_id ? { competency_id: String(competency_id) } : {}),
+  contentLinkUpsert:  (b: object)              => profPost("professional_competency_content_link_upsert", b),
+  contentLinkDelete:  (id: number)             => profPost("professional_competency_content_link_delete", { id }),
+  contentCatalog:     (params?: Record<string, string>) =>
+    profGet("professional_learning_content_catalog_list", params ?? {}),
 };

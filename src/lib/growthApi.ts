@@ -30,4 +30,13 @@ export const growthApi = {
   progress:       ()                 => gGet("professional_growth_progress_me"),
   recommendations:()                 => gGet("professional_growth_recommendations_me"),
   checkinAdd:     (b: object)        => gPost("professional_growth_checkin_add_me", b),
+
+  // W9.1 Learning Path
+  learningPath:        ()        => gGet("growth_learning_path_me"),
+  learningRecs:        ()        => gGet("growth_learning_recommendations_me"),
+  learningStart:       (b: object) => gPost("growth_learning_assignment_start_me", b),
+  learningComplete:    (b: object) => gPost("growth_learning_assignment_complete_me", b),
+  learningSkip:        (b: object) => gPost("growth_learning_assignment_skip_me", b),
+  learningAddManual:   (b: object) => gPost("growth_learning_assignment_add_manual_me", b),
+  learningProgress:    ()        => gGet("growth_learning_progress_me"),
 };

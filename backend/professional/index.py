@@ -745,6 +745,123 @@ def action_visibility_upsert_me(conn, user_id, body):
     conn.commit()
     return resp({"ok": True})
 
+# ── W9.1 Content Links (admin) ───────────────────────────────────────
+
+def action_content_links_list(conn, qs):
+    comp_id = qs.get("competency_id")
+    where = f"AND cl.competency_id={int(comp_id)}" if comp_id else ""
+    rows = fetch_all(conn, f"""
+        SELECT cl.id, cl.competency_id, c.name AS comp_name,
+               cl.content_type, cl.content_id, cl.content_title, cl.content_url,
+               cl.level_min, cl.level_max, cl.gap_min, cl.gap_max,
+               cl.recommendation_strength, cl.is_required, cl.match_reason,
+               cl.sort_order, cl.created_by, cl.created_at
+        FROM {S}.professional_competency_content_links cl
+        JOIN {S}.professional_competencies c ON c.id=cl.competency_id
+        WHERE c.status='active' {where}
+        ORDER BY cl.competency_id, cl.recommendation_strength DESC, cl.sort_order
+    """)
+    return resp({"content_links": [{
+        "id": r[0], "competency_id": r[1], "competency_name": r[2],
+        "content_type": r[3], "content_id": r[4],
+        "content_title": r[5], "content_url": r[6],
+        "level_min": r[7], "level_max": r[8], "gap_min": r[9], "gap_max": r[10],
+        "recommendation_strength": r[11], "is_required": r[12],
+        "match_reason": r[13], "sort_order": r[14],
+        "created_by": r[15], "created_at": str(r[16]),
+    } for r in rows]})
+
+
+def action_content_link_upsert(conn, actor, body):
+    cid = body.get("competency_id")
+    title = (body.get("content_title") or "").strip()
+    if not cid or not title:
+        return resp({"error": "competency_id and content_title required"}, 400)
+    lid = body.get("id")
+    if lid:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                UPDATE {S}.professional_competency_content_links
+                SET content_type=%s, content_id=%s, content_title=%s, content_url=%s,
+                    level_min=%s, level_max=%s, gap_min=%s, gap_max=%s,
+                    recommendation_strength=%s, is_required=%s, match_reason=%s,
+                    sort_order=%s, updated_at=NOW()
+                WHERE id=%s
+            """, (body.get("content_type","education_item"),
+                  body.get("content_id"), title, body.get("content_url",""),
+                  body.get("level_min"), body.get("level_max"),
+                  body.get("gap_min"), body.get("gap_max"),
+                  body.get("recommendation_strength","medium"),
+                  bool(body.get("is_required")), body.get("match_reason",""),
+                  body.get("sort_order",0), int(lid)))
+        conn.commit()
+        return resp({"ok": True, "id": lid})
+    else:
+        max_order = (fetch_one(conn, f"SELECT COALESCE(MAX(sort_order),0)+1 FROM {S}.professional_competency_content_links WHERE competency_id={int(cid)}") or [1])[0]
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {S}.professional_competency_content_links
+                    (competency_id,content_type,content_id,content_title,content_url,
+                     level_min,level_max,gap_min,gap_max,
+                     recommendation_strength,is_required,match_reason,sort_order,created_by)
+                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+            """, (int(cid),
+                  body.get("content_type","education_item"),
+                  body.get("content_id"), title, body.get("content_url",""),
+                  body.get("level_min"), body.get("level_max"),
+                  body.get("gap_min"), body.get("gap_max"),
+                  body.get("recommendation_strength","medium"),
+                  bool(body.get("is_required")), body.get("match_reason",""),
+                  max_order, actor["email"]))
+            new_id = cur.fetchone()[0]
+        conn.commit()
+        return resp({"ok": True, "id": new_id})
+
+
+def action_content_link_delete(conn, body):
+    lid = body.get("id")
+    if not lid:
+        return resp({"error": "id required"}, 400)
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.professional_competency_content_links SET sort_order=-1,updated_at=NOW() WHERE id=%s", (int(lid),))
+        cur.execute(f"UPDATE {S}.professional_competency_content_links SET content_title='[DELETED]' WHERE id=%s", (int(lid),))
+    conn.commit()
+    return resp({"ok": True})
+
+
+def action_content_catalog_list(conn, qs):
+    """Список доступного контента для привязки к компетенциям."""
+    content_type = qs.get("content_type", "admin_content")
+    limit = min(int(qs.get("limit","50")), 100)
+    search = (qs.get("q") or "").strip()
+    items = []
+    if content_type in ("admin_content", "all"):
+        sql = f"""
+            SELECT id, title, type, status, module_slug
+            FROM {S}.admin_content_items
+            WHERE status='published'
+            {"AND title ILIKE '%" + search + "%'" if search else ""}
+            ORDER BY updated_at DESC LIMIT {limit}
+        """
+        rows = fetch_all(conn, sql)
+        items += [{"id": r[0], "title": r[1], "kind": r[2], "content_type": "admin_content",
+                   "meta": r[3], "module": r[4]} for r in rows]
+    if content_type in ("education_item", "all"):
+        sql = f"""
+            SELECT DISTINCT ON (title) id, title, kind, status
+            FROM {S}.education_items
+            WHERE status NOT IN ('archived') AND user_id IN (
+                SELECT id FROM {S}.users LIMIT 1
+            )
+            {"AND title ILIKE '%" + search + "%'" if search else ""}
+            ORDER BY title, id DESC LIMIT {limit}
+        """
+        rows = fetch_all(conn, sql)
+        items += [{"id": r[0], "title": r[1], "kind": r[2], "content_type": "education_item",
+                   "meta": r[3], "module": ""} for r in rows]
+    return resp({"catalog": items[:limit]})
+
+
 # ── Handler ───────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
@@ -874,6 +991,18 @@ def handler(event: dict, context) -> dict:
             return action_competency_evidence_delete(conn, body)
         if action == "professional_competency_gap_summary":
             return action_competency_gap_summary(conn, qs)
+
+        # W9.1 Content Links
+        if action == "professional_competency_content_links_list":
+            return action_content_links_list(conn, qs)
+        if action == "professional_competency_content_link_upsert":
+            if method != "POST": return resp({"error": "POST required"}, 405)
+            return action_content_link_upsert(conn, actor, body)
+        if action == "professional_competency_content_link_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405)
+            return action_content_link_delete(conn, body)
+        if action == "professional_learning_content_catalog_list":
+            return action_content_catalog_list(conn, qs)
 
         return resp({"error": "unknown action"}, 400)
 
