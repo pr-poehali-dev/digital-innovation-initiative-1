@@ -57,11 +57,11 @@ def get_or_create_wallet(conn, user_id: int) -> dict:
     return {"id": row[0], "balance_kopecks": row[1], "currency": row[2]}
 
 
-def yookassa_create_payment(amount_rub: int, idempotency_key: str, user_id: int, payment_db_id: int) -> dict:
+def yookassa_create_payment(amount_rub: int, idempotency_key: str, user_id: int, payment_db_id: int, user_email: str = "") -> dict:
     """Создать платёж в ЮKassa API"""
     return_url = f"{RETURN_URL}?payment_id={payment_db_id}"
     payload = {
-        "amount": {"value": str(amount_rub) + ".00", "currency": "RUB"},
+        "amount": {"value": f"{amount_rub}.00", "currency": "RUB"},
         "confirmation": {"type": "redirect", "return_url": return_url},
         "capture": True,
         "description": f"Пополнение кошелька Траектория на {amount_rub} ₽",
@@ -69,6 +69,19 @@ def yookassa_create_payment(amount_rub: int, idempotency_key: str, user_id: int,
             "user_id": str(user_id),
             "payment_db_id": str(payment_db_id),
             "source": "wallet_topup",
+        },
+        "receipt": {
+            "customer": {"email": user_email or "noreply@raven.moscow"},
+            "items": [
+                {
+                    "description": f"Пополнение кошелька на {amount_rub} ₽",
+                    "quantity": "1.00",
+                    "amount": {"value": f"{amount_rub}.00", "currency": "RUB"},
+                    "vat_code": 1,
+                    "payment_mode": "full_prepayment",
+                    "payment_subject": "service",
+                }
+            ],
         },
     }
     data = json.dumps(payload).encode()
@@ -178,7 +191,7 @@ def handler(event: dict, context) -> dict:
 
             print(f"[wallet] creating YK payment: shop={SHOP_ID!r} amount={amount_rub} return_url={RETURN_URL}?payment_id={payment_db_id}")
             try:
-                yk_payment = yookassa_create_payment(amount_rub, idempotency_key, user["id"], payment_db_id)
+                yk_payment = yookassa_create_payment(amount_rub, idempotency_key, user["id"], payment_db_id, user.get("email",""))
             except RuntimeError as e:
                 print(f"[wallet] YK error: {e}")
                 return cors({"error": "payment_gateway_error", "detail": str(e)}, 502)
