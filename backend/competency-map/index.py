@@ -486,83 +486,145 @@ def action_track_event(conn, user_id: int, body: dict):
     return resp({"ok": True})
 
 
-def action_adoption_stats(conn):
-    """W15.2 — Adoption funnel: агрегация по competency_map_events для дашборда.
+def action_adoption_stats(conn, qs: dict):
+    """W15 Admin adoption dashboard — агрегация competency_map_events.
 
-    Возвращает воронку: loaded → domain_expanded → competency_clicked → self_assessed.
-    Плюс: распределение по статусам, CTR рекомендаций, retention (повторные визиты).
+    Query params:
+      from_date  — ISO date строка, например 2026-06-01 (default: 30 дней назад)
+      to_date    — ISO date строка, например 2026-06-30 (default: сегодня)
+      exclude_internal — "true"/"false" (default: true, исключает user_id IN (2,3))
     """
-    # Воронка по уникальным пользователям
-    funnel = fetch_all(conn, f"""
-        SELECT event, COUNT(DISTINCT user_id) as unique_users, COUNT(*) as total_events
-        FROM {S}.competency_map_events
-        GROUP BY event
-        ORDER BY unique_users DESC
-    """)
+    import json as _json
+    from datetime import datetime, timedelta
 
-    # Распределение статусов при первом открытии карты
+    # Даты
+    try:
+        from_date = qs.get("from_date") or (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        to_date   = qs.get("to_date")   or datetime.now().strftime("%Y-%m-%d")
+        # Валидируем формат
+        datetime.strptime(from_date, "%Y-%m-%d")
+        datetime.strptime(to_date, "%Y-%m-%d")
+    except ValueError:
+        return resp({"error": "invalid date format, use YYYY-MM-DD"}, 400)
+
+    exclude_internal = qs.get("exclude_internal", "true").lower() != "false"
+    internal_filter  = "AND user_id NOT IN (2, 3)" if exclude_internal else ""
+    date_filter      = f"AND created_at >= '{from_date}' AND created_at < '{to_date}'::date + INTERVAL '1 day'"
+
+    WHERE = f"WHERE 1=1 {internal_filter} {date_filter}"
+
+    # ── 1. Воронка ─────────────────────────────────────────────────────
+    FUNNEL_EVENTS = [
+        "competency_map_loaded",
+        "competency_map_domain_expanded",
+        "competency_map_self_assessed",
+        "competency_map_recommendation_clicked",
+    ]
+    raw_funnel = fetch_all(conn, f"""
+        SELECT event, COUNT(DISTINCT user_id), COUNT(*)
+        FROM {S}.competency_map_events
+        {WHERE}
+        GROUP BY event
+    """)
+    by_event = {r[0]: {"unique_users": r[1], "total_events": r[2]} for r in raw_funnel}
+
+    loaded_users   = by_event.get("competency_map_loaded",                  {}).get("unique_users", 0)
+    expanded_users = by_event.get("competency_map_domain_expanded",         {}).get("unique_users", 0)
+    assessed_users = by_event.get("competency_map_self_assessed",           {}).get("unique_users", 0)
+    rec_users      = by_event.get("competency_map_recommendation_clicked",  {}).get("unique_users", 0)
+
+    def pct(num, den):
+        return round(num / den * 100, 1) if den > 0 else 0.0
+
+    funnel_out = []
+    prev = loaded_users
+    for ev in FUNNEL_EVENTS:
+        u = by_event.get(ev, {}).get("unique_users", 0)
+        funnel_out.append({
+            "event": ev,
+            "unique_users": u,
+            "total_events": by_event.get(ev, {}).get("total_events", 0),
+            "from_loaded_pct": pct(u, loaded_users),
+            "from_prev_pct":   pct(u, prev) if ev != FUNNEL_EVENTS[0] else 100.0,
+        })
+        prev = u
+
+    # ── 2. Summary KPI ─────────────────────────────────────────────────
+    summary = {
+        "loaded_users":   loaded_users,
+        "expanded_users": expanded_users,
+        "assessed_users": assessed_users,
+        "rec_click_users": rec_users,
+        "loaded_to_assessed_pct":  pct(assessed_users, loaded_users),
+        "assessed_to_rec_pct":     pct(rec_users,      assessed_users),
+        "loaded_to_rec_pct":       pct(rec_users,      loaded_users),
+    }
+
+    # ── 3. Map status distribution (первое открытие на пользователя) ──
     status_dist = fetch_all(conn, f"""
-        SELECT map_status, COUNT(DISTINCT user_id) as users
+        SELECT COALESCE(map_status, 'unknown') as status,
+               COUNT(DISTINCT user_id) as users,
+               COUNT(*) as events
         FROM {S}.competency_map_events
         WHERE event = 'competency_map_loaded'
-          AND map_status IS NOT NULL
+          {internal_filter} {date_filter}
           AND id IN (
               SELECT MIN(id) FROM {S}.competency_map_events
               WHERE event = 'competency_map_loaded'
+                {internal_filter} {date_filter}
               GROUP BY user_id
           )
-        GROUP BY map_status
+        GROUP BY COALESCE(map_status, 'unknown')
         ORDER BY users DESC
     """)
 
-    # Self-assessment conversion: кто loaded → кто self_assessed
-    conversion = fetch_one(conn, f"""
-        SELECT
-            COUNT(DISTINCT l.user_id) as loaded_users,
-            COUNT(DISTINCT s.user_id) as assessed_users,
-            CASE WHEN COUNT(DISTINCT l.user_id) > 0
-                 THEN ROUND(100.0 * COUNT(DISTINCT s.user_id) / COUNT(DISTINCT l.user_id), 1)
-                 ELSE 0 END as conversion_pct
-        FROM (SELECT DISTINCT user_id FROM {S}.competency_map_events WHERE event = 'competency_map_loaded') l
-        LEFT JOIN (SELECT DISTINCT user_id FROM {S}.competency_map_events WHERE event = 'competency_map_self_assessed') s
-          ON s.user_id = l.user_id
-    """)
-
-    # Recommendation CTR
-    rec_stats = fetch_one(conn, f"""
-        SELECT
-            (SELECT COUNT(DISTINCT user_id) FROM {S}.competency_map_events WHERE event = 'competency_map_loaded') as shown_to_users,
-            COUNT(DISTINCT user_id) as clicked_users,
-            COUNT(*) as total_clicks
-        FROM {S}.competency_map_events WHERE event = 'competency_map_recommendation_clicked'
-    """)
-
-    # Динамика по дням (последние 14 дней)
-    daily = fetch_all(conn, f"""
-        SELECT DATE(created_at) as day,
-               COUNT(DISTINCT user_id) as dau,
-               COUNT(*) as events
+    # ── 4. Daily trend ─────────────────────────────────────────────────
+    daily_raw = fetch_all(conn, f"""
+        SELECT DATE(created_at) as day, event, COUNT(DISTINCT user_id)
         FROM {S}.competency_map_events
-        WHERE created_at >= NOW() - INTERVAL '14 days'
-        GROUP BY DATE(created_at)
-        ORDER BY day DESC
+        {WHERE}
+          AND event IN ('competency_map_loaded','competency_map_self_assessed',
+                        'competency_map_domain_expanded','competency_map_recommendation_clicked')
+        GROUP BY DATE(created_at), event
+        ORDER BY day ASC
+    """)
+    daily_map: dict = {}
+    for r in daily_raw:
+        day = str(r[0])
+        if day not in daily_map:
+            daily_map[day] = {"date": day, "loaded": 0, "expanded": 0, "assessed": 0, "rec_clicked": 0}
+        key_map = {
+            "competency_map_loaded":                 "loaded",
+            "competency_map_domain_expanded":        "expanded",
+            "competency_map_self_assessed":          "assessed",
+            "competency_map_recommendation_clicked": "rec_clicked",
+        }
+        k = key_map.get(r[1])
+        if k:
+            daily_map[day][k] = r[2]
+    daily_out = list(daily_map.values())
+
+    # ── 5. Landing CTA ─────────────────────────────────────────────────
+    landing_raw = fetch_all(conn, f"""
+        SELECT COALESCE(props_json->>'cta_id', 'unknown') as cta_id,
+               COUNT(DISTINCT user_id) as users,
+               COUNT(*) as clicks
+        FROM {S}.competency_map_events
+        WHERE event = 'landing_cta_clicked'
+          {internal_filter} {date_filter}
+        GROUP BY COALESCE(props_json->>'cta_id', 'unknown')
+        ORDER BY clicks DESC
     """)
 
     return resp({
-        "funnel": [{"event": r[0], "unique_users": r[1], "total_events": r[2]} for r in funnel],
-        "status_distribution": [{"status": r[0], "users": r[1]} for r in status_dist],
-        "self_assess_conversion": {
-            "loaded_users": conversion[0] if conversion else 0,
-            "assessed_users": conversion[1] if conversion else 0,
-            "conversion_pct": float(conversion[2]) if conversion else 0.0,
-        },
-        "recommendation_ctr": {
-            "shown_to_users": rec_stats[0] if rec_stats else 0,
-            "clicked_users": rec_stats[1] if rec_stats else 0,
-            "total_clicks": rec_stats[2] if rec_stats else 0,
-        },
-        "daily_activity": [{"day": str(r[0]), "dau": r[1], "events": r[2]} for r in daily],
+        "period": {"from": from_date, "to": to_date, "exclude_internal": exclude_internal},
+        "summary": summary,
+        "funnel": funnel_out,
+        "map_status": [{"status": r[0], "users": r[1], "events": r[2]} for r in status_dist],
+        "daily": daily_out,
+        "landing_cta": [{"cta_id": r[0], "users": r[1], "clicks": r[2]} for r in landing_raw],
     })
+
 
 
 def handler(event: dict, context) -> dict:
@@ -599,7 +661,7 @@ def handler(event: dict, context) -> dict:
             return action_track_event(conn, user_id, body)
 
         if action == "competency_map_adoption_stats":
-            return action_adoption_stats(conn)
+            return action_adoption_stats(conn, qs)
 
         return resp({"error": "unknown action"}, 400)
     finally:

@@ -17,6 +17,7 @@ const NAV = [
   { label: "Стратегия",    icon: "TrendingUp",        href: "/admin/strategy" },
   { label: "Execution",    icon: "Rocket",            href: "/admin/execution" },
   { label: "Компетенции",  icon: "BrainCircuit",      href: "/admin/competencies" },
+  { label: "Adoption",     icon: "BarChart2",          href: "/admin/analytics/competency-map" },
   { label: "Автоматизация", icon: "Zap",             href: "/admin/automations" },
   { label: "Контент",     icon: "FileText",         href: "/admin/content" },
 ];

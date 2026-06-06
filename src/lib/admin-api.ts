@@ -40,6 +40,72 @@ async function hqRequest(path: string, options: RequestInit = {}) {
   return { ok: res.ok, status: res.status, data };
 }
 
+// ── Adoption Dashboard ────────────────────────────────────────────────
+
+const MAP_BASE = "https://functions.poehali.dev/d54f275a-1abc-4018-82e9-0d27e4a041b5";
+
+function sessionHdr() {
+  const sid = localStorage.getItem("session_id") || "";
+  return sid ? { "X-Session-Id": sid, "Content-Type": "application/json" } : { "Content-Type": "application/json" };
+}
+
+export type AdoptionSummary = {
+  loaded_users: number;
+  expanded_users: number;
+  assessed_users: number;
+  rec_click_users: number;
+  loaded_to_assessed_pct: number;
+  assessed_to_rec_pct: number;
+  loaded_to_rec_pct: number;
+};
+
+export type AdoptionFunnelStep = {
+  event: string;
+  unique_users: number;
+  total_events: number;
+  from_loaded_pct: number;
+  from_prev_pct: number;
+};
+
+export type AdoptionDailyRow = {
+  date: string;
+  loaded: number;
+  expanded: number;
+  assessed: number;
+  rec_clicked: number;
+};
+
+export type AdoptionMapStatusRow = { status: string; users: number; events: number };
+export type AdoptionLandingCta   = { cta_id: string; users: number; clicks: number };
+
+export type AdoptionStats = {
+  period: { from: string; to: string; exclude_internal: boolean };
+  summary: AdoptionSummary;
+  funnel: AdoptionFunnelStep[];
+  map_status: AdoptionMapStatusRow[];
+  daily: AdoptionDailyRow[];
+  landing_cta: AdoptionLandingCta[];
+};
+
+export const adoptionApi = {
+  getStats: async (params: {
+    from_date?: string;
+    to_date?: string;
+    exclude_internal?: boolean;
+  } = {}): Promise<{ ok: boolean; data: AdoptionStats }> => {
+    const qs = new URLSearchParams({ action: "competency_map_adoption_stats" });
+    if (params.from_date)       qs.set("from_date",        params.from_date);
+    if (params.to_date)         qs.set("to_date",           params.to_date);
+    if (params.exclude_internal !== undefined)
+      qs.set("exclude_internal", params.exclude_internal ? "true" : "false");
+    const res = await fetch(`${MAP_BASE}/?${qs}`, { headers: sessionHdr() });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, data };
+  },
+};
+
+// ── HQ Types ─────────────────────────────────────────────────────────
+
 export type HQGoalStatus = "planned" | "on_track" | "at_risk" | "done";
 export type HQIdeaStatus  = "new" | "considering" | "in_plan" | "rejected" | "done";
 export type HQRiskImpact  = "high" | "medium" | "low";

@@ -452,14 +452,14 @@ export default function SoftwareDevelopmentWebsite() {
                   className="mt-10 flex flex-col items-center justify-center gap-3 md:flex-row"
                 >
                   <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
-                    <Link to="/login" onClick={() => analytics.landingCtaClicked("hero_primary", "/login")}>
+                    <Link to="/login" onClick={() => analytics.landingCtaClicked("hero_start_self_assessment", "/login")}>
                       <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
                         <Map className="mr-2 h-4 w-4" />
                         <span className="text-nowrap">Начать self-assessment</span>
                       </Button>
                     </Link>
                   </div>
-                  <a href="#services" key={2} onClick={() => analytics.landingCtaClicked("hero_secondary", "#services")}>
+                  <a href="#services" key={2} onClick={() => analytics.landingCtaClicked("hero_learn_more", "#services")}>
                     <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
                       <span className="text-nowrap">Узнать подробнее</span>
                     </Button>
@@ -613,7 +613,7 @@ export default function SoftwareDevelopmentWebsite() {
             </div>
 
             <div className="mt-8 text-center">
-              <Link to="/login" onClick={() => analytics.landingCtaClicked("how_it_works", "/login")}>
+              <Link to="/login" onClick={() => analytics.landingCtaClicked("how_it_works_open_cabinet", "/login")}>
                 <Button size="lg" className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-8">
                   Начать self-assessment
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -682,7 +682,7 @@ export default function SoftwareDevelopmentWebsite() {
                     </li>
                   ))}
                 </ul>
-                <Link to="/login" className="mt-6 inline-block" onClick={() => analytics.landingCtaClicked("platform_open", "/login")}>
+                <Link to="/login" className="mt-6 inline-block" onClick={() => analytics.landingCtaClicked("platform_open_cabinet", "/login")}>
                   <button className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors">
                     Открыть кабинет →
                   </button>
