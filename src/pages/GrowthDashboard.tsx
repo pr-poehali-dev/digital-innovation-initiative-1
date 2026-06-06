@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { projectsApi, learningApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import { publicProfileApi, type PublicSettings } from "@/lib/publicProfileApi";
 
 type Goal = {
   id: number;
@@ -86,6 +87,109 @@ function ProgressArc({ value, total }: { value: number; total: number }) {
           <div className="text-xs text-slate-400 mt-1">Появится после первых шагов</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── PublicProfileCard ─────────────────────────────────────────────────────
+
+function PublicProfileCard() {
+  const [settings, setSettings] = useState<PublicSettings | null | "loading">("loading");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    publicProfileApi.getMe()
+      .then((d: { settings?: PublicSettings }) => setSettings(d.settings ?? null))
+      .catch(() => setSettings(null));
+  }, []);
+
+  function copyLink() {
+    if (!settings || settings === "loading" || !settings.public_url) return;
+    navigator.clipboard.writeText(settings.public_url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  const isLoading = settings === "loading";
+  const hasSettings = settings !== null && settings !== "loading";
+  const isPublished = hasSettings && (settings as PublicSettings).is_published;
+  const slug = hasSettings ? (settings as PublicSettings).public_slug : null;
+  const pubUrl = hasSettings ? (settings as PublicSettings).public_url : null;
+
+  return (
+    <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col gap-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${isPublished ? "bg-emerald-100" : "bg-slate-100"}`}>
+            <Icon name={isPublished ? "Globe" : "EyeOff"} size={15} className={isPublished ? "text-emerald-600" : "text-slate-400"} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Публичный профиль</p>
+            {!isLoading && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${
+                isPublished
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-100 text-slate-500"
+              }`}>
+                {isPublished ? "Опубликован" : "Не опубликован"}
+              </span>
+            )}
+          </div>
+        </div>
+        <Link to="/cabinet/public-profile" className="text-[11px] text-slate-400 hover:text-violet-600 transition-colors">
+          Настроить →
+        </Link>
+      </div>
+
+      {/* Body */}
+      {isLoading ? (
+        <div className="h-8 bg-slate-100 rounded-xl animate-pulse" />
+      ) : isPublished && slug ? (
+        <div className="space-y-3">
+          {/* URL row */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+            <Icon name="Link" size={12} className="text-slate-400 flex-shrink-0" />
+            <span className="text-xs text-slate-500 flex-1 truncate">
+              raven.moscow/p/<span className="font-semibold text-slate-700">{slug}</span>
+            </span>
+          </div>
+          {/* Actions */}
+          <div className="flex gap-2">
+            <a
+              href={pubUrl ?? "#"}
+              target="_blank"
+              rel="noreferrer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-colors"
+            >
+              <Icon name="ExternalLink" size={12} />
+              Открыть
+            </a>
+            <button
+              onClick={copyLink}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
+            >
+              <Icon name={copied ? "Check" : "Copy"} size={12} />
+              {copied ? "Скопировано" : "Скопировать"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500 leading-relaxed">
+            {!slug
+              ? "Создайте публичную ссылку и выберите, что показывать — профиль станет доступен для шеринга."
+              : "Профиль готов, но ещё не опубликован. Откройте доступ, чтобы поделиться им по ссылке."}
+          </p>
+          <Link
+            to="/cabinet/public-profile"
+            className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-xl transition-colors"
+          >
+            <Icon name="Globe" size={13} />
+            {!slug ? "Создать публичный профиль" : "Опубликовать профиль"}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
@@ -392,8 +496,8 @@ export default function GrowthDashboard() {
           </div>
         </div>
 
-        {/* ── Ряд 3: Проекты + Быстрые действия ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* ── Ряд 3: Проекты + Быстрые действия + Публичный профиль ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
           {/* Проекты — реальные данные из API */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
@@ -460,6 +564,9 @@ export default function GrowthDashboard() {
               </div>
             )}
           </div>
+
+          {/* Публичный профиль */}
+          <PublicProfileCard />
 
           {/* Быстрые действия */}
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
