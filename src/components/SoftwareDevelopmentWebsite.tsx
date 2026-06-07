@@ -454,6 +454,33 @@ export default function SoftwareDevelopmentWebsite() {
                       </a>
                     </div>
 
+                    {/* Mobile compact product card — только до lg */}
+                    <div className="mt-6 lg:hidden bg-white border border-slate-200 rounded-2xl shadow-md shadow-slate-100/60 overflow-hidden">
+                      <div className="px-4 py-3 flex items-center justify-between border-b border-slate-100">
+                        <div>
+                          <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">Целевая роль</p>
+                          <p className="text-sm font-bold text-slate-900 mt-0.5">Product Manager</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">Готовность</p>
+                          <p className="text-xl font-bold text-emerald-600 leading-none mt-0.5">72%</p>
+                        </div>
+                      </div>
+                      <div className="h-1.5 bg-slate-100">
+                        <div className="h-1.5 bg-gradient-to-r from-emerald-400 to-emerald-500" style={{ width: "72%" }} />
+                      </div>
+                      <div className="px-4 py-3 flex items-center gap-3 bg-gradient-to-r from-violet-50 to-indigo-50">
+                        <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
+                          <Sparkles className="w-3.5 h-3.5 text-white" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-bold text-violet-700 uppercase tracking-wider">Следующий шаг</p>
+                          <p className="text-xs font-semibold text-slate-800 leading-snug truncate">Подтвердить опыт приоритизации</p>
+                        </div>
+                        <span className="ml-auto text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-semibold flex-shrink-0">Практика</span>
+                      </div>
+                    </div>
+
                     {/* Value strip */}
                     <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
                       {["Сильные стороны", "Зоны роста", "Персональный план"].map((v, i) => (
