@@ -51,7 +51,7 @@ def get_user(conn, session_id: str):
     safe_sid = session_id.replace("'", "''")
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT user_id FROM {S}.sessions WHERE session_id='{safe_sid}' AND expires_at>NOW() LIMIT 1"
+            f"SELECT user_id FROM {S}.sessions WHERE id='{safe_sid}' AND expires_at>NOW() LIMIT 1"
         )
         row = cur.fetchone()
     return row[0] if row else None
