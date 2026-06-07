@@ -2658,6 +2658,298 @@ def action_decision_delete(conn, actor, body, origin):
     return resp({"ok": True}, origin=origin)
 
 
+# ── Benchmark functions ──────────────────────────────────────────────
+
+BENCHMARK_PRODUCTS_SEED = [
+    {"slug":"degreed","name":"Degreed","category":"skill_growth_platform","target_audience":"enterprise learning and development","best_at":"Skill graph, multi-signal skill profile, unified growth layer","main_jtbd":"Help users understand and grow skills through multiple signals","ux_strengths":["Unified view of skills","Signals beyond self-assessment","Good bridge between skill data and development"],"ux_weaknesses":["Can feel enterprise-heavy","Too many parallel signals may overload user"],"ideas_to_borrow":["Multi-signal skill confidence","Explainable skill status","Link skills to actions and evidence"],"anti_patterns":["Avoid overloaded dashboards","Avoid dense enterprise terminology"],"relevance":"high","recommendation":"borrow"},
+    {"slug":"fuel50","name":"Fuel50","category":"career_pathing_platform","target_audience":"internal mobility and career growth","best_at":"Adjacent roles, career pathing, growth routes","main_jtbd":"Help employees discover next roles and growth paths","ux_strengths":["Clear career mobility framing","Good adjacent-role logic","Makes role progression tangible"],"ux_weaknesses":["Can feel HR-centric","Less emphasis on proof/evidence"],"ideas_to_borrow":["Adjacent roles","Alternative paths to target role","Role transition explanations"],"anti_patterns":["Avoid HR-heavy language","Avoid overcomplicating role mobility"],"relevance":"high","recommendation":"borrow"},
+    {"slug":"gloat","name":"Gloat","category":"talent_marketplace","target_audience":"skill-based talent mobility","best_at":"Projects, gigs, opportunity-based growth","main_jtbd":"Connect development to real opportunities and internal projects","ux_strengths":["Growth through real work","Strong practice orientation","Skills connected to opportunities"],"ux_weaknesses":["Marketplace bias","Can distract from personal growth planning"],"ideas_to_borrow":["Practice on real tasks","Project-based development items","Learning-to-application flow"],"anti_patterns":["Avoid opportunity marketplace overload before core plan is clear"],"relevance":"high","recommendation":"adapt"},
+    {"slug":"leapsome","name":"Leapsome","category":"performance_growth_platform","target_audience":"performance and development teams","best_at":"Competency frameworks and structured development plans","main_jtbd":"Connect competencies, goals, feedback and development planning","ux_strengths":["Structured development planning","Clear framework-to-plan connection","Good B2B SaaS clarity"],"ux_weaknesses":["May feel review/performance heavy","Weak proof layer"],"ideas_to_borrow":["Competency-to-plan structure","Consistent development plan layout","Clear language in admin config"],"anti_patterns":["Avoid performance-review overload in user flow"],"relevance":"high","recommendation":"adapt"},
+    {"slug":"lattice-grow","name":"Lattice Grow","category":"career_growth_platform","target_audience":"career frameworks and manager-led growth","best_at":"Role expectations and career tracks","main_jtbd":"Show what is expected at each level and guide growth conversations","ux_strengths":["Clear expectations by role and level","Strong career track framing"],"ux_weaknesses":["Less strong in evidence/proof","Can depend on manager/performance context"],"ideas_to_borrow":["Role expectations by level","Explain why gaps matter","Career-track framing"],"anti_patterns":["Avoid tying everything to review cycles"],"relevance":"high","recommendation":"borrow"},
+    {"slug":"pluralsight-skills","name":"Pluralsight Skills","category":"skill_assessment_learning","target_audience":"technical skill development","best_at":"Skill assessment and proficiency visibility","main_jtbd":"Measure skill levels and suggest what to improve next","ux_strengths":["Clear proficiency visibility","Readable skill-gap logic","Assessment results are understandable"],"ux_weaknesses":["Role layer is weaker","Too learning-centric"],"ideas_to_borrow":["Readiness explainer","Simple skill-level communication","Short and clear gap summaries"],"anti_patterns":["Avoid assessment without action"],"relevance":"high","recommendation":"borrow"},
+    {"slug":"coursera-career-academy","name":"Coursera Career Academy","category":"learning_paths","target_audience":"learning and role-based upskilling","best_at":"Structured learning paths and time estimates","main_jtbd":"Guide users through role-relevant learning journeys","ux_strengths":["Clear path packaging","Strong time estimates","Feels finishable"],"ux_weaknesses":["Generic if not role-personalized","Weak practice/proof layer"],"ideas_to_borrow":["Time estimate per step","Sequential path structure","Manageable workload framing"],"anti_patterns":["Avoid turning product into a content catalog"],"relevance":"medium_high","recommendation":"adapt"},
+    {"slug":"betterup","name":"BetterUp","category":"coaching_development_journey","target_audience":"personal and leadership development","best_at":"Supportive journey, check-ins, reflection rhythm","main_jtbd":"Sustain behavior change and long-term development","ux_strengths":["Supportive tone","Development as a journey","Good reflection rhythm"],"ux_weaknesses":["Weak skill transparency","Less concrete role-to-gap logic"],"ideas_to_borrow":["Check-ins","Reflection points","Supportive copy"],"anti_patterns":["Avoid abstract coaching language in skill screens"],"relevance":"medium","recommendation":"adapt"},
+]
+
+BENCHMARK_PATTERNS_SEED = [
+    {"slug":"one-next-best-action","title":"One next best action","area":"ux","source_products":["degreed","pluralsight-skills","coursera-career-academy"],"pattern_description":"The screen highlights one primary next step instead of multiple competing actions.","why_it_works":"Reduces cognitive load and increases action clarity.","recommendation":"borrow","impact":"high","effort":"small","priority":"p0"},
+    {"slug":"readiness-with-explanation","title":"Readiness with explanation","area":"gap_visualization","source_products":["pluralsight-skills","lattice-grow"],"pattern_description":"Readiness is shown together with the main drivers: strengths, blockers and priority gaps.","why_it_works":"Users trust scores when they understand what drives them.","recommendation":"borrow","impact":"high","effort":"medium","priority":"p0"},
+    {"slug":"adjacent-roles","title":"Adjacent roles","area":"role_selection","source_products":["fuel50","gloat"],"pattern_description":"The product suggests nearby roles and alternative development paths.","why_it_works":"Prevents tunnel vision and makes progress feel more achievable.","recommendation":"borrow","impact":"high","effort":"medium","priority":"p1"},
+    {"slug":"practice-project-items","title":"Practice/project-based development items","area":"plan","source_products":["gloat"],"pattern_description":"Development plans include real tasks, mini-projects or workplace practice, not only learning content.","why_it_works":"Improves transfer from theory to actual competence.","recommendation":"borrow","impact":"high","effort":"medium","priority":"p0"},
+    {"slug":"skill-action-proof-loop","title":"Skill → action → proof loop","area":"evidence","source_products":["degreed","gloat"],"pattern_description":"Each growth recommendation can lead to an action and then to a visible proof of progress.","why_it_works":"Makes growth measurable and believable.","recommendation":"borrow","impact":"high","effort":"medium","priority":"p0"},
+    {"slug":"time-estimates","title":"Time and workload estimates","area":"plan","source_products":["coursera-career-academy"],"pattern_description":"Each plan step shows expected duration and workload per week.","why_it_works":"Makes the plan feel realistic and easier to commit to.","recommendation":"borrow","impact":"high","effort":"small","priority":"p0"},
+    {"slug":"role-expectations-by-level","title":"Role expectations by level","area":"role_framework","source_products":["lattice-grow","leapsome"],"pattern_description":"The role view explains what is expected at the target level and why certain skills matter.","why_it_works":"Turns abstract gaps into clear role requirements.","recommendation":"borrow","impact":"high","effort":"medium","priority":"p1"},
+    {"slug":"multi-signal-skill-confidence","title":"Multi-signal skill confidence","area":"assessment","source_products":["degreed"],"pattern_description":"Skill confidence combines self-assessment, completed steps and proof signals.","why_it_works":"Raises trust and improves recommendation quality.","recommendation":"adapt","impact":"high","effort":"large","priority":"p2"},
+    {"slug":"reflection-checkpoints","title":"Reflection checkpoints","area":"retention","source_products":["betterup"],"pattern_description":"The plan includes short check-in or reflection moments after key actions.","why_it_works":"Improves continuity and helps users notice progress.","recommendation":"adapt","impact":"medium","effort":"small","priority":"p2"},
+    {"slug":"path-not-card-pile","title":"Plan as a path, not a pile of cards","area":"plan","source_products":["coursera-career-academy","leapsome"],"pattern_description":"The plan is perceived as a guided route with sequence and progress, not a flat list of content cards.","why_it_works":"Improves focus and completion.","recommendation":"borrow","impact":"high","effort":"medium","priority":"p1"},
+]
+
+STRATEGY_DECISIONS_SEED = [
+    {"slug":"add-readiness-explainer","title":"Добавить explainable readiness в Strategy screen","problem_statement":"Пользователь видит статус готовности, но не всегда понимает, из чего он сложился.","source_patterns":["readiness-with-explanation"],"decision":"Показывать 2-3 главных фактора: что уже хорошо, что тормозит, какой шаг даст максимальный эффект.","module":"growth_navigator","expected_user_value":"Рост доверия к оценке и более понятный следующий шаг.","expected_biz_value":"Выше вовлеченность в план и ниже отвал после первого просмотра.","effort":"medium","impact":"high","priority":"p0","status":"planned"},
+    {"slug":"add-time-estimates-to-plan-items","title":"Добавить оценки времени к шагам плана","problem_statement":"Шаги плана воспринимаются абстрактно и пользователю трудно оценить, насколько они посильны.","source_patterns":["time-estimates"],"decision":"У каждого шага показывать длительность и нагрузку в неделю.","module":"plan_tab","expected_user_value":"План становится реалистичнее и проще для старта.","expected_biz_value":"Выше конверсия в начало выполнения шагов.","effort":"small","impact":"high","priority":"p0","status":"planned"},
+    {"slug":"promote-practice-project-steps","title":"Сделать практические шаги основой development plan","problem_statement":"План может восприниматься как набор обучающих рекомендаций без реального применения.","source_patterns":["practice-project-items","path-not-card-pile"],"decision":"Добавить и приоритизировать шаги типа практика, проект, применение на рабочей задаче.","module":"plan_engine","expected_user_value":"Развитие становится прикладным, а не теоретическим.","expected_biz_value":"Сильнее perceived value и выше шанс на реальный outcome.","effort":"medium","impact":"high","priority":"p0","status":"planned"},
+    {"slug":"add-evidence-prompts","title":"Добавить prompts для подтверждения опыта","problem_statement":"Даже после выполнения шага прогресс сложно зафиксировать и показать.","source_patterns":["skill-action-proof-loop"],"decision":"Для каждого шага показывать, чем можно подтвердить выполнение: артефакт, кейс, заметка, результат.","module":"evidence_layer","expected_user_value":"Появляется ощущение реального и видимого прогресса.","expected_biz_value":"Рост удержания и ценности продукта как системы развития.","effort":"medium","impact":"high","priority":"p0","status":"planned"},
+    {"slug":"single-primary-cta-everywhere","title":"Закрепить правило одного основного CTA на экран/состояние","problem_statement":"Множественные CTA создают перегруз и снижают конверсию в следующий шаг.","source_patterns":["one-next-best-action"],"decision":"На каждом состоянии strategy/welcome показывать только один primary CTA.","module":"ux_system","expected_user_value":"Понятнее, что делать дальше.","expected_biz_value":"Выше action completion rate.","effort":"small","impact":"high","priority":"p0","status":"validated"},
+    {"slug":"introduce-adjacent-roles","title":"Показывать смежные роли и альтернативные пути","problem_statement":"Одна целевая роль может быть слишком далекой или демотивирующей.","source_patterns":["adjacent-roles"],"decision":"Показывать 2-3 соседние роли и объяснять, почему они близки текущему профилю.","module":"role_strategy","expected_user_value":"Пользователю проще выбрать достижимый маршрут развития.","expected_biz_value":"Выше конверсия в осмысленный target selection.","effort":"medium","impact":"high","priority":"p1","status":"idea"},
+    {"slug":"add-role-expectations","title":"Добавить ожидания от целевой роли по уровням","problem_statement":"Не все gaps понятны без контекста требований роли.","source_patterns":["role-expectations-by-level"],"decision":"Показывать, какие группы навыков критичны для роли и почему.","module":"role_framework","expected_user_value":"Gaps становятся понятнее и логичнее.","expected_biz_value":"Выше доверие к рекомендациям и readiness status.","effort":"medium","impact":"high","priority":"p1","status":"idea"},
+    {"slug":"introduce-reflection-checkpoints","title":"Добавить точки рефлексии после ключевых шагов","problem_statement":"После выполнения шага пользователь может потерять ощущение прогресса и контекста.","source_patterns":["reflection-checkpoints"],"decision":"После некоторых шагов предлагать короткий check-in: что получилось, что изменилось, что дальше.","module":"plan_journey","expected_user_value":"Легче удерживать мотивацию и видеть прогресс.","expected_biz_value":"Лучшее удержание в длинном пути.","effort":"small","impact":"medium","priority":"p2","status":"idea"},
+]
+
+
+def action_benchmark_seed(conn, actor, origin):
+    """Seed benchmark data — idempotent upsert."""
+    with conn.cursor() as cur:
+        for p in BENCHMARK_PRODUCTS_SEED:
+            cur.execute(f"""
+                INSERT INTO {S}.benchmark_products
+                  (slug, name, category, target_audience, best_at, main_jtbd,
+                   ux_strengths, ux_weaknesses, ideas_to_borrow, anti_patterns,
+                   relevance, recommendation, updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (slug) DO UPDATE SET
+                  name=EXCLUDED.name, category=EXCLUDED.category,
+                  target_audience=EXCLUDED.target_audience, best_at=EXCLUDED.best_at,
+                  main_jtbd=EXCLUDED.main_jtbd, ux_strengths=EXCLUDED.ux_strengths,
+                  ux_weaknesses=EXCLUDED.ux_weaknesses, ideas_to_borrow=EXCLUDED.ideas_to_borrow,
+                  anti_patterns=EXCLUDED.anti_patterns, relevance=EXCLUDED.relevance,
+                  recommendation=EXCLUDED.recommendation, updated_at=NOW()
+            """, (p["slug"], p["name"], p["category"], p["target_audience"], p["best_at"],
+                  p["main_jtbd"], json.dumps(p["ux_strengths"], ensure_ascii=False),
+                  json.dumps(p["ux_weaknesses"], ensure_ascii=False),
+                  json.dumps(p["ideas_to_borrow"], ensure_ascii=False),
+                  json.dumps(p["anti_patterns"], ensure_ascii=False),
+                  p["relevance"], p["recommendation"]))
+        for p in BENCHMARK_PATTERNS_SEED:
+            cur.execute(f"""
+                INSERT INTO {S}.benchmark_patterns
+                  (slug, title, area, source_products, pattern_description, why_it_works,
+                   recommendation, impact, effort, priority, updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (slug) DO UPDATE SET
+                  title=EXCLUDED.title, area=EXCLUDED.area, source_products=EXCLUDED.source_products,
+                  pattern_description=EXCLUDED.pattern_description, why_it_works=EXCLUDED.why_it_works,
+                  recommendation=EXCLUDED.recommendation, impact=EXCLUDED.impact,
+                  effort=EXCLUDED.effort, priority=EXCLUDED.priority, updated_at=NOW()
+            """, (p["slug"], p["title"], p["area"],
+                  json.dumps(p["source_products"], ensure_ascii=False),
+                  p["pattern_description"], p["why_it_works"],
+                  p["recommendation"], p["impact"], p["effort"], p["priority"]))
+        for d in STRATEGY_DECISIONS_SEED:
+            cur.execute(f"""
+                INSERT INTO {S}.strategy_decisions
+                  (slug, title, problem_statement, source_patterns, decision, module,
+                   expected_user_value, expected_biz_value, effort, impact, priority, status, updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (slug) DO UPDATE SET
+                  title=EXCLUDED.title, problem_statement=EXCLUDED.problem_statement,
+                  source_patterns=EXCLUDED.source_patterns, decision=EXCLUDED.decision,
+                  module=EXCLUDED.module, expected_user_value=EXCLUDED.expected_user_value,
+                  expected_biz_value=EXCLUDED.expected_biz_value, effort=EXCLUDED.effort,
+                  impact=EXCLUDED.impact, priority=EXCLUDED.priority, status=EXCLUDED.status,
+                  updated_at=NOW()
+            """, (d["slug"], d["title"], d["problem_statement"],
+                  json.dumps(d["source_patterns"], ensure_ascii=False),
+                  d["decision"], d["module"], d["expected_user_value"],
+                  d["expected_biz_value"], d["effort"], d["impact"],
+                  d["priority"], d["status"]))
+    conn.commit()
+    _audit(conn, actor, "benchmark.seed", "full seed upsert")
+    return resp({"ok": True, "products": len(BENCHMARK_PRODUCTS_SEED),
+                 "patterns": len(BENCHMARK_PATTERNS_SEED),
+                 "decisions": len(STRATEGY_DECISIONS_SEED)}, origin=origin)
+
+
+def action_benchmark_products_list(conn, qs, origin):
+    relevance = qs.get("relevance", "")
+    rec = qs.get("recommendation", "")
+    with conn.cursor() as cur:
+        where, params = [], []
+        if relevance: where.append("relevance=%s"); params.append(relevance)
+        if rec: where.append("recommendation=%s"); params.append(rec)
+        w = ("WHERE " + " AND ".join(where)) if where else ""
+        cur.execute(f"SELECT id,slug,name,category,target_audience,best_at,main_jtbd,ux_strengths,ux_weaknesses,ideas_to_borrow,anti_patterns,relevance,recommendation,notes,reviewed_at,updated_at FROM {S}.benchmark_products {w} ORDER BY relevance,name", params)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return resp({"products": rows}, origin=origin)
+
+
+def action_benchmark_product_upsert(conn, actor, body, origin):
+    slug = body.get("slug","").strip()
+    if not slug: return resp({"error": "slug required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.benchmark_products
+              (slug,name,category,target_audience,best_at,main_jtbd,
+               ux_strengths,ux_weaknesses,ideas_to_borrow,anti_patterns,
+               relevance,recommendation,notes,reviewed_at,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT (slug) DO UPDATE SET
+              name=EXCLUDED.name, category=EXCLUDED.category,
+              target_audience=EXCLUDED.target_audience, best_at=EXCLUDED.best_at,
+              main_jtbd=EXCLUDED.main_jtbd, ux_strengths=EXCLUDED.ux_strengths,
+              ux_weaknesses=EXCLUDED.ux_weaknesses, ideas_to_borrow=EXCLUDED.ideas_to_borrow,
+              anti_patterns=EXCLUDED.anti_patterns, relevance=EXCLUDED.relevance,
+              recommendation=EXCLUDED.recommendation, notes=EXCLUDED.notes,
+              reviewed_at=EXCLUDED.reviewed_at, updated_at=NOW()
+            RETURNING id
+        """, (slug, body.get("name",""), body.get("category",""),
+              body.get("target_audience",""), body.get("best_at",""), body.get("main_jtbd",""),
+              json.dumps(body.get("ux_strengths",[]), ensure_ascii=False),
+              json.dumps(body.get("ux_weaknesses",[]), ensure_ascii=False),
+              json.dumps(body.get("ideas_to_borrow",[]), ensure_ascii=False),
+              json.dumps(body.get("anti_patterns",[]), ensure_ascii=False),
+              body.get("relevance","medium"), body.get("recommendation","adapt"),
+              body.get("notes",""), body.get("reviewed_at")))
+        row_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "benchmark.product_upsert", f"slug={slug}")
+    return resp({"ok": True, "id": row_id}, origin=origin)
+
+
+def action_benchmark_product_delete(conn, actor, body, origin):
+    pid = body.get("id")
+    if not pid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.benchmark_products WHERE id=%s", (int(pid),))
+    conn.commit()
+    _audit(conn, actor, "benchmark.product_deleted", f"id={pid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_benchmark_patterns_list(conn, qs, origin):
+    area = qs.get("area",""); priority = qs.get("priority",""); rec = qs.get("recommendation","")
+    with conn.cursor() as cur:
+        where, params = [], []
+        if area: where.append("area=%s"); params.append(area)
+        if priority: where.append("priority=%s"); params.append(priority)
+        if rec: where.append("recommendation=%s"); params.append(rec)
+        w = ("WHERE " + " AND ".join(where)) if where else ""
+        cur.execute(f"SELECT id,slug,title,area,source_products,pattern_description,why_it_works,recommendation,impact,effort,priority,notes,updated_at FROM {S}.benchmark_patterns {w} ORDER BY priority,area,title", params)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return resp({"patterns": rows}, origin=origin)
+
+
+def action_benchmark_pattern_upsert(conn, actor, body, origin):
+    slug = body.get("slug","").strip()
+    if not slug: return resp({"error": "slug required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.benchmark_patterns
+              (slug,title,area,source_products,pattern_description,why_it_works,
+               recommendation,impact,effort,priority,notes,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT (slug) DO UPDATE SET
+              title=EXCLUDED.title, area=EXCLUDED.area,
+              source_products=EXCLUDED.source_products,
+              pattern_description=EXCLUDED.pattern_description,
+              why_it_works=EXCLUDED.why_it_works, recommendation=EXCLUDED.recommendation,
+              impact=EXCLUDED.impact, effort=EXCLUDED.effort, priority=EXCLUDED.priority,
+              notes=EXCLUDED.notes, updated_at=NOW()
+            RETURNING id
+        """, (slug, body.get("title",""), body.get("area",""),
+              json.dumps(body.get("source_products",[]), ensure_ascii=False),
+              body.get("pattern_description",""), body.get("why_it_works",""),
+              body.get("recommendation","borrow"), body.get("impact","medium"),
+              body.get("effort","medium"), body.get("priority","p1"), body.get("notes","")))
+        row_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "benchmark.pattern_upsert", f"slug={slug}")
+    return resp({"ok": True, "id": row_id}, origin=origin)
+
+
+def action_benchmark_pattern_delete(conn, actor, body, origin):
+    pid = body.get("id")
+    if not pid: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.benchmark_patterns WHERE id=%s", (int(pid),))
+    conn.commit()
+    _audit(conn, actor, "benchmark.pattern_deleted", f"id={pid}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_bm_decisions_list(conn, qs, origin):
+    priority = qs.get("priority",""); status = qs.get("status",""); module = qs.get("module","")
+    with conn.cursor() as cur:
+        where, params = [], []
+        if priority: where.append("priority=%s"); params.append(priority)
+        if status: where.append("status=%s"); params.append(status)
+        if module: where.append("module=%s"); params.append(module)
+        w = ("WHERE " + " AND ".join(where)) if where else ""
+        cur.execute(f"SELECT id,slug,title,problem_statement,source_patterns,decision,module,expected_user_value,expected_biz_value,effort,impact,priority,status,owner,reviewed_at,notes,updated_at FROM {S}.strategy_decisions {w} ORDER BY priority,status,title", params)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return resp({"decisions": rows}, origin=origin)
+
+
+def action_bm_decision_upsert(conn, actor, body, origin):
+    slug = body.get("slug","").strip()
+    if not slug: return resp({"error": "slug required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.strategy_decisions
+              (slug,title,problem_statement,source_patterns,decision,module,
+               expected_user_value,expected_biz_value,effort,impact,priority,status,owner,notes,updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            ON CONFLICT (slug) DO UPDATE SET
+              title=EXCLUDED.title, problem_statement=EXCLUDED.problem_statement,
+              source_patterns=EXCLUDED.source_patterns, decision=EXCLUDED.decision,
+              module=EXCLUDED.module, expected_user_value=EXCLUDED.expected_user_value,
+              expected_biz_value=EXCLUDED.expected_biz_value, effort=EXCLUDED.effort,
+              impact=EXCLUDED.impact, priority=EXCLUDED.priority, status=EXCLUDED.status,
+              owner=EXCLUDED.owner, notes=EXCLUDED.notes, updated_at=NOW()
+            RETURNING id
+        """, (slug, body.get("title",""), body.get("problem_statement",""),
+              json.dumps(body.get("source_patterns",[]), ensure_ascii=False),
+              body.get("decision",""), body.get("module",""),
+              body.get("expected_user_value",""), body.get("expected_biz_value",""),
+              body.get("effort","medium"), body.get("impact","high"),
+              body.get("priority","p1"), body.get("status","idea"),
+              body.get("owner",""), body.get("notes","")))
+        row_id = cur.fetchone()[0]
+    conn.commit()
+    _audit(conn, actor, "benchmark.decision_upsert", f"slug={slug}")
+    return resp({"ok": True, "id": row_id}, origin=origin)
+
+
+def action_bm_decision_delete(conn, actor, body, origin):
+    did = body.get("id")
+    if not did: return resp({"error": "id required"}, 400, origin)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.strategy_decisions WHERE id=%s", (int(did),))
+    conn.commit()
+    _audit(conn, actor, "benchmark.decision_deleted", f"id={did}")
+    return resp({"ok": True}, origin=origin)
+
+
+def action_benchmark_summary(conn, origin):
+    """Сводка: топ p0 decisions + количество продуктов/паттернов."""
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) FROM {S}.benchmark_products")
+        products_count = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM {S}.benchmark_patterns")
+        patterns_count = cur.fetchone()[0]
+        cur.execute(f"""
+            SELECT id,slug,title,module,priority,status,effort,impact
+            FROM {S}.strategy_decisions
+            WHERE priority IN ('p0','p1')
+            ORDER BY priority, status, title LIMIT 8
+        """)
+        cols = [d[0] for d in cur.description]
+        top_decisions = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.execute(f"""
+            SELECT recommendation, COUNT(*) as cnt
+            FROM {S}.benchmark_products GROUP BY recommendation ORDER BY cnt DESC
+        """)
+        by_rec = [{"recommendation": r[0], "count": r[1]} for r in cur.fetchall()]
+    return resp({
+        "products_count": products_count,
+        "patterns_count": patterns_count,
+        "top_decisions": top_decisions,
+        "products_by_recommendation": by_rec,
+    }, origin=origin)
+
+
 # ── Handler ─────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
@@ -2846,6 +3138,43 @@ def handler(event: dict, context) -> dict:
             return action_alert_update(conn, actor, body, origin)
         if action == "strategy_alerts_summary":
             return action_alerts_summary(conn, origin)
+
+        # ── Benchmark Products ──────────────────────────────────────────
+        if action == "benchmark_products_list":
+            return action_benchmark_products_list(conn, qs, origin)
+        if action == "benchmark_product_upsert":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_benchmark_product_upsert(conn, actor, body, origin)
+        if action == "benchmark_product_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_benchmark_product_delete(conn, actor, body, origin)
+        if action == "benchmark_seed":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_benchmark_seed(conn, actor, origin)
+
+        # ── Benchmark Patterns ──────────────────────────────────────────
+        if action == "benchmark_patterns_list":
+            return action_benchmark_patterns_list(conn, qs, origin)
+        if action == "benchmark_pattern_upsert":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_benchmark_pattern_upsert(conn, actor, body, origin)
+        if action == "benchmark_pattern_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_benchmark_pattern_delete(conn, actor, body, origin)
+
+        # ── Strategy Decisions (benchmark layer) ────────────────────────
+        if action == "bm_decisions_list":
+            return action_bm_decisions_list(conn, qs, origin)
+        if action == "bm_decision_upsert":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_bm_decision_upsert(conn, actor, body, origin)
+        if action == "bm_decision_delete":
+            if method != "POST": return resp({"error": "POST required"}, 405, origin)
+            return action_bm_decision_delete(conn, actor, body, origin)
+
+        # ── Benchmark Summary ───────────────────────────────────────────
+        if action == "benchmark_summary":
+            return action_benchmark_summary(conn, origin)
 
         return resp({"error": "unknown action"}, 400, origin)
 

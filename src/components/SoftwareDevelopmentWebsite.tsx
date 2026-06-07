@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
-import { ArrowRight, ChevronRight, Menu, X, Map, Target, BookOpen, Briefcase, TrendingUp, CheckCircle, LayoutGrid, Sparkles, Users, FolderOpen } from "lucide-react"
+import { ArrowRight, ChevronRight, Menu, X, Map, Target, BookOpen, Briefcase, TrendingUp, CheckCircle, LayoutGrid, Sparkles, Users, FolderOpen, Plus } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
 import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
@@ -204,20 +204,20 @@ const HOW_IT_WORKS_STEPS = [
   {
     num: "1",
     color: "bg-emerald-100 text-emerald-700",
-    title: "Оцените компетенции",
-    desc: "Раскройте любой домен и выставьте уровень по нужным компетенциям. Карта формируется сразу — никаких анкет.",
+    title: "Выберите целевую роль",
+    desc: "Определите роль, к которой хотите двигаться, чтобы платформа показала нужные ориентиры и приоритеты.",
   },
   {
     num: "2",
     color: "bg-violet-100 text-violet-700",
-    title: "Фиксируйте опыт и обучение",
-    desc: "Завершили курс — он отмечается в карте. Ведёте проекты — это подтверждает смежные компетенции.",
+    title: "Оцените текущий уровень",
+    desc: "Заполните профиль и пройдите самооценку — увидите сильные стороны, зоны роста и насколько вы близко к роли.",
   },
   {
     num: "3",
     color: "bg-blue-100 text-blue-700",
-    title: "Получайте рекомендации",
-    desc: "Система подсказывает что развить дальше, где низкая уверенность и какой следующий шаг имеет смысл именно для вас.",
+    title: "Получите план и подтверждайте прогресс",
+    desc: "Система соберёт приоритеты и следующие шаги. Фиксируйте обучение, практику и результаты — чтобы видеть реальное движение.",
   },
 ]
 
@@ -225,26 +225,54 @@ const FOR_WHOM = [
   {
     icon: <TrendingUp className="h-6 w-6 text-emerald-600" />,
     bg: "bg-emerald-50",
-    title: "Руководители проектов",
-    desc: "Оцените свой уровень по ключевым PM-компетенциям, зафиксируйте сильные стороны и зоны роста с конкретными следующими шагами.",
+    title: "Специалистам",
+    desc: "Поймёте, какие навыки развивать дальше. Получите план, а не просто список советов.",
   },
   {
     icon: <BookOpen className="h-6 w-6 text-blue-600" />,
     bg: "bg-blue-50",
-    title: "Специалисты в росте",
-    desc: "Стройте карьерный план опираясь на реальную картину компетенций, а не ощущения. Видите где вы сейчас и куда двигаться.",
+    title: "Руководителям",
+    desc: "Видите сильные стороны и точки роста — свои и команды. Развитие становится управляемым.",
   },
   {
     icon: <Briefcase className="h-6 w-6 text-violet-600" />,
     bg: "bg-violet-50",
-    title: "Профессионалы с опытом",
-    desc: "Переводите накопленный опыт в структурированный профиль. Подтверждайте компетенции через проекты и обучение.",
+    title: "Тем, кто готовится к новой роли",
+    desc: "Двигаетесь не вслепую — знаете, что нужно подтянуть, и видите, насколько вы уже близко.",
   },
   {
     icon: <Target className="h-6 w-6 text-orange-600" />,
     bg: "bg-orange-50",
-    title: "Те, кто меняет направление",
-    desc: "Видите какие компетенции уже есть и что нужно добрать для нового вектора. Growth-план помогает двигаться не вслепую.",
+    title: "Тем, кто меняет направление",
+    desc: "Видите, какие компетенции уже есть и что нужно добрать. Переход становится понятным шагами.",
+  },
+]
+
+const FAQ_ITEMS = [
+  {
+    id: "faq-start",
+    q: "Что нужно, чтобы начать?",
+    a: "Достаточно заполнить профиль и пройти самооценку. После этого платформа сможет показать сильные стороны, зоны роста и следующий шаг.",
+  },
+  {
+    id: "faq-time",
+    q: "Сколько времени занимает самооценка?",
+    a: "Зависит от количества компетенций, но в большинстве случаев это короткий стартовый этап — после которого уже можно увидеть первые рекомендации.",
+  },
+  {
+    id: "faq-diff",
+    q: "Чем это отличается от обычного каталога курсов?",
+    a: "Платформа не просто предлагает материалы. Она помогает понять, к какой роли вы идёте, чего пока не хватает, что делать в первую очередь — и как подтверждать прогресс.",
+  },
+  {
+    id: "faq-update",
+    q: "Можно ли обновлять план развития?",
+    a: "Да. Если профиль, оценки или цель изменились — план можно пересобрать и получить обновлённые приоритеты.",
+  },
+  {
+    id: "faq-proof",
+    q: "Как подтверждается прогресс?",
+    a: "Через выполненные шаги, практику, результаты задач и другие подтверждения опыта — которые показывают, что развитие происходит не только на словах.",
   },
 ]
 
@@ -378,7 +406,55 @@ const CardDecorator = ({ children }: { children: React.ReactNode }) => (
   </div>
 )
 
+function FaqList() {
+  const [open, setOpen] = React.useState<string | null>(null)
+  const { user } = useAuth()
+  return (
+    <div className="space-y-3">
+      {FAQ_ITEMS.map(item => (
+        <div key={item.id} className="bg-background border border-slate-200 rounded-2xl overflow-hidden">
+          <button
+            className="w-full flex items-center justify-between px-5 py-4 text-left gap-4"
+            onClick={() => {
+              const next = open === item.id ? null : item.id
+              setOpen(next)
+              analytics.faqToggled(item.id, next ? "open" : "close")
+            }}
+          >
+            <span className="text-sm font-semibold text-slate-800">{item.q}</span>
+            <span className={`flex-shrink-0 w-5 h-5 rounded-full border border-slate-200 flex items-center justify-center transition-transform ${open === item.id ? "rotate-45" : ""}`}>
+              <Plus className="w-3 h-3 text-slate-500" />
+            </span>
+          </button>
+          {open === item.id && (
+            <div className="px-5 pb-4">
+              <p className="text-sm text-slate-600 leading-relaxed">{item.a}</p>
+            </div>
+          )}
+        </div>
+      ))}
+      <div className="text-center pt-4">
+        <Link to={user ? "/cabinet/competency-map" : "/login"}
+          onClick={() => {
+            analytics.landingPrimaryCtaClicked("Начать самооценку", "hero", !!user)
+            analytics.landingCtaClicked("faq_start_self_assessment", user ? "/cabinet/competency-map" : "/login")
+          }}
+          className="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-xl transition-colors">
+          Начать самооценку
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 export default function SoftwareDevelopmentWebsite() {
+  const { user } = useAuth()
+
+  React.useEffect(() => {
+    analytics.landingView(!!user)
+  }, [user])
+
   const studyImages = [
     "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/ba4b75b8-8d2b-4603-b9ab-07f5a660cef0.jpg",
     "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/6281ccd8-f392-4b34-88fd-170ccc1992e2.jpg",
@@ -415,7 +491,7 @@ export default function SoftwareDevelopmentWebsite() {
                     href="#services"
                     className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
                   >
-                    <span className="text-foreground text-sm">Карта компетенций, план развития и проекты — в одном кабинете</span>
+                    <span className="text-foreground text-sm">Карта компетенций · Персональный план · Подтверждение прогресса</span>
                     <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                     <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
@@ -431,13 +507,13 @@ export default function SoftwareDevelopmentWebsite() {
                   </a>
 
                   <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
-                    Развивайте компетенции{" "}
+                    Поймите, какие навыки развивать дальше —{" "}
                     <span className="inline-block text-slate-600">
-                      и отслеживайте реальный прогресс
+                      и получите персональный план под целевую роль
                     </span>
                   </h1>
                   <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Самооценка, профессиональный профиль, обучение и проекты — чтобы знать где вы сейчас и куда идти дальше.
+                    Платформа помогает оценить текущий профиль, увидеть сильные стороны и зоны роста, а затем собрать понятный путь развития с обучением, практикой и подтверждением прогресса.
                   </p>
                 </AnimatedGroup>
 
@@ -453,16 +529,24 @@ export default function SoftwareDevelopmentWebsite() {
                   className="mt-10 flex flex-col items-center justify-center gap-3 md:flex-row"
                 >
                   <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
-                    <Link to="/login" onClick={() => analytics.landingCtaClicked("hero_start_self_assessment", "/login")}>
+                    <Link to={user ? "/cabinet/competency-map" : "/login"}
+                      onClick={() => {
+                        analytics.landingPrimaryCtaClicked("Начать самооценку", "hero", !!user);
+                        analytics.landingCtaClicked("hero_start_self_assessment", user ? "/cabinet/competency-map" : "/login");
+                      }}>
                       <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
                         <Map className="mr-2 h-4 w-4" />
-                        <span className="text-nowrap">Начать self-assessment</span>
+                        <span className="text-nowrap">Начать самооценку</span>
                       </Button>
                     </Link>
                   </div>
-                  <a href="#services" key={2} onClick={() => analytics.landingCtaClicked("hero_learn_more", "#services")}>
+                  <a href="#how-it-works" key={2}
+                    onClick={() => {
+                      analytics.landingSecondaryCtaClicked("Посмотреть, как это работает", "hero");
+                      analytics.landingCtaClicked("hero_learn_more", "#how-it-works");
+                    }}>
                     <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
-                      <span className="text-nowrap">Узнать подробнее</span>
+                      <span className="text-nowrap">Посмотреть, как это работает</span>
                     </Button>
                   </a>
                 </AnimatedGroup>
@@ -712,6 +796,48 @@ export default function SoftwareDevelopmentWebsite() {
                   ))}
                 </ul>
               </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── FAQ ── */}
+        <section id="faq" className="py-16 md:py-24 bg-slate-50">
+          <div className="mx-auto max-w-3xl px-6">
+            <div className="text-center mb-12">
+              <h2 className="text-balance text-3xl md:text-4xl font-bold">Частые вопросы</h2>
+            </div>
+            <FaqList />
+          </div>
+        </section>
+
+        {/* ── Финальный CTA ── */}
+        <section className="py-16 md:py-24 bg-background">
+          <div className="mx-auto max-w-2xl px-6 text-center">
+            <h2 className="text-balance text-3xl md:text-4xl font-bold mb-4">
+              Начните с оценки текущего уровня — и получите первый план развития
+            </h2>
+            <p className="text-muted-foreground mb-8 max-w-xl mx-auto">
+              Это займёт немного времени — зато вы сразу увидите, где вы сейчас и что делать дальше.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Link to={user ? "/cabinet/competency-map" : "/login"}
+                onClick={() => {
+                  analytics.landingPrimaryCtaClicked("Начать самооценку", "final_cta", !!user);
+                  analytics.landingCtaClicked("final_start_self_assessment", user ? "/cabinet/competency-map" : "/login");
+                }}>
+                <Button size="lg" className="rounded-xl px-8 bg-slate-900 hover:bg-slate-800 text-white">
+                  Начать самооценку
+                </Button>
+              </Link>
+              <Link to="/guide"
+                onClick={() => {
+                  analytics.landingSecondaryCtaClicked("Открыть инструкцию", "final_cta");
+                  analytics.landingCtaClicked("final_open_guide", "/guide");
+                }}>
+                <Button size="lg" variant="ghost" className="rounded-xl px-6 hover:text-slate-900">
+                  Открыть инструкцию
+                </Button>
+              </Link>
             </div>
           </div>
         </section>

@@ -15,6 +15,7 @@ const NAV = [
   { label: "Flags",        icon: "ToggleRight",      href: "/admin/flags" },
   { label: "Тикеты",      icon: "Ticket",           href: "/admin/tickets" },
   { label: "Стратегия",    icon: "TrendingUp",        href: "/admin/strategy" },
+  { label: "Benchmark",    icon: "FlaskConical",       href: "/admin/benchmark" },
   { label: "Execution",    icon: "Rocket",            href: "/admin/execution" },
   { label: "Компетенции",  icon: "BrainCircuit",      href: "/admin/competencies" },
   { label: "Adoption",     icon: "BarChart2",          href: "/admin/analytics/competency-map" },

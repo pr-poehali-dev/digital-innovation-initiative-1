@@ -254,6 +254,50 @@ export type AnalyticsEvents = {
     link_key: string;
     link_url: string;
   };
+
+  // ── Landing page ───────────────────────────────────────────────────
+  // 35. Просмотр лендинга
+  landing_view: {
+    is_authenticated: boolean;
+    source: string;
+  };
+
+  // 36. Клик по primary CTA на лендинге
+  landing_primary_cta_clicked: {
+    cta_label: string;
+    location: "hero" | "final_cta";
+    is_authenticated: boolean;
+  };
+
+  // 37. Клик по secondary CTA на лендинге
+  landing_secondary_cta_clicked: {
+    cta_label: string;
+    location: "hero" | "final_cta";
+  };
+
+  // 38. Переключение FAQ-вопроса
+  faq_toggled: {
+    question_id: string;
+    state: "open" | "close";
+  };
+
+  // ── Welcome page ───────────────────────────────────────────────────
+  // 39. Просмотр welcome-экрана
+  welcome_view: {
+    state: string;
+  };
+
+  // 40. Клик по primary CTA на welcome
+  welcome_primary_cta_clicked: {
+    state: string;
+    cta_label: string;
+  };
+
+  // 41. Клик по secondary CTA на welcome
+  welcome_secondary_cta_clicked: {
+    state: string;
+    cta_label: string;
+  };
 };
 
 // --- Ядро ---
@@ -541,6 +585,38 @@ export const analytics = {
 
   publicProfileExternalLinkClicked(linkKey: string, linkUrl: string) {
     sendEvent("public_profile_external_link_clicked", { link_key: linkKey, link_url: linkUrl });
+  },
+
+  // ── Landing ────────────────────────────────────────────────────────
+
+  landingView(isAuthenticated: boolean, source = "direct") {
+    sendEvent("landing_view", { is_authenticated: isAuthenticated, source });
+  },
+
+  landingPrimaryCtaClicked(ctaLabel: string, location: "hero" | "final_cta", isAuthenticated: boolean) {
+    sendEvent("landing_primary_cta_clicked", { cta_label: ctaLabel, location, is_authenticated: isAuthenticated });
+  },
+
+  landingSecondaryCtaClicked(ctaLabel: string, location: "hero" | "final_cta") {
+    sendEvent("landing_secondary_cta_clicked", { cta_label: ctaLabel, location });
+  },
+
+  faqToggled(questionId: string, state: "open" | "close") {
+    sendEvent("faq_toggled", { question_id: questionId, state });
+  },
+
+  // ── Welcome ────────────────────────────────────────────────────────
+
+  welcomeView(state: string) {
+    sendEvent("welcome_view", { state });
+  },
+
+  welcomePrimaryCtaClicked(state: string, ctaLabel: string) {
+    sendEvent("welcome_primary_cta_clicked", { state, cta_label: ctaLabel });
+  },
+
+  welcomeSecondaryCtaClicked(state: string, ctaLabel: string) {
+    sendEvent("welcome_secondary_cta_clicked", { state, cta_label: ctaLabel });
   },
 };
 

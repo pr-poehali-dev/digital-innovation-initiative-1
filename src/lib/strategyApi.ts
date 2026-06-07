@@ -83,4 +83,26 @@ export const api = {
   alertGet:        (id: number) => fetch(`${STRATEGY_URL}/?action=strategy_alert_get&id=${id}`, { headers: strategyHdr() }).then(r => r.json()),
   alertUpdate:     (b: object)  => stratAction("strategy_alert_update", b),
   alertsSummary:   ()           => stratAction("strategy_alerts_summary"),
+
+  // Package B — Benchmark
+  benchmarkSeed:           ()             => stratAction("benchmark_seed", {}),
+  benchmarkSummary:        ()             => stratAction("benchmark_summary"),
+  benchmarkProductsList:   (p?: Record<string, string>) => {
+    const qs = p ? `&${new URLSearchParams(p).toString()}` : "";
+    return fetch(`${STRATEGY_URL}/?action=benchmark_products_list${qs}`, { headers: strategyHdr() }).then(r => r.json());
+  },
+  benchmarkProductUpsert:  (b: object)    => stratAction("benchmark_product_upsert", b),
+  benchmarkProductDelete:  (id: number)   => stratAction("benchmark_product_delete", { id }),
+  benchmarkPatternsList:   (p?: Record<string, string>) => {
+    const qs = p ? `&${new URLSearchParams(p).toString()}` : "";
+    return fetch(`${STRATEGY_URL}/?action=benchmark_patterns_list${qs}`, { headers: strategyHdr() }).then(r => r.json());
+  },
+  benchmarkPatternUpsert:  (b: object)    => stratAction("benchmark_pattern_upsert", b),
+  benchmarkPatternDelete:  (id: number)   => stratAction("benchmark_pattern_delete", { id }),
+  bmDecisionsList:         (p?: Record<string, string>) => {
+    const qs = p ? `&${new URLSearchParams(p).toString()}` : "";
+    return fetch(`${STRATEGY_URL}/?action=bm_decisions_list${qs}`, { headers: strategyHdr() }).then(r => r.json());
+  },
+  bmDecisionUpsert:        (b: object)    => stratAction("bm_decision_upsert", b),
+  bmDecisionDelete:        (id: number)   => stratAction("bm_decision_delete", { id }),
 };

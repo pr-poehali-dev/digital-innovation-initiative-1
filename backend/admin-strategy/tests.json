@@ -2,6 +2,10 @@
   "tests": [
     {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
     {"name": "profile без токена — 401", "method": "GET", "path": "/?action=strategy_profile_get", "expectedStatus": 401},
-    {"name": "overview без токена — 401", "method": "GET", "path": "/?action=strategy_overview", "expectedStatus": 401}
+    {"name": "overview без токена — 401", "method": "GET", "path": "/?action=strategy_overview", "expectedStatus": 401},
+    {"name": "benchmark_products без токена — 401", "method": "GET", "path": "/?action=benchmark_products_list", "expectedStatus": 401},
+    {"name": "benchmark_patterns без токена — 401", "method": "GET", "path": "/?action=benchmark_patterns_list", "expectedStatus": 401},
+    {"name": "bm_decisions без токена — 401", "method": "GET", "path": "/?action=bm_decisions_list", "expectedStatus": 401},
+    {"name": "benchmark_summary без токена — 401", "method": "GET", "path": "/?action=benchmark_summary", "expectedStatus": 401}
   ]
 }

@@ -27,7 +27,9 @@ import AdminAutomationsPage from "./pages/admin/AdminAutomationsPage";
 import AdminContentPage from "./pages/admin/AdminContentPage";
 import AdminCompetenciesPage from "./pages/admin/AdminCompetenciesPage";
 import AdminAdoptionPage from "./pages/admin/AdminAdoptionPage";
+import AdminBenchmarkPage from "./pages/admin/AdminBenchmarkPage";
 import Index from "./pages/Index";
+import WelcomePage from "./pages/WelcomePage";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
 import CabinetPage from "./pages/CabinetPage";
@@ -94,6 +96,7 @@ const App = () => (
               <Route path="/admin/content" element={<AdminRoute><AdminContentPage /></AdminRoute>} />
               <Route path="/admin/competencies" element={<AdminRoute><AdminCompetenciesPage /></AdminRoute>} />
               <Route path="/admin/analytics/competency-map" element={<AdminRoute><AdminAdoptionPage /></AdminRoute>} />
+              <Route path="/admin/benchmark" element={<AdminRoute><AdminBenchmarkPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}
@@ -116,6 +119,7 @@ const App = () => (
               <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />
               <Route path="/cabinet/competency-map" element={<ProtectedRoute><CompetencyMapPage /></ProtectedRoute>} />
               <Route path="/cabinet/headquarters" element={<Navigate to="/cabinet" replace />} />
+              <Route path="/welcome" element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
               <Route path="/guide" element={<GuidePage />} />
               <Route path="/legal/privacy" element={<PrivacyPage />} />
               <Route path="/legal/terms" element={<TermsPage />} />
