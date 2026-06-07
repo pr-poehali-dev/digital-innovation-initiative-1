@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
-import { ArrowRight, ChevronRight, Menu, X, Map, Target, BookOpen, Briefcase, TrendingUp, CheckCircle, LayoutGrid, Sparkles, Users, FolderOpen, Plus } from "lucide-react"
+import { ArrowRight, ChevronRight, Menu, X, Map, Target, TrendingUp, CheckCircle, Sparkles, Users, Plus } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
 import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
@@ -51,22 +51,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 )
 Button.displayName = "Button"
 
-const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
-))
-Card.displayName = "Card"
 
-const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("flex flex-col space-y-1.5 p-6", className)} {...props} />
-  ),
-)
-CardHeader.displayName = "CardHeader"
-
-const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => <div ref={ref} className={cn("p-6 pt-0", className)} {...props} />,
-)
-CardContent.displayName = "CardContent"
 
 const defaultContainerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -130,96 +115,39 @@ const transitionVariants = {
 }
 
 const menuItems = [
-  { name: "Возможности", href: "#services" },
   { name: "Как это работает", href: "#how-it-works" },
   { name: "Для кого", href: "#about" },
+  { name: "FAQ", href: "#faq" },
   { name: "Инструкция", href: "/guide" },
   { name: "Контакты", href: "#contact" },
 ]
 
 // ── Контент лендинга ──────────────────────────────────────────────────
 
-const FEATURES = [
-  {
-    emoji: "🗺",
-    color: "bg-emerald-50 border-emerald-200 hover:border-emerald-400",
-    iconBg: "bg-emerald-100",
-    title: "Карта компетенций",
-    desc: "Оцените текущий уровень по доменам. Карта формируется из вашей самооценки, обучения и проектов — и обновляется автоматически.",
-    cta: "Открыть карту →",
-    link: "/cabinet/competency-map",
-    ctaCls: "bg-emerald-600 hover:bg-emerald-700 text-white",
-  },
-  {
-    emoji: "🎯",
-    color: "bg-violet-50 border-violet-200 hover:border-violet-400",
-    iconBg: "bg-violet-100",
-    title: "Self-assessment",
-    desc: "Оцените себя по любой компетенции прямо в карте. Первый шаг — всегда честная самооценка, не тест и не форма.",
-    cta: "Оценить себя →",
-    link: "/cabinet/competency-map",
-    ctaCls: "bg-violet-600 hover:bg-violet-700 text-white",
-  },
-  {
-    emoji: "📚",
-    color: "bg-blue-50 border-blue-200 hover:border-blue-400",
-    iconBg: "bg-blue-100",
-    title: "Учебный кабинет",
-    desc: "Добавляйте завершённые курсы и обучение — они становятся верифицированными сигналами в вашей карте компетенций.",
-    cta: "Перейти →",
-    link: "/cabinet/learning",
-    ctaCls: "bg-blue-600 hover:bg-blue-700 text-white",
-  },
-  {
-    emoji: "👤",
-    color: "bg-indigo-50 border-indigo-200 hover:border-indigo-400",
-    iconBg: "bg-indigo-100",
-    title: "Профессиональный профиль",
-    desc: "Заполните профиль: опыт работы, образование, цели. Профиль усиливает карту и формирует публичную страницу.",
-    cta: "Заполнить профиль →",
-    link: "/cabinet/profile",
-    ctaCls: "bg-indigo-600 hover:bg-indigo-700 text-white",
-  },
-  {
-    emoji: "📁",
-    color: "bg-orange-50 border-orange-200 hover:border-orange-400",
-    iconBg: "bg-orange-100",
-    title: "Проекты",
-    desc: "Фиксируйте проекты с участием — они дают сигналы в карту по смежным доменам и подтверждают практический опыт.",
-    cta: "Мои проекты →",
-    link: "/cabinet/projects",
-    ctaCls: "bg-orange-600 hover:bg-orange-700 text-white",
-  },
-  {
-    emoji: "📈",
-    color: "bg-green-50 border-green-200 hover:border-green-400",
-    iconBg: "bg-green-100",
-    title: "План развития",
-    desc: "На основе карты компетенций система формирует план: что усилить, чего не хватает, куда двигаться дальше.",
-    cta: "Открыть план →",
-    link: "/cabinet/growth",
-    ctaCls: "bg-green-600 hover:bg-green-700 text-white",
-  },
-]
-
 const HOW_IT_WORKS_STEPS = [
   {
     num: "01",
     color: "bg-emerald-100 text-emerald-700",
-    title: "Выберите целевую роль",
-    desc: "Определите роль — платформа покажет приоритеты и насколько вы уже близко.",
+    title: "Выберите цель",
+    desc: "Укажите роль, к которой хотите двигаться.",
   },
   {
     num: "02",
     color: "bg-violet-100 text-violet-700",
     title: "Оцените текущий уровень",
-    desc: "Пройдите самооценку — увидите сильные стороны и зоны роста в одной карте.",
+    desc: "Заполните профиль и пройдите самооценку.",
   },
   {
     num: "03",
     color: "bg-blue-100 text-blue-700",
-    title: "Получите план и подтверждайте рост",
-    desc: "Система соберёт следующие шаги. Фиксируйте обучение и практику — прогресс станет видимым.",
+    title: "Получите план развития",
+    desc: "Система покажет приоритеты и следующий шаг.",
+  },
+  {
+    num: "04",
+    color: "bg-indigo-100 text-indigo-700",
+    title: "Подтверждайте прогресс",
+    desc: "Фиксируйте практику, результаты и примеры опыта.",
   },
 ]
 
@@ -393,17 +321,6 @@ const Logo = ({ className }: { className?: string }) => {
   )
 }
 
-const CardDecorator = ({ children }: { children: React.ReactNode }) => (
-  <div
-    aria-hidden
-    className="relative mx-auto size-36 [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)]"
-  >
-    <div className="absolute inset-0 [--border:black] dark:[--border:white] bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:24px_24px] opacity-10" />
-    <div className="bg-background absolute inset-0 m-auto flex size-12 items-center justify-center border-t border-l border-slate-200">
-      {children}
-    </div>
-  </div>
-)
 
 function FaqList() {
   const [open, setOpen] = React.useState<string | null>(null)
@@ -487,231 +404,122 @@ export default function SoftwareDevelopmentWebsite() {
           <div className="h-[80rem] absolute left-0 top-0 w-56 -rotate-45 rounded-full bg-[radial-gradient(50%_50%_at_50%_50%,hsla(220,13%,18%,.06)_0,hsla(220,13%,18%,.02)_80%,transparent_100%)] [translate:5%_-50%]" />
         </div>
 
+        {/* ── Hero — 2 колонки ── */}
         <section>
-          <div className="relative pt-24 md:pt-36">
+          <div className="relative pt-20 md:pt-32 pb-8 md:pb-0">
             <div
               aria-hidden
               className="absolute inset-0 -z-10 size-full [background:radial-gradient(125%_125%_at_50%_100%,transparent_0%,var(--background)_75%)]"
             />
             <div className="mx-auto max-w-7xl px-6">
-              <div className="text-center sm:mx-auto lg:mr-auto lg:mt-0">
-                <AnimatedGroup variants={transitionVariants}>
-                  <a
-                    href="#services"
-                    className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-black/5 transition-all duration-300 dark:border-t-white/5 dark:shadow-zinc-950"
-                  >
-                    <span className="text-foreground text-sm">Карта компетенций · Персональный план · Подтверждение прогресса</span>
-                    <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
+              <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
 
-                    <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">
-                      <div className="flex w-12 -translate-x-1/2 duration-500 ease-in-out group-hover:translate-x-0">
-                        <span className="flex size-6">
-                          <ArrowRight className="m-auto size-3" />
-                        </span>
-                        <span className="flex size-6">
-                          <ArrowRight className="m-auto size-3" />
-                        </span>
+                {/* Левая колонка — текст + CTA */}
+                <AnimatedGroup variants={transitionVariants}>
+                  <div>
+                    {/* Eyebrow */}
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-5">
+                      Платформа развития компетенций
+                    </p>
+
+                    <h1 className="text-4xl md:text-5xl lg:text-[52px] font-bold text-slate-900 leading-tight text-balance max-w-xl">
+                      Поймите, какие навыки развивать дальше — и получите план под целевую роль
+                    </h1>
+
+                    <p className="mt-5 text-base md:text-lg text-slate-500 leading-relaxed max-w-lg">
+                      Оцените текущий уровень, увидьте сильные стороны и зоны роста, а затем соберите понятный путь развития с обучением, практикой и подтверждением прогресса.
+                    </p>
+
+                    {/* CTAs */}
+                    <div className="mt-8 flex flex-col sm:flex-row gap-3">
+                      <Link to={user ? "/cabinet/competency-map" : "/login"}
+                        onClick={() => {
+                          analytics.landingPrimaryCtaClicked("Начать самооценку", "hero", !!user);
+                          analytics.landingCtaClicked("hero_start_self_assessment", user ? "/cabinet/competency-map" : "/login");
+                        }}
+                        className="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-xl transition-colors">
+                        <Map className="h-4 w-4 flex-shrink-0" />
+                        Начать самооценку
+                      </Link>
+                      <a href="#how-it-works"
+                        onClick={() => {
+                          analytics.landingSecondaryCtaClicked("Как это работает", "hero");
+                          analytics.landingCtaClicked("hero_learn_more", "#how-it-works");
+                        }}
+                        className="inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-slate-50 hover:bg-slate-100 text-slate-600 text-sm font-medium rounded-xl border border-slate-200 transition-colors">
+                        Как это работает
+                        <ChevronRight className="h-4 w-4 text-slate-400" />
+                      </a>
+                    </div>
+
+                    {/* Value strip */}
+                    <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
+                      {["Сильные стороны", "Зоны роста", "Персональный план"].map((v, i) => (
+                        <React.Fragment key={v}>
+                          {i > 0 && <span className="w-1 h-1 rounded-full bg-slate-300 flex-shrink-0 hidden sm:block" />}
+                          <span className="flex items-center gap-1.5">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                            {v}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                </AnimatedGroup>
+
+                {/* Правая колонка — product visual */}
+                <AnimatedGroup variants={{
+                  container: { visible: { transition: { staggerChildren: 0.05, delayChildren: 0.4 } } },
+                  ...transitionVariants,
+                }}>
+                  <div className="relative hidden lg:block">
+                    <div className="relative rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60 overflow-hidden">
+                      <div className="bg-gradient-to-br from-slate-50 to-slate-100 aspect-[4/3] overflow-hidden">
+                        <GridMotion items={gridItems} gradientColor="rgba(30, 41, 59, 0.06)" className="h-full w-full" />
+                      </div>
+                      {/* overlay bottom fade */}
+                      <div aria-hidden className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white to-transparent" />
+                    </div>
+                    {/* floating badge */}
+                    <div className="absolute -bottom-4 -left-4 bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-lg shadow-slate-200/60 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                        <CheckCircle className="w-4 h-4 text-emerald-500" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-slate-800">Готовность к роли</p>
+                        <p className="text-[10px] text-slate-400">Персональный план сформирован</p>
                       </div>
                     </div>
-                  </a>
-
-                  <h1 className="mt-8 max-w-4xl mx-auto text-balance text-5xl md:text-6xl lg:mt-16 xl:text-7xl font-bold">
-                    Поймите, какие навыки развивать дальше —{" "}
-                    <span className="inline-block text-slate-600">
-                      и получите персональный план под целевую роль
-                    </span>
-                  </h1>
-                  <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-                    Платформа помогает оценить текущий профиль, увидеть сильные стороны и зоны роста, а затем собрать понятный путь развития с обучением, практикой и подтверждением прогресса.
-                  </p>
+                  </div>
                 </AnimatedGroup>
 
-                <AnimatedGroup
-                  variants={{
-                    container: {
-                      visible: {
-                        transition: { staggerChildren: 0.05, delayChildren: 0.75 },
-                      },
-                    },
-                    ...transitionVariants,
-                  }}
-                  className="mt-10 flex flex-col items-center justify-center gap-3 md:flex-row"
-                >
-                  <div key={1} className="bg-slate-100 rounded-[14px] border border-slate-200 p-0.5">
-                    <Link to={user ? "/cabinet/competency-map" : "/login"}
-                      onClick={() => {
-                        analytics.landingPrimaryCtaClicked("Начать самооценку", "hero", !!user);
-                        analytics.landingCtaClicked("hero_start_self_assessment", user ? "/cabinet/competency-map" : "/login");
-                      }}>
-                      <Button size="lg" className="rounded-xl px-6 text-base bg-slate-800 hover:bg-slate-700">
-                        <Map className="mr-2 h-4 w-4" />
-                        <span className="text-nowrap">Начать самооценку</span>
-                      </Button>
-                    </Link>
-                  </div>
-                  <a href="#how-it-works" key={2}
-                    onClick={() => {
-                      analytics.landingSecondaryCtaClicked("Посмотреть, как это работает", "hero");
-                      analytics.landingCtaClicked("hero_learn_more", "#how-it-works");
-                    }}>
-                    <Button size="lg" variant="ghost" className="h-10.5 rounded-xl px-5 hover:text-slate-900">
-                      <span className="text-nowrap">Посмотреть, как это работает</span>
-                    </Button>
-                  </a>
-                </AnimatedGroup>
-
-                {/* Value strip */}
-                <div className="mt-8 flex items-center justify-center gap-6 text-sm text-slate-500">
-                  {["Сильные стороны", "Зоны роста", "Персональный план"].map((v, i) => (
-                    <React.Fragment key={v}>
-                      {i > 0 && <span className="w-1 h-1 rounded-full bg-slate-300 flex-shrink-0" />}
-                      <span className="flex items-center gap-1.5">
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-                        {v}
-                      </span>
-                    </React.Fragment>
-                  ))}
-                </div>
               </div>
             </div>
-
-            <AnimatedGroup
-              variants={{
-                container: {
-                  visible: {
-                    transition: {
-                      staggerChildren: 0.05,
-                      delayChildren: 0.75,
-                    },
-                  },
-                },
-                ...transitionVariants,
-              }}
-            >
-              <div className="relative -mr-56 mt-8 overflow-hidden px-2 sm:mr-0 sm:mt-12 md:mt-20">
-                <div
-                  aria-hidden
-                  className="bg-gradient-to-b to-background absolute inset-0 z-10 from-transparent from-35%"
-                />
-                <div className="inset-shadow-2xs ring-background dark:inset-shadow-white/20 bg-background relative mx-auto max-w-6xl overflow-hidden rounded-2xl border border-slate-200 p-4 shadow-lg shadow-slate-300/30 ring-1">
-                  <div className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 aspect-[15/8] relative rounded-2xl border border-slate-200 overflow-hidden">
-                    <GridMotion items={gridItems} gradientColor="rgba(30, 41, 59, 0.08)" className="h-full w-full" />
-                  </div>
-                </div>
-              </div>
-
-            </AnimatedGroup>
-          </div>
-        </section>
-
-        {/* ── Возможности ── */}
-        <section id="services" className="py-16 md:py-24 bg-background">
-          <div className="mx-auto max-w-5xl px-6">
-            <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Возможности</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Всё для роста — в одном кабинете</h2>
-              <p className="mt-3 text-muted-foreground">Откройте любой модуль и начните с того, что важнее прямо сейчас</p>
-            </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {FEATURES.map((s) => (
-                <Link
-                  key={s.title}
-                  to={s.link}
-                  className={`group flex flex-col border-2 rounded-2xl p-5 transition-all duration-200 ${s.color}`}
-                >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-4 ${s.iconBg}`}>
-                    {s.emoji}
-                  </div>
-                  <h3 className="font-semibold text-slate-800 mb-1.5">{s.title}</h3>
-                  <p className="text-sm text-slate-600 flex-1 mb-4">{s.desc}</p>
-                  <span className={`self-start text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${s.ctaCls}`}>
-                    {s.cta}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section id="solutions" className="bg-muted/50 py-16 md:py-32 dark:bg-transparent">
-          <div className="mx-auto max-w-5xl px-6">
-            <div className="text-center">
-              <h2 className="text-balance text-4xl font-semibold lg:text-5xl">
-                Карта компетенций — <span className="text-slate-600">живая, не статичная</span>
-              </h2>
-              <p className="mt-4 text-muted-foreground">
-                Строится из реальных сигналов: самооценки, завершённого обучения и проектов. Обновляется автоматически.
-              </p>
-            </div>
-            <Card className="mx-auto mt-8 grid max-w-sm divide-y overflow-hidden shadow-zinc-950/5 border-slate-200 *:text-center md:mt-16 md:max-w-full md:grid-cols-3 md:divide-x md:divide-y-0">
-              <div className="group shadow-zinc-950/5">
-                <CardHeader className="pb-3">
-                  <CardDecorator>
-                    <LayoutGrid className="size-6 text-slate-800" aria-hidden />
-                  </CardDecorator>
-                  <h3 className="mt-6 font-medium">Self-assessment</h3>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Оцените уровень по каждой компетенции прямо в карте. Это первый и самый быстрый сигнал — без тестов и форм.
-                  </p>
-                </CardContent>
-              </div>
-
-              <div className="group shadow-zinc-950/5">
-                <CardHeader className="pb-3">
-                  <CardDecorator>
-                    <BookOpen className="size-6 text-slate-800" aria-hidden />
-                  </CardDecorator>
-                  <h3 className="mt-6 font-medium">Обучение подтверждает карту</h3>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Завершили курс или программу — он отмечается в карте как подтверждённый. Это весомее просто самооценки.
-                  </p>
-                </CardContent>
-              </div>
-
-              <div className="group shadow-zinc-950/5">
-                <CardHeader className="pb-3">
-                  <CardDecorator>
-                    <FolderOpen className="size-6 text-slate-800" aria-hidden />
-                  </CardDecorator>
-                  <h3 className="mt-6 font-medium">Проекты как опыт</h3>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Участие в проектах усиливает смежные домены карты. Практический опыт виден отдельным источником.
-                  </p>
-                </CardContent>
-              </div>
-            </Card>
           </div>
         </section>
 
         {/* Секция: как это работает */}
         <section id="how-it-works" className="py-16 md:py-24 bg-slate-50">
-          <div className="mx-auto max-w-5xl px-6">
+          <div className="mx-auto max-w-6xl px-6">
             <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-400 uppercase mb-3 letter-spacing-wide">Как это работает</span>
+              <span className="inline-block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Как это работает</span>
               <h2 className="text-balance text-3xl md:text-4xl font-bold text-slate-900">
-                Три шага — и у вас есть <span className="text-slate-600">понятный план развития</span>
+                Четыре шага — <span className="text-slate-500">от оценки до подтверждённого прогресса</span>
               </h2>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-5">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {HOW_IT_WORKS_STEPS.map((step, i) => (
-                <div key={i} className="relative bg-white rounded-2xl border border-slate-200 p-6 flex flex-col">
-                  <div className="flex items-center gap-3 mb-4">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${step.color}`}>{step.num}</span>
-                    {i < HOW_IT_WORKS_STEPS.length - 1 && (
-                      <div className="hidden md:block absolute top-7 -right-2.5 z-10">
-                        <ChevronRight className="h-4 w-4 text-slate-300" />
-                      </div>
-                    )}
-                  </div>
-                  <h3 className="font-semibold text-slate-800 mb-2 text-base">{step.title}</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed flex-1">{step.desc}</p>
+                <div key={i} className="relative bg-white rounded-2xl border border-slate-200 p-5 flex flex-col">
+                  {/* Connector line on desktop */}
+                  {i < HOW_IT_WORKS_STEPS.length - 1 && (
+                    <div className="hidden lg:block absolute top-[26px] -right-2 z-10">
+                      <ChevronRight className="h-4 w-4 text-slate-300" />
+                    </div>
+                  )}
+                  <span className={`self-start text-[11px] font-bold px-2.5 py-1 rounded-full mb-4 ${step.color}`}>{step.num}</span>
+                  <h3 className="font-semibold text-slate-800 mb-1.5 text-sm">{step.title}</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed flex-1">{step.desc}</p>
                 </div>
               ))}
             </div>
@@ -772,71 +580,7 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
 
         {/* ── Роадмап: доступно сейчас / в разработке ── */}
-        <section className="py-16 md:py-24 bg-background">
-          <div className="mx-auto max-w-5xl px-6">
-            <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Что уже доступно</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Одна платформа —{" "}
-                <span className="text-slate-600">весь путь развития</span>
-              </h2>
-              <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Все модули связаны: самооценка наполняет карту, обучение подтверждает компетенции, проекты фиксируют практический опыт.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Доступно сейчас */}
-              <div className="rounded-2xl border-2 border-green-200 bg-green-50 p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                  <span className="text-sm font-semibold text-green-700">Работает сейчас</span>
-                </div>
-                <ul className="space-y-3">
-                  {[
-                    { icon: <Map className="h-4 w-4" />, text: "Карта компетенций с self-assessment" },
-                    { icon: <BookOpen className="h-4 w-4" />, text: "Учебный кабинет с верификацией" },
-                    { icon: <Users className="h-4 w-4" />, text: "Профессиональный профиль" },
-                    { icon: <FolderOpen className="h-4 w-4" />, text: "Проекты и задачи" },
-                    { icon: <TrendingUp className="h-4 w-4" />, text: "План развития по компетенциям" },
-                    { icon: <Sparkles className="h-4 w-4" />, text: "Рекомендации по следующему шагу" },
-                  ].map((item) => (
-                    <li key={item.text} className="flex items-center gap-3 text-sm text-slate-700">
-                      <span className="text-green-600 flex-shrink-0">{item.icon}</span>
-                      {item.text}
-                    </li>
-                  ))}
-                </ul>
-                <Link to="/login" className="mt-6 inline-block" onClick={() => analytics.landingCtaClicked("platform_open_cabinet", "/login")}>
-                  <button className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors">
-                    Открыть кабинет →
-                  </button>
-                </Link>
-              </div>
 
-              {/* Как связано */}
-              <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <CheckCircle className="h-4 w-4 text-violet-500" />
-                  <span className="text-sm font-semibold text-slate-700">Как всё связано</span>
-                </div>
-                <ul className="space-y-4">
-                  {[
-                    { from: "Self-assessment", arrow: "→", to: "карта компетенций наполняется" },
-                    { from: "Завершили курс", arrow: "→", to: "verified-источник в карте" },
-                    { from: "Ведёте проект", arrow: "→", to: "сигнал по смежным доменам" },
-                    { from: "Карта компетенций", arrow: "→", to: "growth-план и рекомендации" },
-                    { from: "Growth-план", arrow: "→", to: "конкретные задачи и обучение" },
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="font-semibold text-slate-700 flex-shrink-0">{item.from}</span>
-                      <span className="text-slate-400 flex-shrink-0">{item.arrow}</span>
-                      <span className="text-slate-600">{item.to}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
 
         {/* ── FAQ ── */}
         <section id="faq" className="py-16 md:py-24 bg-slate-50">
@@ -849,32 +593,32 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
 
         {/* ── Финальный CTA ── */}
-        <section className="py-16 md:py-24 bg-background">
+        <section className="py-16 md:py-24 bg-slate-900">
           <div className="mx-auto max-w-2xl px-6 text-center">
-            <h2 className="text-balance text-3xl md:text-4xl font-bold mb-4">
+            <h2 className="text-balance text-3xl md:text-4xl font-bold text-white mb-4">
               Начните с оценки текущего уровня — и получите первый план развития
             </h2>
-            <p className="text-muted-foreground mb-8 max-w-xl mx-auto">
-              Это займёт немного времени — зато вы сразу увидите, где вы сейчас и что делать дальше.
+            <p className="text-slate-400 mb-8 text-base leading-relaxed">
+              Это займёт немного времени, но сразу покажет сильные стороны, зоны роста и следующий шаг.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <Link to={user ? "/cabinet/competency-map" : "/login"}
                 onClick={() => {
                   analytics.landingPrimaryCtaClicked("Начать самооценку", "final_cta", !!user);
                   analytics.landingCtaClicked("final_start_self_assessment", user ? "/cabinet/competency-map" : "/login");
-                }}>
-                <Button size="lg" className="rounded-xl px-8 bg-slate-900 hover:bg-slate-800 text-white">
-                  Начать самооценку
-                </Button>
+                }}
+                className="inline-flex items-center gap-2 px-7 py-3.5 bg-white hover:bg-slate-50 text-slate-900 text-sm font-semibold rounded-xl transition-colors">
+                <Map className="h-4 w-4 flex-shrink-0" />
+                Начать самооценку
               </Link>
               <Link to="/guide"
                 onClick={() => {
                   analytics.landingSecondaryCtaClicked("Открыть инструкцию", "final_cta");
                   analytics.landingCtaClicked("final_open_guide", "/guide");
-                }}>
-                <Button size="lg" variant="ghost" className="rounded-xl px-6 hover:text-slate-900">
-                  Открыть инструкцию
-                </Button>
+                }}
+                className="inline-flex items-center gap-1.5 px-6 py-3.5 text-slate-400 hover:text-white text-sm font-medium rounded-xl transition-colors">
+                Открыть инструкцию
+                <ChevronRight className="h-4 w-4" />
               </Link>
             </div>
           </div>
@@ -899,11 +643,6 @@ export default function SoftwareDevelopmentWebsite() {
               <h3 className="text-sm font-semibold text-foreground">Навигация</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="#services" className="text-muted-foreground hover:text-slate-900 transition-colors">
-                    Возможности
-                  </a>
-                </li>
-                <li>
                   <a href="#how-it-works" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Как это работает
                   </a>
@@ -911,6 +650,11 @@ export default function SoftwareDevelopmentWebsite() {
                 <li>
                   <a href="#about" className="text-muted-foreground hover:text-slate-900 transition-colors">
                     Для кого
+                  </a>
+                </li>
+                <li>
+                  <a href="#faq" className="text-muted-foreground hover:text-slate-900 transition-colors">
+                    FAQ
                   </a>
                 </li>
                 <li>

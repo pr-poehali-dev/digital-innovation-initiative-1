@@ -351,13 +351,16 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
 }) {
   const [priority, setPriority] = useState<"all" | "p0" | "p1" | "p2">("all");
   const [status, setStatus] = useState<string>("all");
+  const [expanded, setExpanded] = useState<number | null>(null);
+
   let shown = decisions;
   if (priority !== "all") shown = shown.filter(d => d.priority === priority);
   if (status !== "all") shown = shown.filter(d => d.status === status);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className="space-y-3">
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 flex-wrap bg-gray-900/60 border border-gray-800 rounded-xl px-3 py-2">
         <FilterPills
           options={[
             { value: "all" as const, label: "Все" },
@@ -368,12 +371,13 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
           active={priority}
           onSelect={setPriority}
         />
+        <div className="w-px h-4 bg-gray-700 mx-1" />
         <select value={status} onChange={e => setStatus(e.target.value)}
-          className="text-[11px] bg-gray-800 text-gray-400 border border-gray-700 rounded-lg px-2.5 py-1 focus:outline-none focus:border-gray-600">
+          className="text-[11px] bg-transparent text-gray-400 border-0 focus:outline-none cursor-pointer">
           <option value="all">Все статусы</option>
           {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
         </select>
-        <span className="ml-auto text-[10px] text-gray-600">{shown.length} решений</span>
+        <span className="ml-auto text-[10px] text-gray-600">{shown.length}</span>
       </div>
 
       {loading && <div className="flex justify-center py-10"><Spinner /></div>}
@@ -381,50 +385,76 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
         <p className="text-sm text-gray-600 text-center py-10">Нет данных — загрузите seed на вкладке «Сводка»</p>
       )}
 
-      <div className="space-y-2">
-        {shown.map(d => (
-          <div key={d.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-gray-700 transition-colors">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-100 leading-snug">{d.title}</p>
-                <p className="text-[10px] text-gray-600 mt-0.5">{d.module}</p>
-              </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${PRIORITY_BADGE[d.priority] ?? "bg-gray-800 text-gray-400 border border-gray-700"}`}>
-                  {PRIORITY_LABEL[d.priority] ?? d.priority}
-                </span>
-                {/* Inline status selector — styled as badge */}
-                <select value={d.status}
-                  onChange={e => onStatusChange(d.id, e.target.value)}
-                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border-0 focus:outline-none cursor-pointer appearance-none ${STATUS_BADGE[d.status] ?? "bg-gray-800 text-gray-400"}`}>
-                  {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
-                </select>
-              </div>
-            </div>
+      <div className="space-y-1.5">
+        {shown.map(d => {
+          const isOpen = expanded === d.id;
+          return (
+            <div key={d.id} className={`bg-gray-900 border rounded-xl transition-all ${isOpen ? "border-gray-700" : "border-gray-800 hover:border-gray-700"}`}>
+              {/* Row — кликабельная */}
+              <button
+                className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                onClick={() => setExpanded(isOpen ? null : d.id)}
+              >
+                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${IMPACT_DOT[d.impact] ?? "bg-gray-600"}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-100 leading-snug truncate">{d.title}</p>
+                  <p className="text-[10px] text-gray-600 mt-0.5">{d.module}</p>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${PRIORITY_BADGE[d.priority] ?? "bg-gray-800 text-gray-400 border border-gray-700"}`}>
+                    {PRIORITY_LABEL[d.priority] ?? d.priority}
+                  </span>
+                  <select value={d.status}
+                    onChange={e => { e.stopPropagation(); onStatusChange(d.id, e.target.value); }}
+                    onClick={e => e.stopPropagation()}
+                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border-0 focus:outline-none cursor-pointer appearance-none ${STATUS_BADGE[d.status] ?? "bg-gray-800 text-gray-400"}`}>
+                    {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
+                  </select>
+                  <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={12} className="text-gray-600 flex-shrink-0" />
+                </div>
+              </button>
 
-            {/* Problem + Decision */}
-            <div className="space-y-1.5 border-t border-gray-800 pt-2.5 mt-2">
-              <p className="text-[11px] text-gray-500 leading-relaxed">
-                <span className="font-semibold text-gray-600">Проблема: </span>{d.problem_statement}
-              </p>
-              <p className="text-[11px] text-gray-400 leading-relaxed">
-                <span className="font-semibold text-gray-500">Решение: </span>{d.decision}
-              </p>
+              {/* Expandable details */}
+              {isOpen && (
+                <div className="px-4 pb-4 border-t border-gray-800/60 pt-3 space-y-3">
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-1">Проблема</p>
+                      <p className="text-[11px] text-gray-400 leading-relaxed">{d.problem_statement}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-1">Решение</p>
+                      <p className="text-[11px] text-gray-300 leading-relaxed">{d.decision}</p>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3 pt-2 border-t border-gray-800/60">
+                    <div>
+                      <p className="text-[9px] font-bold text-emerald-500/60 uppercase tracking-wider mb-1">Ценность для пользователя</p>
+                      <p className="text-[11px] text-emerald-400/80 leading-relaxed">{d.expected_user_value}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-bold text-blue-500/60 uppercase tracking-wider mb-1">Бизнес-ценность</p>
+                      <p className="text-[11px] text-blue-400/70 leading-relaxed">{d.expected_biz_value}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-[9px] px-2 py-1 bg-gray-800 text-gray-500 rounded-lg">effort: {d.effort}</span>
+                    <span className={`text-[9px] px-2 py-1 rounded-lg ${d.impact === "high" ? "bg-red-900/40 text-red-400" : "bg-gray-800 text-gray-500"}`}>
+                      impact: {d.impact}
+                    </span>
+                    {d.source_patterns.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap ml-2">
+                        {d.source_patterns.map(p => (
+                          <span key={p} className="text-[9px] px-1.5 py-0.5 bg-violet-900/30 text-violet-400 rounded">{p}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-
-            {/* Footer meta */}
-            <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-gray-800/60">
-              <p className="text-[10px] text-emerald-400/80 flex-1 min-w-0 truncate">{d.expected_user_value}</p>
-              <div className="flex gap-1.5 flex-shrink-0 ml-3">
-                <span className="text-[9px] px-1.5 py-0.5 bg-gray-800 text-gray-500 rounded">effort: {d.effort}</span>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded ${d.impact === "high" ? "bg-red-900/40 text-red-400" : "bg-gray-800 text-gray-500"}`}>
-                  impact: {d.impact}
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

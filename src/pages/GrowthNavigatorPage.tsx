@@ -171,123 +171,109 @@ function OverviewTab({
   return (
     <div className="space-y-4">
 
-      {/* ── 1. Status block — всегда наверху, один primary CTA ── */}
-      <div className={`rounded-2xl border-2 p-5 ${
-        mapState === "no_role"  ? "bg-slate-50 border-slate-200" :
-        mapState === "no_plan"  ? "bg-amber-50 border-amber-200" :
-        mapState === "ready"    ? "bg-white border-slate-200" :
-        "bg-white border-slate-200"
-      }`}>
-
-        {/* Роль + смена */}
-        <div className="flex items-center gap-3 flex-wrap mb-4">
+      {/* ── 1. Role header ── */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex-1 min-w-[180px]">
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
               Целевая роль
             </label>
             <select value={selectedRole ?? ""} onChange={e => onRoleChange(Number(e.target.value))}
-              className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:border-slate-400 bg-white">
+              className="w-full text-sm font-medium border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-slate-400 bg-white text-slate-800">
               <option value="">— выберите роль —</option>
               {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>
+          {/* Readiness summary — inline when ready */}
+          {mapState === "ready" && gapSummary && progress && (
+            <div className="flex items-center gap-4 flex-shrink-0">
+              <div className="text-center">
+                <p className={`text-xl font-bold tabular-nums leading-none ${gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
+                  {gapSummary.fit_pct}%
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">готовность</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xl font-bold tabular-nums leading-none text-emerald-600">{progress.done}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">выполнено</p>
+              </div>
+              {progress.critical_gaps_remaining > 0 && (
+                <div className="text-center">
+                  <p className="text-xl font-bold tabular-nums leading-none text-red-500">{progress.critical_gaps_remaining}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">зон внимания</p>
+                </div>
+              )}
+              <button onClick={onGenerate} disabled={generating}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-600 text-xs font-semibold rounded-xl transition-colors">
+                {generating ? <Spinner /> : <Icon name="RefreshCw" size={12} />}
+                {generating ? "..." : "Обновить"}
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Состояние + CTA */}
-        {mapState === "no_role" && (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Выберите роль выше — это отправная точка для анализа зон роста и формирования плана.
-            </p>
-            <div className="flex items-center gap-1.5">
-              <Icon name="BookOpen" size={12} className="text-slate-400" />
-              <p className="text-xs text-slate-400">
-                Не уверены как работает навигатор?{" "}
-                <Link
-                  to="/guide"
-                  state={{ source: "strategy_empty_state" }}
-                  onClick={() => analytics.guideCtaClicked("open_guide", "strategy_empty_state")}
-                  className="text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
-                >
-                  Откройте инструкцию
-                </Link>
-              </p>
-            </div>
-          </div>
-        )}
-
+        {/* Loading */}
         {mapState === "loading" && (
-          <div className="flex items-center gap-2 text-sm text-slate-500 py-2">
+          <div className="flex items-center gap-2 text-sm text-slate-500 mt-3">
             <Spinner />
             <span>Анализируем данные...</span>
           </div>
         )}
 
-        {mapState === "no_plan" && gapSummary && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <p className="text-sm font-semibold text-amber-800">Можно собрать первый план развития</p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  Соответствие роли: <span className="font-bold">{gapSummary.fit_pct}%</span>
-                  {" · "}{gapSummary.critical_gaps.length > 0
-                    ? `${gapSummary.critical_gaps.length} зон, требующих внимания`
-                    : "Все приоритетные зоны закрыты"}
-                </p>
-              </div>
-              <button onClick={onGenerate} disabled={generating}
-                className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors">
-                {generating ? <Spinner /> : <Icon name="Sparkles" size={14} />}
-                {generating ? "Генерирую..." : "Сформировать план"}
-              </button>
+        {/* Progress bar — only when ready */}
+        {mapState === "ready" && progress && (
+          <div className="flex items-center gap-3 mt-3">
+            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-1.5 bg-emerald-500 rounded-full transition-all" style={{ width: `${progress.done_pct}%` }} />
             </div>
-          </div>
-        )}
-
-        {mapState === "ready" && gapSummary && progress && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className={`text-2xl font-bold tabular-nums ${gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
-                    {gapSummary.fit_pct}%
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-slate-700">соответствие роли</p>
-                    <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{gapSummary.role_name}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span>
-                    <span className="font-semibold text-emerald-600">{progress.done}</span> выполнено
-                  </span>
-                  <span>
-                    <span className="font-semibold text-blue-600">{progress.in_progress}</span> в работе
-                  </span>
-                  {progress.critical_gaps_remaining > 0 && (
-                    <span>
-                      <span className="font-semibold text-red-500">{progress.critical_gaps_remaining}</span> зон внимания
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button onClick={onGenerate} disabled={generating}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-sm font-semibold rounded-xl transition-colors">
-                {generating ? <Spinner /> : <Icon name="RefreshCw" size={13} />}
-                {generating ? "Обновляю..." : "Обновить план"}
-              </button>
-            </div>
-
-            {/* Прогресс-бар */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-2 bg-slate-900 rounded-full transition-all" style={{ width: `${progress.done_pct}%` }} />
-              </div>
-              <span className="text-xs font-semibold text-slate-600 w-8 text-right">{progress.done_pct}%</span>
-            </div>
+            <span className="text-xs text-slate-400 tabular-nums">{progress.done_pct}%</span>
           </div>
         )}
       </div>
+
+      {/* ── 2. No role empty state ── */}
+      {mapState === "no_role" && (
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center">
+          <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+            <Icon name="Target" size={18} className="text-slate-400" />
+          </div>
+          <p className="text-sm font-semibold text-slate-700 mb-1">Выберите целевую роль</p>
+          <p className="text-xs text-slate-500 mb-4">Это отправная точка для анализа зон роста и формирования плана.</p>
+          <Link
+            to="/guide"
+            state={{ source: "strategy_empty_state" }}
+            onClick={() => analytics.guideCtaClicked("open_guide", "strategy_empty_state")}
+            className="text-xs text-violet-600 hover:text-violet-800 font-medium underline underline-offset-2 transition-colors"
+          >
+            Как работает навигатор
+          </Link>
+        </div>
+      )}
+
+      {/* ── 3. No plan CTA — главный экшн ── */}
+      {mapState === "no_plan" && gapSummary && (
+        <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Icon name="Sparkles" size={14} className="text-amber-600 flex-shrink-0" />
+                <p className="text-sm font-bold text-amber-900">Можно собрать первый план развития</p>
+              </div>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Соответствие роли: <span className="font-bold">{gapSummary.fit_pct}%</span>
+                {gapSummary.critical_gaps.length > 0
+                  ? ` · ${gapSummary.critical_gaps.length} зон, требующих внимания`
+                  : " · Все приоритетные зоны закрыты"}
+              </p>
+            </div>
+            <button onClick={onGenerate} disabled={generating}
+              className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white text-sm font-semibold rounded-xl transition-colors flex-shrink-0">
+              {generating ? <Spinner /> : <Icon name="Sparkles" size={14} />}
+              {generating ? "Генерирую..." : "Сформировать план"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── 2. Следующий шаг — главный блок действия ── */}
       {recommendations.length > 0 && (
