@@ -587,15 +587,10 @@ export default function GrowthDashboard() {
           </div>
 
           {/* Ближайшие шаги — из dashboardModel */}
-          <div className="bg-white rounded-2xl p-5 border border-violet-100 shadow-sm ring-1 ring-violet-100">
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center">
-                  <Icon name="ListChecks" size={13} className="text-violet-600" />
-                </div>
-                <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
-              </div>
-              <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+              <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
+              <span className="text-[11px] text-slate-400">
                 {nextStepsTasks.filter(t => t.state === "done").length}/{nextStepsTasks.length}
               </span>
             </div>
