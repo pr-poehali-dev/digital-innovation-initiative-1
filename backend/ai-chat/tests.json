@@ -1,0 +1,6 @@
+{
+  "tests": [
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "chat без сессии — 401", "method": "POST", "path": "/", "body": {"messages": [{"role": "user", "text": "Привет"}]}, "expectedStatus": 401}
+  ]
+}

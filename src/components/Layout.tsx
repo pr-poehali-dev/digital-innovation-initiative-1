@@ -5,6 +5,7 @@ import Icon from "@/components/ui/icon";
 import GlobalSearchDialog from "@/components/GlobalSearchDialog";
 import { NAV_SECTIONS, NAV_SECONDARY, MOBILE_NAV, type NavSection, type NavItem } from "@/lib/routes";
 import SeoMeta from "@/components/SeoMeta";
+import AiChatPanel from "@/components/AiChatPanel";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -200,6 +201,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
 
   // Состояние раскрытия секций — инициализируем из localStorage
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
@@ -357,7 +359,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <Icon name="Bell" size={18} />
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-orange-500 rounded-full" />
               </button>
-              <button className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity">
+              <button
+                onClick={() => setAiOpen(true)}
+                className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity"
+              >
                 <Icon name="Sparkles" size={13} />
                 AI-помощник
               </button>
@@ -396,6 +401,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </nav>
 
       <GlobalSearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <AiChatPanel open={aiOpen} onClose={() => setAiOpen(false)} />
     </div>
   );
 }
