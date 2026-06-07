@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { authApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
+import SeoMeta from "@/components/SeoMeta";
 
 const LOGO_URL = "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/0a6d2e9d-2156-49ee-a4b8-7baaa8811800.jpg";
 
@@ -60,6 +61,7 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4 py-8">
+      <SeoMeta noindex />
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
           <img
