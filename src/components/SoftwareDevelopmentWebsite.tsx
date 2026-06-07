@@ -611,9 +611,9 @@ export default function SoftwareDevelopmentWebsite() {
           </div>
         </section>
         {/* ── Что вы получите ── */}
-        <section className="py-16 md:py-24 bg-white">
+        <section className="py-14 md:py-20 bg-white">
           <div className="mx-auto max-w-5xl px-6">
-            <div className="text-center mb-12">
+            <div className="text-center mb-10">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-400 uppercase mb-3">Что вы получите</span>
               <h2 className="text-balance text-3xl md:text-4xl font-bold text-slate-900">
                 Не просто оценка — <span className="text-slate-600">понятный следующий шаг</span>
@@ -621,16 +621,16 @@ export default function SoftwareDevelopmentWebsite() {
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { icon: "Star",       color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", title: "Сильные стороны",         desc: "Поймёте, на что уже можно опираться при движении к роли." },
-                { icon: "TrendingUp", color: "text-amber-600",   bg: "bg-amber-50",   border: "border-amber-100",   title: "Зоны роста",              desc: "Увидите, что мешает двигаться к цели и что закрыть первым." },
-                { icon: "Sparkles",   color: "text-violet-600",  bg: "bg-violet-50",  border: "border-violet-100",  title: "Следующие шаги",          desc: "Конкретные рекомендации — обучение, практика, применение." },
-                { icon: "BadgeCheck", color: "text-blue-600",    bg: "bg-blue-50",    border: "border-blue-100",    title: "Подтверждения прогресса", desc: "Фиксируйте рост не только обучением, но и реальным опытом." },
+                { icon: "Star",       color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200", title: "Сильные стороны",         desc: "Поймёте, на что уже можно опираться при движении к роли." },
+                { icon: "TrendingUp", color: "text-amber-600",   bg: "bg-amber-50",   border: "border-amber-200",   title: "Зоны роста",              desc: "Увидите, что мешает двигаться к цели и что закрыть первым." },
+                { icon: "Sparkles",   color: "text-violet-600",  bg: "bg-violet-50",  border: "border-violet-200",  title: "Следующие шаги",          desc: "Конкретные рекомендации — обучение, практика, применение." },
+                { icon: "BadgeCheck", color: "text-blue-600",    bg: "bg-blue-50",    border: "border-blue-200",    title: "Подтверждения прогресса", desc: "Фиксируйте рост не только обучением, но и реальным опытом." },
               ].map(item => (
-                <div key={item.title} className={`bg-white rounded-2xl border ${item.border} p-5 flex flex-col gap-3 shadow-sm`}>
+                <div key={item.title} className={`bg-white rounded-2xl border ${item.border} p-5 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow`}>
                   <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${item.bg}`}>
                     <Icon name={item.icon} size={20} className={item.color} />
                   </div>
-                  <h3 className="font-semibold text-slate-800 text-sm">{item.title}</h3>
+                  <h3 className="font-semibold text-slate-900 text-[15px]">{item.title}</h3>
                   <p className="text-xs text-slate-500 leading-relaxed">{item.desc}</p>
                 </div>
               ))}
@@ -639,7 +639,7 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
 
         {/* ── Блок «Для кого» ── */}
-        <section id="about" className="py-16 md:py-24 bg-slate-50">
+        <section id="about" className="py-14 md:py-20 bg-slate-50">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
               <span className="inline-block text-xs font-semibold tracking-wide text-slate-400 uppercase mb-3">Для кого</span>
@@ -668,7 +668,7 @@ export default function SoftwareDevelopmentWebsite() {
 
 
         {/* ── FAQ ── */}
-        <section id="faq" className="py-16 md:py-24 bg-slate-50">
+        <section id="faq" className="py-14 md:py-20 bg-slate-50">
           <div className="mx-auto max-w-3xl px-6">
             <div className="text-center mb-12">
               <h2 className="text-balance text-3xl md:text-4xl font-bold">Частые вопросы</h2>
@@ -678,7 +678,7 @@ export default function SoftwareDevelopmentWebsite() {
         </section>
 
         {/* ── Финальный CTA ── */}
-        <section className="py-16 md:py-24 bg-slate-900">
+        <section className="py-14 md:py-20 bg-slate-900">
           <div className="mx-auto max-w-2xl px-6 text-center">
             <h2 className="text-balance text-3xl md:text-4xl font-bold text-white mb-4">
               Начните с оценки текущего уровня — и получите первый план развития

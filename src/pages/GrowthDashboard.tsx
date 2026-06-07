@@ -113,7 +113,10 @@ function NextStepRow({ task, onNavigate }: {
 
   return (
     <div
-      className={`flex items-start gap-2.5 p-2 rounded-lg transition-colors ${isActive ? "hover:bg-slate-50 cursor-pointer" : ""}`}
+      className={`flex items-center gap-2.5 px-2 py-2 rounded-lg transition-colors ${
+        isActive  ? "hover:bg-violet-50 cursor-pointer" :
+        isDone    ? "opacity-60" : ""
+      }`}
       onClick={() => {
         if (isActive && task.href) {
           analytics.dashboardNextStepClicked(task.id, task.state);
@@ -121,11 +124,11 @@ function NextStepRow({ task, onNavigate }: {
         }
       }}
     >
-      <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 flex items-center justify-center border ${
-        isDone    ? "bg-indigo-600 border-indigo-600" :
+      <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border ${
+        isDone    ? "bg-indigo-500 border-indigo-500" :
+        isActive  ? "border-violet-400 bg-violet-50" :
         isComing  ? "border-slate-200 bg-slate-50" :
-        isBlocked ? "border-slate-200 bg-slate-50" :
-                    "border-slate-300"
+                    "border-slate-200 bg-slate-50"
       }`}>
         {isDone    && <Icon name="Check" size={10} className="text-white" />}
         {isComing  && <Icon name="Clock" size={9}  className="text-slate-300" />}
@@ -134,15 +137,15 @@ function NextStepRow({ task, onNavigate }: {
       <div className="flex-1 min-w-0">
         <span className={`text-sm leading-tight block ${
           isDone    ? "text-slate-400 line-through" :
-          isComing || isBlocked ? "text-slate-400" :
-                                  "text-slate-700"
+          isActive  ? "text-slate-800 font-medium" :
+                      "text-slate-400"
         }`}>
           {task.title}
         </span>
         {isComing  && <span className="text-[10px] text-slate-400">Скоро</span>}
-        {isBlocked && <span className="text-[10px] text-slate-400">Сначала выполните предыдущий шаг</span>}
+        {isBlocked && <span className="text-[10px] text-slate-400">Выполните предыдущий шаг</span>}
       </div>
-      {isActive && <Icon name="ChevronRight" size={14} className="text-slate-300 flex-shrink-0 mt-0.5" />}
+      {isActive && <Icon name="ChevronRight" size={14} className="text-violet-400 flex-shrink-0" />}
     </div>
   );
 }
@@ -386,33 +389,33 @@ export default function GrowthDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
           {/* Приветствие + AI-инсайт */}
-          <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-violet-50 to-transparent rounded-2xl pointer-events-none" />
+          <div className="lg:col-span-2 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-violet-50 to-transparent rounded-2xl pointer-events-none" />
             <div className="relative">
-              <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center justify-between mb-3">
                 <div>
-                  <p className="text-xs text-slate-400 font-medium mb-0.5">Траектория · Кабинет развития</p>
-                  <h1 className="text-xl font-bold text-slate-900">{getGreeting(user?.name ?? "")}</h1>
-                  <p className="text-sm text-slate-500 mt-1">
+                  <p className="text-[11px] text-slate-400 font-medium mb-0.5">Траектория · Кабинет развития</p>
+                  <h1 className="text-lg font-bold text-slate-900">{getGreeting(user?.name ?? "")}</h1>
+                  <p className="text-sm text-slate-500 mt-0.5">
                     {projectCount > 0
                       ? `У вас ${projectCount} ${projectCount === 1 ? "проект" : projectCount < 5 ? "проекта" : "проектов"}. Продолжайте развиваться!`
                       : "Начните своё развитие — создайте первый проект."}
                   </p>
                 </div>
-                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0 ml-4">
-                  <span className="text-white font-bold text-base">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center flex-shrink-0 ml-4">
+                  <span className="text-white font-bold text-sm">
                     {user?.name?.trim().charAt(0)?.toUpperCase() ?? "Я"}
                   </span>
                 </div>
               </div>
-              <div className="mt-4 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-100">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
-                    <Icon name="Sparkles" size={15} className="text-white" />
+              <div className="p-3 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-100/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Sparkles" size={13} className="text-white" />
                   </div>
-                  <div>
-                    <div className="text-xs font-semibold text-violet-700 mb-1 uppercase tracking-wide">AI-инсайт дня</div>
-                    <p className="text-sm text-slate-700 leading-relaxed">{aiInsight}</p>
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-violet-700 uppercase tracking-wide">AI-инсайт дня</span>
+                    <p className="text-xs text-slate-600 leading-snug mt-0.5">{aiInsight}</p>
                   </div>
                 </div>
               </div>
@@ -513,7 +516,10 @@ export default function GrowthDashboard() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-bold text-violet-200 uppercase tracking-widest mb-0.5">Следующий шаг</p>
-                <p className="text-sm font-semibold text-white leading-snug">{activeStep.label}</p>
+                <p className="text-sm font-semibold text-white leading-snug">{activeStep.title}</p>
+                {activeStep.description && (
+                  <p className="text-xs text-violet-200/80 mt-0.5 leading-snug truncate">{activeStep.description}</p>
+                )}
               </div>
               <Icon name="ChevronRight" size={20} className="text-white/70 flex-shrink-0" />
             </div>
@@ -833,33 +839,15 @@ export default function GrowthDashboard() {
           </div>
         </div>
 
-        {/* ── Ряд 5: Модули в разработке ── */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center">
-              <Icon name="Layers" size={13} className="text-slate-500" />
-            </div>
-            <h3 className="text-sm font-semibold text-slate-800">Платформа развивается вместе с вами</h3>
-            <span className="ml-auto text-xs text-slate-400 font-medium">В разработке</span>
+        {/* ── Ряд 5: Модули в разработке — компактная строка ── */}
+        <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200">
+          <div className="w-6 h-6 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
+            <Icon name="Layers" size={13} className="text-slate-500" />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {[
-              { label: "Дипломы и сертификаты", icon: "Award", color: "text-amber-500 bg-amber-50" },
-              { label: "Тесты и повторение", icon: "ClipboardCheck", color: "text-blue-500 bg-blue-50" },
-              { label: "Карта компетенций", icon: "Map", color: "text-violet-500 bg-violet-50" },
-              { label: "План развития", icon: "Target", color: "text-emerald-500 bg-emerald-50" },
-              { label: "Карьерная траектория", icon: "TrendingUp", color: "text-indigo-500 bg-indigo-50" },
-              { label: "Профессиональный профиль", icon: "UserCircle", color: "text-pink-500 bg-pink-50" },
-            ].map(m => (
-              <div key={m.label} className="flex flex-col items-center gap-2 p-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 text-center opacity-70">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${m.color}`}>
-                  <Icon name={m.icon} size={17} />
-                </div>
-                <span className="text-xs text-slate-600 leading-tight font-medium">{m.label}</span>
-                <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">Скоро</span>
-              </div>
-            ))}
-          </div>
+          <p className="text-sm text-slate-500 flex-1 min-w-0">
+            Платформа продолжает развиваться — скоро появятся карта компетенций, дипломы и план развития.
+          </p>
+          <span className="text-[11px] font-semibold text-slate-400 bg-slate-200 px-2 py-0.5 rounded-full flex-shrink-0">Скоро</span>
         </div>
 
       </div>
