@@ -1,7 +1,7 @@
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
-import { ArrowRight, ChevronRight, Menu, X, Map, Target, TrendingUp, CheckCircle, Sparkles, Users, Plus } from "lucide-react"
+import { ArrowRight, ChevronRight, Menu, X, Map, Target, TrendingUp, Check, Sparkles, Users, Plus } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { Link } from "react-router-dom"
@@ -487,7 +487,7 @@ export default function SoftwareDevelopmentWebsite() {
                         <React.Fragment key={v}>
                           {i > 0 && <span className="w-1 h-1 rounded-full bg-slate-300 flex-shrink-0 hidden sm:block" />}
                           <span className="flex items-center gap-1.5">
-                            <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                            <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
                             {v}
                           </span>
                         </React.Fragment>
@@ -545,7 +545,7 @@ export default function SoftwareDevelopmentWebsite() {
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Сильные стороны</p>
                           {["Стратегия", "Коммуникация", "Анализ данных"].map(s => (
                             <div key={s} className="flex items-center gap-1.5 mb-1.5">
-                              <CheckCircle className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                              <Check className="w-3 h-3 text-emerald-500 flex-shrink-0" />
                               <span className="text-[11px] text-slate-600">{s}</span>
                             </div>
                           ))}
