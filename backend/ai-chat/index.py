@@ -48,10 +48,10 @@ def resp(data, code=200, origin=""):
 def get_user(conn, session_id: str):
     if not session_id:
         return None
+    safe_sid = session_id.replace("'", "''")
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT user_id FROM {S}.sessions WHERE session_id=%s AND expires_at>NOW() LIMIT 1",
-            (session_id,)
+            f"SELECT user_id FROM {S}.sessions WHERE session_id='{safe_sid}' AND expires_at>NOW() LIMIT 1"
         )
         row = cur.fetchone()
     return row[0] if row else None
