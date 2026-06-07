@@ -73,10 +73,10 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <CookieBanner />
       <BrowserRouter>
         <AdminProvider>
           <AuthProvider>
+            <CookieBanner />
             <Routes>
               {/* Admin routes */}
               <Route path="/admin/login" element={<AdminLogin />} />
