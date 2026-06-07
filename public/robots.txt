@@ -1,14 +1,11 @@
-User-agent: Googlebot
-Allow: /
-
-User-agent: Bingbot
-Allow: /
-
-User-agent: Twitterbot
-Allow: /
-
-User-agent: facebookexternalhit
-Allow: /
-
 User-agent: *
 Allow: /
+Allow: /guide
+Allow: /legal/
+
+Disallow: /cabinet
+Disallow: /welcome
+Disallow: /admin
+Disallow: /login
+
+Sitemap: https://raven.moscow/sitemap.xml

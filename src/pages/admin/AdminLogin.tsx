@@ -4,6 +4,7 @@ import { useAdmin } from "@/lib/admin-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Icon from "@/components/ui/icon";
+import SeoMeta from "@/components/SeoMeta";
 
 export default function AdminLogin() {
   const { session, loading, login } = useAdmin();
@@ -39,6 +40,7 @@ export default function AdminLogin() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950">
+      <SeoMeta noindex />
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <div className="inline-flex items-center justify-center w-12 h-12 bg-orange-500 rounded-xl mb-4">

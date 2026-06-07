@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Link } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
 import { analytics } from "@/lib/analytics"
+import SeoMeta from "@/components/SeoMeta"
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
@@ -450,10 +451,15 @@ function FaqList() {
 
 export default function SoftwareDevelopmentWebsite() {
   const { user } = useAuth()
+  const viewFired = React.useRef(false)
 
   React.useEffect(() => {
-    analytics.landingView(!!user)
-  }, [user])
+    if (!viewFired.current) {
+      viewFired.current = true
+      analytics.landingView(!!user)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const studyImages = [
     "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/ba4b75b8-8d2b-4603-b9ab-07f5a660cef0.jpg",
@@ -468,6 +474,11 @@ export default function SoftwareDevelopmentWebsite() {
 
   return (
     <>
+      <SeoMeta
+        title="Персональный план развития компетенций под целевую роль — Траектория"
+        description="Оцените свои навыки, увидьте сильные стороны и зоны роста, получите персональный план развития с обучением, практикой и подтверждением прогресса."
+        canonical="https://raven.moscow/"
+      />
       <HeroHeader />
       <main className="overflow-hidden">
         <div

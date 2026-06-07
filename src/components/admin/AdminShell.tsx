@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAdmin } from "@/lib/admin-context";
 import Icon from "@/components/ui/icon";
+import SeoMeta from "@/components/SeoMeta";
 
 const NAV = [
   { label: "Дашборд",     icon: "LayoutDashboard", href: "/admin" },
@@ -34,6 +35,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen flex bg-gray-950 text-white">
+      <SeoMeta noindex />
       {/* Sidebar */}
       <aside className="w-56 flex-shrink-0 flex flex-col border-r border-gray-800">
         <div className="px-4 py-5 flex items-center gap-2 border-b border-gray-800">

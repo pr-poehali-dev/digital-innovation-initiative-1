@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import GlobalSearchDialog from "@/components/GlobalSearchDialog";
 import { NAV_SECTIONS, NAV_SECONDARY, MOBILE_NAV, type NavSection, type NavItem } from "@/lib/routes";
+import SeoMeta from "@/components/SeoMeta";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -248,6 +249,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
+      <SeoMeta noindex />
 
       {/* ── Sidebar (desktop) ── */}
       <aside className={`hidden lg:flex flex-col fixed top-0 left-0 h-screen bg-white border-r border-slate-200 transition-all duration-200 z-20 ${collapsed ? "w-16" : "w-60"}`}>

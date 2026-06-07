@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import Icon from "@/components/ui/icon";
 import { passportApi } from "@/lib/passportApi";
 import { competencyMapApi } from "@/lib/competencyMapApi";
 import { growthApi } from "@/lib/growthApi";
 import { analytics } from "@/lib/analytics";
+import SeoMeta from "@/components/SeoMeta";
 
 // ── State resolver ────────────────────────────────────────────────────
 
@@ -164,16 +165,25 @@ const QUICK_LINKS = [
 
 export default function WelcomePage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [stateData, setStateData] = useState<WelcomeStateData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const viewFired = useRef(false);
 
   useEffect(() => {
-    resolveWelcomeState().then(s => {
-      setStateData(s);
-      setLoading(false);
-      analytics.welcomeView(s.key);
-    });
+    resolveWelcomeState()
+      .then(s => {
+        setStateData(s);
+        setLoading(false);
+        if (!viewFired.current) {
+          viewFired.current = true;
+          analytics.welcomeView(s.key);
+        }
+      })
+      .catch(() => {
+        setLoading(false);
+        setError(true);
+      });
   }, []);
 
   if (loading) {
@@ -184,12 +194,24 @@ export default function WelcomePage() {
     );
   }
 
-  if (!stateData) return null;
+  if (error || !stateData) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center max-w-sm px-4">
+          <p className="text-slate-600 text-sm mb-4">Не удалось загрузить данные. Попробуйте обновить страницу.</p>
+          <Link to="/cabinet" className="text-sm font-medium text-violet-600 hover:text-violet-800 underline underline-offset-2">
+            Перейти в кабинет
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const cfg = STATE_CONFIG[stateData.key];
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <SeoMeta noindex />
       {/* Header */}
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -245,15 +267,20 @@ export default function WelcomePage() {
           </div>
         </div>
 
-        {/* Quick navigation */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {QUICK_LINKS.map(l => (
-            <Link key={l.href} to={l.href}
-              className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col items-center gap-2 hover:border-slate-300 hover:shadow-sm transition-all">
-              <Icon name={l.icon} size={18} className="text-slate-500" />
-              <span className="text-[11px] font-medium text-slate-600 text-center leading-tight">{l.label}</span>
-            </Link>
-          ))}
+        {/* Quick navigation — вторичная навигация, намеренно приглушена */}
+        <div className="mt-8">
+          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3 px-1">
+            Быстрый переход
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {QUICK_LINKS.map(l => (
+              <Link key={l.href} to={l.href}
+                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 text-xs font-medium rounded-lg transition-colors">
+                <Icon name={l.icon} size={13} />
+                {l.label}
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </div>
