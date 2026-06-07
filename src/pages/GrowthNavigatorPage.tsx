@@ -100,6 +100,17 @@ const STATUS_CFG: Record<string, { label: string; icon: string; cls: string; dot
 };
 const ITEM_TYPE_ICON: Record<string, string> = {
   learn: "BookOpen", practice: "Wrench", evidence: "FileCheck", reflection: "MessageSquare",
+  project: "FolderKanban", assessment: "ClipboardCheck", mentor: "Users", mentoring: "Users",
+};
+const ITEM_TYPE_LABEL: Record<string, string> = {
+  learn: "Изучение",
+  practice: "Практика",
+  project: "Практика на задаче",
+  evidence: "Подтверждение",
+  reflection: "Рефлексия",
+  assessment: "Проверка прогресса",
+  mentor: "Наставничество",
+  mentoring: "Наставничество",
 };
 const PRIORITY_DOT: Record<string, string> = {
   high: "bg-red-400", medium: "bg-amber-400", low: "bg-slate-300",
@@ -278,8 +289,15 @@ function OverviewTab({
                   <Icon name={ITEM_TYPE_ICON[r.item_type] ?? "Circle"} size={11} className="text-violet-500" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-slate-800 leading-snug">{r.title}</p>
-                  {r.competency_name && <p className="text-[10px] text-slate-500 mt-0.5">{r.competency_name}</p>}
+                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                    <p className="text-xs font-medium text-slate-800 leading-snug">{r.title}</p>
+                    {r.item_type && (
+                      <span className="text-[9px] px-1.5 py-0.5 bg-violet-100 text-violet-600 rounded font-medium">
+                        {ITEM_TYPE_LABEL[r.item_type] ?? r.item_type}
+                      </span>
+                    )}
+                  </div>
+                  {r.competency_name && <p className="text-[10px] text-slate-500">{r.competency_name}</p>}
                 </div>
               </div>
             ))}
@@ -541,6 +559,11 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <p className={`text-sm font-semibold ${item.status === "done" ? "line-through text-slate-400" : "text-slate-800"}`}>{item.title}</p>
+                        {item.item_type && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-md font-medium">
+                            {ITEM_TYPE_LABEL[item.item_type] ?? item.item_type}
+                          </span>
+                        )}
                         {item.competency_name && <span className="text-[10px] text-violet-500">{item.competency_name}</span>}
                       </div>
                       <p className="text-xs text-slate-500 leading-relaxed">{item.description}</p>
@@ -614,10 +637,13 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
                 <div>
                   <label className={lbl}>Тип</label>
                   <select className={inp} value={addForm.item_type} onChange={e => setAddForm(f => ({ ...f, item_type: e.target.value }))}>
-                    <option value="learn">Обучение</option>
+                    <option value="learn">Изучение</option>
                     <option value="practice">Практика</option>
+                    <option value="project">Практика на задаче</option>
                     <option value="evidence">Подтверждение</option>
                     <option value="reflection">Рефлексия</option>
+                    <option value="assessment">Проверка прогресса</option>
+                    <option value="mentor">Наставничество</option>
                   </select>
                 </div>
                 <div>
