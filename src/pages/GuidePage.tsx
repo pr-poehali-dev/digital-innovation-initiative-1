@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { analytics } from "@/lib/analytics";
 
@@ -323,7 +323,12 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 export default function GuidePage() {
   const location = useLocation();
-  const source = (location.state as { source?: string } | null)?.source ?? "direct";
+  const [searchParams] = useSearchParams();
+  // fallback: router state → query param → "direct"
+  const source =
+    (location.state as { source?: string } | null)?.source ??
+    searchParams.get("source") ??
+    "direct";
 
   useEffect(() => {
     analytics.guideOpened(source);

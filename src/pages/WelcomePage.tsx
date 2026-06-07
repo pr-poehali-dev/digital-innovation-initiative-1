@@ -78,7 +78,7 @@ const STATE_CONFIG: Record<WelcomeStateKey, StateConfig> = {
     primaryLabel: "Заполнить профиль",
     primaryHref: "/cabinet/profile",
     secondaryLabel: "Как это работает",
-    secondaryHref: "/guide",
+    secondaryHref: "/guide?source=welcome_no_profile",
   },
   no_assessment: {
     icon: "ClipboardList",
@@ -90,7 +90,7 @@ const STATE_CONFIG: Record<WelcomeStateKey, StateConfig> = {
     primaryLabel: "Пройти самооценку",
     primaryHref: "/cabinet/competency-map",
     secondaryLabel: "Как проходит оценка",
-    secondaryHref: "/guide",
+    secondaryHref: "/guide?source=welcome_no_assessment",
   },
   no_role: {
     icon: "Target",
