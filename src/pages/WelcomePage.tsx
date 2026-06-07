@@ -349,6 +349,7 @@ export default function WelcomePage() {
           <div className="flex flex-wrap gap-2">
             {QUICK_LINKS.map(l => (
               <Link key={l.href} to={l.href}
+                onClick={() => analytics.welcomeQuickLinkClicked(stateData.key, l.href, l.label)}
                 className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:border-slate-300 text-slate-400 hover:text-slate-600 text-xs font-medium rounded-lg transition-colors">
                 <Icon name={l.icon} size={12} />
                 {l.label}

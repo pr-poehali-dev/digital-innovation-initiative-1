@@ -298,6 +298,78 @@ export type AnalyticsEvents = {
     state: string;
     cta_label: string;
   };
+
+  // 42. Клик по quick link на welcome
+  welcome_quick_link_clicked: {
+    state: string;
+    target: string;
+    label: string;
+  };
+
+  // ── Strategy / Growth ──────────────────────────────────────────────
+  // 43. Просмотр strategy-экрана
+  strategy_view: {
+    role_id: number | null;
+    has_plan: boolean;
+    readiness_bucket: "none" | "low" | "mid" | "high";
+  };
+
+  // 44. Клик по «Следующему шагу» (первая рекомендация)
+  strategy_next_step_clicked: {
+    item_type: string;
+    item_id: number;
+    role_id: number | null;
+  };
+
+  // 45. Клик по шагу в плане
+  strategy_plan_item_clicked: {
+    item_type: string;
+    item_id: number;
+    status: string;
+    priority: string;
+  };
+
+  // 46. Смена статуса шага плана
+  strategy_plan_item_status_changed: {
+    item_id: number;
+    from_status: string;
+    to_status: string;
+    item_type: string;
+  };
+
+  // 47. Генерация / обновление плана
+  strategy_plan_generated: {
+    role_id: number | null;
+    trigger: "first_time" | "refresh";
+  };
+
+  // ── Admin benchmark ────────────────────────────────────────────────
+  // 48. Просмотр страницы benchmark
+  admin_benchmark_viewed: {
+    tab: string;
+  };
+
+  // 49. Смена фильтра
+  admin_benchmark_filter_changed: {
+    tab: string;
+    filter_type: string;
+    value: string;
+  };
+
+  // 50. Раскрытие строки решения
+  admin_benchmark_row_expanded: {
+    decision_id: number;
+    priority: string;
+    current_status: string;
+  };
+
+  // 51. Смена статуса решения
+  admin_benchmark_status_changed: {
+    decision_id: number;
+    from_status: string;
+    to_status: string;
+    priority: string;
+  };
 };
 
 // --- Ядро ---
@@ -617,6 +689,60 @@ export const analytics = {
 
   welcomeSecondaryCtaClicked(state: string, ctaLabel: string) {
     sendEvent("welcome_secondary_cta_clicked", { state, cta_label: ctaLabel });
+  },
+
+  welcomeQuickLinkClicked(state: string, target: string, label: string) {
+    sendEvent("welcome_quick_link_clicked", { state, target, label });
+  },
+
+  // ── Strategy / Growth ──────────────────────────────────────────────
+
+  strategyView(roleId: number | null, hasPlan: boolean, fitPct: number | null) {
+    const readiness_bucket: "none" | "low" | "mid" | "high" =
+      fitPct === null ? "none" :
+      fitPct < 30     ? "low"  :
+      fitPct < 60     ? "mid"  : "high";
+    sendEvent("strategy_view", { role_id: roleId, has_plan: hasPlan, readiness_bucket });
+  },
+
+  strategyNextStepClicked(itemType: string, itemId: number, roleId: number | null) {
+    sendEvent("strategy_next_step_clicked", { item_type: itemType, item_id: itemId, role_id: roleId });
+  },
+
+  strategyPlanItemClicked(itemType: string, itemId: number, status: string, priority: string) {
+    sendEvent("strategy_plan_item_clicked", { item_type: itemType, item_id: itemId, status, priority });
+  },
+
+  strategyPlanItemStatusChanged(itemId: number, fromStatus: string, toStatus: string, itemType: string) {
+    sendEvent("strategy_plan_item_status_changed", {
+      item_id: itemId, from_status: fromStatus, to_status: toStatus, item_type: itemType,
+    });
+  },
+
+  strategyPlanGenerated(roleId: number | null, trigger: "first_time" | "refresh") {
+    sendEvent("strategy_plan_generated", { role_id: roleId, trigger });
+  },
+
+  // ── Admin benchmark ────────────────────────────────────────────────
+
+  adminBenchmarkViewed(tab: string) {
+    sendEvent("admin_benchmark_viewed", { tab });
+  },
+
+  adminBenchmarkFilterChanged(tab: string, filterType: string, value: string) {
+    sendEvent("admin_benchmark_filter_changed", { tab, filter_type: filterType, value });
+  },
+
+  adminBenchmarkRowExpanded(decisionId: number, priority: string, currentStatus: string) {
+    sendEvent("admin_benchmark_row_expanded", {
+      decision_id: decisionId, priority, current_status: currentStatus,
+    });
+  },
+
+  adminBenchmarkStatusChanged(decisionId: number, fromStatus: string, toStatus: string, priority: string) {
+    sendEvent("admin_benchmark_status_changed", {
+      decision_id: decisionId, from_status: fromStatus, to_status: toStatus, priority,
+    });
   },
 };
 

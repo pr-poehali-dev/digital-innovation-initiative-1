@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
@@ -286,7 +286,11 @@ function OverviewTab({
           </div>
           <div className="space-y-2.5">
             {recommendations.slice(0, 3).map((r, i) => (
-              <div key={r.id} className={`flex items-start gap-3 ${i === 0 ? "bg-white/70 rounded-xl p-3 -mx-1" : "px-1 opacity-70"}`}>
+              <div
+                key={r.id}
+                className={`flex items-start gap-3 ${i === 0 ? "bg-white/70 rounded-xl p-3 -mx-1 cursor-pointer" : "px-1 opacity-70"}`}
+                onClick={i === 0 ? () => analytics.strategyNextStepClicked(r.item_type, r.id, selectedRole) : undefined}
+              >
                 <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${i === 0 ? "bg-violet-100" : "bg-transparent"}`}>
                   <Icon name={ITEM_TYPE_ICON[r.item_type] ?? "Circle"} size={12} className="text-violet-500" />
                 </div>
@@ -478,6 +482,7 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
   function showMsg(m: string) { setToast(m); setTimeout(() => setToast(null), 2000); }
 
   async function updateStatus(item: PlanItem, status: string) {
+    analytics.strategyPlanItemStatusChanged(item.id, item.status, status, item.item_type);
     await growthApi.itemUpdate({ id: item.id, status });
     onRefresh();
   }
@@ -556,7 +561,10 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
             {pitems.map(item => {
               const sc = STATUS_CFG[item.status] ?? STATUS_CFG.not_started;
               return (
-                <div key={item.id} className={`bg-white border border-slate-200 rounded-2xl p-4 transition-all ${item.status === "done" ? "opacity-50 border-slate-100" : "hover:border-slate-300"}`}>
+                <div key={item.id}
+                  className={`bg-white border border-slate-200 rounded-2xl p-4 transition-all ${item.status === "done" ? "opacity-50 border-slate-100" : "hover:border-slate-300"}`}
+                  onClick={() => analytics.strategyPlanItemClicked(item.item_type, item.id, item.status, item.priority)}
+                >
                   <div className="flex items-start gap-3">
                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${ITEM_TYPE_COLOR[item.item_type] ?? "bg-slate-50 text-slate-400"}`}>
                       <Icon name={ITEM_TYPE_ICON[item.item_type] ?? "Circle"} size={14} />
@@ -1000,6 +1008,7 @@ export default function GrowthNavigatorPage() {
   const [loadingGap, setLoadingGap] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const viewFired = useRef(false);
 
   // Initial load
   useEffect(() => {
@@ -1011,13 +1020,23 @@ export default function GrowthNavigatorPage() {
     ]).then(([rr, pp, pr, rec]) => {
       setRoles(rr.role_profiles ?? []);
       const loadedPlan: Plan | null = pp.plan ?? null;
+      const loadedProgress = pr.progress ?? null;
       setPlan(loadedPlan);
-      setProgress(pr.progress ?? null);
+      setProgress(loadedProgress);
       setRecommendations(rec.recommendations ?? []);
       if (loadedPlan?.target_role_profile_id) {
         setSelectedRole(loadedPlan.target_role_profile_id);
       }
       setInitialLoading(false);
+      // strategy_view — один раз при загрузке
+      if (!viewFired.current) {
+        viewFired.current = true;
+        analytics.strategyView(
+          loadedPlan?.target_role_profile_id ?? null,
+          !!loadedPlan,
+          loadedProgress?.done_pct ?? null,
+        );
+      }
     });
   }, []);
 
@@ -1044,10 +1063,12 @@ export default function GrowthNavigatorPage() {
 
   async function handleGenerate() {
     if (!selectedRole) return;
+    const isFirst = !plan;
     setGenerating(true);
     await growthApi.planGenerate({ target_role_profile_id: selectedRole });
     await loadPlan();
     setGenerating(false);
+    analytics.strategyPlanGenerated(selectedRole, isFirst ? "first_time" : "refresh");
   }
 
   const TABS: { key: Tab; icon: string; label: string }[] = [

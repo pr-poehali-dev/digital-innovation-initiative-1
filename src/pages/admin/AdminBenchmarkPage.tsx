@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { api } from "@/lib/strategyApi";
+import { analytics } from "@/lib/analytics";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -214,6 +215,11 @@ function ProductsTab({ products, loading }: { products: BenchmarkProduct[]; load
   const [filter, setFilter] = useState<"all" | "borrow" | "adapt" | "avoid">("all");
   const shown = filter === "all" ? products : products.filter(p => p.recommendation === filter);
 
+  function handleFilter(v: "all" | "borrow" | "adapt" | "avoid") {
+    setFilter(v);
+    if (v !== "all") analytics.adminBenchmarkFilterChanged("products", "recommendation", v);
+  }
+
   return (
     <div className="space-y-4">
       <FilterPills
@@ -224,7 +230,7 @@ function ProductsTab({ products, loading }: { products: BenchmarkProduct[]; load
           { value: "avoid" as const, label: "Избегать" },
         ]}
         active={filter}
-        onSelect={setFilter}
+        onSelect={handleFilter}
         count={shown.length}
       />
 
@@ -289,6 +295,11 @@ function PatternsTab({ patterns, loading }: { patterns: BenchmarkPattern[]; load
   const [priority, setPriority] = useState<"all" | "p0" | "p1" | "p2">("all");
   const shown = priority === "all" ? patterns : patterns.filter(p => p.priority === priority);
 
+  function handlePriority(v: "all" | "p0" | "p1" | "p2") {
+    setPriority(v);
+    if (v !== "all") analytics.adminBenchmarkFilterChanged("patterns", "priority", v);
+  }
+
   return (
     <div className="space-y-4">
       <FilterPills
@@ -299,7 +310,7 @@ function PatternsTab({ patterns, loading }: { patterns: BenchmarkPattern[]; load
           { value: "p2" as const, label: "P2" },
         ]}
         active={priority}
-        onSelect={setPriority}
+        onSelect={handlePriority}
         count={shown.length}
       />
 
@@ -347,7 +358,7 @@ function PatternsTab({ patterns, loading }: { patterns: BenchmarkPattern[]; load
 
 function DecisionsTab({ decisions, loading, onStatusChange }: {
   decisions: StrategyDecision[]; loading: boolean;
-  onStatusChange: (id: number, status: string) => void;
+  onStatusChange: (id: number, status: string, decision?: StrategyDecision) => void;
 }) {
   const [priority, setPriority] = useState<"all" | "p0" | "p1" | "p2">("all");
   const [status, setStatus] = useState<string>("all");
@@ -356,6 +367,16 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
   let shown = decisions;
   if (priority !== "all") shown = shown.filter(d => d.priority === priority);
   if (status !== "all") shown = shown.filter(d => d.status === status);
+
+  function handlePriority(v: "all" | "p0" | "p1" | "p2") {
+    setPriority(v);
+    if (v !== "all") analytics.adminBenchmarkFilterChanged("decisions", "priority", v);
+  }
+
+  function handleStatusFilter(v: string) {
+    setStatus(v);
+    if (v !== "all") analytics.adminBenchmarkFilterChanged("decisions", "status", v);
+  }
 
   return (
     <div className="space-y-3">
@@ -369,10 +390,10 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
             { value: "p2" as const, label: "P2" },
           ]}
           active={priority}
-          onSelect={setPriority}
+          onSelect={handlePriority}
         />
         <div className="w-px h-4 bg-gray-700 mx-1" />
-        <select value={status} onChange={e => setStatus(e.target.value)}
+        <select value={status} onChange={e => handleStatusFilter(e.target.value)}
           className="text-[11px] bg-transparent text-gray-400 border-0 focus:outline-none cursor-pointer">
           <option value="all">Все статусы</option>
           {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
@@ -393,7 +414,11 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
               {/* Row — кликабельная */}
               <button
                 className="w-full flex items-center gap-3 px-4 py-3 text-left"
-                onClick={() => setExpanded(isOpen ? null : d.id)}
+                onClick={() => {
+                  const next = isOpen ? null : d.id;
+                  setExpanded(next);
+                  if (next !== null) analytics.adminBenchmarkRowExpanded(d.id, d.priority, d.status);
+                }}
               >
                 <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${IMPACT_DOT[d.impact] ?? "bg-gray-600"}`} />
                 <div className="flex-1 min-w-0">
@@ -405,7 +430,7 @@ function DecisionsTab({ decisions, loading, onStatusChange }: {
                     {PRIORITY_LABEL[d.priority] ?? d.priority}
                   </span>
                   <select value={d.status}
-                    onChange={e => { e.stopPropagation(); onStatusChange(d.id, e.target.value); }}
+                    onChange={e => { e.stopPropagation(); onStatusChange(d.id, e.target.value, d); }}
                     onClick={e => e.stopPropagation()}
                     className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border-0 focus:outline-none cursor-pointer appearance-none ${STATUS_BADGE[d.status] ?? "bg-gray-800 text-gray-400"}`}>
                     {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABEL[s] ?? s}</option>)}
@@ -473,6 +498,7 @@ export default function AdminBenchmarkPage() {
   const [loadingDecisions, setLoadingDecisions] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const viewFired = useRef(false);
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2500); }
 
@@ -502,10 +528,24 @@ export default function AdminBenchmarkPage() {
     setLoadingDecisions(false);
   }, []);
 
+  // view event — один раз при маунте
+  useEffect(() => {
+    if (!viewFired.current) {
+      viewFired.current = true;
+      analytics.adminBenchmarkViewed("summary");
+    }
+  }, []);
+
   useEffect(() => { loadSummary(); }, [loadSummary]);
   useEffect(() => { if (tab === "products") loadProducts(); }, [tab, loadProducts]);
   useEffect(() => { if (tab === "patterns") loadPatterns(); }, [tab, loadPatterns]);
   useEffect(() => { if (tab === "decisions") loadDecisions(); }, [tab, loadDecisions]);
+
+  // tab change → fire view event
+  function handleTabChange(newTab: Tab) {
+    setTab(newTab);
+    analytics.adminBenchmarkViewed(newTab);
+  }
 
   async function handleSeed() {
     setSeeding(true);
@@ -517,7 +557,10 @@ export default function AdminBenchmarkPage() {
     }
   }
 
-  async function handleStatusChange(id: number, status: string) {
+  async function handleStatusChange(id: number, status: string, decision?: StrategyDecision) {
+    const fromStatus = decision?.status ?? "";
+    const priority = decision?.priority ?? "";
+    analytics.adminBenchmarkStatusChanged(id, fromStatus, status, priority);
     await api.bmDecisionUpsert({ id, status });
     setDecisions(prev => prev.map(d => d.id === id ? { ...d, status } : d));
     showToast("Статус обновлён");
@@ -543,7 +586,7 @@ export default function AdminBenchmarkPage() {
         {/* Tabs */}
         <div className="flex gap-1 mb-6 bg-gray-900/80 p-1 rounded-xl w-fit border border-gray-800">
           {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button key={t.key} onClick={() => handleTabChange(t.key)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 tab === t.key
                   ? "bg-orange-600 text-white shadow-sm"
