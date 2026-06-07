@@ -9,6 +9,7 @@ import { Link } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
 import { analytics } from "@/lib/analytics"
 import SeoMeta from "@/components/SeoMeta"
+import Icon from "@/components/ui/icon"
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
@@ -203,49 +204,46 @@ const FEATURES = [
 
 const HOW_IT_WORKS_STEPS = [
   {
-    num: "1",
+    num: "01",
     color: "bg-emerald-100 text-emerald-700",
     title: "Выберите целевую роль",
-    desc: "Определите роль, к которой хотите двигаться, чтобы платформа показала нужные ориентиры и приоритеты.",
+    desc: "Определите роль — платформа покажет приоритеты и насколько вы уже близко.",
   },
   {
-    num: "2",
+    num: "02",
     color: "bg-violet-100 text-violet-700",
     title: "Оцените текущий уровень",
-    desc: "Заполните профиль и пройдите самооценку — увидите сильные стороны, зоны роста и насколько вы близко к роли.",
+    desc: "Пройдите самооценку — увидите сильные стороны и зоны роста в одной карте.",
   },
   {
-    num: "3",
+    num: "03",
     color: "bg-blue-100 text-blue-700",
-    title: "Получите план и подтверждайте прогресс",
-    desc: "Система соберёт приоритеты и следующие шаги. Фиксируйте обучение, практику и результаты — чтобы видеть реальное движение.",
+    title: "Получите план и подтверждайте рост",
+    desc: "Система соберёт следующие шаги. Фиксируйте обучение и практику — прогресс станет видимым.",
   },
 ]
 
 const FOR_WHOM = [
   {
-    icon: <TrendingUp className="h-6 w-6 text-emerald-600" />,
+    label: "Индивидуально",
+    icon: <TrendingUp className="h-5 w-5 text-emerald-600" />,
     bg: "bg-emerald-50",
     title: "Специалистам",
     desc: "Поймёте, какие навыки развивать дальше. Получите план, а не просто список советов.",
   },
   {
-    icon: <BookOpen className="h-6 w-6 text-blue-600" />,
+    label: "Для команды",
+    icon: <Users className="h-5 w-5 text-blue-600" />,
     bg: "bg-blue-50",
     title: "Руководителям",
     desc: "Видите сильные стороны и точки роста — свои и команды. Развитие становится управляемым.",
   },
   {
-    icon: <Briefcase className="h-6 w-6 text-violet-600" />,
+    label: "Карьерный переход",
+    icon: <Target className="h-5 w-5 text-violet-600" />,
     bg: "bg-violet-50",
     title: "Тем, кто готовится к новой роли",
     desc: "Двигаетесь не вслепую — знаете, что нужно подтянуть, и видите, насколько вы уже близко.",
-  },
-  {
-    icon: <Target className="h-6 w-6 text-orange-600" />,
-    bg: "bg-orange-50",
-    title: "Тем, кто меняет направление",
-    desc: "Видите, какие компетенции уже есть и что нужно добрать. Переход становится понятным шагами.",
   },
 ]
 
@@ -561,6 +559,19 @@ export default function SoftwareDevelopmentWebsite() {
                     </Button>
                   </a>
                 </AnimatedGroup>
+
+                {/* Value strip */}
+                <div className="mt-8 flex items-center justify-center gap-6 text-sm text-slate-500">
+                  {["Сильные стороны", "Зоны роста", "Персональный план"].map((v, i) => (
+                    <React.Fragment key={v}>
+                      {i > 0 && <span className="w-1 h-1 rounded-full bg-slate-300 flex-shrink-0" />}
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                        {v}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -678,66 +689,82 @@ export default function SoftwareDevelopmentWebsite() {
           </div>
         </section>
 
-        {/* Секция: пример промпта */}
-        <section id="how-it-works" className="py-16 md:py-24 bg-background">
+        {/* Секция: как это работает */}
+        <section id="how-it-works" className="py-16 md:py-24 bg-slate-50">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Как это работает</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-semibold">
-                От пустой карты до <span className="text-slate-600">понятного плана роста</span>
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-400 uppercase mb-3 letter-spacing-wide">Как это работает</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold text-slate-900">
+                Три шага — и у вас есть <span className="text-slate-600">понятный план развития</span>
               </h2>
-              <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
-                Три шага — и у вас есть карта компетенций, рекомендации и следующий конкретный шаг.
-              </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid md:grid-cols-3 gap-5">
               {HOW_IT_WORKS_STEPS.map((step, i) => (
-                <div key={i} className="relative bg-background rounded-2xl border border-slate-200 p-6">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg font-bold mb-5 ${step.color}`}>
-                    {step.num}
+                <div key={i} className="relative bg-white rounded-2xl border border-slate-200 p-6 flex flex-col">
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${step.color}`}>{step.num}</span>
+                    {i < HOW_IT_WORKS_STEPS.length - 1 && (
+                      <div className="hidden md:block absolute top-7 -right-2.5 z-10">
+                        <ChevronRight className="h-4 w-4 text-slate-300" />
+                      </div>
+                    )}
                   </div>
-                  <h3 className="font-semibold text-slate-800 mb-2">{step.title}</h3>
-                  <p className="text-sm text-slate-600 leading-relaxed">{step.desc}</p>
-                  {i < HOW_IT_WORKS_STEPS.length - 1 && (
-                    <div className="hidden md:block absolute top-10 -right-3 z-10">
-                      <ChevronRight className="h-5 w-5 text-slate-300" />
-                    </div>
-                  )}
+                  <h3 className="font-semibold text-slate-800 mb-2 text-base">{step.title}</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed flex-1">{step.desc}</p>
                 </div>
               ))}
             </div>
-
-            <div className="mt-8 text-center">
-              <Link to="/login" onClick={() => analytics.landingCtaClicked("how_it_works_open_cabinet", "/login")}>
-                <Button size="lg" className="bg-slate-800 hover:bg-slate-700 text-white rounded-xl px-8">
-                  Начать self-assessment
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
+          </div>
+        </section>
+        {/* ── Что вы получите ── */}
+        <section className="py-16 md:py-24 bg-white">
+          <div className="mx-auto max-w-5xl px-6">
+            <div className="text-center mb-12">
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-400 uppercase mb-3">Что вы получите</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold text-slate-900">
+                Не просто оценка — <span className="text-slate-600">понятный следующий шаг</span>
+              </h2>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { icon: "Star",       color: "text-emerald-500", bg: "bg-emerald-50", title: "Сильные стороны",       desc: "Поймёте, на что уже можно опираться при движении к роли." },
+                { icon: "TrendingUp", color: "text-amber-500",   bg: "bg-amber-50",   title: "Зоны роста",            desc: "Увидите, что мешает двигаться к цели и что закрыть первым." },
+                { icon: "Sparkles",   color: "text-violet-500",  bg: "bg-violet-50",  title: "Следующие шаги",        desc: "Конкретные рекомендации — обучение, практика, применение." },
+                { icon: "BadgeCheck", color: "text-blue-500",    bg: "bg-blue-50",    title: "Подтверждения прогресса", desc: "Фиксируйте рост не только обучением, но и реальным опытом." },
+              ].map(item => (
+                <div key={item.title} className="bg-slate-50 rounded-2xl p-5 flex flex-col gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${item.bg}`}>
+                    <Icon name={item.icon} size={18} className={item.color} />
+                  </div>
+                  <h3 className="font-semibold text-slate-800 text-sm">{item.title}</h3>
+                  <p className="text-xs text-slate-500 leading-relaxed">{item.desc}</p>
+                </div>
+              ))}
             </div>
           </div>
         </section>
+
         {/* ── Блок «Для кого» ── */}
-        <section id="about" className="py-16 md:py-24 bg-muted/30">
+        <section id="about" className="py-16 md:py-24 bg-slate-50">
           <div className="mx-auto max-w-5xl px-6">
             <div className="text-center mb-12">
-              <span className="inline-block text-xs font-semibold tracking-wide text-slate-500 uppercase mb-3">Для кого</span>
-              <h2 className="text-balance text-3xl md:text-4xl font-bold">Для тех,{" "}
-                <span className="text-slate-600">кто управляет своим развитием</span>
+              <span className="inline-block text-xs font-semibold tracking-wide text-slate-400 uppercase mb-3">Для кого</span>
+              <h2 className="text-balance text-3xl md:text-4xl font-bold text-slate-900">
+                Для тех, кто управляет <span className="text-slate-600">своим развитием</span>
               </h2>
-              <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-                Не важно на каком этапе карьеры вы находитесь — Траектория помогает видеть реальную картину и двигаться вперёд.
-              </p>
             </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="grid sm:grid-cols-3 gap-5">
               {FOR_WHOM.map((item) => (
-                <div key={item.title} className="bg-background rounded-2xl border border-slate-200 p-6 flex flex-col gap-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${item.bg}`}>
-                    {item.icon}
+                <div key={item.title} className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col gap-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${item.bg}`}>
+                      {item.icon}
+                    </div>
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{item.label}</span>
                   </div>
                   <h3 className="font-semibold text-slate-800">{item.title}</h3>
-                  <p className="text-sm text-slate-600 leading-relaxed flex-1">{item.desc}</p>
+                  <p className="text-sm text-slate-500 leading-relaxed flex-1">{item.desc}</p>
                 </div>
               ))}
             </div>

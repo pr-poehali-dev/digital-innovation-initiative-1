@@ -112,6 +112,16 @@ const ITEM_TYPE_LABEL: Record<string, string> = {
   mentor: "Наставничество",
   mentoring: "Наставничество",
 };
+const ITEM_TYPE_COLOR: Record<string, string> = {
+  learn:      "bg-blue-50 text-blue-600",
+  practice:   "bg-emerald-50 text-emerald-600",
+  project:    "bg-teal-50 text-teal-600",
+  evidence:   "bg-violet-50 text-violet-600",
+  reflection: "bg-amber-50 text-amber-600",
+  assessment: "bg-indigo-50 text-indigo-600",
+  mentor:     "bg-rose-50 text-rose-600",
+  mentoring:  "bg-rose-50 text-rose-600",
+};
 const PRIORITY_DOT: Record<string, string> = {
   high: "bg-red-400", medium: "bg-amber-400", low: "bg-slate-300",
 };
@@ -238,11 +248,14 @@ function OverviewTab({
           <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span className={`text-lg font-bold ${gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
-                    {gapSummary.fit_pct}% соответствие роли
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className={`text-2xl font-bold tabular-nums ${gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600"}`}>
+                    {gapSummary.fit_pct}%
                   </span>
-                  <span className="text-slate-400 text-sm">{gapSummary.role_name}</span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-700">соответствие роли</p>
+                    <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{gapSummary.role_name}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-slate-500">
                   <span>
@@ -276,28 +289,31 @@ function OverviewTab({
         )}
       </div>
 
-      {/* ── 2. Следующий шаг — если есть ── */}
+      {/* ── 2. Следующий шаг — главный блок действия ── */}
       {recommendations.length > 0 && (
-        <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
-          <p className="text-xs font-semibold text-violet-700 mb-3 flex items-center gap-1.5">
-            <Icon name="Sparkles" size={13} /> Следующий шаг
-          </p>
-          <div className="space-y-2">
-            {recommendations.slice(0, 3).map(r => (
-              <div key={r.id} className="flex items-start gap-2.5">
-                <div className="w-5 h-5 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Icon name={ITEM_TYPE_ICON[r.item_type] ?? "Circle"} size={11} className="text-violet-500" />
+        <div className="bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-200 rounded-2xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-6 h-6 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
+              <Icon name="Sparkles" size={12} className="text-white" />
+            </div>
+            <p className="text-sm font-bold text-violet-900">Следующий шаг</p>
+          </div>
+          <div className="space-y-2.5">
+            {recommendations.slice(0, 3).map((r, i) => (
+              <div key={r.id} className={`flex items-start gap-3 ${i === 0 ? "bg-white/70 rounded-xl p-3 -mx-1" : "px-1 opacity-70"}`}>
+                <div className={`w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${i === 0 ? "bg-violet-100" : "bg-transparent"}`}>
+                  <Icon name={ITEM_TYPE_ICON[r.item_type] ?? "Circle"} size={12} className="text-violet-500" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                    <p className="text-xs font-medium text-slate-800 leading-snug">{r.title}</p>
+                  <p className={`leading-snug ${i === 0 ? "text-sm font-semibold text-slate-800" : "text-xs text-slate-600"}`}>{r.title}</p>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                     {r.item_type && (
-                      <span className="text-[9px] px-1.5 py-0.5 bg-violet-100 text-violet-600 rounded font-medium">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_TYPE_COLOR[r.item_type] ?? "bg-slate-100 text-slate-500"}`}>
                         {ITEM_TYPE_LABEL[r.item_type] ?? r.item_type}
                       </span>
                     )}
+                    {r.competency_name && <p className="text-[9px] text-slate-400">{r.competency_name}</p>}
                   </div>
-                  {r.competency_name && <p className="text-[10px] text-slate-500">{r.competency_name}</p>}
                 </div>
               </div>
             ))}
@@ -330,7 +346,9 @@ function OverviewTab({
               </p>
               {gapSummary.critical_gaps.slice(0, 4).map(g => (
                 <div key={g.competency_id} className="flex items-center gap-2 mb-1.5">
-                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${IMP_COLOR[g.importance]}`}>{g.importance}</span>
+                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${IMP_COLOR[g.importance] ?? ""}`}>
+                    {g.importance === "core" ? "ключевая" : g.importance === "important" ? "важная" : "базовая"}
+                  </span>
                   <span className="text-xs text-slate-700 flex-1 truncate">{g.name}</span>
                   <span className="text-[10px] text-slate-400 flex-shrink-0">{g.current_level}→{g.target_level}</span>
                 </div>
@@ -357,18 +375,17 @@ function OverviewTab({
         </div>
       )}
 
-      {/* ── 5. Детали — fit покрытие, Evidence — совсем вниз ── */}
+      {/* ── 5. Детали — только вторичные метрики ── */}
       {gapSummary && progress && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="flex flex-wrap gap-2 pt-1">
           {[
-            { l: "Соответствие роли", v: `${gapSummary.fit_pct}%`,        cls: gapSummary.fit_pct >= 60 ? "text-emerald-600" : "text-amber-600" },
-            { l: "Охват",            v: `${gapSummary.coverage_pct}%`,   cls: "text-violet-600" },
-            { l: "Быстрые улучшения", v: gapSummary.quick_wins.length,   cls: "text-amber-600" },
-            { l: "Подтверждений/нед", v: progress.evidence_added_week,   cls: "text-violet-600" },
+            { l: "Охват",             v: `${gapSummary.coverage_pct}%`,  cls: "text-violet-600" },
+            { l: "Быстрые улучшения", v: String(gapSummary.quick_wins.length), cls: "text-amber-600" },
+            { l: "Подтверждений/нед", v: String(progress.evidence_added_week), cls: "text-slate-600" },
           ].map(({ l, v, cls }) => (
-            <div key={l} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
-              <p className={`text-lg font-bold ${cls}`}>{v}</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">{l}</p>
+            <div key={l} className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+              <span className={`text-sm font-bold tabular-nums ${cls}`}>{v}</span>
+              <span className="text-[10px] text-slate-400">{l}</span>
             </div>
           ))}
         </div>
@@ -553,14 +570,16 @@ function PlanTab({ plan, onRefresh }: { plan: Plan | null; onRefresh: () => void
             {pitems.map(item => {
               const sc = STATUS_CFG[item.status] ?? STATUS_CFG.not_started;
               return (
-                <div key={item.id} className={`bg-white border rounded-2xl p-4 transition-opacity ${item.status === "done" ? "opacity-60" : ""}`}>
+                <div key={item.id} className={`bg-white border border-slate-200 rounded-2xl p-4 transition-all ${item.status === "done" ? "opacity-50 border-slate-100" : "hover:border-slate-300"}`}>
                   <div className="flex items-start gap-3">
-                    <Icon name={ITEM_TYPE_ICON[item.item_type] ?? "Circle"} size={15} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${ITEM_TYPE_COLOR[item.item_type] ?? "bg-slate-50 text-slate-400"}`}>
+                      <Icon name={ITEM_TYPE_ICON[item.item_type] ?? "Circle"} size={14} />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <p className={`text-sm font-semibold ${item.status === "done" ? "line-through text-slate-400" : "text-slate-800"}`}>{item.title}</p>
                         {item.item_type && (
-                          <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded-md font-medium">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${ITEM_TYPE_COLOR[item.item_type] ?? "bg-slate-100 text-slate-500"}`}>
                             {ITEM_TYPE_LABEL[item.item_type] ?? item.item_type}
                           </span>
                         )}
