@@ -499,6 +499,27 @@ export default function GrowthDashboard() {
           </div>
         </div>
 
+        {/* ── Ближайший шаг — выведен на первый план ── */}
+        {nextStepsTasks.some(t => t.state === "available") && (() => {
+          const activeStep = nextStepsTasks.find(t => t.state === "available" && Boolean(t.href));
+          if (!activeStep) return null;
+          return (
+            <div
+              className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-2xl p-5 flex items-center gap-4 cursor-pointer hover:from-violet-700 hover:to-indigo-700 transition-all shadow-md shadow-violet-200"
+              onClick={() => { analytics.dashboardNextStepClicked(activeStep.id, activeStep.state); navigate(activeStep.href!); }}
+            >
+              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                <Icon name="Sparkles" size={20} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-violet-200 uppercase tracking-widest mb-0.5">Следующий шаг</p>
+                <p className="text-sm font-semibold text-white leading-snug">{activeStep.label}</p>
+              </div>
+              <Icon name="ChevronRight" size={20} className="text-white/70 flex-shrink-0" />
+            </div>
+          );
+        })()}
+
         {/* ── Ряд 2: Индекс развития + Карта компетенций + Шаги ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 
@@ -566,10 +587,15 @@ export default function GrowthDashboard() {
           </div>
 
           {/* Ближайшие шаги — из dashboardModel */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="bg-white rounded-2xl p-5 border border-violet-100 shadow-sm ring-1 ring-violet-100">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
-              <span className="text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center">
+                  <Icon name="ListChecks" size={13} className="text-violet-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-slate-800">Ближайшие шаги</h3>
+              </div>
+              <span className="text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
                 {nextStepsTasks.filter(t => t.state === "done").length}/{nextStepsTasks.length}
               </span>
             </div>

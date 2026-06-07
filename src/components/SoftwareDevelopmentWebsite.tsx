@@ -3,7 +3,6 @@ import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import { ArrowRight, ChevronRight, Menu, X, Map, Target, TrendingUp, CheckCircle, Sparkles, Users, Plus } from "lucide-react"
 import { motion, type Variants } from "framer-motion"
-import { GridMotion } from "./ui/grid-motion"
 import { cn } from "@/lib/utils"
 import { Link } from "react-router-dom"
 import { useAuth } from "@/lib/auth-context"
@@ -127,25 +126,37 @@ const menuItems = [
 const HOW_IT_WORKS_STEPS = [
   {
     num: "01",
-    color: "bg-emerald-100 text-emerald-700",
+    icon: "Target",
+    accent: "bg-emerald-50 border-emerald-200",
+    numColor: "text-emerald-600",
+    iconColor: "text-emerald-500",
     title: "Выберите цель",
     desc: "Укажите роль, к которой хотите двигаться.",
   },
   {
     num: "02",
-    color: "bg-violet-100 text-violet-700",
+    icon: "ClipboardList",
+    accent: "bg-violet-50 border-violet-200",
+    numColor: "text-violet-600",
+    iconColor: "text-violet-500",
     title: "Оцените текущий уровень",
     desc: "Заполните профиль и пройдите самооценку.",
   },
   {
     num: "03",
-    color: "bg-blue-100 text-blue-700",
+    icon: "Map",
+    accent: "bg-blue-50 border-blue-200",
+    numColor: "text-blue-600",
+    iconColor: "text-blue-500",
     title: "Получите план развития",
     desc: "Система покажет приоритеты и следующий шаг.",
   },
   {
     num: "04",
-    color: "bg-indigo-100 text-indigo-700",
+    icon: "BadgeCheck",
+    accent: "bg-indigo-50 border-indigo-200",
+    numColor: "text-indigo-600",
+    iconColor: "text-indigo-500",
     title: "Подтверждайте прогресс",
     desc: "Фиксируйте практику, результаты и примеры опыта.",
   },
@@ -376,16 +387,7 @@ export default function SoftwareDevelopmentWebsite() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const studyImages = [
-    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/ba4b75b8-8d2b-4603-b9ab-07f5a660cef0.jpg",
-    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/6281ccd8-f392-4b34-88fd-170ccc1992e2.jpg",
-    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/805e5e62-be27-487c-8548-5db747b6ac1b.jpg",
-    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/591f1da1-c305-46ac-bf31-4b8a6e75c400.jpg",
-    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/940fc694-e228-423f-b6ea-e89b5ce9b80a.jpg",
-    "https://cdn.poehali.dev/projects/74e2bb00-8b75-428a-b2fe-9c02b6a39d64/files/7c3a1d4f-87c8-4660-a9d3-2cfdc414c421.jpg",
-  ]
-  // Заполняем сетку 28 элементов (повтор картинок про учёбу)
-  const gridItems = Array.from({ length: 28 }, (_, i) => studyImages[i % studyImages.length])
+
 
   return (
     <>
@@ -467,29 +469,83 @@ export default function SoftwareDevelopmentWebsite() {
                   </div>
                 </AnimatedGroup>
 
-                {/* Правая колонка — product visual */}
+                {/* Правая колонка — product UI visual */}
                 <AnimatedGroup variants={{
-                  container: { visible: { transition: { staggerChildren: 0.05, delayChildren: 0.4 } } },
+                  container: { visible: { transition: { staggerChildren: 0.08, delayChildren: 0.3 } } },
                   ...transitionVariants,
                 }}>
-                  <div className="relative hidden lg:block">
-                    <div className="relative rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60 overflow-hidden">
-                      <div className="bg-gradient-to-br from-slate-50 to-slate-100 aspect-[4/3] overflow-hidden">
-                        <GridMotion items={gridItems} gradientColor="rgba(30, 41, 59, 0.06)" className="h-full w-full" />
+                  <div className="relative hidden lg:block select-none">
+
+                    {/* Main product card */}
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden">
+
+                      {/* Card top bar */}
+                      <div className="px-5 pt-5 pb-4 border-b border-slate-100">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Целевая роль</p>
+                            <p className="text-sm font-bold text-slate-900 mt-0.5">Product Manager</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Готовность</p>
+                            <p className="text-2xl font-bold text-emerald-600 leading-none mt-0.5">72%</p>
+                          </div>
+                        </div>
+                        {/* Progress bar */}
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="h-2 bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full" style={{ width: "72%" }} />
+                        </div>
                       </div>
-                      {/* overlay bottom fade */}
-                      <div aria-hidden className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white to-transparent" />
+
+                      {/* Следующий шаг */}
+                      <div className="px-5 py-4 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-violet-100/60">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-5 h-5 rounded-md bg-violet-600 flex items-center justify-center flex-shrink-0">
+                            <Sparkles className="w-3 h-3 text-white" />
+                          </div>
+                          <p className="text-[11px] font-bold text-violet-800 uppercase tracking-wider">Следующий шаг</p>
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mb-1">Подтвердить опыт приоритизации</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-semibold">Практика</span>
+                          <span className="text-[10px] text-slate-400">30–45 мин</span>
+                        </div>
+                      </div>
+
+                      {/* Strengths + Gaps */}
+                      <div className="px-5 py-4 grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Сильные стороны</p>
+                          {["Стратегия", "Коммуникация", "Анализ данных"].map(s => (
+                            <div key={s} className="flex items-center gap-1.5 mb-1.5">
+                              <CheckCircle className="w-3 h-3 text-emerald-500 flex-shrink-0" />
+                              <span className="text-[11px] text-slate-600">{s}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Зоны роста</p>
+                          {["Технический бэкграунд", "Финансы"].map(g => (
+                            <div key={g} className="flex items-center gap-1.5 mb-1.5">
+                              <div className="w-3 h-3 rounded-full bg-amber-100 border border-amber-300 flex-shrink-0" />
+                              <span className="text-[11px] text-slate-600">{g}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    {/* floating badge */}
-                    <div className="absolute -bottom-4 -left-4 bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-lg shadow-slate-200/60 flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
-                        <CheckCircle className="w-4 h-4 text-emerald-500" />
+
+                    {/* Floating readiness badge */}
+                    <div className="absolute -bottom-3 -right-3 bg-white border border-slate-200 rounded-2xl px-3.5 py-2.5 shadow-lg shadow-slate-200/60 flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-xl bg-violet-600 flex items-center justify-center flex-shrink-0">
+                        <TrendingUp className="w-3.5 h-3.5 text-white" />
                       </div>
                       <div>
-                        <p className="text-xs font-semibold text-slate-800">Готовность к роли</p>
-                        <p className="text-[10px] text-slate-400">Персональный план сформирован</p>
+                        <p className="text-[10px] font-bold text-slate-800">+8% за месяц</p>
+                        <p className="text-[9px] text-slate-400">Прогресс растёт</p>
                       </div>
                     </div>
+
                   </div>
                 </AnimatedGroup>
 
@@ -510,14 +566,16 @@ export default function SoftwareDevelopmentWebsite() {
 
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {HOW_IT_WORKS_STEPS.map((step, i) => (
-                <div key={i} className="relative bg-white rounded-2xl border border-slate-200 p-5 flex flex-col">
-                  {/* Connector line on desktop */}
+                <div key={i} className={`relative rounded-2xl border p-5 flex flex-col ${step.accent}`}>
                   {i < HOW_IT_WORKS_STEPS.length - 1 && (
-                    <div className="hidden lg:block absolute top-[26px] -right-2 z-10">
+                    <div className="hidden lg:block absolute top-[22px] -right-2.5 z-10">
                       <ChevronRight className="h-4 w-4 text-slate-300" />
                     </div>
                   )}
-                  <span className={`self-start text-[11px] font-bold px-2.5 py-1 rounded-full mb-4 ${step.color}`}>{step.num}</span>
+                  <div className="flex items-center justify-between mb-4">
+                    <span className={`text-2xl font-black leading-none ${step.numColor}`}>{step.num}</span>
+                    <Icon name={step.icon} size={16} className={step.iconColor} fallback="Circle" />
+                  </div>
                   <h3 className="font-semibold text-slate-800 mb-1.5 text-sm">{step.title}</h3>
                   <p className="text-xs text-slate-500 leading-relaxed flex-1">{step.desc}</p>
                 </div>
@@ -536,14 +594,14 @@ export default function SoftwareDevelopmentWebsite() {
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { icon: "Star",       color: "text-emerald-500", bg: "bg-emerald-50", title: "Сильные стороны",       desc: "Поймёте, на что уже можно опираться при движении к роли." },
-                { icon: "TrendingUp", color: "text-amber-500",   bg: "bg-amber-50",   title: "Зоны роста",            desc: "Увидите, что мешает двигаться к цели и что закрыть первым." },
-                { icon: "Sparkles",   color: "text-violet-500",  bg: "bg-violet-50",  title: "Следующие шаги",        desc: "Конкретные рекомендации — обучение, практика, применение." },
-                { icon: "BadgeCheck", color: "text-blue-500",    bg: "bg-blue-50",    title: "Подтверждения прогресса", desc: "Фиксируйте рост не только обучением, но и реальным опытом." },
+                { icon: "Star",       color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", title: "Сильные стороны",         desc: "Поймёте, на что уже можно опираться при движении к роли." },
+                { icon: "TrendingUp", color: "text-amber-600",   bg: "bg-amber-50",   border: "border-amber-100",   title: "Зоны роста",              desc: "Увидите, что мешает двигаться к цели и что закрыть первым." },
+                { icon: "Sparkles",   color: "text-violet-600",  bg: "bg-violet-50",  border: "border-violet-100",  title: "Следующие шаги",          desc: "Конкретные рекомендации — обучение, практика, применение." },
+                { icon: "BadgeCheck", color: "text-blue-600",    bg: "bg-blue-50",    border: "border-blue-100",    title: "Подтверждения прогресса", desc: "Фиксируйте рост не только обучением, но и реальным опытом." },
               ].map(item => (
-                <div key={item.title} className="bg-slate-50 rounded-2xl p-5 flex flex-col gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${item.bg}`}>
-                    <Icon name={item.icon} size={18} className={item.color} />
+                <div key={item.title} className={`bg-white rounded-2xl border ${item.border} p-5 flex flex-col gap-3 shadow-sm`}>
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${item.bg}`}>
+                    <Icon name={item.icon} size={20} className={item.color} />
                   </div>
                   <h3 className="font-semibold text-slate-800 text-sm">{item.title}</h3>
                   <p className="text-xs text-slate-500 leading-relaxed">{item.desc}</p>
@@ -564,14 +622,14 @@ export default function SoftwareDevelopmentWebsite() {
             </div>
             <div className="grid sm:grid-cols-3 gap-5">
               {FOR_WHOM.map((item) => (
-                <div key={item.title} className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col gap-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${item.bg}`}>
+                <div key={item.title} className="bg-white rounded-2xl border border-slate-200 p-6 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-slate-300 transition-all duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${item.bg}`}>
                       {item.icon}
                     </div>
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{item.label}</span>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{item.label}</span>
                   </div>
-                  <h3 className="font-semibold text-slate-800">{item.title}</h3>
+                  <h3 className="font-bold text-slate-800 text-base mt-1">{item.title}</h3>
                   <p className="text-sm text-slate-500 leading-relaxed flex-1">{item.desc}</p>
                 </div>
               ))}
