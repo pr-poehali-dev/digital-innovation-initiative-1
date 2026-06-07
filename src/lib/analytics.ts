@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-const YM_ID = 101026698;
+const YM_ID = 109707980;
 
 type VisualsSupportsReason =
   | "presentation_task"
