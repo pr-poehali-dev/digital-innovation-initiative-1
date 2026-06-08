@@ -489,7 +489,7 @@ def handler(event: dict, context) -> dict:
 
         # ── AI-режим обучения по теме ─────────────────────────────────
         if method == "POST" and action == "topic_learn":
-            topic_id   = body.get("topic_id")
+            topic_id    = body.get("topic_id")
             topic_title = (body.get("topic_title") or "").strip()
             goal_title  = (body.get("goal_title") or "").strip()
             mode        = body.get("mode", "full")   # full | explain | materials | quiz | session
@@ -497,171 +497,176 @@ def handler(event: dict, context) -> dict:
             if not topic_title:
                 return cors({"ok": False, "error": {"message": "Нужен topic_title"}}, 400)
 
-            context = f"Тема: «{topic_title}»"
+            # Контекст роли: передаётся из goal_title, помогает AI давать релевантные примеры
+            role_ctx = ""
             if goal_title:
-                context += f". Учебная цель: «{goal_title}»"
+                role_ctx = (
+                    f"Учебная цель пользователя: «{goal_title}». "
+                    "Пользователь — практик, изучает для применения в работе, "
+                    "не студент. Все объяснения и примеры привязывай к этому контексту."
+                )
+
+            # Единый materials-промпт с provenance
+            MATERIALS_SCHEMA = (
+                '  "materials": [\n'
+                '    {\n'
+                '      "title": "Точное название документа / книги / ресурса",\n'
+                '      "source_name": "Организация или автор-издатель (COSO, IIA, BIS, McKinsey и т.д.)",\n'
+                '      "source_type": "official_framework|official_guidance|professional_standard|academic|consulting_overview|book|course|tool",\n'
+                '      "trust_level": "high|medium|low",\n'
+                '      "level": "basic|intermediate|advanced",\n'
+                '      "description": "Что внутри и почему полезно (1-2 предложения)",\n'
+                '      "why_recommended": "Конкретная причина рекомендации именно для этой темы",\n'
+                '      "access_note": "Где найти: официальный сайт, открытый доступ, поисковый запрос, коммерческий"\n'
+                "    }\n"
+                "  ]\n"
+            )
+
+            def parse_json(raw: str, fallback: dict) -> dict:
+                raw = raw.strip()
+                if raw.startswith("```"):
+                    raw = "\n".join(raw.split("\n")[1:])
+                    raw = raw.rsplit("```", 1)[0]
+                try:
+                    return json.loads(raw.strip())
+                except Exception:
+                    return fallback
 
             if mode == "explain":
-                # Только объяснение темы
-                system = "Ты эксперт-наставник. Объясняй чётко, по-русски, практичным языком руководителя."
+                system = (
+                    "Ты эксперт-наставник. Объясняй чётко, по-русски, языком практика. "
+                    "Давай примеры, привязанные к реальной работе. Отвечай СТРОГО в JSON."
+                )
                 prompt = (
-                    f"{context}\n\n"
-                    "Дай структурированное объяснение этой темы в формате JSON:\n"
+                    f"Тема: «{topic_title}»\n"
+                    f"{role_ctx}\n\n"
+                    "Дай структурированное объяснение в формате JSON:\n"
                     "{\n"
-                    '  "what": "Что это такое (2-3 предложения)",\n'
-                    '  "why": "Почему это важно для специалиста (1-2 предложения)",\n'
+                    '  "what": "Что это такое (2-3 предложения простым языком)",\n'
+                    '  "why": "Почему важно именно для этой учебной цели (1-2 предложения)",\n'
                     '  "key_concepts": ["Ключевое понятие 1", "Ключевое понятие 2", "Ключевое понятие 3"],\n'
                     '  "common_mistakes": ["Типичная ошибка понимания 1", "Типичная ошибка 2"],\n'
-                    '  "practical_tip": "Один практический совет как применить это знание"\n'
+                    '  "practical_tip": "Один конкретный совет как применить в работе"\n'
                     "}"
                 )
-                raw = yandex_gpt(prompt, system)
-                raw = raw.strip()
-                if raw.startswith("```"):
-                    raw = "\n".join(raw.split("\n")[1:])
-                    raw = raw.rsplit("```", 1)[0]
-                try:
-                    explanation = json.loads(raw.strip())
-                except Exception:
-                    explanation = {"what": raw, "why": "", "key_concepts": [], "common_mistakes": [], "practical_tip": ""}
-                return cors({"ok": True, "explanation": explanation})
+                result = parse_json(yandex_gpt(prompt, system),
+                                    {"what": "", "why": "", "key_concepts": [], "common_mistakes": [], "practical_tip": ""})
+                return cors({"ok": True, "explanation": result})
 
             if mode == "materials":
-                # Подбор материалов по теме
-                system = "Ты библиотекарь-эксперт. Подбираешь качественные источники для изучения темы. Отвечай СТРОГО в JSON."
+                system = (
+                    "Ты эксперт-библиотекарь. Рекомендуй только реально существующие, "
+                    "проверенные источники с указанием организации-автора. "
+                    "Никаких выдуманных названий — только известные документы, фреймворки, книги. "
+                    "trust_level: high — официальные стандарты и признанные профассоциации, "
+                    "medium — консалтинговые обзоры и академические статьи, low — прочее. "
+                    "Отвечай СТРОГО в JSON."
+                )
                 prompt = (
-                    f"{context}\n\n"
-                    "Подбери 5 лучших источников для изучения этой темы. Для каждого укажи:\n"
-                    "- что это за источник\n"
-                    "- почему полезен\n"
-                    "- как называется / где найти\n"
-                    "- уровень: basic / intermediate / advanced\n"
-                    "- тип: standard / book / article / course / tool\n\n"
+                    f"Тема: «{topic_title}»\n"
+                    f"{role_ctx}\n\n"
+                    "Подбери 5 лучших реально существующих источников для изучения темы.\n"
                     "Формат JSON:\n"
                     "{\n"
-                    '  "materials": [\n'
-                    '    {\n'
-                    '      "title": "Название источника",\n'
-                    '      "type": "standard",\n'
-                    '      "level": "basic",\n'
-                    '      "description": "Краткое описание (1-2 предложения)",\n'
-                    '      "why_useful": "Почему полезен для этой темы",\n'
-                    '      "where_to_find": "Где найти: сайт, поисковый запрос, издательство"\n'
-                    "    }\n"
-                    "  ]\n"
+                    + MATERIALS_SCHEMA +
                     "}"
                 )
-                raw = yandex_gpt(prompt, system)
-                raw = raw.strip()
-                if raw.startswith("```"):
-                    raw = "\n".join(raw.split("\n")[1:])
-                    raw = raw.rsplit("```", 1)[0]
-                try:
-                    result = json.loads(raw.strip())
-                    materials = result.get("materials", [])
-                except Exception:
-                    materials = []
-                return cors({"ok": True, "materials": materials})
+                result = parse_json(yandex_gpt(prompt, system), {"materials": []})
+                return cors({"ok": True, "materials": result.get("materials", [])})
 
             if mode == "quiz":
-                # Мини-проверка понимания
-                system = "Ты преподаватель. Составляй вопросы, проверяющие понимание, а не механическое запоминание. JSON только."
+                system = (
+                    "Ты преподаватель-эксперт. Составляй вопросы, проверяющие понимание концепций, "
+                    "а не механическое запоминание терминов. Вопросы должны выявлять реальные пробелы. "
+                    "Отвечай СТРОГО в JSON."
+                )
                 prompt = (
-                    f"{context}\n\n"
-                    "Составь 5 вопросов для проверки понимания этой темы в формате JSON:\n"
+                    f"Тема: «{topic_title}»\n"
+                    f"{role_ctx}\n\n"
+                    "Составь 5 вопросов с вариантами ответов для проверки понимания темы.\n"
+                    "Вопросы должны проверять:\n"
+                    "- понимание концепции, а не определения наизусть;\n"
+                    "- умение отличить правильное от похожего неправильного;\n"
+                    "- применение в практической ситуации.\n\n"
+                    "Формат JSON:\n"
                     "{\n"
                     '  "questions": [\n'
                     '    {\n'
                     '      "question": "Текст вопроса",\n'
                     '      "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"],\n'
                     '      "correct": 0,\n'
-                    '      "explanation": "Почему этот ответ правильный"\n'
+                    '      "explanation": "Почему правильный ответ правильный, и в чём ошибка в остальных"\n'
                     "    }\n"
                     "  ]\n"
                     "}"
                 )
-                raw = yandex_gpt(prompt, system)
-                raw = raw.strip()
-                if raw.startswith("```"):
-                    raw = "\n".join(raw.split("\n")[1:])
-                    raw = raw.rsplit("```", 1)[0]
-                try:
-                    result = json.loads(raw.strip())
-                    questions = result.get("questions", [])
-                except Exception:
-                    questions = []
-                return cors({"ok": True, "questions": questions})
+                result = parse_json(yandex_gpt(prompt, system), {"questions": []})
+                return cors({"ok": True, "questions": result.get("questions", [])})
 
             if mode == "session":
-                # Учебная сессия: объяснение + термины + практика за один запрос
                 minutes = int(body.get("minutes", 30))
-                system = "Ты наставник. Составляй компактные учебные сессии. Отвечай строго в JSON."
+                # Масштабируем глубину под длину сессии
+                depth = "краткий" if minutes <= 20 else ("стандартный" if minutes <= 30 else "углублённый")
+                system = (
+                    "Ты наставник. Составляй структурированные учебные сессии. "
+                    "Включай практические кейсы из реальной жизни. Отвечай СТРОГО в JSON."
+                )
                 prompt = (
-                    f"{context}\n"
-                    f"Время сессии: {minutes} минут.\n\n"
+                    f"Тема: «{topic_title}»\n"
+                    f"{role_ctx}\n"
+                    f"Длина сессии: {minutes} минут. Уровень детализации: {depth}.\n\n"
                     "Составь учебную сессию в формате JSON:\n"
                     "{\n"
-                    '  "intro": "Вводное объяснение темы (3-5 предложений)",\n'
+                    '  "intro": "Вводное объяснение темы (3-5 предложений, конкретно и по делу)",\n'
                     '  "key_points": [\n'
-                    '    {"point": "Ключевой тезис 1", "detail": "Пояснение в 1-2 предложениях"}\n'
+                    '    {"point": "Ключевой тезис", "detail": "Пояснение 1-2 предложения с примером"}\n'
                     "  ],\n"
                     '  "terms": [\n'
-                    '    {"term": "Термин", "definition": "Простое определение"}\n'
+                    '    {"term": "Термин", "definition": "Простое определение без воды"}\n'
                     "  ],\n"
-                    '  "practical_case": "Практический сценарий или пример применения темы",\n'
-                    '  "takeaway": "Главный вывод сессии в одном предложении",\n'
-                    '  "next_step": "Что изучить следующим"\n'
+                    '  "practical_case": "Конкретный рабочий сценарий: ситуация, риск, как работает контроль / инструмент / принцип",\n'
+                    '  "reflection_questions": [\n'
+                    '    "Вопрос для самостоятельного обдумывания (не тест, а повод подумать)"\n'
+                    "  ],\n"
+                    '  "takeaway": "Главный вывод одним предложением",\n'
+                    '  "next_step": "Конкретная тема или действие — что делать после этой сессии"\n'
                     "}"
                 )
-                raw = yandex_gpt(prompt, system)
-                raw = raw.strip()
-                if raw.startswith("```"):
-                    raw = "\n".join(raw.split("\n")[1:])
-                    raw = raw.rsplit("```", 1)[0]
-                try:
-                    session = json.loads(raw.strip())
-                except Exception:
-                    session = {"intro": raw, "key_points": [], "terms": [], "practical_case": "", "takeaway": "", "next_step": ""}
-                return cors({"ok": True, "session": session})
+                result = parse_json(yandex_gpt(prompt, system),
+                                    {"intro": "", "key_points": [], "terms": [], "practical_case": "", "reflection_questions": [], "takeaway": "", "next_step": ""})
+                return cors({"ok": True, "session": result})
 
-            # mode == "full": полный пакет для открытия темы
-            system = "Ты эксперт-наставник. Отвечай СТРОГО в формате JSON, без markdown, без пояснений."
+            # mode == "full": полный пакет при открытии темы
+            system = (
+                "Ты эксперт-наставник и библиотекарь. "
+                "Для материалов рекомендуй только реально существующие источники. "
+                "trust_level: high — официальные стандарты и профессиональные ассоциации (COSO, IIA, BIS, ISO и т.д.), "
+                "medium — консалтинговые обзоры крупных компаний и академические работы, "
+                "low — прочее. "
+                "Отвечай СТРОГО в формате JSON без markdown и без пояснений вне JSON."
+            )
             prompt = (
-                f"{context}\n\n"
-                "Составь полный учебный пакет для изучения этой темы в формате JSON:\n"
+                f"Тема: «{topic_title}»\n"
+                f"{role_ctx}\n\n"
+                "Составь полный учебный пакет в формате JSON:\n"
                 "{\n"
                 '  "explanation": {\n'
-                '    "what": "Что это такое (2-3 предложения)",\n'
-                '    "why": "Почему важно для специалиста",\n'
-                '    "practical_tip": "Один практический совет"\n'
+                '    "what": "Что это такое (2-3 предложения простым языком)",\n'
+                '    "why": "Почему важно именно для этой учебной цели",\n'
+                '    "practical_tip": "Один конкретный совет практика"\n'
                 "  },\n"
                 '  "terms": [\n'
                 '    {"term": "Термин", "definition": "Простое определение"}\n'
                 "  ],\n"
-                '  "materials": [\n'
-                '    {\n'
-                '      "title": "Название",\n'
-                '      "type": "book|article|standard|course|tool",\n'
-                '      "level": "basic|intermediate|advanced",\n'
-                '      "description": "Краткое описание",\n'
-                '      "where_to_find": "Где найти"\n'
-                '    }\n'
-                "  ],\n"
+                "  " + MATERIALS_SCHEMA.strip() + ",\n"
                 '  "questions": [\n'
-                '    {"question": "Вопрос для самопроверки"}\n'
+                '    {"question": "Вопрос для самопроверки — проверяет понимание, не память"}\n'
                 "  ],\n"
-                '  "next_step": "Что сделать после изучения этой темы"\n'
+                '  "next_step": "Что изучить или сделать следующим"\n'
                 "}"
             )
-            raw = yandex_gpt(prompt, system)
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = "\n".join(raw.split("\n")[1:])
-                raw = raw.rsplit("```", 1)[0]
-            try:
-                pack = json.loads(raw.strip())
-            except Exception:
-                pack = {"explanation": {"what": raw, "why": "", "practical_tip": ""}, "terms": [], "materials": [], "questions": [], "next_step": ""}
+            pack = parse_json(yandex_gpt(prompt, system),
+                              {"explanation": {"what": "", "why": "", "practical_tip": ""}, "terms": [], "materials": [], "questions": [], "next_step": ""})
             return cors({"ok": True, "pack": pack})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)

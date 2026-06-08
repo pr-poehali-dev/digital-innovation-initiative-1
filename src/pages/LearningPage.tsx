@@ -54,10 +54,22 @@ type Progress = {
   notes_count: number;
 };
 
+type Material = {
+  title: string;
+  source_name?: string;
+  source_type?: string;
+  trust_level?: "high" | "medium" | "low";
+  level?: string;
+  description?: string;
+  why_recommended?: string;
+  access_note?: string;
+  where_to_find?: string;
+};
+
 type TopicPack = {
   explanation?: { what: string; why: string; practical_tip: string };
   terms?: { term: string; definition: string }[];
-  materials?: { title: string; type: string; level: string; description: string; where_to_find: string }[];
+  materials?: Material[];
   questions?: { question: string }[];
   next_step?: string;
 };
@@ -73,6 +85,7 @@ type SessionData = {
   intro: string;
   key_points: { point: string; detail: string }[];
   terms: { term: string; definition: string }[];
+  reflection_questions?: string[];
   practical_case: string;
   takeaway: string;
   next_step: string;
@@ -958,26 +971,53 @@ export default function LearningPage() {
                               <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Рекомендуемые материалы</span>
                             </div>
                             <div className="space-y-3">
-                              {topicPack.materials.map((m, i) => (
-                                <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                  <div className="flex-shrink-0 mt-0.5">
-                                    <span className={`inline-block w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center ${
-                                      m.level === "basic" ? "bg-emerald-100 text-emerald-700" :
-                                      m.level === "advanced" ? "bg-red-100 text-red-700" :
-                                      "bg-blue-100 text-blue-700"
-                                    }`}>
-                                      {m.level === "basic" ? "B" : m.level === "advanced" ? "A" : "M"}
-                                    </span>
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-semibold text-slate-800 leading-snug">{m.title}</p>
-                                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{m.description}</p>
-                                    {m.where_to_find && (
-                                      <p className="text-[10px] text-violet-600 mt-1">📍 {m.where_to_find}</p>
+                              {topicPack.materials.map((m, i) => {
+                                const trustColor = m.trust_level === "high"
+                                  ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                  : m.trust_level === "medium"
+                                  ? "bg-amber-100 text-amber-700 border-amber-200"
+                                  : "bg-slate-100 text-slate-500 border-slate-200";
+                                const trustLabel = m.trust_level === "high" ? "★ Надёжный" : m.trust_level === "medium" ? "◆ Средний" : "○ Прочее";
+                                const typeLabel: Record<string, string> = {
+                                  official_framework: "Фреймворк",
+                                  official_guidance: "Гайданс",
+                                  professional_standard: "Стандарт",
+                                  academic: "Академический",
+                                  consulting_overview: "Консалтинг",
+                                  book: "Книга",
+                                  course: "Курс",
+                                  tool: "Инструмент",
+                                };
+                                return (
+                                  <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="text-xs font-semibold text-slate-800 leading-snug flex-1">{m.title}</p>
+                                      <span className={`flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded border ${trustColor}`}>
+                                        {trustLabel}
+                                      </span>
+                                    </div>
+                                    {m.source_name && (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-semibold text-slate-500">{m.source_name}</span>
+                                        {m.source_type && (
+                                          <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded">
+                                            {typeLabel[m.source_type] || m.source_type}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {(m.description || m.why_recommended) && (
+                                      <p className="text-[11px] text-slate-600 leading-snug">{m.why_recommended || m.description}</p>
+                                    )}
+                                    {m.access_note && (
+                                      <p className="text-[10px] text-violet-600 flex items-center gap-1">
+                                        <Icon name="MapPin" size={9} />
+                                        {m.access_note}
+                                      </p>
                                     )}
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -1111,6 +1151,20 @@ export default function LearningPage() {
                             <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
                               <p className="text-xs font-semibold text-amber-700 mb-1">Практический сценарий</p>
                               <p className="text-xs text-slate-700 leading-snug">{sessionData.practical_case}</p>
+                            </div>
+                          )}
+                          {/* Вопросы для рефлексии */}
+                          {sessionData.reflection_questions && sessionData.reflection_questions.length > 0 && (
+                            <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                              <p className="text-xs font-semibold text-indigo-700 mb-2">Подумай сам</p>
+                              <div className="space-y-1.5">
+                                {sessionData.reflection_questions.map((q, i) => (
+                                  <div key={i} className="flex gap-2 text-xs text-slate-700">
+                                    <span className="text-indigo-400 flex-shrink-0">→</span>
+                                    <span className="leading-snug">{q}</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
                           {/* Вывод */}
