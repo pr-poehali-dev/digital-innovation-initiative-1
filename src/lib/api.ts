@@ -521,4 +521,6 @@ export const learningApi = {
   saveCheckin: (data: { goal_id: number; goal_title: string; learned: string; clearer_now: string; gaps: string; next_focus: string }) =>
     request(URLS.learning, "/?action=save_checkin", "POST", data),
   getCheckins: (goal_id: number) => request(URLS.learning, `/?action=checkins&goal_id=${goal_id}`, "GET"),
+  topicLearn: (data: { topic_id?: number; topic_title: string; goal_title?: string; mode: "full" | "explain" | "materials" | "quiz" | "session"; minutes?: number }) =>
+    request(URLS.learning, "/?action=topic_learn", "POST", data),
 };

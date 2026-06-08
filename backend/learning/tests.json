@@ -29,6 +29,15 @@
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized - topic_learn",
+      "method": "POST",
+      "path": "/?action=topic_learn",
+      "body": {"topic_title": "Тест", "mode": "full"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

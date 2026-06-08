@@ -53,6 +53,30 @@ type Progress = {
   percent: number;
   notes_count: number;
 };
+
+type TopicPack = {
+  explanation?: { what: string; why: string; practical_tip: string };
+  terms?: { term: string; definition: string }[];
+  materials?: { title: string; type: string; level: string; description: string; where_to_find: string }[];
+  questions?: { question: string }[];
+  next_step?: string;
+};
+
+type QuizQuestion = {
+  question: string;
+  options: string[];
+  correct: number;
+  explanation: string;
+};
+
+type SessionData = {
+  intro: string;
+  key_points: { point: string; detail: string }[];
+  terms: { term: string; definition: string }[];
+  practical_case: string;
+  takeaway: string;
+  next_step: string;
+};
 const KIND_ICONS: Record<string, string> = {
   note: "StickyNote",
   link: "Link",
@@ -97,6 +121,19 @@ export default function LearningPage() {
   const [aiHistory, setAiHistory] = useState<{ q: string; a: string }[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const aiEndRef = useRef<HTMLDivElement>(null);
+
+  // Topic Learning Mode
+  const [activeTopic, setActiveTopic] = useState<Topic | null>(null);
+  const [topicTab, setTopicTab] = useState<"learn" | "session" | "quiz">("learn");
+  const [topicPack, setTopicPack] = useState<TopicPack | null>(null);
+  const [topicPackLoading, setTopicPackLoading] = useState(false);
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionMinutes, setSessionMinutes] = useState(30);
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
+  const [quizSubmitted, setQuizSubmitted] = useState(false);
 
   // Находки
   const [noteContent, setNoteContent] = useState("");
@@ -252,6 +289,72 @@ export default function LearningPage() {
     }
   }
 
+  async function openTopic(topic: Topic) {
+    setActiveTopic(topic);
+    setTopicTab("learn");
+    setTopicPack(null);
+    setSessionData(null);
+    setQuizQuestions([]);
+    setQuizAnswers({});
+    setQuizSubmitted(false);
+    if (!activeGoal) return;
+    setTopicPackLoading(true);
+    try {
+      const data = await learningApi.topicLearn({
+        topic_id: topic.id,
+        topic_title: topic.title,
+        goal_title: activeGoal.title,
+        mode: "full",
+      }) as { pack: TopicPack };
+      setTopicPack(data.pack);
+    } catch {
+      toast({ title: "AI не смог загрузить тему, попробуй ещё раз", variant: "destructive" });
+    } finally {
+      setTopicPackLoading(false);
+    }
+  }
+
+  async function loadSession(minutes: number) {
+    if (!activeTopic || !activeGoal) return;
+    setSessionLoading(true);
+    setSessionData(null);
+    try {
+      const data = await learningApi.topicLearn({
+        topic_id: activeTopic.id,
+        topic_title: activeTopic.title,
+        goal_title: activeGoal.title,
+        mode: "session",
+        minutes,
+      }) as { session: SessionData };
+      setSessionData(data.session);
+    } catch {
+      toast({ title: "Не удалось загрузить сессию", variant: "destructive" });
+    } finally {
+      setSessionLoading(false);
+    }
+  }
+
+  async function loadQuiz() {
+    if (!activeTopic || !activeGoal) return;
+    setQuizLoading(true);
+    setQuizQuestions([]);
+    setQuizAnswers({});
+    setQuizSubmitted(false);
+    try {
+      const data = await learningApi.topicLearn({
+        topic_id: activeTopic.id,
+        topic_title: activeTopic.title,
+        goal_title: activeGoal.title,
+        mode: "quiz",
+      }) as { questions: QuizQuestion[] };
+      setQuizQuestions(data.questions || []);
+    } catch {
+      toast({ title: "Не удалось загрузить проверку", variant: "destructive" });
+    } finally {
+      setQuizLoading(false);
+    }
+  }
+
   // Строим дерево тем
   const rootTopics = topics.filter(t => t.parent_id === null);
   const childTopics = (parentId: number) => topics.filter(t => t.parent_id === parentId);
@@ -363,7 +466,7 @@ export default function LearningPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+          <div className={`grid grid-cols-1 gap-5 ${activeTopic ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
 
             {/* Левая колонка — список целей */}
             <div className="lg:col-span-1 space-y-2">
@@ -397,9 +500,9 @@ export default function LearningPage() {
               ))}
             </div>
 
-            {/* Правая колонка — детали цели */}
+            {/* Центральная колонка — детали цели */}
             {activeGoal && (
-              <div className="lg:col-span-3 space-y-4">
+              <div className={`${activeTopic ? "lg:col-span-2" : "lg:col-span-3"} space-y-4`}>
 
                 {/* Прогресс-шапка */}
                 {progress && (
@@ -491,15 +594,36 @@ export default function LearningPage() {
                               <div className="divide-y divide-slate-50">
                                 {children.map(topic => {
                                   const cur = TOPIC_STATUSES.find(s => s.value === topic.status) ?? TOPIC_STATUSES[0];
+                                  const isActive = activeTopic?.id === topic.id;
                                   return (
-                                    <div key={topic.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 transition-colors group">
-                                      {/* Цветная точка текущего статуса */}
+                                    <div
+                                      key={topic.id}
+                                      className={`px-4 py-2.5 flex items-center gap-3 transition-colors group cursor-pointer ${
+                                        isActive ? "bg-violet-50 border-l-2 border-violet-500" : "hover:bg-slate-50"
+                                      }`}
+                                      onClick={() => isActive ? setActiveTopic(null) : openTopic(topic)}
+                                    >
                                       <div className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${cur.dot}`} />
-                                      <span className={`text-sm flex-1 leading-snug ${topic.status === "applied" ? "text-slate-500" : "text-slate-700"}`}>
+                                      <span className={`text-sm flex-1 leading-snug ${
+                                        isActive ? "text-violet-700 font-medium" :
+                                        topic.status === "applied" ? "text-slate-500" : "text-slate-700"
+                                      }`}>
                                         {topic.title}
                                       </span>
+                                      {/* Кнопка «Учить» */}
+                                      <button
+                                        onClick={e => { e.stopPropagation(); if (isActive) { setActiveTopic(null); } else { openTopic(topic); } }}
+                                        className={`flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all ${
+                                          isActive
+                                            ? "bg-violet-100 text-violet-700"
+                                            : "opacity-0 group-hover:opacity-100 bg-violet-50 text-violet-600 hover:bg-violet-100"
+                                        }`}
+                                      >
+                                        <Icon name="Sparkles" size={10} />
+                                        {isActive ? "Закрыть" : "Учить"}
+                                      </button>
                                       {/* 4-уровневый inline-селектор */}
-                                      <div className="flex gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                                      <div className="flex gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                                         {TOPIC_STATUSES.map(s => (
                                           <button
                                             key={s.value}
@@ -515,9 +639,6 @@ export default function LearningPage() {
                                           </button>
                                         ))}
                                       </div>
-                                      <span className={`hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${cur.bg} ${cur.color}`}>
-                                        {cur.label}
-                                      </span>
                                     </div>
                                   );
                                 })}
@@ -734,6 +855,369 @@ export default function LearningPage() {
                       setActiveGoal(g => g ? { ...g, start_date: date } : g);
                     }}
                   />
+                )}
+              </div>
+            )}
+
+            {/* ── Topic Learning Mode — правая панель ── */}
+            {activeTopic && (
+              <div className="lg:col-span-2 space-y-4">
+                {/* Заголовок панели */}
+                <div className="bg-gradient-to-r from-violet-600 to-indigo-600 rounded-2xl p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-violet-200 uppercase tracking-widest mb-1">AI-коуч · Тема</p>
+                      <h3 className="text-sm font-bold text-white leading-snug">{activeTopic.title}</h3>
+                    </div>
+                    <button onClick={() => setActiveTopic(null)} className="flex-shrink-0 w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center hover:bg-white/30 transition-colors">
+                      <Icon name="X" size={13} className="text-white" />
+                    </button>
+                  </div>
+                  {/* Вкладки внутри панели */}
+                  <div className="flex gap-1 mt-3">
+                    {(["learn", "session", "quiz"] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          setTopicTab(t);
+                          if (t === "session" && !sessionData && !sessionLoading) loadSession(sessionMinutes);
+                          if (t === "quiz" && quizQuestions.length === 0 && !quizLoading) loadQuiz();
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          topicTab === t ? "bg-white text-violet-700" : "text-violet-200 hover:text-white hover:bg-white/20"
+                        }`}
+                      >
+                        {t === "learn" ? "📖 Учить" : t === "session" ? "⏱ Сессия" : "✅ Проверка"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Вкладка: Учить */}
+                {topicTab === "learn" && (
+                  <div className="space-y-3">
+                    {topicPackLoading ? (
+                      <div className="bg-white border border-slate-200 rounded-2xl p-8 flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-sm text-slate-500">AI изучает тему и готовит пакет...</p>
+                      </div>
+                    ) : topicPack ? (
+                      <>
+                        {/* Объяснение */}
+                        {topicPack.explanation && (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center">
+                                <Icon name="BookOpen" size={13} className="text-violet-600" />
+                              </div>
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Объяснение</span>
+                            </div>
+                            <p className="text-sm text-slate-800 leading-relaxed">{topicPack.explanation.what}</p>
+                            {topicPack.explanation.why && (
+                              <div className="p-3 bg-violet-50 rounded-xl border border-violet-100">
+                                <p className="text-xs font-semibold text-violet-700 mb-0.5">Почему важно</p>
+                                <p className="text-xs text-slate-700 leading-relaxed">{topicPack.explanation.why}</p>
+                              </div>
+                            )}
+                            {topicPack.explanation.practical_tip && (
+                              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                                <p className="text-xs font-semibold text-emerald-700 mb-0.5">Практический совет</p>
+                                <p className="text-xs text-slate-700 leading-relaxed">{topicPack.explanation.practical_tip}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Термины */}
+                        {topicPack.terms && topicPack.terms.length > 0 && (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-6 h-6 rounded-lg bg-amber-100 flex items-center justify-center">
+                                <Icon name="BookMarked" size={13} className="text-amber-600" />
+                              </div>
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Ключевые термины</span>
+                            </div>
+                            <div className="space-y-2">
+                              {topicPack.terms.map((t, i) => (
+                                <div key={i} className="flex gap-2">
+                                  <span className="text-xs font-semibold text-slate-700 flex-shrink-0 min-w-[90px]">{t.term}</span>
+                                  <span className="text-xs text-slate-500 leading-snug">{t.definition}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Материалы */}
+                        {topicPack.materials && topicPack.materials.length > 0 && (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-6 h-6 rounded-lg bg-blue-100 flex items-center justify-center">
+                                <Icon name="Library" size={13} className="text-blue-600" />
+                              </div>
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Рекомендуемые материалы</span>
+                            </div>
+                            <div className="space-y-3">
+                              {topicPack.materials.map((m, i) => (
+                                <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                  <div className="flex-shrink-0 mt-0.5">
+                                    <span className={`inline-block w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center ${
+                                      m.level === "basic" ? "bg-emerald-100 text-emerald-700" :
+                                      m.level === "advanced" ? "bg-red-100 text-red-700" :
+                                      "bg-blue-100 text-blue-700"
+                                    }`}>
+                                      {m.level === "basic" ? "B" : m.level === "advanced" ? "A" : "M"}
+                                    </span>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-slate-800 leading-snug">{m.title}</p>
+                                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{m.description}</p>
+                                    {m.where_to_find && (
+                                      <p className="text-[10px] text-violet-600 mt-1">📍 {m.where_to_find}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Вопросы для самопроверки */}
+                        {topicPack.questions && topicPack.questions.length > 0 && (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-6 h-6 rounded-lg bg-indigo-100 flex items-center justify-center">
+                                <Icon name="HelpCircle" size={13} className="text-indigo-600" />
+                              </div>
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Вопросы для размышления</span>
+                            </div>
+                            <div className="space-y-2">
+                              {topicPack.questions.map((q, i) => (
+                                <div key={i} className="flex gap-2 text-xs text-slate-700">
+                                  <span className="text-slate-400 flex-shrink-0">{i + 1}.</span>
+                                  <span className="leading-snug">{q.question}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Next step */}
+                        {topicPack.next_step && (
+                          <div className="flex items-start gap-3 px-4 py-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                            <Icon name="ArrowRight" size={15} className="text-indigo-500 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-xs font-semibold text-indigo-700 mb-0.5">Следующий шаг</p>
+                              <p className="text-xs text-slate-700 leading-snug">{topicPack.next_step}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Кнопка обновить статус */}
+                        <div className="flex gap-2">
+                          {TOPIC_STATUSES.filter(s => s.value !== "not_started").map(s => (
+                            <button
+                              key={s.value}
+                              onClick={() => handleTopicStatus(activeTopic, s.value)}
+                              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${
+                                activeTopic.status === s.value
+                                  ? `${s.bg} ${s.color} ring-1 ring-current`
+                                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              }`}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
+
+                {/* Вкладка: Сессия */}
+                {topicTab === "session" && (
+                  <div className="space-y-3">
+                    {!sessionData && !sessionLoading && (
+                      <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+                        <p className="text-sm font-semibold text-slate-800">Выбери длину сессии</p>
+                        <div className="flex gap-2">
+                          {[20, 30, 45].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setSessionMinutes(m)}
+                              className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
+                                sessionMinutes === m ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              {m} мин
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          onClick={() => loadSession(sessionMinutes)}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-colors"
+                        >
+                          <Icon name="Sparkles" size={15} />
+                          Начать сессию
+                        </button>
+                      </div>
+                    )}
+
+                    {sessionLoading && (
+                      <div className="bg-white border border-slate-200 rounded-2xl p-8 flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-sm text-slate-500">AI готовит учебную сессию...</p>
+                      </div>
+                    )}
+
+                    {sessionData && (
+                      <>
+                        <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4">
+                          {/* Введение */}
+                          <div>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Введение</p>
+                            <p className="text-sm text-slate-800 leading-relaxed">{sessionData.intro}</p>
+                          </div>
+                          {/* Ключевые тезисы */}
+                          {sessionData.key_points?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Ключевые тезисы</p>
+                              <div className="space-y-2">
+                                {sessionData.key_points.map((kp, i) => (
+                                  <div key={i} className="p-3 bg-slate-50 rounded-xl">
+                                    <p className="text-xs font-semibold text-slate-800">{kp.point}</p>
+                                    <p className="text-xs text-slate-500 mt-0.5 leading-snug">{kp.detail}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {/* Термины */}
+                          {sessionData.terms?.length > 0 && (
+                            <div>
+                              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Термины сессии</p>
+                              <div className="space-y-1.5">
+                                {sessionData.terms.map((t, i) => (
+                                  <div key={i} className="flex gap-2 text-xs">
+                                    <span className="font-semibold text-slate-700 flex-shrink-0">{t.term} —</span>
+                                    <span className="text-slate-500 leading-snug">{t.definition}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {/* Практический кейс */}
+                          {sessionData.practical_case && (
+                            <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                              <p className="text-xs font-semibold text-amber-700 mb-1">Практический сценарий</p>
+                              <p className="text-xs text-slate-700 leading-snug">{sessionData.practical_case}</p>
+                            </div>
+                          )}
+                          {/* Вывод */}
+                          {sessionData.takeaway && (
+                            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                              <p className="text-xs font-semibold text-emerald-700 mb-1">Главный вывод</p>
+                              <p className="text-xs text-slate-800 font-medium leading-snug">{sessionData.takeaway}</p>
+                            </div>
+                          )}
+                          {sessionData.next_step && (
+                            <div className="flex items-start gap-2 text-xs text-slate-600">
+                              <Icon name="ArrowRight" size={13} className="text-violet-500 flex-shrink-0 mt-0.5" />
+                              <span><strong>Дальше:</strong> {sessionData.next_step}</span>
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { setSessionData(null); }}
+                          className="w-full py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-colors"
+                        >
+                          Повторить сессию
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Вкладка: Проверка */}
+                {topicTab === "quiz" && (
+                  <div className="space-y-3">
+                    {quizLoading && (
+                      <div className="bg-white border border-slate-200 rounded-2xl p-8 flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                        <p className="text-sm text-slate-500">AI составляет вопросы...</p>
+                      </div>
+                    )}
+
+                    {!quizLoading && quizQuestions.length === 0 && (
+                      <div className="bg-white border border-slate-200 rounded-2xl p-5 text-center space-y-3">
+                        <Icon name="HelpCircle" size={28} className="text-slate-300 mx-auto" />
+                        <p className="text-sm text-slate-500">AI составит 5 вопросов по теме</p>
+                        <button onClick={loadQuiz} className="w-full py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-colors">
+                          Начать проверку
+                        </button>
+                      </div>
+                    )}
+
+                    {quizQuestions.length > 0 && (
+                      <>
+                        <div className="space-y-3">
+                          {quizQuestions.map((q, qi) => (
+                            <div key={qi} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                              <p className="text-sm font-semibold text-slate-800 leading-snug">{qi + 1}. {q.question}</p>
+                              <div className="space-y-1.5">
+                                {q.options.map((opt, oi) => {
+                                  const chosen = quizAnswers[qi] === oi;
+                                  const isCorrect = q.correct === oi;
+                                  const showResult = quizSubmitted;
+                                  return (
+                                    <button
+                                      key={oi}
+                                      disabled={quizSubmitted}
+                                      onClick={() => !quizSubmitted && setQuizAnswers(prev => ({ ...prev, [qi]: oi }))}
+                                      className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all border ${
+                                        showResult && isCorrect ? "bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold" :
+                                        showResult && chosen && !isCorrect ? "bg-red-50 border-red-300 text-red-700" :
+                                        chosen ? "bg-violet-50 border-violet-300 text-violet-800" :
+                                        "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                                      }`}
+                                    >
+                                      {opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {quizSubmitted && q.explanation && (
+                                <div className={`p-2.5 rounded-lg text-[11px] leading-snug ${
+                                  quizAnswers[qi] === q.correct ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"
+                                }`}>
+                                  {q.explanation}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {!quizSubmitted ? (
+                          <button
+                            onClick={() => setQuizSubmitted(true)}
+                            disabled={Object.keys(quizAnswers).length < quizQuestions.length}
+                            className="w-full py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:opacity-40 transition-colors"
+                          >
+                            Проверить ответы
+                          </button>
+                        ) : (
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2">
+                            <p className="text-sm font-bold text-slate-800">
+                              Результат: {Object.entries(quizAnswers).filter(([qi, oi]) => quizQuestions[+qi]?.correct === oi).length} / {quizQuestions.length}
+                            </p>
+                            <button onClick={loadQuiz} className="w-full py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-colors">
+                              Пройти ещё раз
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             )}
