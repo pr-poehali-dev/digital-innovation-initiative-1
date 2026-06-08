@@ -368,6 +368,9 @@ export default function LearningPage() {
     }
   }
 
+  // Инструкция
+  const [showGuide, setShowGuide] = useState(false);
+
   // Строим дерево тем
   const rootTopics = topics.filter(t => t.parent_id === null);
   const childTopics = (parentId: number) => topics.filter(t => t.parent_id === parentId);
@@ -399,6 +402,76 @@ export default function LearningPage() {
             <Icon name="Plus" size={15} />
             Новая цель
           </button>
+        </div>
+
+        {/* Инструкция */}
+        <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
+          <button
+            onClick={() => setShowGuide(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
+                <Icon name="HelpCircle" size={13} className="text-violet-600" />
+              </div>
+              <span className="text-sm font-semibold text-slate-700">Как пользоваться AI-коучем?</span>
+              <span className="text-[11px] text-slate-400">— нажми, чтобы {showGuide ? "свернуть" : "раскрыть"}</span>
+            </div>
+            <Icon name={showGuide ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400 flex-shrink-0" />
+          </button>
+
+          {showGuide && (
+            <div className="border-t border-slate-100 px-4 py-4 space-y-4">
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Этот раздел — твой личный AI-коуч. Он не просто хранит список тем, а <strong>активно тебя учит</strong>: объясняет, подбирает материалы, проводит сессии и проверяет понимание.
+              </p>
+
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <p className="text-xs font-bold text-slate-700 mb-1.5">① Создай учебную цель</p>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Нажми <strong>«Новая цель»</strong> и напиши, что хочешь освоить — например: «Основы внутреннего контроля и аудита». AI сам разобьёт цель на этапы и темы.
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <p className="text-xs font-bold text-slate-700 mb-1.5">② Нажми «Учить» на теме</p>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Наведи на любую тему в плане — появится кнопка <strong>«Учить»</strong>. AI откроет панель с объяснением, источниками и вопросами именно по этой теме.
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <p className="text-xs font-bold text-slate-700 mb-1.5">③ Учись в трёх режимах</p>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    <strong>📖 Учить</strong> — объяснение + материалы с указанием источника.<br />
+                    <strong>⏱ Сессия</strong> — 20/30/45 мин структурированного обучения.<br />
+                    <strong>✅ Проверка</strong> — 5 вопросов с разбором ошибок.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="p-3 bg-violet-50 rounded-xl border border-violet-100">
+                  <p className="text-xs font-bold text-violet-700 mb-1">После изучения темы</p>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Отметь статус темы прямо в панели: <strong>Изучаю → Понимаю → Применяю</strong>. Это обновит прогресс и поможет AI понять, что идти дальше.
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                  <p className="text-xs font-bold text-amber-700 mb-1">Вкладка «Наставник»</p>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Там можно задать любой вопрос в свободной форме — AI ответит в контексте твоей учебной цели. Используй для уточнений после сессии.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <Icon name="Lightbulb" size={13} className="text-amber-500 flex-shrink-0" />
+                <p className="text-xs text-slate-500">
+                  <strong>Совет:</strong> начни с создания цели «Основы внутреннего контроля» — AI сразу составит план на несколько недель.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Модал создания цели */}
