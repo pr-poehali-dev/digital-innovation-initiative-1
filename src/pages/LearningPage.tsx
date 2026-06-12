@@ -1082,12 +1082,24 @@ export default function LearningPage() {
                                     {(m.description || m.why_recommended) && (
                                       <p className="text-[11px] text-slate-600 leading-snug">{m.why_recommended || m.description}</p>
                                     )}
-                                    {m.access_note && (
-                                      <p className="text-[10px] text-violet-600 flex items-center gap-1">
-                                        <Icon name="MapPin" size={9} />
-                                        {m.access_note}
-                                      </p>
-                                    )}
+                                    {m.access_note && (() => {
+                                      const urlMatch = m.access_note!.match(/https?:\/\/[^\s]+/);
+                                      const href = urlMatch
+                                        ? urlMatch[0]
+                                        : `https://www.google.com/search?q=${encodeURIComponent((m.title || "") + " " + (m.source_name || ""))}`;
+                                      return (
+                                        <a
+                                          href={href}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[10px] text-violet-600 flex items-center gap-1 hover:text-violet-800 hover:underline active:opacity-70"
+                                        >
+                                          <Icon name="MapPin" size={9} />
+                                          {m.access_note}
+                                          <Icon name="ExternalLink" size={8} className="opacity-60" />
+                                        </a>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
