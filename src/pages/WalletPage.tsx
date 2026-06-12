@@ -150,26 +150,24 @@ export default function WalletPage() {
         )}
 
         {/* Карточка баланса */}
-        <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-400 text-white p-5 relative overflow-hidden">
-          <div className="absolute right-0 top-0 w-32 h-32 rounded-full bg-white/10 translate-x-8 -translate-y-8" />
-          <div className="absolute right-8 bottom-0 w-20 h-20 rounded-full bg-white/10 translate-y-6" />
-          <p className="text-emerald-100 text-sm mb-1">Текущий баланс</p>
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-400 text-white px-5 py-5 relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-white/10 translate-x-8 -translate-y-8 pointer-events-none" />
+          <div className="absolute right-6 bottom-0 w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white/10 translate-y-6 pointer-events-none" />
+          <p className="text-emerald-100 text-sm mb-1 relative">Текущий баланс</p>
           {loading ? (
-            <div className="h-10 w-32 bg-white/20 rounded-xl animate-pulse mb-4" />
+            <div className="h-9 w-32 bg-white/20 rounded-xl animate-pulse mb-4" />
           ) : (
-            <p className="text-4xl font-bold mb-4">
-              {(balance ?? 0).toFixed(2)} <span className="text-2xl font-medium">₽</span>
+            <p className="text-3xl sm:text-4xl font-bold mb-4 relative">
+              {(balance ?? 0).toFixed(2)} <span className="text-xl sm:text-2xl font-medium">₽</span>
             </p>
           )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowTopUp(v => !v)}
-              className="flex items-center gap-2 bg-white text-emerald-600 font-semibold px-4 py-2 rounded-xl text-sm hover:bg-emerald-50 transition-colors"
-            >
-              <Icon name="Plus" size={16} />
-              Пополнить
-            </button>
-          </div>
+          <button
+            onClick={() => setShowTopUp(v => !v)}
+            className="relative flex items-center gap-2 bg-white text-emerald-600 font-semibold px-4 py-2.5 rounded-xl text-sm hover:bg-emerald-50 transition-colors active:scale-95"
+          >
+            <Icon name="Plus" size={16} />
+            Пополнить
+          </button>
         </div>
 
         {/* Форма пополнения */}
@@ -180,12 +178,12 @@ export default function WalletPage() {
               Пополнить баланс
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {PRESETS.map(a => (
                 <button
                   key={a}
                   onClick={() => setAmount(String(a))}
-                  className={`px-3 py-1.5 rounded-full border text-sm font-medium transition-colors ${
+                  className={`py-2 rounded-xl border text-sm font-semibold transition-colors active:scale-95 ${
                     amount === String(a)
                       ? "bg-emerald-500 text-white border-emerald-500"
                       : "border-slate-200 text-slate-600 hover:border-emerald-400 hover:text-emerald-600"
@@ -215,7 +213,7 @@ export default function WalletPage() {
             <button
               onClick={handleTopup}
               disabled={paying}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
+              className="w-full bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 disabled:opacity-60 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
             >
               {paying ? (
                 <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Переход к оплате…</>

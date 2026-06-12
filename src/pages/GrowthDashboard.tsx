@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
-import { projectsApi, learningApi } from "@/lib/api";
+import { projectsApi, learningApi, walletApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { publicProfileApi, type PublicSettings } from "@/lib/publicProfileApi";
@@ -303,6 +303,7 @@ export default function GrowthDashboard() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalProgress, setGoalProgress] = useState<Record<number, Progress>>({});
   const [pubSettings, setPubSettings] = useState<PublicSettings | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   useEffect(() => {
     setLoadingProjects(true);
@@ -326,10 +327,13 @@ export default function GrowthDashboard() {
       })
       .catch(() => setGoals([]));
 
-    // Загружаем статус публичного профиля для "Ближайших шагов"
     publicProfileApi.getMe()
       .then((d: { settings?: PublicSettings }) => setPubSettings(d.settings ?? null))
       .catch(() => {});
+
+    walletApi.getBalance()
+      .then((d: { balance_rub?: number }) => setWalletBalance(d.balance_rub ?? 0))
+      .catch(() => setWalletBalance(0));
   }, []);
 
   const activeProjects = projects.slice(0, 3);
@@ -830,7 +834,11 @@ export default function GrowthDashboard() {
             </div>
             <div className="bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl p-4 text-white mb-3">
               <div className="text-xs font-medium text-indigo-200 mb-1">Текущий баланс</div>
-              <div className="text-2xl font-bold">0 ₽</div>
+              {walletBalance === null ? (
+                <div className="h-8 w-24 bg-white/20 rounded-lg animate-pulse my-1" />
+              ) : (
+                <div className="text-2xl font-bold">{walletBalance.toFixed(2)} ₽</div>
+              )}
               <div className="text-xs text-indigo-200 mt-1">AI-кредиты</div>
             </div>
             <Link to="/cabinet/wallet" className="block w-full text-center text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 py-2.5 rounded-xl transition-colors">
