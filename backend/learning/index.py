@@ -1,6 +1,9 @@
 import json
 import os
 import psycopg2
+import re
+import threading
+import urllib.parse
 import urllib.request
 
 DB = os.environ["DATABASE_URL"]
@@ -54,6 +57,223 @@ def yandex_gpt(prompt: str, system: str = "") -> str:
     with urllib.request.urlopen(req, timeout=25) as resp:
         data = json.loads(resp.read())
     return data["result"]["alternatives"][0]["message"]["text"]
+
+
+# ── Link Resolver ─────────────────────────────────────────────────────────────
+# In-memory кеш: key = (normalized_title, source_name) → результат верификации
+_LINK_CACHE: dict = {}
+_LINK_CACHE_LOCK = threading.Lock()
+
+# Whitelist: source_name (lower) → допустимые домены
+DOMAIN_WHITELIST: dict = {
+    "coso":             ["coso.org"],
+    "iia":              ["theiia.org", "global.theiia.org"],
+    "institute of internal auditors": ["theiia.org"],
+    "bis":              ["bis.org"],
+    "bis / basel committee": ["bis.org"],
+    "basel committee":  ["bis.org"],
+    "nist":             ["nist.gov", "csrc.nist.gov"],
+    "iso":              ["iso.org"],
+    "isaca":            ["isaca.org"],
+    "deloitte":         ["deloitte.com", "www2.deloitte.com"],
+    "pwc":              ["pwc.com"],
+    "ey":               ["ey.com"],
+    "kpmg":             ["kpmg.com"],
+    "mckinsey":         ["mckinsey.com"],
+    "acfe":             ["acfe.com"],
+    "ifc":              ["ifc.org"],
+    "world bank":       ["worldbank.org"],
+    "harvard business review": ["hbr.org"],
+    "mit sloan":        ["sloanreview.mit.edu"],
+    "gartner":          ["gartner.com"],
+    "forrester":        ["forrester.com"],
+}
+
+
+def _normalize_key(title: str, source_name: str) -> str:
+    return f"{title.lower().strip()}||{source_name.lower().strip()}"
+
+
+def _extract_domain(url: str) -> str:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.hostname or ""
+        return host.lstrip("www.")
+    except Exception:
+        return ""
+
+
+def _is_trusted_domain(url: str, source_name: str) -> bool:
+    domain = _extract_domain(url)
+    if not domain:
+        return False
+    sn = source_name.lower()
+    for key, allowed in DOMAIN_WHITELIST.items():
+        if key in sn or sn in key:
+            return any(domain == d or domain.endswith("." + d) for d in allowed)
+    return False
+
+
+def _title_matches(result_title: str, material_title: str) -> bool:
+    """Проверяет, что заголовок результата поиска близок к названию материала."""
+    rt = result_title.lower()
+    mt = material_title.lower()
+    # Точное совпадение
+    if mt in rt or rt in mt:
+        return True
+    # Совпадение по ≥ 4 словам из названия материала
+    words = [w for w in mt.split() if len(w) > 3]
+    if len(words) >= 3:
+        matches = sum(1 for w in words if w in rt)
+        return matches >= max(3, len(words) // 2)
+    return False
+
+
+def _search_duckduckgo(query: str, limit: int = 5) -> list:
+    """Поиск через DuckDuckGo HTML без ключа. Timeout 8 сек."""
+    try:
+        encoded = urllib.parse.quote(query)
+        url = f"https://html.duckduckgo.com/html/?q={encoded}"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        })
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        results = []
+        pattern = re.compile(
+            r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
+            r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+            re.DOTALL
+        )
+        for m in pattern.finditer(html):
+            if len(results) >= limit:
+                break
+            link = m.group(1)
+            title = re.sub(r'<[^>]+>', '', m.group(2)).strip()
+            snippet = re.sub(r'<[^>]+>', '', m.group(3)).strip()
+            if link.startswith("//duckduckgo.com/l/?uddg="):
+                try:
+                    link = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
+                except Exception:
+                    pass
+            if title and link and link.startswith("http"):
+                results.append({"title": title, "snippet": snippet, "url": link})
+        return results
+    except Exception:
+        return []
+
+
+def _resolve_one(material: dict) -> dict:
+    """
+    Ищет верифицированный URL для одного материала.
+    Возвращает обогащённый материал с полями source_url, link_status и др.
+    Никогда не подставляет непроверенные ссылки.
+    """
+    title = material.get("title", "")
+    source_name = material.get("source_name", "")
+    source_type = material.get("source_type", "")
+
+    cache_key = _normalize_key(title, source_name)
+    with _LINK_CACHE_LOCK:
+        if cache_key in _LINK_CACHE:
+            cached = _LINK_CACHE[cache_key]
+            return {**material, **cached}
+
+    result_fields = {
+        "source_url": None,
+        "open_access_url": None,
+        "source_domain": None,
+        "link_status": "not_found",
+        "verification_method": "web_search_domain_match",
+    }
+
+    # Формируем поисковые запросы по приоритету
+    queries = []
+    sn_lower = source_name.lower()
+    # 1) site:-запрос для известного источника
+    for key, domains in DOMAIN_WHITELIST.items():
+        if key in sn_lower or sn_lower in key:
+            queries.append(f'site:{domains[0]} "{title}"')
+            break
+    # 2) source_name + title
+    queries.append(f'"{source_name}" "{title}"')
+    # 3) title + тип
+    if source_type in ("official_framework", "official_guidance", "professional_standard"):
+        queries.append(f'"{title}" official pdf')
+    else:
+        queries.append(f'"{title}" {source_name}')
+
+    found_url = None
+    found_domain = None
+
+    for query in queries:
+        results = _search_duckduckgo(query, limit=5)
+        for r in results:
+            url = r.get("url", "")
+            rtitle = r.get("title", "")
+            if not url:
+                continue
+            # Проверяем домен по whitelist
+            if _is_trusted_domain(url, source_name):
+                if _title_matches(rtitle, title):
+                    found_url = url
+                    found_domain = _extract_domain(url)
+                    result_fields["link_status"] = "verified_official"
+                    break
+                # Домен совпал, но заголовок нет — слабее, но допустимо для org
+                if not found_url and source_type in ("official_framework", "official_guidance"):
+                    found_url = url
+                    found_domain = _extract_domain(url)
+                    result_fields["link_status"] = "verified_org"
+        if found_url and result_fields["link_status"] == "verified_official":
+            break
+
+    if found_url:
+        result_fields["source_url"] = found_url
+        result_fields["open_access_url"] = found_url
+        result_fields["source_domain"] = found_domain
+
+    with _LINK_CACHE_LOCK:
+        _LINK_CACHE[cache_key] = result_fields
+
+    return {**material, **result_fields}
+
+
+def enrich_materials(materials: list) -> list:
+    """
+    Параллельно обогащает до 5 материалов verified links.
+    Работает с жёстким timeout через threads: если поиск завис — возвращаем как есть.
+    """
+    if not materials:
+        return materials
+
+    results = list(materials)  # копия
+
+    def resolve_idx(i: int):
+        try:
+            results[i] = _resolve_one(materials[i])
+        except Exception:
+            results[i] = {
+                **materials[i],
+                "source_url": None,
+                "open_access_url": None,
+                "source_domain": None,
+                "link_status": "not_found",
+                "verification_method": "web_search_domain_match",
+            }
+
+    threads = []
+    for idx in range(min(len(materials), 5)):
+        t = threading.Thread(target=resolve_idx, args=(idx,), daemon=True)
+        t.start()
+        threads.append(t)
+
+    # Ждём максимум 12 секунд на все потоки
+    for t in threads:
+        t.join(timeout=12)
+
+    return results
 
 
 def handler(event: dict, context) -> dict:
@@ -572,7 +792,8 @@ def handler(event: dict, context) -> dict:
                     "}"
                 )
                 result = parse_json(yandex_gpt(prompt, system), {"materials": []})
-                return cors({"ok": True, "materials": result.get("materials", [])})
+                mats = enrich_materials(result.get("materials", []))
+                return cors({"ok": True, "materials": mats})
 
             if mode == "quiz":
                 system = (
@@ -667,6 +888,7 @@ def handler(event: dict, context) -> dict:
             )
             pack = parse_json(yandex_gpt(prompt, system),
                               {"explanation": {"what": "", "why": "", "practical_tip": ""}, "terms": [], "materials": [], "questions": [], "next_step": ""})
+            pack["materials"] = enrich_materials(pack.get("materials", []))
             return cors({"ok": True, "pack": pack})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)

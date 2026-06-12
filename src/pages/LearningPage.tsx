@@ -65,6 +65,10 @@ type Material = {
   description?: string;
   why_recommended?: string;
   access_note?: string;
+  source_url?: string | null;
+  open_access_url?: string | null;
+  source_domain?: string | null;
+  link_status?: "verified_official" | "verified_publisher" | "verified_org" | "unverified" | "not_found" | null;
   where_to_find?: string;
 };
 
@@ -1098,45 +1102,75 @@ export default function LearningPage() {
                                   course: "Курс",
                                   tool: "Инструмент",
                                 };
+                                const isVerified = m.link_status === "verified_official" || m.link_status === "verified_publisher" || m.link_status === "verified_org";
+                                const verifiedUrl = m.source_url || m.open_access_url;
+                                const linkBadge = isVerified
+                                  ? m.link_status === "verified_official"
+                                    ? { label: "Офиц. источник", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+                                    : { label: "Проверено", cls: "bg-blue-50 text-blue-700 border-blue-200" }
+                                  : null;
                                 return (
                                   <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                                    {/* Заголовок + trust badge */}
                                     <div className="flex items-start justify-between gap-2">
                                       <p className="text-xs font-semibold text-slate-800 leading-snug flex-1">{m.title}</p>
                                       <span className={`flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded border ${trustColor}`}>
                                         {trustLabel}
                                       </span>
                                     </div>
+                                    {/* Source name + type + verified badge */}
                                     {m.source_name && (
-                                      <div className="flex items-center gap-1.5">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className="text-[10px] font-semibold text-slate-500">{m.source_name}</span>
                                         {m.source_type && (
                                           <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded">
                                             {typeLabel[m.source_type] || m.source_type}
                                           </span>
                                         )}
+                                        {linkBadge && (
+                                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border flex items-center gap-0.5 ${linkBadge.cls}`}>
+                                            <Icon name="ShieldCheck" size={8} />
+                                            {linkBadge.label}
+                                          </span>
+                                        )}
                                       </div>
                                     )}
+                                    {/* Описание */}
                                     {(m.description || m.why_recommended) && (
                                       <p className="text-[11px] text-slate-600 leading-snug">{m.why_recommended || m.description}</p>
                                     )}
-                                    {m.access_note && (() => {
-                                      const urlMatch = m.access_note!.match(/https?:\/\/[^\s]+/);
-                                      const href = urlMatch
-                                        ? urlMatch[0]
-                                        : `https://www.google.com/search?q=${encodeURIComponent((m.title || "") + " " + (m.source_name || ""))}`;
-                                      return (
-                                        <a
-                                          href={href}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-[10px] text-violet-600 flex items-center gap-1 hover:text-violet-800 hover:underline active:opacity-70"
-                                        >
+                                    {/* Ссылки */}
+                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                      {isVerified && verifiedUrl ? (
+                                        <>
+                                          <a
+                                            href={verifiedUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1 text-[10px] font-semibold text-white bg-violet-600 hover:bg-violet-700 px-2 py-1 rounded-lg transition-colors active:opacity-80"
+                                          >
+                                            <Icon name="ExternalLink" size={9} />
+                                            Открыть источник
+                                          </a>
+                                          {m.open_access_url && m.open_access_url !== verifiedUrl && (
+                                            <a
+                                              href={m.open_access_url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-1 rounded-lg transition-colors"
+                                            >
+                                              <Icon name="Unlock" size={9} />
+                                              Open access
+                                            </a>
+                                          )}
+                                        </>
+                                      ) : m.access_note ? (
+                                        <span className="flex items-center gap-1 text-[10px] text-slate-400">
                                           <Icon name="MapPin" size={9} />
                                           {m.access_note}
-                                          <Icon name="ExternalLink" size={8} className="opacity-60" />
-                                        </a>
-                                      );
-                                    })()}
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   </div>
                                 );
                               })}
