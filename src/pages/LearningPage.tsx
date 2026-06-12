@@ -3,6 +3,8 @@ import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { learningApi, TOPIC_STATUSES, type TopicStatus } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import LearningOnboarding from "@/components/LearningOnboarding";
+import { analytics } from "@/lib/analytics";
 
 type Goal = {
   id: number;
@@ -154,6 +156,9 @@ export default function LearningPage() {
   const [noteUrl, setNoteUrl] = useState("");
   const [addingNote, setAddingNote] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
+
+  // Онбординг: показываем первую тему из онбординга сразу
+  const [onboardingFirstTopic, setOnboardingFirstTopic] = useState<Topic | null>(null);
 
   useEffect(() => {
     loadGoals();
@@ -371,6 +376,28 @@ export default function LearningPage() {
   // Инструкция
   const [showGuide, setShowGuide] = useState(false);
 
+  // Callback: онбординг завершён — цель и первая тема готовы
+  async function handleOnboardingDone(goal: Goal, firstTopic: Topic | null) {
+    setGoals(prev => {
+      const exists = prev.some(g => g.id === goal.id);
+      return exists ? prev.map(g => g.id === goal.id ? goal : g) : [goal, ...prev];
+    });
+    setActiveGoal(goal);
+    setOnboardingFirstTopic(firstTopic);
+  }
+
+  // Автооткрытие первой темы после онбординга
+  useEffect(() => {
+    if (!onboardingFirstTopic || !activeGoal) return;
+    // Ждём загрузки топиков
+    if (topics.length === 0) return;
+    const topic = topics.find(t => t.id === onboardingFirstTopic.id) ?? topics.find(t => t.parent_id !== null) ?? topics[0];
+    if (topic) {
+      openTopic(topic);
+      setOnboardingFirstTopic(null);
+    }
+  }, [topics, onboardingFirstTopic, activeGoal?.id]);
+
   // Строим дерево тем
   const rootTopics = topics.filter(t => t.parent_id === null);
   const childTopics = (parentId: number) => topics.filter(t => t.parent_id === parentId);
@@ -532,25 +559,7 @@ export default function LearningPage() {
         )}
 
         {goals.length === 0 ? (
-          /* Пустое состояние */
-          <div className="flex flex-col items-center justify-center py-24 text-center space-y-4">
-            <div className="w-16 h-16 rounded-2xl bg-violet-100 flex items-center justify-center">
-              <Icon name="GraduationCap" size={32} className="text-violet-500" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-slate-800">Начни своё обучение</h2>
-              <p className="text-slate-500 text-sm mt-1 max-w-sm">
-                Задай цель — AI составит персональный план, разобьёт на темы и поможет двигаться шаг за шагом
-              </p>
-            </div>
-            <button
-              onClick={() => setShowNewGoal(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 transition-colors"
-            >
-              <Icon name="Sparkles" size={16} />
-              Создать первую цель
-            </button>
-          </div>
+          <LearningOnboarding onGoalCreated={handleOnboardingDone} />
         ) : (
           <div className={`grid grid-cols-1 gap-5 ${activeTopic ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
 
@@ -978,6 +987,34 @@ export default function LearningPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* CTA: первая сессия — показывается всегда на вкладке Учить поверх контента */}
+                {topicTab === "learn" && !topicPackLoading && topicPack && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        analytics.learningFirstSessionStarted(activeGoal!.id, activeTopic.id, 20);
+                        setTopicTab("session");
+                        setSessionMinutes(20);
+                        if (!sessionData && !sessionLoading) loadSession(20);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-[0.98] text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                    >
+                      <Icon name="PlayCircle" size={15} />
+                      Начать 20-мин сессию
+                    </button>
+                    <button
+                      onClick={() => {
+                        setTopicTab("quiz");
+                        if (quizQuestions.length === 0 && !quizLoading) loadQuiz();
+                      }}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                    >
+                      <Icon name="CheckSquare" size={14} />
+                      Проверить
+                    </button>
+                  </div>
+                )}
 
                 {/* Вкладка: Учить */}
                 {topicTab === "learn" && (

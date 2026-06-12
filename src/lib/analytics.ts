@@ -370,6 +370,43 @@ export type AnalyticsEvents = {
     to_status: string;
     priority: string;
   };
+
+  // ── Learning Onboarding воронка ─────────────────────────────────────
+  // 52. Онбординг показан (нет целей)
+  learning_onboarding_viewed: Record<string, never>;
+
+  // 53. Пользователь начал заполнять цель
+  learning_goal_started: {
+    source: "free_input" | "template";
+    template_id?: string;
+  };
+
+  // 54. Цель создана
+  learning_goal_created: {
+    goal_id: number;
+    source: "free_input" | "template";
+    template_id?: string;
+  };
+
+  // 55. AI-план сгенерирован
+  learning_plan_generated: {
+    goal_id: number;
+    topics_count: number;
+  };
+
+  // 56. Первая тема открыта
+  learning_first_topic_opened: {
+    goal_id: number;
+    topic_id: number;
+    topic_title: string;
+  };
+
+  // 57. Первая сессия запущена
+  learning_first_session_started: {
+    goal_id: number;
+    topic_id: number;
+    minutes: number;
+  };
 };
 
 // --- Ядро ---
@@ -743,6 +780,32 @@ export const analytics = {
     sendEvent("admin_benchmark_status_changed", {
       decision_id: decisionId, from_status: fromStatus, to_status: toStatus, priority,
     });
+  },
+
+  // ── Learning Onboarding воронка ─────────────────────────────────────
+
+  learningOnboardingViewed() {
+    sendEvent("learning_onboarding_viewed", {});
+  },
+
+  learningGoalStarted(source: "free_input" | "template", templateId?: string) {
+    sendEvent("learning_goal_started", { source, template_id: templateId });
+  },
+
+  learningGoalCreated(goalId: number, source: "free_input" | "template", templateId?: string) {
+    sendEvent("learning_goal_created", { goal_id: goalId, source, template_id: templateId });
+  },
+
+  learningPlanGenerated(goalId: number, topicsCount: number) {
+    sendEvent("learning_plan_generated", { goal_id: goalId, topics_count: topicsCount });
+  },
+
+  learningFirstTopicOpened(goalId: number, topicId: number, topicTitle: string) {
+    sendEvent("learning_first_topic_opened", { goal_id: goalId, topic_id: topicId, topic_title: topicTitle });
+  },
+
+  learningFirstSessionStarted(goalId: number, topicId: number, minutes: number) {
+    sendEvent("learning_first_session_started", { goal_id: goalId, topic_id: topicId, minutes });
   },
 };
 
