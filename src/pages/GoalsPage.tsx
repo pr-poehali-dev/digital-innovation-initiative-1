@@ -589,17 +589,34 @@ function MilestoneRow({
             </div>
           ) : (
             <>
+              {/* Баннер устаревших данных — все pending значит старый пайплайн без верификации */}
+              {materials.every(m => m.verification_status === "pending") && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
+                  <Icon name="RefreshCw" size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-amber-700 mb-0.5">Требуется обновление</p>
+                    <p className="text-[11px] text-amber-600">Материалы подобраны старой версией без проверки ссылок и конспектов. Обнови подборку — займёт ~40 сек.</p>
+                  </div>
+                  <button onClick={handleGenerate} disabled={generating}
+                    className="shrink-0 flex items-center gap-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                    {generating ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <Icon name="RefreshCw" size={11} />}
+                    {generating ? "Обновляю..." : "Обновить"}
+                  </button>
+                </div>
+              )}
               <div className="space-y-3">
                 {materials.map(mat => (
                   <MaterialCard key={mat.id} material={mat} milestoneId={milestone.id}
                     onProgressChange={(status) => handleProgress(mat, status)} />
                 ))}
               </div>
-              <button onClick={handleGenerate} disabled={generating}
-                className="text-xs text-slate-400 hover:text-violet-600 transition-colors flex items-center gap-1">
-                <Icon name="RefreshCw" size={11} />
-                {generating ? "Обновляю..." : "Обновить подборку"}
-              </button>
+              {!materials.every(m => m.verification_status === "pending") && (
+                <button onClick={handleGenerate} disabled={generating}
+                  className="text-xs text-slate-400 hover:text-violet-600 transition-colors flex items-center gap-1">
+                  <Icon name="RefreshCw" size={11} />
+                  {generating ? "Обновляю..." : "Обновить подборку"}
+                </button>
+              )}
             </>
           )}
         </div>
