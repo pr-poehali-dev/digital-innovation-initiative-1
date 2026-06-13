@@ -601,27 +601,47 @@ export default function ProjectPage() {
                   </div>
                 </div>
               )}
-              {copilotHistory.map((h, i) => (
-                <div key={i} className="space-y-2">
-                  <div className="flex justify-end">
-                    <div className="bg-slate-800 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm">{h.q}</div>
-                  </div>
-                  <div className="flex gap-2.5">
-                    <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Icon name="Sparkles" size={13} className="text-violet-600" />
+              {copilotHistory.map((h, i) => {
+                const isLast = i === copilotHistory.length - 1;
+                const nextHints: Record<string, string[]> = {
+                  analyst:    ["Найди слабые места в анализе", "Сравни с лучшими практиками", "Сделай executive summary"],
+                  strategist: ["Оформи как гипотезу", "Предложи метрики успеха", "Составь roadmap на 3 месяца"],
+                  pm:         ["Разбей на задачи с дедлайнами", "Определи риски", "Кто отвечает за каждый шаг?"],
+                  researcher: ["Найди контраргументы", "Какие источники подтверждают?", "Сравни с аналогами на рынке"],
+                };
+                const hints = nextHints[copilotMode] ?? ["Углуби анализ", "Предложи следующие шаги", "Сохрани как артефакт"];
+                return (
+                  <div key={i} className="space-y-2">
+                    <div className="flex justify-end">
+                      <div className="bg-slate-800 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm">{h.q}</div>
                     </div>
-                    <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 flex-1">
-                      <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{h.a}</p>
-                      {h.artifact_id && (
-                        <button onClick={() => handleOpenArtifact(h.artifact_id!)} className="mt-2 flex items-center gap-1 text-[11px] text-violet-600 hover:text-violet-800 font-medium">
-                          <Icon name="Package" size={11} />
-                          Сохранён как артефакт
-                        </button>
-                      )}
+                    <div className="flex gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Icon name="Sparkles" size={13} className="text-violet-600" />
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 flex-1">
+                        <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{h.a}</p>
+                        {h.artifact_id && (
+                          <button onClick={() => handleOpenArtifact(h.artifact_id!)} className="mt-2 flex items-center gap-1 text-[11px] text-violet-600 hover:text-violet-800 font-medium">
+                            <Icon name="Package" size={11} />
+                            Сохранён как артефакт
+                          </button>
+                        )}
+                      </div>
                     </div>
+                    {isLast && !copilotLoading && (
+                      <div className="flex flex-wrap gap-1.5 pl-9 pt-0.5">
+                        {hints.map(hint => (
+                          <button key={hint} onClick={() => setCopilotMsg(hint)}
+                            className="text-[11px] px-2.5 py-1 bg-violet-50 border border-violet-100 text-violet-600 rounded-full hover:bg-violet-100 transition-colors">
+                            {hint}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {copilotLoading && (
                 <div className="flex gap-2.5">
                   <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
@@ -804,7 +824,7 @@ export default function ProjectPage() {
                       <span>Черновик готов — AI заполнил описание</span>
                     </div>
                     <Link
-                      to="/professional-passport"
+                      to="/cabinet/profile"
                       onClick={() => setOpenArtifact(null)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 transition-colors flex-shrink-0"
                     >
