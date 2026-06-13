@@ -21,7 +21,7 @@ DB     = os.environ["DATABASE_URL"]
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "t_p61016064_digital_innovation_i")
 YANDEX_GPT_API_KEY = os.environ.get("YANDEX_GPT_API_KEY", "")
 YANDEX_FOLDER_ID   = os.environ.get("YANDEX_FOLDER_ID", "")
-SEARCH_URL = os.environ.get("SEARCH_FUNCTION_URL", "https://functions.poehali.dev/54999e08-24f7-478d-92d8-8d66785f0a00")
+SEARCH_URL = os.environ.get("SEARCH_FUNCTION_URL", "")
 
 
 def cors(body: dict, code: int = 200) -> dict:
@@ -83,21 +83,34 @@ def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 3000) -> str:
 
 
 def search_in_project(project_id: int, query: str, session_id: str, limit: int = 5) -> list:
-    """Поиск по файлам проекта через search_knowledge."""
-    if not SEARCH_URL:
+    """Поиск по файлам проекта через search_knowledge. Graceful fallback на пустой список."""
+    url = SEARCH_URL
+    if not url:
         return []
     try:
         payload = json.dumps({"action": "search_knowledge", "project_id": project_id, "query": query}).encode()
-        req = urllib.request.Request(SEARCH_URL, data=payload, headers={
+        req = urllib.request.Request(url, data=payload, headers={
             "Content-Type": "application/json",
             "X-Session-Id": session_id,
         })
         with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read())
-        body = data.get("body") or data
+            raw = resp.read()
+        outer = json.loads(raw)
+        # Функция может вернуть body как строку (Cloud Functions envelope)
+        body = outer.get("body") or outer
         if isinstance(body, str):
-            body = json.loads(body)
-        results = body.get("results") or body.get("data", {}).get("results", [])
+            try:
+                body = json.loads(body)
+            except Exception:
+                return []
+        # Несколько возможных ключей
+        results = (
+            body.get("results")
+            or body.get("data", {}).get("results", [])
+            or []
+        )
+        if not isinstance(results, list):
+            return []
         return results[:limit]
     except Exception:
         return []
@@ -105,49 +118,59 @@ def search_in_project(project_id: int, query: str, session_id: str, limit: int =
 
 def build_context(conn, project_id: int, message: str, session_id: str) -> dict:
     """
-    Собирает workspace-контекст для AI:
-    1. workspace_context — постоянный контекст пространства
-    2. project.description — описание проекта
-    3. search_knowledge(message) top-5 — релевантные фрагменты файлов
-    4. последние 3 артефакта (summary)
-    5. открытые гипотезы (title + statement)
+    Собирает workspace-контекст для AI. Каждый источник — graceful fallback.
+    Порядок: workspace_context → project description → search → artifacts → hypotheses.
     """
-    # 1. workspace_context
     wctx = {"goals_text": "", "constraints_text": "", "key_facts_text": "", "stakeholders_text": ""}
-    with conn.cursor() as cur:
-        cur.execute(
-            f"SELECT goals_text, constraints_text, key_facts_text, stakeholders_text FROM {SCHEMA}.workspace_context WHERE project_id = %s",
-            (project_id,),
-        )
-        row = cur.fetchone()
-    if row:
-        wctx = {"goals_text": row[0], "constraints_text": row[1], "key_facts_text": row[2], "stakeholders_text": row[3]}
+    project_title = ""
+    project_desc  = ""
+    search_results: list = []
+    artifacts: list = []
+    hypotheses: list = []
 
-    # 2. project description
-    with conn.cursor() as cur:
-        cur.execute(f"SELECT title, description FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
-        proj = cur.fetchone()
-    project_title = proj[0] if proj else ""
-    project_desc  = proj[1] if proj else ""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT goals_text, constraints_text, key_facts_text, stakeholders_text FROM {SCHEMA}.workspace_context WHERE project_id = %s",
+                (project_id,),
+            )
+            row = cur.fetchone()
+        if row:
+            wctx = {"goals_text": row[0] or "", "constraints_text": row[1] or "", "key_facts_text": row[2] or "", "stakeholders_text": row[3] or ""}
+    except Exception:
+        pass
 
-    # 3. search
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT title, description FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
+            proj = cur.fetchone()
+        project_title = (proj[0] or "") if proj else ""
+        project_desc  = (proj[1] or "") if proj else ""
+    except Exception:
+        pass
+
+    # Поиск — внешний вызов, может не ответить
     search_results = search_in_project(project_id, message, session_id, limit=5)
 
-    # 4. последние 3 артефакта
-    with conn.cursor() as cur:
-        cur.execute(
-            f"SELECT title, artifact_type, summary FROM {SCHEMA}.workspace_artifacts WHERE project_id = %s ORDER BY created_at DESC LIMIT 3",
-            (project_id,),
-        )
-        artifacts = cur.fetchall()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT title, artifact_type, summary FROM {SCHEMA}.workspace_artifacts WHERE project_id = %s ORDER BY created_at DESC LIMIT 3",
+                (project_id,),
+            )
+            artifacts = cur.fetchall() or []
+    except Exception:
+        pass
 
-    # 5. открытые гипотезы
-    with conn.cursor() as cur:
-        cur.execute(
-            f"SELECT title, statement FROM {SCHEMA}.workspace_hypotheses WHERE project_id = %s AND status IN ('open','testing') ORDER BY created_at DESC LIMIT 5",
-            (project_id,),
-        )
-        hypotheses = cur.fetchall()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT title, statement FROM {SCHEMA}.workspace_hypotheses WHERE project_id = %s AND status IN ('open','testing') ORDER BY created_at DESC LIMIT 5",
+                (project_id,),
+            )
+            hypotheses = cur.fetchall() or []
+    except Exception:
+        pass
 
     return {
         "project_title": project_title,

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
+import { analytics } from "@/lib/analytics";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -130,7 +131,7 @@ export default function ProjectPage() {
     workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
   };
 
-  useEffect(() => { load(); }, [projectId]);
+  useEffect(() => { load(); analytics.workspaceOpened(projectId, "overview"); }, [projectId]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -259,7 +260,11 @@ export default function ProjectPage() {
     try {
       const res = await workspaceApi.copilot({ project_id: projectId, message: q, mode: copilotMode, save_as_artifact: copilotSave, artifact_type: "analysis" }) as { answer: string; artifact_id?: number };
       setCopilotHistory(prev => [...prev, { q, a: res.answer, artifact_id: res.artifact_id }]);
-      if (res.artifact_id) workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
+      analytics.workspaceCopilotUsed(projectId, copilotMode, copilotSave);
+      if (res.artifact_id) {
+        analytics.workspaceArtifactCreated(projectId, "analysis", copilotMode);
+        workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
+      }
       setTimeout(() => copilotEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch {
       setCopilotHistory(prev => [...prev, { q, a: "Не удалось получить ответ. Попробуй ещё раз." }]);
@@ -270,6 +275,7 @@ export default function ProjectPage() {
 
   const handleSaveContext = async () => {
     await workspaceApi.updateContext(projectId, wsContextDraft);
+    analytics.workspaceContextUpdated(projectId, wsContextDraft);
     setWsContextEdit(false);
     workspaceApi.getContext(projectId).then((d: { context: WsContext }) => setWsContext(d.context)).catch(() => {});
   };
@@ -277,6 +283,7 @@ export default function ProjectPage() {
   const handleCreateHypothesis = async () => {
     if (!hypDraft.title.trim()) return;
     await workspaceApi.createHypothesis({ project_id: projectId, ...hypDraft });
+    analytics.workspaceHypothesisCreated(projectId, hypDraft.priority);
     setHypForm(false);
     setHypDraft({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
@@ -284,12 +291,14 @@ export default function ProjectPage() {
 
   const handleHypStatus = async (id: number, status: string) => {
     await workspaceApi.updateHypothesis({ id, status });
+    analytics.workspaceHypothesisUpdated(projectId, id, status);
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
   };
 
   const handleOpenArtifact = async (id: number) => {
     const res = await workspaceApi.getArtifact(id) as { artifact: Artifact };
     setOpenArtifact(res.artifact);
+    analytics.workspaceArtifactOpened(projectId, id);
   };
 
   const handleInvite = async (e: React.FormEvent) => {

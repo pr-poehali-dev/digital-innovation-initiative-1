@@ -441,6 +441,54 @@ export type AnalyticsEvents = {
     goal_id: number;
     topic_id: number;
   };
+
+  // ── Workspace ───────────────────────────────────────────────────────
+  // 63. Открыт проект в workspace-режиме
+  workspace_opened: {
+    project_id: number;
+    tab: string;
+  };
+
+  // 64. Контекст обновлён
+  workspace_context_updated: {
+    project_id: number;
+    has_goals: boolean;
+    has_constraints: boolean;
+    has_key_facts: boolean;
+  };
+
+  // 65. Copilot использован
+  workspace_copilot_used: {
+    project_id: number;
+    mode: string;
+    saved_as_artifact: boolean;
+  };
+
+  // 66. Артефакт создан (через copilot)
+  workspace_artifact_created: {
+    project_id: number;
+    artifact_type: string;
+    mode: string;
+  };
+
+  // 67. Артефакт открыт
+  workspace_artifact_opened: {
+    project_id: number;
+    artifact_id: number;
+  };
+
+  // 68. Гипотеза создана
+  workspace_hypothesis_created: {
+    project_id: number;
+    priority: string;
+  };
+
+  // 69. Статус гипотезы изменён
+  workspace_hypothesis_updated: {
+    project_id: number;
+    hypothesis_id: number;
+    new_status: string;
+  };
 };
 
 // --- Ядро ---
@@ -860,6 +908,41 @@ export const analytics = {
 
   learningReviewQuizRetaken(goalId: number, topicId: number) {
     sendEvent("learning_review_quiz_retaken", { goal_id: goalId, topic_id: topicId });
+  },
+
+  // ── Workspace ────────────────────────────────────────────────────────
+
+  workspaceOpened(projectId: number, tab: string) {
+    sendEvent("workspace_opened", { project_id: projectId, tab });
+  },
+
+  workspaceContextUpdated(projectId: number, ctx: { goals_text: string; constraints_text: string; key_facts_text: string }) {
+    sendEvent("workspace_context_updated", {
+      project_id: projectId,
+      has_goals: Boolean(ctx.goals_text),
+      has_constraints: Boolean(ctx.constraints_text),
+      has_key_facts: Boolean(ctx.key_facts_text),
+    });
+  },
+
+  workspaceCopilotUsed(projectId: number, mode: string, savedAsArtifact: boolean) {
+    sendEvent("workspace_copilot_used", { project_id: projectId, mode, saved_as_artifact: savedAsArtifact });
+  },
+
+  workspaceArtifactCreated(projectId: number, artifactType: string, mode: string) {
+    sendEvent("workspace_artifact_created", { project_id: projectId, artifact_type: artifactType, mode });
+  },
+
+  workspaceArtifactOpened(projectId: number, artifactId: number) {
+    sendEvent("workspace_artifact_opened", { project_id: projectId, artifact_id: artifactId });
+  },
+
+  workspaceHypothesisCreated(projectId: number, priority: string) {
+    sendEvent("workspace_hypothesis_created", { project_id: projectId, priority });
+  },
+
+  workspaceHypothesisUpdated(projectId: number, hypothesisId: number, newStatus: string) {
+    sendEvent("workspace_hypothesis_updated", { project_id: projectId, hypothesis_id: hypothesisId, new_status: newStatus });
   },
 };
 
