@@ -292,6 +292,8 @@ export const educationApi = {
     request(URLS.education, "/", "POST", { action: "education.file_ready", id, filename, mime, s3_key: s3Key, file_size: fileSize }),
   getFileUrl: (fileId: number) =>
     request(URLS.education, "/", "POST", { action: "education.get_file_url", file_id: fileId }),
+  deleteFile: (fileId: number) =>
+    request(URLS.education, "/", "POST", { action: "education.delete_file", file_id: fileId }),
   analyze: (id: number) =>
     request(URLS.education, "/", "POST", { action: "education.analyze", id }),
   confirm: (id: number, overrides?: Record<string, unknown>) =>

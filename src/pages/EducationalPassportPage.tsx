@@ -87,6 +87,7 @@ export default function EducationalPassportPage() {
   const [detailItem, setDetailItem] = useState<EduItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [fileUrlLoading, setFileUrlLoading] = useState<number | null>(null);
+  const [fileDeleting, setFileDeleting] = useState<number | null>(null);
 
   const [editMode, setEditMode] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -228,6 +229,19 @@ export default function EducationalPassportPage() {
       setConfirmItem(full);
     } catch {
       setConfirmItem(item);
+    }
+  };
+
+  const deleteFile = async (file: EduFile) => {
+    if (!confirm(`Удалить файл «${file.name}»?`)) return;
+    setFileDeleting(file.id);
+    try {
+      await educationApi.deleteFile(file.id);
+      setDetailItem((prev) => prev ? { ...prev, files: prev.files?.filter(f => f.id !== file.id) } : prev);
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Не удалось удалить файл");
+    } finally {
+      setFileDeleting(null);
     }
   };
 
@@ -593,6 +607,14 @@ export default function EducationalPassportPage() {
                             className="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-2 py-1 rounded-md disabled:opacity-50 flex-shrink-0"
                           >
                             {fileUrlLoading === f.id ? "..." : "Открыть"}
+                          </button>
+                          <button
+                            onClick={() => deleteFile(f)}
+                            disabled={fileDeleting === f.id}
+                            className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-2 py-1 rounded-md disabled:opacity-50 flex-shrink-0"
+                            title="Удалить файл"
+                          >
+                            {fileDeleting === f.id ? "..." : <Icon name="Trash2" size={12} />}
                           </button>
                         </div>
                       ))}

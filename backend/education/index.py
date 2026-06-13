@@ -30,6 +30,7 @@ ALLOWED_ACTIONS = {
     "education.create",
     "education.update",
     "education.archive",
+    "education.delete_file",
     "education.upload_file",
     "education.upload_init",
     "education.upload_chunk",
@@ -267,27 +268,33 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
 
 
 def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
-    """OCR через Yandex Vision API для сканов дипломов и сертификатов. Поддерживает PDF и изображения."""
+    """OCR через YandexGPT Vision (multimodal) — извлекает весь текст с изображения диплома/сертификата."""
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
         return "[OCR недоступен: нет ключей Yandex]"
     import urllib.request, urllib.error
     b64 = base64.b64encode(image_bytes).decode("ascii")
-    spec = {
-        "content": b64,
-        "features": [{"type": "TEXT_DETECTION", "text_detection_config": {"language_codes": ["ru", "en"]}}],
-    }
-    if mime_type:
-        spec["mime_type"] = mime_type
+    if not mime_type or mime_type == "application/octet-stream":
+        mime_type = "image/png"
+    image_url = f"data:{mime_type};base64,{b64}"
     payload = json.dumps({
-        "folderId": folder_id,
-        "analyze_specs": [spec],
+        "modelUri": f"gpt://{folder_id}/yandexgpt/latest",
+        "completionOptions": {"stream": False, "temperature": 0, "maxTokens": 4000},
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Извлеки весь текст с этого изображения документа (диплома, сертификата). Верни только текст документа, без пояснений."},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
     }).encode()
     req = urllib.request.Request(
-        "https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze",
+        "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
         data=payload,
-        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json", "x-folder-id": folder_id},
     )
     try:
         try:
@@ -295,20 +302,11 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
                 result = json.loads(resp.read())
         except urllib.error.HTTPError as http_err:
             body = http_err.read().decode("utf-8", errors="replace")[:500]
-            log.error("Vision HTTP %d: %s", http_err.code, body)
+            log.error("YandexGPT Vision HTTP %d: %s", http_err.code, body)
             return f"[Ошибка OCR: HTTP {http_err.code}: {body}]"
-        lines = []
-        for r in result.get("results", []):
-            for sub in r.get("results", []):
-                td = sub.get("textDetection", {})
-                for page in td.get("pages", []):
-                    for block in page.get("blocks", []):
-                        for line in block.get("lines", []):
-                            words = [w.get("text", "") for w in line.get("words", [])]
-                            text = " ".join(words).strip()
-                            if text:
-                                lines.append(text)
-        return "\n".join(lines)[:30000] if lines else "[OCR: текст не найден]"
+        text = result.get("result", {}).get("alternatives", [{}])[0].get("message", {}).get("text", "")
+        log.info("OCR result length=%d", len(text))
+        return text[:30000] if text else "[OCR: текст не найден]"
     except Exception as e:
         log.error("OCR error mime=%s size=%d err=%s", mime_type, len(image_bytes), e)
         return f"[Ошибка OCR: {e}]"
@@ -617,6 +615,36 @@ def handle_archive(conn, user, body, request_id, origin):
     conn.commit()
     notify_indexer("delete", int(item_id))
     return ok_response({"ok": True, "archived": True}, request_id, origin)
+
+
+def handle_delete_file(conn, user, body, request_id, origin):
+    """Удаляет прикреплённый файл из карточки (из S3 и БД)."""
+    schema = get_schema()
+    file_id = body.get("file_id")
+    if not file_id:
+        return err_response("validation_error", "Нужен file_id", 400, request_id, origin)
+    cur = conn.cursor()
+    cur.execute(
+        f"""SELECT eif.id, eif.s3_key, ei.user_id
+            FROM {schema}.education_item_files eif
+            JOIN {schema}.education_items ei ON ei.id = eif.education_item_id
+            WHERE eif.id = %s""",
+        (int(file_id),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Файл не найден", 404, request_id, origin)
+    if row[2] != user["id"]:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin)
+    s3_key = row[1]
+    try:
+        s3 = get_s3()
+        s3.delete_object(Bucket="files", Key=s3_key)
+    except Exception as e:
+        log.warning("S3 delete failed for key=%s: %s", s3_key, e)
+    cur.execute(f"DELETE FROM {schema}.education_item_files WHERE id = %s", (int(file_id),))
+    conn.commit()
+    return ok_response({"ok": True, "deleted_file_id": int(file_id)}, request_id, origin)
 
 
 def handle_upload_file(conn, user, body, request_id, origin):
@@ -1140,6 +1168,8 @@ def handler(event: dict, context) -> dict:
             return handle_update(conn, user, body, request_id, origin)
         if action == "education.archive":
             return handle_archive(conn, user, body, request_id, origin)
+        if action == "education.delete_file":
+            return handle_delete_file(conn, user, body, request_id, origin)
         if action == "education.upload_file":
             return handle_upload_file(conn, user, body, request_id, origin)
         if action == "education.get_upload_url":
