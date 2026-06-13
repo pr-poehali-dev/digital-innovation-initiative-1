@@ -481,16 +481,29 @@ export function fileToBase64(file: File): Promise<string> {
 
 const CHUNK_SIZE = 512 * 1024; // 512 KB — безопасно до лимита 1 МБ
 
+function detectMime(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.split(".").pop()?.toLowerCase() || "";
+  const map: Record<string, string> = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+    pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    txt: "text/plain", heic: "image/heic", webp: "image/webp",
+  };
+  return map[ext] || "application/octet-stream";
+}
+
 export async function uploadEducationFile(itemId: number, file: File): Promise<{ warning?: string; extracted?: Record<string, unknown>; parse_status?: string }> {
+  const mime = detectMime(file);
   if (file.size <= CHUNK_SIZE) {
     const fileData = await fileToBase64(file);
-    return educationApi.uploadFile(itemId, file.name, file.type || "application/octet-stream", fileData);
+    return educationApi.uploadFile(itemId, file.name, mime, fileData);
   }
   const { upload_session_id } = await request(URLS.education, "/", "POST", {
     action: "education.upload_init",
     id: itemId,
     filename: file.name,
-    mime: file.type || "application/octet-stream",
+    mime,
   }) as { upload_session_id: string };
 
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);

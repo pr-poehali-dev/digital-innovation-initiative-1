@@ -273,6 +273,7 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
         log.info("extract_text: unrecognized mime=%s size=%d, skipping OCR", mime, len(file_bytes))
         return ""
     except Exception as e:
+        log.error("extract_text EXCEPTION mime=%s size=%d: %s", mime, len(file_bytes), e, exc_info=True)
         return f"[Ошибка извлечения: {e}]"
 
 
@@ -669,6 +670,7 @@ def handle_upload_file(conn, user, body, request_id, origin):
     file_data_b64 = body.get("file_data")
     filename = body.get("filename", "file")
     mime = body.get("mime", "application/octet-stream")
+    log.info("[PIPELINE] upload_file start item_id=%s filename=%r mime=%r", item_id, filename, mime)
     if not item_id or not file_data_b64:
         return err_response("validation_error", "Нужны id и file_data", 400, request_id, origin)
 
@@ -711,7 +713,10 @@ def handle_upload_file(conn, user, body, request_id, origin):
     #  - текст есть и нормальный → done
     #  - пусто или очень мало (<50 символов) → empty_or_too_short
     #  - начинается с [Ошибка / [OCR: текст не найден → failed
+    magic4 = file_bytes[:4].hex() if file_bytes else "empty"
+    log.info("[PIPELINE] extract_text start mime=%r size=%d magic=%s", mime, len(file_bytes), magic4)
     parsed_text = extract_text_from_file(file_bytes, mime)
+    log.info("[PIPELINE] extract_text done len=%d preview=%r", len(parsed_text or ""), (parsed_text or "")[:80])
     if not parsed_text:
         parse_status = "empty"
     elif parsed_text.startswith("[Ошибка") or parsed_text.startswith("[OCR"):
