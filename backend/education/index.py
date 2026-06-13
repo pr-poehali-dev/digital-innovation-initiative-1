@@ -259,9 +259,17 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
         if mime.startswith("text/"):
             return file_bytes.decode("utf-8", errors="ignore")[:30000]
         # JPG / PNG / HEIC — скан документа, используем Yandex Vision OCR
-        if mime.startswith("image/") or any(mime.endswith(ext) for ext in ("/jpeg", "/jpg", "/png", "/webp", "/heic")):
-            log.info("OCR image mime=%s size=%d", mime, len(file_bytes))
-            return ocr_image_bytes(file_bytes, mime_type=mime)
+        # Детектируем по MIME и по сигнатуре файла (первые байты)
+        is_image_mime = mime.startswith("image/") or any(mime.endswith(ext) for ext in ("/jpeg", "/jpg", "/png", "/webp", "/heic"))
+        # Детектируем PNG по magic bytes: \x89PNG
+        is_png_magic = file_bytes[:4] == b'\x89PNG'
+        # Детектируем JPEG по magic bytes: \xff\xd8
+        is_jpg_magic = file_bytes[:2] == b'\xff\xd8'
+        if is_image_mime or is_png_magic or is_jpg_magic:
+            detected_mime = mime if mime.startswith("image/") else ("image/png" if is_png_magic else "image/jpeg")
+            log.info("OCR image detected mime=%s size=%d", detected_mime, len(file_bytes))
+            return ocr_image_bytes(file_bytes, mime_type=detected_mime)
+        log.info("extract_text: unrecognized mime=%s size=%d, skipping OCR", mime, len(file_bytes))
         return ""
     except Exception as e:
         return f"[Ошибка извлечения: {e}]"
