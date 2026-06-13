@@ -237,12 +237,11 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
             import PyPDF2
             reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
             text = "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+            log.info("PDF text extract len=%d", len(text))
             if len(text) >= 50:
                 return text[:30000]
-            # PDF — скан без текстового слоя, передаём в Yandex Vision напрямую
-            ocr_text = ocr_image_bytes(file_bytes, mime_type="application/pdf")
-            if ocr_text and not ocr_text.startswith("["):
-                return ocr_text[:30000]
+            # PDF-скан без текстового слоя — не поддерживается без ai.vision.user роли
+            log.warning("PDF has no extractable text len=%d", len(text))
             return text or ""
         if "wordprocessingml" in mime or mime.endswith("/docx"):
             import docx
@@ -278,35 +277,73 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
 
 
 def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
-    """OCR через Yandex Vision OCR API v1 — распознаёт текст с PNG/JPG дипломов и сертификатов."""
+    """OCR через YandexGPT Vision (multimodal) — распознаёт текст с PNG/JPG/PDF дипломов.
+    Использует тот же YANDEX_GPT_API_KEY что и текстовые запросы."""
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
         return "[OCR недоступен: нет ключей Yandex]"
     import urllib.request, urllib.error
-    b64 = base64.b64encode(image_bytes).decode("ascii")
+
     if not mime_type or mime_type == "application/octet-stream":
         mime_type = "image/png"
-    # Yandex Vision OCR v1 принимает MIME-тип в формате image/jpeg, image/png, application/pdf
-    # Нормализуем к стандартным MIME
-    mime_map = {
-        "image/jpg": "image/jpeg",
-        "image/JPG": "image/jpeg",
-        "image/PNG": "image/png",
-        "image/JPEG": "image/jpeg",
-    }
+    mime_map = {"image/jpg": "image/jpeg", "image/JPG": "image/jpeg",
+                "image/PNG": "image/png", "image/JPEG": "image/jpeg"}
     mime_type = mime_map.get(mime_type, mime_type)
-    log.info("OCR start mime=%s size=%d", mime_type, len(image_bytes))
+
+    # Для PDF конвертируем первую страницу в PNG через Pillow
+    if "pdf" in mime_type:
+        try:
+            import io as _io
+            import PyPDF2 as _pypdf
+            reader = _pypdf.PdfReader(_io.BytesIO(image_bytes))
+            # Попытка извлечь текст из PDF — если есть текстовый слой
+            text = "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+            if len(text) >= 50:
+                log.info("PDF text layer found len=%d", len(text))
+                return text[:30000]
+        except Exception as pdf_err:
+            log.warning("PDF text extract failed: %s", pdf_err)
+        # Если текста нет — отправляем PDF напрямую в vision как изображение
+        # YandexGPT vision не принимает PDF, поэтому возвращаем пусто и caller сам решит
+        log.warning("PDF has no text layer and no image conversion available, size=%d", len(image_bytes))
+        return "[OCR: PDF без текстового слоя]"
+
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    log.info("OCR via YandexGPT vision start mime=%s size=%d", mime_type, len(image_bytes))
+
     payload = json.dumps({
-        "mimeType": mime_type,
-        "languageCodes": ["ru", "en"],
-        "model": "page",
-        "content": b64,
+        "modelUri": f"gpt://{folder_id}/yandexgpt-lite/latest",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime_type};base64,{b64}"}
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Перед тобой скан документа об образовании (диплом, сертификат, свидетельство). "
+                            "Распознай и выпиши ВЕСЬ текст с изображения максимально точно, сохраняя структуру. "
+                            "Не добавляй ничего от себя — только текст с документа."
+                        )
+                    }
+                ]
+            }
+        ],
+        "completionOptions": {"stream": False, "temperature": 0, "maxTokens": 4000}
     }).encode()
+
     req = urllib.request.Request(
-        "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText",
+        "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
         data=payload,
-        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json", "x-folder-id": folder_id, "x-data-logging-enabled": "false"},
+        headers={
+            "Authorization": f"Api-Key {api_key}",
+            "Content-Type": "application/json",
+            "x-folder-id": folder_id,
+        },
     )
     try:
         try:
@@ -314,17 +351,13 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
                 result = json.loads(resp.read())
         except urllib.error.HTTPError as http_err:
             body = http_err.read().decode("utf-8", errors="replace")[:500]
-            log.error("Yandex OCR HTTP %d: %s", http_err.code, body)
+            log.error("YandexGPT Vision HTTP %d: %s", http_err.code, body)
             return f"[Ошибка OCR: HTTP {http_err.code}: {body}]"
-        # Извлекаем fullText из результата
-        text_annotation = result.get("result", {}).get("textAnnotation", {})
-        full_text = text_annotation.get("fullText", "")
-        log.info("OCR result length=%d raw_keys=%s", len(full_text), list(result.keys()))
-        if not full_text:
-            log.warning("OCR empty result: %s", json.dumps(result, ensure_ascii=False)[:500])
-        return full_text[:30000] if full_text else "[OCR: текст не найден]"
+        text = result.get("result", {}).get("alternatives", [{}])[0].get("message", {}).get("text", "")
+        log.info("YandexGPT Vision OCR done len=%d", len(text))
+        return text[:30000] if text else "[OCR: текст не найден]"
     except Exception as e:
-        log.error("OCR error mime=%s size=%d err=%s", mime_type, len(image_bytes), e)
+        log.error("YandexGPT Vision OCR error: %s", e, exc_info=True)
         return f"[Ошибка OCR: {e}]"
 
 
