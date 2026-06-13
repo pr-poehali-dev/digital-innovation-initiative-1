@@ -234,7 +234,14 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
         if "pdf" in mime:
             import PyPDF2
             reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            return "\n".join((p.extract_text() or "") for p in reader.pages)[:30000]
+            text = "\n".join((p.extract_text() or "") for p in reader.pages).strip()
+            if len(text) >= 50:
+                return text[:30000]
+            # PDF — скан без текстового слоя, передаём в Yandex Vision напрямую
+            ocr_text = ocr_image_bytes(file_bytes, mime_type="application/pdf")
+            if ocr_text and not ocr_text.startswith("["):
+                return ocr_text[:30000]
+            return text or ""
         if "wordprocessingml" in mime or mime.endswith("/docx"):
             import docx
             d = docx.Document(io.BytesIO(file_bytes))
@@ -258,20 +265,23 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
         return f"[Ошибка извлечения: {e}]"
 
 
-def ocr_image_bytes(image_bytes: bytes) -> str:
-    """OCR через Yandex Vision API для сканов дипломов и сертификатов."""
+def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
+    """OCR через Yandex Vision API для сканов дипломов и сертификатов. Поддерживает PDF и изображения."""
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
         return "[OCR недоступен: нет ключей Yandex]"
     import urllib.request, urllib.error
     b64 = base64.b64encode(image_bytes).decode("ascii")
+    spec = {
+        "content": b64,
+        "features": [{"type": "TEXT_DETECTION", "text_detection_config": {"language_codes": ["ru", "en"]}}],
+    }
+    if mime_type:
+        spec["mime_type"] = mime_type
     payload = json.dumps({
         "folderId": folder_id,
-        "analyze_specs": [{
-            "content": b64,
-            "features": [{"type": "TEXT_DETECTION", "text_detection_config": {"language_codes": ["ru", "en"]}}],
-        }],
+        "analyze_specs": [spec],
     }).encode()
     req = urllib.request.Request(
         "https://vision.api.cloud.yandex.net/vision/v1/batchAnalyze",
@@ -999,16 +1009,8 @@ def handle_get_file_url(conn, user, body, request_id, origin):
         return err_response("access_denied", "Нет доступа", 403, request_id, origin)
 
     s3_key, original_name, mime_type = row[0], row[1], row[2]
-    s3 = get_s3()
-    try:
-        url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": "files", "Key": s3_key},
-            ExpiresIn=300,
-        )
-    except Exception as e:
-        return err_response("storage_error", f"Не удалось получить ссылку: {e}", 500, request_id, origin)
-
+    access_key = os.environ.get("AWS_ACCESS_KEY_ID", "")
+    url = f"https://cdn.poehali.dev/projects/{access_key}/bucket/{s3_key}"
     return ok_response({"url": url, "filename": original_name, "mime": mime_type}, request_id, origin)
 
 
