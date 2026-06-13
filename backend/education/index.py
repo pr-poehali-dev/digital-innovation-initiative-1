@@ -31,6 +31,9 @@ ALLOWED_ACTIONS = {
     "education.update",
     "education.archive",
     "education.upload_file",
+    "education.upload_init",
+    "education.upload_chunk",
+    "education.upload_complete",
     "education.get_upload_url",
     "education.file_ready",
     "education.get_file_url",
@@ -38,6 +41,10 @@ ALLOWED_ACTIONS = {
     "education.confirm",
     "education.profile_summary",
 }
+
+# Временное хранилище чанков в памяти (в рамках одного invocation не работает
+# между запросами — используем S3 как буфер)
+
 
 KIND_GROUPS = {
     "formal": {"degree", "certificate", "course", "program"},
@@ -1005,6 +1012,80 @@ def handle_get_file_url(conn, user, body, request_id, origin):
     return ok_response({"url": url, "filename": original_name, "mime": mime_type}, request_id, origin)
 
 
+def handle_upload_init(conn, user, body, request_id, origin):
+    """Инициализирует чанковую загрузку — возвращает upload_session_id."""
+    item_id = body.get("id")
+    filename = body.get("filename", "file")
+    mime = body.get("mime", "application/octet-stream")
+    if not item_id or not filename:
+        return err_response("validation_error", "Нужны id и filename", 400, request_id, origin)
+    schema = get_schema()
+    cur = conn.cursor()
+    cur.execute(f"SELECT user_id FROM {schema}.education_items WHERE id = %s", (int(item_id),))
+    row = cur.fetchone()
+    if not row:
+        return err_response("not_found", "Запись не найдена", 404, request_id, origin)
+    if row[0] != user["id"]:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin)
+    session_id = uuid.uuid4().hex
+    s3 = get_s3()
+    meta = json.dumps({"item_id": item_id, "filename": filename, "mime": mime, "user_id": user["id"]})
+    s3.put_object(Bucket="files", Key=f"edu_upload/{session_id}/_meta.json", Body=meta.encode(), ContentType="application/json")
+    return ok_response({"upload_session_id": session_id}, request_id, origin)
+
+
+def handle_upload_chunk(conn, user, body, request_id, origin):
+    """Принимает один чанк (base64) и сохраняет в S3 как отдельный объект."""
+    session_id = body.get("upload_session_id")
+    chunk_index = body.get("chunk_index")
+    chunk_b64 = body.get("chunk_b64")
+    if not session_id or chunk_index is None or not chunk_b64:
+        return err_response("validation_error", "Нужны upload_session_id, chunk_index, chunk_b64", 400, request_id, origin)
+    s3 = get_s3()
+    try:
+        s3.get_object(Bucket="files", Key=f"edu_upload/{session_id}/_meta.json")
+    except Exception:
+        return err_response("not_found", "Сессия загрузки не найдена", 404, request_id, origin)
+    chunk_bytes = base64.b64decode(chunk_b64)
+    s3.put_object(Bucket="files", Key=f"edu_upload/{session_id}/chunk_{chunk_index:05d}", Body=chunk_bytes)
+    return ok_response({"chunk_index": chunk_index}, request_id, origin)
+
+
+def handle_upload_complete(conn, user, body, request_id, origin):
+    """Склеивает чанки, сохраняет файл, запускает AI-анализ."""
+    session_id = body.get("upload_session_id")
+    total_chunks = body.get("total_chunks")
+    if not session_id or total_chunks is None:
+        return err_response("validation_error", "Нужны upload_session_id и total_chunks", 400, request_id, origin)
+    s3 = get_s3()
+    try:
+        meta_obj = s3.get_object(Bucket="files", Key=f"edu_upload/{session_id}/_meta.json")
+        meta = json.loads(meta_obj["Body"].read())
+    except Exception:
+        return err_response("not_found", "Сессия загрузки не найдена", 404, request_id, origin)
+    if meta["user_id"] != user["id"]:
+        return err_response("access_denied", "Нет доступа", 403, request_id, origin)
+    item_id = meta["item_id"]
+    filename = meta["filename"]
+    mime = meta["mime"]
+    parts = []
+    for i in range(int(total_chunks)):
+        chunk_obj = s3.get_object(Bucket="files", Key=f"edu_upload/{session_id}/chunk_{i:05d}")
+        parts.append(chunk_obj["Body"].read())
+    file_bytes = b"".join(parts)
+    # Делегируем существующей логике через синтетический body
+    synthetic_body = {"id": item_id, "file_data": base64.b64encode(file_bytes).decode(), "filename": filename, "mime": mime}
+    result = handle_upload_file(conn, user, synthetic_body, request_id, origin)
+    # Удаляем временные чанки
+    try:
+        for i in range(int(total_chunks)):
+            s3.delete_object(Bucket="files", Key=f"edu_upload/{session_id}/chunk_{i:05d}")
+        s3.delete_object(Bucket="files", Key=f"edu_upload/{session_id}/_meta.json")
+    except Exception:
+        pass
+    return result
+
+
 # ============================================================
 # Router
 # ============================================================
@@ -1064,6 +1145,12 @@ def handler(event: dict, context) -> dict:
             return handle_confirm(conn, user, body, request_id, origin)
         if action == "education.profile_summary":
             return handle_profile_summary(conn, user, request_id, origin)
+        if action == "education.upload_init":
+            return handle_upload_init(conn, user, body, request_id, origin)
+        if action == "education.upload_chunk":
+            return handle_upload_chunk(conn, user, body, request_id, origin)
+        if action == "education.upload_complete":
+            return handle_upload_complete(conn, user, body, request_id, origin)
 
         return err_response("not_implemented", "Не реализовано", 501, request_id, origin)
 

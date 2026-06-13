@@ -477,6 +477,40 @@ export function fileToBase64(file: File): Promise<string> {
   });
 }
 
+const CHUNK_SIZE = 512 * 1024; // 512 KB — безопасно до лимита 1 МБ
+
+export async function uploadEducationFile(itemId: number, file: File): Promise<{ warning?: string }> {
+  if (file.size <= CHUNK_SIZE) {
+    const fileData = await fileToBase64(file);
+    return educationApi.uploadFile(itemId, file.name, file.type || "application/octet-stream", fileData);
+  }
+  const { upload_session_id } = await request(URLS.education, "/", "POST", {
+    action: "education.upload_init",
+    id: itemId,
+    filename: file.name,
+    mime: file.type || "application/octet-stream",
+  }) as { upload_session_id: string };
+
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunkB64 = await readChunkAsBase64(file, start, end);
+    await request(URLS.education, "/", "POST", {
+      action: "education.upload_chunk",
+      upload_session_id,
+      chunk_index: i,
+      chunk_b64: chunkB64,
+    });
+  }
+
+  return request(URLS.education, "/", "POST", {
+    action: "education.upload_complete",
+    upload_session_id,
+    total_chunks: totalChunks,
+  }) as Promise<{ warning?: string }>;
+}
+
 export const walletApi = {
   getBalance: () =>
     request(URLS.wallet, "/", "POST", { action: "wallet.get_balance" }),

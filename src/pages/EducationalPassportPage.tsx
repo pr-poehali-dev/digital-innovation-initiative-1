@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { educationApi, fileToBase64 } from "@/lib/api";
+import { educationApi, uploadEducationFile } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
@@ -145,16 +145,8 @@ export default function EducationalPassportPage() {
       const newItem = await educationApi.create(payload);
 
       if (createPendingFile) {
-        const fileData = await fileToBase64(createPendingFile);
-        const uploadResult = await educationApi.uploadFile(
-          newItem.id,
-          createPendingFile.name,
-          createPendingFile.type || "application/octet-stream",
-          fileData,
-        );
-        if (uploadResult.warning) {
-          alert("⚠️ " + uploadResult.warning);
-        }
+        const uploadResult = await uploadEducationFile(newItem.id, createPendingFile);
+        if (uploadResult.warning) alert("⚠️ " + uploadResult.warning);
       }
 
       resetCreate();
@@ -215,13 +207,7 @@ export default function EducationalPassportPage() {
         description: editDesc.trim() || undefined,
       });
       if (editPendingFile) {
-        const fileData = await fileToBase64(editPendingFile);
-        const uploadResult = await educationApi.uploadFile(
-          detailItem.id,
-          editPendingFile.name,
-          editPendingFile.type || "application/octet-stream",
-          fileData,
-        );
+        const uploadResult = await uploadEducationFile(detailItem.id, editPendingFile);
         if (uploadResult.warning) alert("⚠️ " + uploadResult.warning);
       }
       const updated = await educationApi.get(detailItem.id);
