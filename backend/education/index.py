@@ -259,7 +259,8 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
             return file_bytes.decode("utf-8", errors="ignore")[:30000]
         # JPG / PNG / HEIC — скан документа, используем Yandex Vision OCR
         if mime.startswith("image/") or any(mime.endswith(ext) for ext in ("/jpeg", "/jpg", "/png", "/webp", "/heic")):
-            return ocr_image_bytes(file_bytes)
+            log.info("OCR image mime=%s size=%d", mime, len(file_bytes))
+            return ocr_image_bytes(file_bytes, mime_type=mime)
         return ""
     except Exception as e:
         return f"[Ошибка извлечения: {e}]"
@@ -289,8 +290,13 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
         headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read())
+        except urllib.error.HTTPError as http_err:
+            body = http_err.read().decode("utf-8", errors="replace")[:500]
+            log.error("Vision HTTP %d: %s", http_err.code, body)
+            return f"[Ошибка OCR: HTTP {http_err.code}: {body}]"
         lines = []
         for r in result.get("results", []):
             for sub in r.get("results", []):
@@ -304,6 +310,7 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
                                 lines.append(text)
         return "\n".join(lines)[:30000] if lines else "[OCR: текст не найден]"
     except Exception as e:
+        log.error("OCR error mime=%s size=%d err=%s", mime_type, len(image_bytes), e)
         return f"[Ошибка OCR: {e}]"
 
 
