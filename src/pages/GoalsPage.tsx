@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Icon from "@/components/ui/icon";
-import { goalsApi, learningPackApi } from "@/lib/api";
+import { goalsApi, learningPackApi, educationApi } from "@/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -529,6 +530,7 @@ function MilestoneRow({
   const [showReadingList, setShowReadingList] = useState(false);
   const [readingList, setReadingList] = useState<ReadingListItem[] | null>(null);
   const [loadingRL, setLoadingRL] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const loadMaterials = useCallback(async () => {
     try {
@@ -547,11 +549,12 @@ function MilestoneRow({
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setGenerateError(null);
     try {
       await learningPackApi.generate(milestone.id, goalId);
       await loadMaterials();
     } catch (e) {
-      alert("Ошибка подбора: " + (e as Error).message);
+      setGenerateError((e as Error).message || "Неизвестная ошибка");
     } finally {
       setGenerating(false);
     }
@@ -613,17 +616,38 @@ function MilestoneRow({
               Загружаю...
             </div>
           ) : materials.length === 0 ? (
-            <div className="text-center py-5">
-              <p className="text-xs text-slate-500 mb-3">
-                {jobStatus === "failed" ? "Ошибка подбора. Попробуй ещё раз." : "Материалы ещё не подобраны"}
-              </p>
-              <button onClick={handleGenerate} disabled={generating}
-                className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors mx-auto">
-                {generating
-                  ? <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Подбираю и верифицирую...</>
-                  : <><Icon name="Search" size={12} />Подобрать материалы</>}
-              </button>
-              {generating && <p className="text-[10px] text-slate-400 mt-2">AI подбирает, проверяет ссылки и готовит конспекты — займёт ~40 секунд</p>}
+            <div className="py-4 space-y-3">
+              {/* Error state */}
+              {generateError && (
+                <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+                  <p className="text-xs font-semibold text-red-600 mb-0.5">Не удалось подобрать материалы</p>
+                  <p className="text-[11px] text-red-500 mb-2">Возможные причины: источник долго отвечал, сервис временно недоступен.</p>
+                  <div className="flex gap-2">
+                    <button onClick={handleGenerate} disabled={generating}
+                      className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-lg transition-colors">
+                      <Icon name="RefreshCw" size={11} />
+                      Повторить
+                    </button>
+                    <button onClick={() => { setGenerateError(null); setShowReadingList(true); handleReadingList(); }}
+                      className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
+                      <Icon name="BookMarked" size={11} />
+                      Список литературы
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!generateError && (
+                <div className="text-center py-2">
+                  <p className="text-xs text-slate-500 mb-3">Материалы ещё не подобраны</p>
+                  <button onClick={handleGenerate} disabled={generating}
+                    className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors mx-auto">
+                    {generating
+                      ? <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Подбираю...</>
+                      : <><Icon name="Search" size={12} />Подобрать материалы</>}
+                  </button>
+                  {generating && <p className="text-[10px] text-slate-400 mt-2">AI подбирает и проверяет ссылки — ~25 секунд</p>}
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -680,40 +704,7 @@ function MilestoneRow({
                           Найди эти материалы самостоятельно и загрузи в <span className="text-violet-600 font-medium">Образовательный паспорт</span> — AI учтёт их в анализе компетенций
                         </p>
                         {readingList.map((item, i) => (
-                          <div key={i} className="bg-slate-50 rounded-xl border border-slate-100 p-3">
-                            <div className="flex items-start gap-2 mb-1.5">
-                              <div className="w-7 h-7 rounded-lg bg-white border border-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                                <Icon name={RL_TYPE_ICON[item.type] || "BookOpen"} size={13} className="text-slate-500" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-slate-800 leading-snug">{item.title}</p>
-                                {item.author && <p className="text-[10px] text-slate-400 mt-0.5">{item.author}</p>}
-                              </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${RL_LEVEL_COLOR[item.level] || "bg-slate-100 text-slate-500"}`}>
-                                  {item.level}
-                                </span>
-                                <span className="text-[9px] text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">
-                                  {RL_TYPE_LABEL[item.type] || item.type}
-                                </span>
-                              </div>
-                            </div>
-                            {item.why && <p className="text-xs text-slate-600 leading-snug ml-9 mb-1">{item.why}</p>}
-                            <div className="flex items-center gap-3 ml-9">
-                              {item.where_to_find && (
-                                <span className="text-[10px] text-violet-600 flex items-center gap-1">
-                                  <Icon name="Search" size={9} />
-                                  {item.where_to_find}
-                                </span>
-                              )}
-                              {item.estimated_hours > 0 && (
-                                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                                  <Icon name="Clock" size={9} />
-                                  ~{item.estimated_hours} ч
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                          <ReadingListCard key={i} item={item} />
                         ))}
                       </>
                     ) : readingList !== null ? (
@@ -726,6 +717,83 @@ function MilestoneRow({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── ReadingListCard ────────────────────────────────────────────────────────────
+
+function ReadingListCard({ item }: { item: ReadingListItem }) {
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveToPassport = async () => {
+    setSaving(true);
+    try {
+      await educationApi.create({
+        kind: item.type === "course" || item.type === "video_series" ? "course" : "book",
+        title: item.title,
+        issuer_name: item.author || undefined,
+        description: item.why || undefined,
+      });
+      setSaved(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={`rounded-xl border p-3 transition-all ${saved ? "border-emerald-100 bg-emerald-50/40" : "bg-white border-slate-100"}`}>
+      <div className="flex items-start gap-2 mb-1.5">
+        <div className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+          <Icon name={RL_TYPE_ICON[item.type] || "BookOpen"} size={13} className="text-slate-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-800 leading-snug">{item.title}</p>
+          {item.author && <p className="text-[10px] text-slate-400 mt-0.5">{item.author}</p>}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${RL_LEVEL_COLOR[item.level] || "bg-slate-100 text-slate-500"}`}>
+            {item.level}
+          </span>
+          <span className="text-[9px] text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">
+            {RL_TYPE_LABEL[item.type] || item.type}
+          </span>
+        </div>
+      </div>
+      {item.why && <p className="text-xs text-slate-600 leading-snug ml-9 mb-2">{item.why}</p>}
+      <div className="flex items-center justify-between ml-9">
+        <div className="flex items-center gap-3">
+          {item.where_to_find && (
+            <span className="text-[10px] text-violet-600 flex items-center gap-1">
+              <Icon name="Search" size={9} />
+              {item.where_to_find}
+            </span>
+          )}
+          {item.estimated_hours > 0 && (
+            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+              <Icon name="Clock" size={9} />
+              ~{item.estimated_hours} ч
+            </span>
+          )}
+        </div>
+        {saved ? (
+          <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-semibold">
+            <Icon name="CheckCircle" size={11} />
+            В паспорте
+          </span>
+        ) : (
+          <button onClick={handleSaveToPassport} disabled={saving}
+            className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 disabled:opacity-60 transition-colors">
+            {saving
+              ? <div className="animate-spin rounded-full h-2.5 w-2.5 border-b border-violet-600" />
+              : <Icon name="Plus" size={10} />}
+            {saving ? "Сохраняю..." : "В паспорт"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -750,8 +818,13 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
   const iconName = FORMAT_ICON[material.format] || "FileText";
 
   const handleReader = async () => {
-    if (view === "reader") { setView("none"); return; }
+    if (view === "reader") {
+      setView("none");
+      document.body.style.overflow = "";
+      return;
+    }
     setView("reader");
+    document.body.style.overflow = "hidden";
     if (readerContent) { return; }
     setReaderLoading(true);
     try {
@@ -761,6 +834,20 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
     } catch (e) { setReaderContent("Не удалось загрузить содержимое."); }
     finally { setReaderLoading(false); }
   };
+
+  const closeReader = () => {
+    setView(v => v === "reader" ? "none" : v);
+    document.body.style.overflow = "";
+  };
+
+  // ESC closes reader
+  useEffect(() => {
+    if (view !== "reader") return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") closeReader(); };
+    window.addEventListener("keydown", handler);
+    return () => { window.removeEventListener("keydown", handler); document.body.style.overflow = ""; };
+   
+  }, [view]);
 
   const handleSummary = async () => {
     if (view === "summary") { setView("none"); return; }
@@ -824,9 +911,9 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
         <div className="flex items-center gap-1.5 mt-3 flex-wrap">
           {isInApp && (
             <button onClick={handleReader}
-              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${view === "reader" ? "bg-violet-600 text-white" : "bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200"}`}>
+              className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors">
               <Icon name="BookOpen" size={11} />
-              {view === "reader" ? "Свернуть" : "Изучать"}
+              Изучать
             </button>
           )}
           {(material.has_assets || (isInApp && material.summary_basis === "content")) && (
@@ -849,49 +936,48 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
         </div>
       </div>
 
-      {/* Reader — fullscreen overlay */}
-      {view === "reader" && (
-        <div className="fixed inset-0 z-50 bg-white flex flex-col">
-          {/* Reader header */}
-          <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-100 bg-white shrink-0">
+      {/* Reader — true fullscreen via portal */}
+      {view === "reader" && createPortal(
+        <div className="fixed inset-0 z-[9999] bg-white flex flex-col">
+          <div className="flex items-center gap-4 px-5 py-3 border-b border-slate-100 shrink-0 shadow-sm">
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-400 mb-0.5">{material.domain}</p>
-              <h2 className="text-base font-bold text-slate-900 leading-snug truncate">{material.title}</h2>
+              <p className="text-[10px] text-slate-400">{material.domain}</p>
+              <h2 className="text-sm font-bold text-slate-900 leading-snug truncate">{material.title}</h2>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {material.word_count > 0 && (
-                <span className="text-xs text-slate-400">{material.word_count} слов</span>
-              )}
+              {material.word_count > 0 && <span className="text-xs text-slate-400 hidden sm:block">{material.word_count} слов</span>}
               <button onClick={handleOpenSource}
-                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-600 border border-slate-200 px-3 py-1.5 rounded-lg transition-colors">
+                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-700 border border-slate-200 px-3 py-1.5 rounded-lg transition-colors">
                 <Icon name="ExternalLink" size={12} />
-                Источник
+                <span className="hidden sm:block">Источник</span>
               </button>
-              <button onClick={() => onProgressChange(isDone ? "in_progress" : "done")}
+              <button onClick={() => { onProgressChange(isDone ? "in_progress" : "done"); }}
                 className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${isDone ? "text-emerald-600 border-emerald-200 bg-emerald-50" : "text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600"}`}>
                 <Icon name={isDone ? "CheckCircle" : "Circle"} size={12} />
-                {isDone ? "Изучено" : "Отметить изученным"}
+                <span className="hidden sm:block">{isDone ? "Изучено" : "Отметить изученным"}</span>
               </button>
-              <button onClick={() => setView("none")}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-500 hover:text-slate-800">
+              <button onClick={closeReader}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 hover:text-slate-800" title="Закрыть (Esc)">
                 <Icon name="X" size={18} />
               </button>
             </div>
           </div>
-          {/* Reader content */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto bg-slate-50">
             {readerLoading ? (
               <div className="flex flex-col items-center justify-center h-64 gap-3">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500" />
                 <p className="text-sm text-slate-400">Загружаю содержимое...</p>
               </div>
             ) : (
-              <div className="max-w-3xl mx-auto px-6 py-8 text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
-                {readerContent || "Содержимое пустое."}
+              <div className="max-w-2xl mx-auto px-6 py-10 bg-white min-h-full shadow-sm">
+                <div className="text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                  {readerContent || "Содержимое недоступно."}
+                </div>
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Summary panel */}

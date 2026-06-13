@@ -222,11 +222,11 @@ def verify_and_fetch(url: str) -> dict:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
         })
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=7) as resp:
             result["http_status"] = resp.status
             result["resolved_url"] = resp.url
             result["content_type"] = resp.headers.get("Content-Type", "")
-            raw = resp.read(300_000)  # максимум 300KB
+            raw = resp.read(150_000)  # максимум 150KB
 
         # Определяем кодировку
         ct = result["content_type"].lower()
@@ -433,27 +433,20 @@ def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
         log.warning("no candidates for milestone=%s", milestone_id)
         return 0
 
-    # 2. Верификация + fetch (до 8 кандидатов, пропускаем уже известные битые)
+    # 2. Верификация + fetch — строго не более 4 URL, timeout 7 сек каждый
+    # Assets строим LAZY (по запросу lp.summarize), чтобы pipeline уложился в 25 сек
+    MAX_FETCH = 4
     verified = []
     seen_urls = set()
     for c in candidates[:8]:
+        if len(verified) >= MAX_FETCH:
+            break
         url = c["url"]
         if url in seen_urls:
             continue
         seen_urls.add(url)
 
-        log.info("verifying: %s", url)
-        fetch = verify_and_fetch(url)
-        c["http_status"] = fetch["http_status"]
-        c["resolved_url"] = fetch.get("resolved_url", url)
-        c["content_type"] = fetch.get("content_type", "")
-        c["availability_mode"] = fetch["availability_mode"]
-        c["plain_text"] = fetch.get("plain_text", "")
-        c["reader_markdown"] = fetch.get("reader_markdown", "")
-        c["word_count"] = fetch.get("word_count", 0)
-        c["fetch_error"] = fetch.get("error", "")
-
-        # Доверие по домену
+        # Доверие по домену (до fetch — быстро)
         domain = c.get("domain") or extract_domain(url)
         trust_info = trusted.get(domain)
         if not trust_info:
@@ -465,27 +458,25 @@ def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
         c["source_type"] = trust_info["source_type"] if trust_info else "article"
         c["format"] = detect_format(url, c["title"], c.get("source_type", "article"))
 
-        # Пропускаем полностью недоступные
+        log.info("verifying %d/%d: %s", len(verified)+1, MAX_FETCH, url)
+        fetch = verify_and_fetch(url)
+        c["http_status"] = fetch["http_status"]
+        c["resolved_url"] = fetch.get("resolved_url", url)
+        c["content_type"] = fetch.get("content_type", "")
+        c["availability_mode"] = fetch["availability_mode"]
+        c["plain_text"] = fetch.get("plain_text", "")
+        c["reader_markdown"] = fetch.get("reader_markdown", "")
+        c["word_count"] = fetch.get("word_count", 0)
+        c["fetch_error"] = fetch.get("error", "")
+        # Assets — не строим сейчас, будут по запросу через lp.summarize
+        c["assets"] = {}
+        c["summary_basis"] = "content" if c["availability_mode"] == "in_app" and c.get("plain_text") else "metadata"
+
         if c["availability_mode"] == "unavailable":
-            log.info("skip unavailable: %s [%s]", url, c.get("fetch_error"))
+            log.info("skip unavailable: %s [%s]", url, c.get("fetch_error",""))
             continue
 
-        # Строим assets если есть контент
-        assets = {}
-        summary_basis = "none"
-        if c["availability_mode"] == "in_app" and c["plain_text"]:
-            assets = ai_build_assets(c["plain_text"], ms_title, goal_title, c["title"])
-            summary_basis = "content"
-            log.info("assets built for: %s", c["title"][:50])
-        else:
-            summary_basis = "metadata"
-
-        c["assets"] = assets
-        c["summary_basis"] = summary_basis
         verified.append(c)
-
-        if len(verified) >= 6:
-            break
 
     log.info("verified: %d / %d candidates", len(verified), len(candidates))
     if not verified:
