@@ -804,6 +804,8 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
   material: Material; milestoneId: number; onProgressChange: (s: string) => void;
 }) {
   const [view, setView] = useState<"none" | "summary" | "reader">("none");
+  // readerContent/summaryData привязаны к material.id — сброс при смене материала
+  const [readerMaterialId, setReaderMaterialId] = useState<number | null>(null);
   const [readerContent, setReaderContent] = useState<string>("");
   const [readerLoading, setReaderLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -812,6 +814,16 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
       ? { summary: material.content_summary, key_points: material.key_points, study_notes: material.study_notes }
       : null
   );
+
+  // Если material.id изменился — сбрасываем reader state
+  useEffect(() => {
+    if (readerMaterialId !== null && readerMaterialId !== material.id) {
+      setReaderContent("");
+      setReaderMaterialId(null);
+      setView("none");
+      document.body.style.overflow = "";
+    }
+  }, [material.id, readerMaterialId]);
 
   const isDone = material.progress_status === "done";
   const isInApp = material.has_reader;
@@ -825,14 +837,23 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
     }
     setView("reader");
     document.body.style.overflow = "hidden";
-    if (readerContent) { return; }
+    // Кеш привязан к material.id — если не тот, сбрасываем
+    if (readerContent && readerMaterialId === material.id) { return; }
+    setReaderContent("");
+    setReaderMaterialId(material.id);
     setReaderLoading(true);
+    const currentId = material.id;
     try {
       const res = await learningPackApi.reader(material.id) as { reader_markdown: string };
-      setReaderContent(res.reader_markdown || "");
-      onProgressChange("in_progress");
-    } catch (e) { setReaderContent("Не удалось загрузить содержимое."); }
-    finally { setReaderLoading(false); }
+      // Применяем только если пользователь не переключился
+      if (currentId === material.id) {
+        setReaderContent(res.reader_markdown || "");
+        onProgressChange("in_progress");
+      }
+    } catch (e) {
+      if (currentId === material.id) setReaderContent("Не удалось загрузить содержимое.");
+    }
+    finally { if (currentId === material.id) setReaderLoading(false); }
   };
 
   const closeReader = () => {

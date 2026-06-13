@@ -206,13 +206,51 @@ def _html_to_markdown(html: str, base_url: str = "") -> str:
     return html.strip()
 
 
+def _extract_page_title(html_text: str) -> str:
+    """Извлекает реальный title страницы: og:title > H1 > <title>."""
+    # og:title (самый надёжный)
+    og = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html_text, re.IGNORECASE)
+    if og:
+        return html_lib.unescape(og.group(1).strip())
+    # H1
+    h1 = re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.DOTALL | re.IGNORECASE)
+    if h1:
+        return html_lib.unescape(re.sub(r'<[^>]+>', '', h1.group(1)).strip())
+    # <title>
+    t = re.search(r'<title[^>]*>(.*?)</title>', html_text, re.DOTALL | re.IGNORECASE)
+    if t:
+        raw = html_lib.unescape(re.sub(r'<[^>]+>', '', t.group(1)).strip())
+        # Убираем суффикс платформы: "Курс | Stepik" → "Курс"
+        for sep in [' | ', ' — ', ' - ', ' :: ']:
+            if sep in raw:
+                raw = raw.split(sep)[0].strip()
+        return raw
+    return ""
+
+
+def _title_matches_candidate(page_title: str, candidate_title: str, threshold: float = 0.3) -> bool:
+    """
+    Проверяет, что заголовок страницы примерно соответствует AI-кандидату.
+    Считаем совпадение по общим значимым словам (>4 символов).
+    """
+    if not page_title or not candidate_title:
+        return True  # не можем проверить — не отклоняем
+    page_words = set(w.lower() for w in re.split(r'\W+', page_title) if len(w) > 3)
+    cand_words = set(w.lower() for w in re.split(r'\W+', candidate_title) if len(w) > 3)
+    if not cand_words:
+        return True
+    overlap = len(page_words & cand_words) / len(cand_words)
+    return overlap >= threshold
+
+
 def verify_and_fetch(url: str) -> dict:
     """
     Верифицируем URL + извлекаем контент.
-    Возвращает: {http_status, resolved_url, content_type, plain_text, reader_markdown, word_count, availability_mode}
+    Возвращает: {http_status, resolved_url, content_type, page_title, plain_text, reader_markdown, word_count, availability_mode}
     """
     result = {
         "http_status": 0, "resolved_url": url, "content_type": "",
+        "page_title": "",
         "plain_text": "", "reader_markdown": "", "word_count": 0,
         "availability_mode": "unknown", "error": "",
     }
@@ -238,6 +276,9 @@ def verify_and_fetch(url: str) -> dict:
             html_text = raw.decode(charset, errors="replace")
         except Exception:
             html_text = raw.decode("utf-8", errors="replace")
+
+        # Извлекаем реальный title страницы
+        result["page_title"] = _extract_page_title(html_text)
 
         # Проверяем на login/paywall/пустую страницу
         low = html_text.lower()
@@ -468,13 +509,30 @@ def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
         c["reader_markdown"] = fetch.get("reader_markdown", "")
         c["word_count"] = fetch.get("word_count", 0)
         c["fetch_error"] = fetch.get("error", "")
-        # Assets — не строим сейчас, будут по запросу через lp.summarize
-        c["assets"] = {}
-        c["summary_basis"] = "content" if c["availability_mode"] == "in_app" and c.get("plain_text") else "metadata"
+        page_title = fetch.get("page_title", "")
 
         if c["availability_mode"] == "unavailable":
             log.info("skip unavailable: %s [%s]", url, c.get("fetch_error",""))
             continue
+
+        # Проверяем: реальный title страницы ≈ AI-кандидат
+        # Если сильное расхождение — берём page_title, но проверяем релевантность milestone
+        if page_title:
+            title_ok = _title_matches_candidate(page_title, c["title"])
+            if not title_ok:
+                # Сильное расхождение: используем реальный title страницы для честности
+                log.warning("title mismatch: AI='%s' page='%s' url=%s — using page_title", c["title"][:60], page_title[:60], url)
+                # Проверяем: хотя бы page_title релевантен milestone?
+                milestone_words = set(w.lower() for w in re.split(r'\W+', ms_title) if len(w) > 3)
+                page_words = set(w.lower() for w in re.split(r'\W+', page_title) if len(w) > 3)
+                if not (milestone_words & page_words):
+                    log.info("skip: page_title '%s' not relevant to milestone '%s'", page_title[:50], ms_title[:50])
+                    continue
+            # В любом случае используем реальный title страницы
+            c["title"] = page_title
+
+        c["assets"] = {}
+        c["summary_basis"] = "content" if c["availability_mode"] == "in_app" and c.get("plain_text") else "metadata"
 
         verified.append(c)
 
