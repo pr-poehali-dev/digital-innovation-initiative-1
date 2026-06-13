@@ -258,18 +258,14 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
             return "\n".join(parts)[:30000]
         if mime.startswith("text/"):
             return file_bytes.decode("utf-8", errors="ignore")[:30000]
-        # JPG / PNG / HEIC — скан документа, используем Yandex Vision OCR
-        # Детектируем по MIME и по сигнатуре файла (первые байты)
-        is_image_mime = mime.startswith("image/") or any(mime.endswith(ext) for ext in ("/jpeg", "/jpg", "/png", "/webp", "/heic"))
-        # Детектируем PNG по magic bytes: \x89PNG
+        # JPG / PNG / HEIC — только прикрепление, OCR не поддерживается
+        is_image_mime = mime.startswith("image/")
         is_png_magic = file_bytes[:4] == b'\x89PNG'
-        # Детектируем JPEG по magic bytes: \xff\xd8
         is_jpg_magic = file_bytes[:2] == b'\xff\xd8'
         if is_image_mime or is_png_magic or is_jpg_magic:
-            detected_mime = mime if mime.startswith("image/") else ("image/png" if is_png_magic else "image/jpeg")
-            log.info("OCR image detected mime=%s size=%d", detected_mime, len(file_bytes))
-            return ocr_image_bytes(file_bytes, mime_type=detected_mime)
-        log.info("extract_text: unrecognized mime=%s size=%d, skipping OCR", mime, len(file_bytes))
+            log.info("image file detected mime=%s size=%d — skipping OCR, attachment only", mime, len(file_bytes))
+            return ""
+        log.info("extract_text: unrecognized mime=%s size=%d, skipping", mime, len(file_bytes))
         return ""
     except Exception as e:
         log.error("extract_text EXCEPTION mime=%s size=%d: %s", mime, len(file_bytes), e, exc_info=True)
@@ -698,6 +694,28 @@ def handle_delete_file(conn, user, body, request_id, origin):
     return ok_response({"ok": True, "deleted_file_id": int(file_id)}, request_id, origin)
 
 
+def _guess_content_type(filename: str, file_bytes: bytes) -> str:
+    """Определяет Content-Type по расширению файла и magic bytes."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ext_map = {
+        "pdf": "application/pdf",
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "webp": "image/webp", "heic": "image/heic",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "txt": "text/plain",
+    }
+    if ext in ext_map:
+        return ext_map[ext]
+    if file_bytes[:4] == b'\x89PNG':
+        return "image/png"
+    if file_bytes[:2] == b'\xff\xd8':
+        return "image/jpeg"
+    if file_bytes[:4] == b'%PDF':
+        return "application/pdf"
+    return "application/octet-stream"
+
+
 def handle_upload_file(conn, user, body, request_id, origin):
     """Прикрепляет файл к записи + автозапускает AI-анализ."""
     schema = get_schema()
@@ -729,37 +747,57 @@ def handle_upload_file(conn, user, body, request_id, origin):
     if cur.fetchone():
         return err_response("duplicate_file", f"Файл '{filename}' уже прикреплён к этой записи", 409, request_id, origin)
 
-    # Санируем имя файла для S3: оставляем только ASCII-буквы, цифры, точки, дефисы, подчёркивания
+    # Санируем имя файла для S3: только ASCII, цифры, точки, дефисы, подчёркивания
     import re as _re
     safe_filename = _re.sub(r"[^\w.\-]", "_", filename, flags=_re.ASCII)
+    safe_filename = _re.sub(r"_+", "_", safe_filename).strip("_")
     if not safe_filename or safe_filename.startswith("."):
         safe_filename = f"file_{file_size}"
     s3_key = f"education/{user['id']}/{item_id}_{safe_filename}"
-    log.info("upload s3_key=%s mime=%s size=%d", s3_key, mime, file_size)
+
+    # Нормализуем ContentType — S3 принимает только стандартные значения
+    ct_map = {
+        "application/octet-stream": _guess_content_type(filename, file_bytes),
+    }
+    content_type = ct_map.get(mime, mime) or "application/octet-stream"
+    log.info("upload s3_key=%s content_type=%s size=%d", s3_key, content_type, file_size)
 
     # Загружаем в S3
     try:
         s3 = get_s3()
-        s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=mime)
+        s3.put_object(Bucket="files", Key=s3_key, Body=file_bytes, ContentType=content_type)
     except Exception as e:
+        log.error("S3 PutObject failed key=%s content_type=%s size=%d: %s", s3_key, content_type, file_size, e)
         return err_response("storage_error", f"Не удалось сохранить файл: {e}", 500, request_id, origin)
 
     # Извлекаем текст. Чёткая обработка случаев:
     #  - текст есть и нормальный → done
     #  - пусто или очень мало (<50 символов) → empty_or_too_short
     #  - начинается с [Ошибка / [OCR: текст не найден → failed
-    magic4 = file_bytes[:4].hex() if file_bytes else "empty"
-    log.info("[PIPELINE] extract_text start mime=%r size=%d magic=%s", mime, len(file_bytes), magic4)
-    parsed_text = extract_text_from_file(file_bytes, mime)
-    log.info("[PIPELINE] extract_text done len=%d preview=%r", len(parsed_text or ""), (parsed_text or "")[:80])
-    if not parsed_text:
-        parse_status = "empty"
-    elif parsed_text.startswith("[Ошибка") or parsed_text.startswith("[OCR"):
-        parse_status = "failed"
-    elif len(parsed_text.strip()) < 50:
-        parse_status = "too_short"
+    # Определяем тип файла — для изображений пропускаем извлечение текста
+    is_image = (
+        content_type.startswith("image/")
+        or file_bytes[:4] == b'\x89PNG'
+        or file_bytes[:2] == b'\xff\xd8'
+    )
+
+    if is_image:
+        parsed_text = ""
+        parse_status = "image_only"
+        log.info("[PIPELINE] image file — skipping text extraction, attachment only")
     else:
-        parse_status = "done"
+        magic4 = file_bytes[:4].hex() if file_bytes else "empty"
+        log.info("[PIPELINE] extract_text start mime=%r size=%d magic=%s", content_type, len(file_bytes), magic4)
+        parsed_text = extract_text_from_file(file_bytes, content_type)
+        log.info("[PIPELINE] extract_text done len=%d preview=%r", len(parsed_text or ""), (parsed_text or "")[:80])
+        if not parsed_text:
+            parse_status = "empty"
+        elif parsed_text.startswith("[Ошибка") or parsed_text.startswith("[OCR"):
+            parse_status = "failed"
+        elif len(parsed_text.strip()) < 50:
+            parse_status = "too_short"
+        else:
+            parse_status = "done"
 
     cur.execute(
         f"""INSERT INTO {schema}.education_item_files
@@ -809,7 +847,9 @@ def handle_upload_file(conn, user, body, request_id, origin):
 
     # Понятные предупреждения для UI
     warning = None
-    if parse_status == "failed":
+    if parse_status == "image_only":
+        pass  # изображение — прикреплено без OCR, всё ок
+    elif parse_status == "failed":
         warning = "Не удалось извлечь текст из файла (возможно повреждён или зашифрован). Проверьте файл или введите данные вручную."
     elif parse_status == "empty":
         warning = "Файл пустой — нет текста для анализа. Введите данные вручную."

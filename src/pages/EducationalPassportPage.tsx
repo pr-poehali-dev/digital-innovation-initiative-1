@@ -167,6 +167,7 @@ export default function EducationalPassportPage() {
           setConfirmItem(full);
           return;
         }
+        // image_only — файл прикреплён, никакого alert и AI-flow
       }
 
       resetCreate();
@@ -513,7 +514,7 @@ export default function EducationalPassportPage() {
                 </div>
                 <div className="border-2 border-dashed border-slate-200 rounded-lg p-3">
                   <p className="text-xs font-semibold text-slate-700 mb-1">📎 Прикрепить файл для AI-анализа</p>
-                  <p className="text-xs text-slate-400 mb-2">PDF, DOCX — извлечение текста · JPG, PNG — OCR скана</p>
+                  <p className="text-xs text-slate-400 mb-2">PDF, DOCX — AI-извлечение · JPG, PNG — только вложение</p>
                   <input type="file" accept=".pdf,.docx,.pptx,.txt,.jpg,.jpeg,.png,.webp"
                     onChange={e => setEditPendingFile(e.target.files?.[0] || null)}
                     className="text-xs w-full" />
@@ -840,8 +841,8 @@ function CreateModal(props: {
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-3">
             <p className="text-xs font-semibold text-slate-700 mb-2">📎 Прикрепить файл (опционально)</p>
             <p className="text-xs text-slate-500 mb-2">
-              PDF, DOCX, PPTX, TXT — извлечение текста.<br />
-              JPG, PNG — для сканов дипломов (OCR через Yandex Vision)
+              PDF, DOCX, PPTX, TXT — AI-извлечение данных.<br />
+              JPG, PNG — только вложение без распознавания
             </p>
             <input
               type="file"
