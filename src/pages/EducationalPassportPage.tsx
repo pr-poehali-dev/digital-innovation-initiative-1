@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { educationApi, uploadFileViaPresigned } from "@/lib/api";
+import { educationApi, fileToBase64 } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 
@@ -144,18 +144,13 @@ export default function EducationalPassportPage() {
       }
       const newItem = await educationApi.create(payload);
 
-      // Если приложен файл — presigned upload напрямую в S3, затем уведомляем бэкенд
       if (createPendingFile) {
-        const { s3_key, file_size } = await uploadFileViaPresigned(
-          createPendingFile,
-          (filename, mime) => educationApi.getUploadUrl(newItem.id, filename, mime),
-        );
-        const uploadResult = await educationApi.fileReady(
+        const fileData = await fileToBase64(createPendingFile);
+        const uploadResult = await educationApi.uploadFile(
           newItem.id,
           createPendingFile.name,
           createPendingFile.type || "application/octet-stream",
-          s3_key,
-          file_size,
+          fileData,
         );
         if (uploadResult.warning) {
           alert("⚠️ " + uploadResult.warning);
@@ -220,16 +215,12 @@ export default function EducationalPassportPage() {
         description: editDesc.trim() || undefined,
       });
       if (editPendingFile) {
-        const { s3_key, file_size } = await uploadFileViaPresigned(
-          editPendingFile,
-          (filename, mime) => educationApi.getUploadUrl(detailItem.id, filename, mime),
-        );
-        const uploadResult = await educationApi.fileReady(
+        const fileData = await fileToBase64(editPendingFile);
+        const uploadResult = await educationApi.uploadFile(
           detailItem.id,
           editPendingFile.name,
           editPendingFile.type || "application/octet-stream",
-          s3_key,
-          file_size,
+          fileData,
         );
         if (uploadResult.warning) alert("⚠️ " + uploadResult.warning);
       }
