@@ -231,6 +231,7 @@ def call_yandex_gpt(messages):
 def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
     """Извлечение текста из PDF/DOCX/PPTX/TXT. Для картинок — пока возвращаем пусто."""
     import io
+    log.info("extract_text mime=%s size=%d", mime, len(file_bytes))
     try:
         if "pdf" in mime:
             import PyPDF2
@@ -691,7 +692,13 @@ def handle_upload_file(conn, user, body, request_id, origin):
     if cur.fetchone():
         return err_response("duplicate_file", f"Файл '{filename}' уже прикреплён к этой записи", 409, request_id, origin)
 
-    s3_key = f"education/{user['id']}/{item_id}_{filename}"
+    # Санируем имя файла для S3: оставляем только ASCII-буквы, цифры, точки, дефисы, подчёркивания
+    import re as _re
+    safe_filename = _re.sub(r"[^\w.\-]", "_", filename, flags=_re.ASCII)
+    if not safe_filename or safe_filename.startswith("."):
+        safe_filename = f"file_{file_size}"
+    s3_key = f"education/{user['id']}/{item_id}_{safe_filename}"
+    log.info("upload s3_key=%s mime=%s size=%d", s3_key, mime, file_size)
 
     # Загружаем в S3
     try:
