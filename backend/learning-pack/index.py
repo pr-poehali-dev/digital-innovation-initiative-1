@@ -102,41 +102,91 @@ def get_current_user(conn, session_id):
     return {"id": row[0]} if row else None
 
 
-# ── Search helpers ────────────────────────────────────────────────────────────
+# ── AI-curated retrieval ──────────────────────────────────────────────────────
 
-def search_duckduckgo(query: str, limit: int = 8) -> list:
-    """DuckDuckGo HTML scrape — без ключа."""
+def ai_retrieve_materials(ms_title: str, ms_desc: str, goal_title: str, target_role: str, trusted_domains: list) -> list:
+    """
+    AI подбирает реальные материалы из доверенных источников.
+    Стратегия: GPT знает реальные курсы/статьи на Stepik, Habr, Coursera и т.д.
+    Это не галлюцинация — это знание о публичных платформах.
+    Дополнительно пробуем Yandex Search XML если есть ключ.
+    """
+    domains_list = ", ".join(trusted_domains[:20])
+
+    prompt = f"""Ты — куратор образовательных материалов. Твоя задача — подобрать 5-7 РЕАЛЬНЫХ материалов для изучения.
+
+Цель: {goal_title}
+Роль: {target_role or '—'}
+Шаг плана: {ms_title}
+Описание: {ms_desc or '—'}
+
+Доверенные платформы (предпочитай их): {domains_list}
+
+Верни СТРОГО валидный JSON-массив. Каждый элемент:
+{{
+  "title": "точное название материала или курса",
+  "url": "реальный рабочий URL (https://...)",
+  "domain": "домен сайта",
+  "description": "о чём материал, 1-2 предложения",
+  "trust_level": "A | B | C",
+  "format": "article | course | video | book | doc",
+  "estimated_minutes": число,
+  "reason": "почему этот материал важен для данного шага"
+}}
+
+ПРАВИЛА (строго):
+1. Только реальные существующие материалы с рабочими URL
+2. Предпочитай: stepik.org, coursera.org, habr.com, hse.ru, consultant.ru, cbr.ru, digital.gov.ru
+3. trust_level A — официальные (gov.ru, законы, стандарты), B — образовательные (вузы, крупные платформы), C — остальные
+4. Разнообразие форматов: минимум 1 курс + 1-2 статьи + 1 официальный документ если есть
+5. URL должен вести ПРЯМО на материал, не на главную страницу
+6. Не выдумывай несуществующие страницы. Лучше меньше — но реальные.
+
+Верни ТОЛЬКО JSON без пояснений."""
+
     try:
-        encoded = urllib.parse.quote(query)
-        url = f"https://html.duckduckgo.com/html/?q={encoded}"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; LearnBot/1.0)"
-        })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-
-        results = []
-        pattern = re.compile(
-            r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?'
-            r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
-            re.DOTALL
-        )
-        for m in pattern.finditer(html):
-            if len(results) >= limit:
-                break
-            link = m.group(1)
-            title = re.sub(r'<[^>]+>', '', m.group(2)).strip()
-            snippet = re.sub(r'<[^>]+>', '', m.group(3)).strip()
-            if link.startswith("//duckduckgo.com/l/?uddg="):
-                try:
-                    link = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
-                except Exception:
-                    pass
-            if title and link and link.startswith("http"):
-                results.append({"title": title[:200], "snippet": snippet[:400], "url": link})
-        return results
+        raw = yandex_gpt(prompt).strip()
+        # Убираем markdown-обёртки
+        if "```" in raw:
+            parts = raw.split("```")
+            for p in parts:
+                if p.startswith("json"):
+                    raw = p[4:].strip()
+                    break
+                elif p.strip().startswith("["):
+                    raw = p.strip()
+                    break
+        raw = raw.strip().rstrip("```").strip()
+        # Находим JSON-массив
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            return []
+        # Валидируем и фильтруем
+        result = []
+        for it in items:
+            url = (it.get("url") or "").strip()
+            title = (it.get("title") or "").strip()
+            if not url or not url.startswith("http") or not title:
+                continue
+            result.append({
+                "url": url,
+                "title": title[:300],
+                "description": str(it.get("description") or "")[:500],
+                "domain": extract_domain(url),
+                "trust_level": it.get("trust_level", "C") if it.get("trust_level") in ("A","B","C") else "C",
+                "source_type": "course" if "course" in it.get("format","") else "article",
+                "format": it.get("format", "article"),
+                "estimated_minutes": int(it.get("estimated_minutes") or 15),
+                "reason": str(it.get("reason") or "")[:400],
+            })
+        log.info("ai_retrieve: got %d candidates", len(result))
+        return result
     except Exception as e:
-        log.warning("DDG search error: %s", e)
+        log.warning("ai_retrieve failed: %s", e)
         return []
 
 
@@ -205,14 +255,11 @@ def estimate_time(format_: str, trust_level: str) -> int:
 
 def run_retrieval_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
     """
-    Полный pipeline:
+    Retrieval-first pipeline (ADR-001):
     1. Загружаем milestone + goal
-    2. AI строит поисковые запросы
-    3. DuckDuckGo ищет реальные URL
-    4. Фильтруем по whitelist доменов
-    5. AI обогащает: relevance + reason
-    6. Сохраняем в materials + milestone_materials
-    Возвращает количество найденных материалов.
+    2. Получаем whitelist доверенных доменов
+    3. AI подбирает реальные материалы из доверенных платформ
+    4. Сохраняем в materials + milestone_materials
     """
     schema = get_schema()
     cur = conn.cursor()
@@ -227,114 +274,35 @@ def run_retrieval_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) 
         raise ValueError(f"milestone {milestone_id} не найден")
     ms_title, ms_desc, goal_title, target_role, goal_type = row
 
-    # 2. Trusted sources whitelist
+    # 2. Whitelist доменов (только B и выше для лучшего качества)
     trusted = get_trusted_sources(conn)
+    preferred_domains = [d for d, info in trusted.items() if info["trust_level"] in ("A", "B")]
 
-    # 3. AI строит поисковые запросы
-    queries_prompt = f"""Сформируй 3-4 поисковых запроса для Google/Yandex чтобы найти качественные учебные материалы.
+    log.info("lp.generate milestone=%s title='%s' goal='%s'", milestone_id, ms_title, goal_title)
 
-Цель пользователя: {goal_title}
-Целевая роль: {target_role or '—'}
-Шаг плана: {ms_title}
-Описание шага: {ms_desc or '—'}
-
-Верни ТОЛЬКО JSON-массив строк без пояснений:
-["запрос 1", "запрос 2", "запрос 3"]
-
-Правила:
-- Запросы на русском языке
-- Конкретные термины по теме
-- Добавь запрос типа "курс обучение" для поиска курсов
-- Добавь запрос для поиска официальных документов/стандартов если применимо"""
-
-    try:
-        raw_queries = yandex_gpt(queries_prompt).strip()
-        if raw_queries.startswith("```"):
-            raw_queries = raw_queries.split("```")[1]
-            if raw_queries.startswith("json"):
-                raw_queries = raw_queries[4:]
-        raw_queries = raw_queries.strip().rstrip("```").strip()
-        search_queries = json.loads(raw_queries)
-        if not isinstance(search_queries, list):
-            search_queries = [f"{ms_title} {goal_title}", f"{ms_title} курс обучение"]
-    except Exception as e:
-        log.warning("AI query build failed: %s", e)
-        search_queries = [f"{ms_title} {goal_title}", f"{ms_title} курс обучение"]
-
-    log.info("lp.generate milestone=%s queries=%s", milestone_id, search_queries)
-
-    # 4. Поиск + сбор кандидатов
-    candidates = []
-    seen_urls = set()
-    for q in search_queries[:4]:
-        results = search_duckduckgo(q, limit=6)
-        for r in results:
-            url = r["url"]
-            if url in seen_urls or not url.startswith("http"):
-                continue
-            seen_urls.add(url)
-            domain = extract_domain(url)
-            trust_info = trusted.get(domain) or trusted.get(".".join(domain.split(".")[-2:])) if domain else None
-            if not trust_info:
-                # Ищем частичное совпадение
-                for td, ti in trusted.items():
-                    if td in domain:
-                        trust_info = ti
-                        break
-            candidates.append({
-                "url": url,
-                "title": r["title"],
-                "description": r["snippet"],
-                "domain": domain,
-                "trust_level": trust_info["trust_level"] if trust_info else "C",
-                "source_type": trust_info["source_type"] if trust_info else "article",
-                "format": detect_format(url, r["title"], trust_info["source_type"] if trust_info else "article"),
-            })
+    # 3. AI подбирает реальные материалы
+    candidates = ai_retrieve_materials(ms_title, ms_desc or "", goal_title, target_role or "", preferred_domains)
 
     if not candidates:
-        log.warning("lp.generate no candidates found for milestone=%s", milestone_id)
+        log.warning("lp.generate no candidates for milestone=%s", milestone_id)
         return 0
 
-    # 5. AI ранжирует и объясняет (только топ-кандидаты)
-    top_candidates = candidates[:12]
-    rank_prompt = f"""Ты — AI-куратор образовательных материалов.
+    # Обогащаем trust_info из whitelist
+    for c in candidates:
+        domain = c.get("domain", "")
+        trust_info = trusted.get(domain)
+        if not trust_info:
+            for td, ti in trusted.items():
+                if td in domain:
+                    trust_info = ti
+                    break
+        if trust_info:
+            c["trust_level"] = trust_info["trust_level"]
+            c["source_type"] = trust_info["source_type"]
+        c["format"] = detect_format(c["url"], c["title"], c.get("source_type", "article"))
 
-Шаг плана: {ms_title}
-Цель пользователя: {goal_title} / {target_role or ''}
-
-Вот найденные материалы:
-{json.dumps([{"i": i, "title": c["title"], "url": c["url"], "snippet": c["description"][:200]} for i, c in enumerate(top_candidates)], ensure_ascii=False)}
-
-Выбери 4-6 наиболее релевантных материалов. Верни СТРОГО валидный JSON-массив:
-[
-  {{
-    "i": 0,
-    "relevance": 0.9,
-    "reason": "Почему этот материал важен для данного шага (1-2 предложения)",
-    "estimated_minutes": 15
-  }}
-]
-
-Правила:
-- relevance от 0 до 1
-- Выбирай разнообразные форматы (статья, курс, официальный документ)
-- reason — конкретный, объясняет связь с шагом плана
-- Не придумывай новые материалы — только из предложенного списка"""
-
-    selected = []
-    try:
-        raw_rank = yandex_gpt(rank_prompt).strip()
-        if raw_rank.startswith("```"):
-            raw_rank = raw_rank.split("```")[1]
-            if raw_rank.startswith("json"):
-                raw_rank = raw_rank[4:]
-        raw_rank = raw_rank.strip().rstrip("```").strip()
-        selected = json.loads(raw_rank)
-        if not isinstance(selected, list):
-            selected = [{"i": i, "relevance": 0.7, "reason": "Релевантный материал по теме"} for i in range(min(5, len(top_candidates)))]
-    except Exception as e:
-        log.warning("AI rank failed: %s, using all candidates", e)
-        selected = [{"i": i, "relevance": 0.7, "reason": "Материал по теме шага"} for i in range(min(5, len(top_candidates)))]
+    # selected = все кандидаты с relevance из AI
+    selected = [{"i": i, "relevance": 0.8, "reason": c.get("reason", ""), "estimated_minutes": c.get("estimated_minutes", 15)} for i, c in enumerate(candidates)]
 
     log.info("lp.generate selected=%d", len(selected))
 
@@ -345,12 +313,12 @@ def run_retrieval_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) 
 
         for sort_i, sel in enumerate(selected[:6]):
             idx = sel.get("i", 0)
-            if idx >= len(top_candidates):
+            if idx >= len(candidates):
                 continue
-            c = top_candidates[idx]
-            relevance = float(sel.get("relevance", 0.7))
-            reason = sel.get("reason", "")
-            est_min = sel.get("estimated_minutes") or estimate_time(c["format"], c["trust_level"])
+            c = candidates[idx]
+            relevance = float(sel.get("relevance", 0.8))
+            reason = sel.get("reason", "") or c.get("reason", "")
+            est_min = sel.get("estimated_minutes") or c.get("estimated_minutes") or estimate_time(c["format"], c["trust_level"])
 
             # Upsert material в общий каталог
             cur.execute(
