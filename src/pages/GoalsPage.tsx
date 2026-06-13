@@ -538,7 +538,10 @@ function MilestoneRow({
     try {
       await learningPackApi.progress(mat.id, milestone.id, status);
       setMaterials(prev => prev.map(m => m.id === mat.id ? { ...m, progress_status: status } : m));
-      if (status === "opened" && mat.url) window.open(mat.url, "_blank", "noopener");
+      // Открываем URL только если материал ещё не изучен (не перезатираем прогресс done→opened)
+      if (status === "opened" && mat.url && mat.progress_status !== "done") {
+        window.open(mat.url, "_blank", "noopener");
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -652,8 +655,12 @@ function MaterialCard({
   const iconName = FORMAT_ICON[material.format] || "FileText";
 
   const handleSummarize = () => {
+    if (showSummary) {
+      setShowSummary(false);
+      return;
+    }
     setShowSummary(true);
-    if (!summary?.text) onSummarize();
+    if (!summary?.text && !summary?.loading) onSummarize();
   };
 
   return (

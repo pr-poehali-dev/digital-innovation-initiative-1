@@ -338,39 +338,43 @@ def run_retrieval_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) 
 
     log.info("lp.generate selected=%d", len(selected))
 
-    # 6. Сохраняем материалы и связи
+    # 6. Сохраняем материалы и связи — атомарно: DELETE + INSERT в одной транзакции
     saved_count = 0
-    # Удаляем старые связи для этого milestone
-    cur.execute(f"DELETE FROM {schema}.milestone_materials WHERE milestone_id = %s AND user_id = %s", (milestone_id, user_id))
+    try:
+        cur.execute(f"DELETE FROM {schema}.milestone_materials WHERE milestone_id = %s AND user_id = %s", (milestone_id, user_id))
 
-    for sort_i, sel in enumerate(selected[:6]):
-        idx = sel.get("i", 0)
-        if idx >= len(top_candidates):
-            continue
-        c = top_candidates[idx]
-        relevance = float(sel.get("relevance", 0.7))
-        reason = sel.get("reason", "")
-        est_min = sel.get("estimated_minutes") or estimate_time(c["format"], c["trust_level"])
+        for sort_i, sel in enumerate(selected[:6]):
+            idx = sel.get("i", 0)
+            if idx >= len(top_candidates):
+                continue
+            c = top_candidates[idx]
+            relevance = float(sel.get("relevance", 0.7))
+            reason = sel.get("reason", "")
+            est_min = sel.get("estimated_minutes") or estimate_time(c["format"], c["trust_level"])
 
-        # Upsert material в общий каталог
-        cur.execute(
-            f"""INSERT INTO {schema}.materials (url, domain, title, description, source_type, trust_level, format, estimated_minutes)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (url) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description, retrieved_at = NOW()
-                RETURNING id""",
-            (c["url"], c["domain"], c["title"], c["description"], c["source_type"], c["trust_level"], c["format"], est_min),
-        )
-        mat_id = cur.fetchone()[0]
+            # Upsert material в общий каталог
+            cur.execute(
+                f"""INSERT INTO {schema}.materials (url, domain, title, description, source_type, trust_level, format, estimated_minutes)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (url) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description, retrieved_at = NOW()
+                    RETURNING id""",
+                (c["url"], c["domain"], c["title"], c["description"], c["source_type"], c["trust_level"], c["format"], est_min),
+            )
+            mat_id = cur.fetchone()[0]
 
-        # Связь milestone ↔ material
-        cur.execute(
-            f"""INSERT INTO {schema}.milestone_materials (milestone_id, goal_id, user_id, material_id, relevance_score, selection_reason, sort_order)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-            (milestone_id, goal_id, user_id, mat_id, relevance, reason, sort_i),
-        )
-        saved_count += 1
+            # Связь milestone ↔ material
+            cur.execute(
+                f"""INSERT INTO {schema}.milestone_materials (milestone_id, goal_id, user_id, material_id, relevance_score, selection_reason, sort_order)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                (milestone_id, goal_id, user_id, mat_id, relevance, reason, sort_i),
+            )
+            saved_count += 1
 
-    conn.commit()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
     log.info("lp.generate done milestone=%s saved=%d", milestone_id, saved_count)
     return saved_count
 
@@ -392,19 +396,15 @@ def handle_generate(conn, user, body, rid, origin):
     if not row or row[0] != user["id"]:
         return err("access_denied", "Нет доступа", 403, rid, origin)
 
-    # Создаём/обновляем job
+    # Создаём/обновляем job — UPSERT через уникальный индекс (user_id, milestone_id)
     cur.execute(
         f"""INSERT INTO {schema}.learning_jobs (user_id, milestone_id, goal_id, status, started_at)
             VALUES (%s,%s,%s,'running',NOW())
-            ON CONFLICT DO NOTHING RETURNING id""",
+            ON CONFLICT (user_id, milestone_id)
+            DO UPDATE SET status='running', started_at=NOW(), error_text=NULL, finished_at=NULL
+            RETURNING id""",
         (user["id"], int(milestone_id), int(goal_id)),
     )
-    row2 = cur.fetchone()
-    if not row2:
-        cur.execute(
-            f"UPDATE {schema}.learning_jobs SET status='running', started_at=NOW(), error_text=NULL WHERE user_id=%s AND milestone_id=%s",
-            (user["id"], int(milestone_id)),
-        )
     conn.commit()
 
     try:
@@ -557,8 +557,8 @@ def handle_progress(conn, user, body, rid, origin):
     material_id = body.get("material_id")
     milestone_id = body.get("milestone_id")
     status = body.get("status")
-    if not material_id or status not in ("new", "opened", "in_progress", "done", "saved"):
-        return err("validation_error", "Нужны material_id и status", 400, rid, origin)
+    if not material_id or not milestone_id or status not in ("new", "opened", "in_progress", "done", "saved"):
+        return err("validation_error", "Нужны material_id, milestone_id и статус", 400, rid, origin)
 
     cur = conn.cursor()
     completed_at = "NOW()" if status == "done" else "NULL"
