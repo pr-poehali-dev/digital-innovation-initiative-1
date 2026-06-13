@@ -95,6 +95,7 @@ export default function EducationalPassportPage() {
   const [editIssuedAt, setEditIssuedAt] = useState("");
   const [editHours, setEditHours] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editPendingFile, setEditPendingFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -201,6 +202,7 @@ export default function EducationalPassportPage() {
     setEditIssuedAt(item.issued_at ? item.issued_at.slice(0, 10) : "");
     setEditHours(item.hours ? String(item.hours) : "");
     setEditDesc(item.description || "");
+    setEditPendingFile(null);
     setEditMode(true);
   };
 
@@ -217,9 +219,24 @@ export default function EducationalPassportPage() {
         hours: editHours ? Number(editHours) : undefined,
         description: editDesc.trim() || undefined,
       });
+      if (editPendingFile) {
+        const { s3_key, file_size } = await uploadFileViaPresigned(
+          editPendingFile,
+          (filename, mime) => educationApi.getUploadUrl(detailItem.id, filename, mime),
+        );
+        const uploadResult = await educationApi.fileReady(
+          detailItem.id,
+          editPendingFile.name,
+          editPendingFile.type || "application/octet-stream",
+          s3_key,
+          file_size,
+        );
+        if (uploadResult.warning) alert("⚠️ " + uploadResult.warning);
+      }
       const updated = await educationApi.get(detailItem.id);
       setDetailItem(updated);
       setEditMode(false);
+      setEditPendingFile(null);
       load();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : "Ошибка сохранения");
@@ -475,10 +492,20 @@ export default function EducationalPassportPage() {
                   <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3}
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
                 </div>
+                <div className="border-2 border-dashed border-slate-200 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-slate-700 mb-1">📎 Прикрепить файл для AI-анализа</p>
+                  <p className="text-xs text-slate-400 mb-2">PDF, DOCX — извлечение текста · JPG, PNG — OCR скана</p>
+                  <input type="file" accept=".pdf,.docx,.pptx,.txt,.jpg,.jpeg,.png,.webp"
+                    onChange={e => setEditPendingFile(e.target.files?.[0] || null)}
+                    className="text-xs w-full" />
+                  {editPendingFile && (
+                    <p className="text-xs text-slate-700 mt-1.5">Выбран: <strong>{editPendingFile.name}</strong></p>
+                  )}
+                </div>
                 <div className="flex gap-2 pt-1">
                   <button onClick={handleSaveEdit} disabled={saving || !editTitle.trim()}
                     className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg py-2 text-sm font-medium transition-colors">
-                    {saving ? "Сохраняю..." : "Сохранить"}
+                    {saving ? (editPendingFile ? "Загружаю файл..." : "Сохраняю...") : "Сохранить"}
                   </button>
                   <button onClick={() => setEditMode(false)}
                     className="border border-slate-200 hover:border-slate-400 text-slate-600 rounded-lg px-4 py-2 text-sm transition-colors">
