@@ -653,6 +653,7 @@ function SummaryTab({ completion }: { completion: Completion | null }) {
         role_in_work: draftEdit.role_in_work ?? openDraft.role_in_work,
         skills_demonstrated: draftEdit.skills_demonstrated ?? openDraft.skills_demonstrated,
       });
+      analytics.evidenceDraftConfirmed(openDraft.id, openDraft.project_id, openDraft.artifact_id);
       setDrafts(prev => prev.filter(d => d.id !== openDraft.id));
       setOpenDraft(null);
     } finally {
@@ -661,7 +662,9 @@ function SummaryTab({ completion }: { completion: Completion | null }) {
   };
 
   const handleReject = async (id: number) => {
+    const draft = drafts.find(d => d.id === id);
     await passportApi.evidenceDraftReject(id);
+    if (draft) analytics.evidenceDraftRejected(id, draft.project_id);
     setDrafts(prev => prev.filter(d => d.id !== id));
     if (openDraft?.id === id) setOpenDraft(null);
   };

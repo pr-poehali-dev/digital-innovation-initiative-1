@@ -796,26 +796,38 @@ export default function ProjectPage() {
                 <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{openArtifact.content}</p>
               </div>
               {/* Evidence Bridge CTA */}
-              <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center gap-3">
+              <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center gap-3 flex-wrap">
                 {evidenceSent.has(openArtifact.id) ? (
-                  <div className="flex items-center gap-2 text-sm text-emerald-700">
-                    <Icon name="CheckCircle2" size={15} className="text-emerald-500" />
-                    Черновик отправлен в Passport — проверь в разделе «Сводка»
-                  </div>
+                  <>
+                    <div className="flex items-center gap-2 text-sm text-emerald-700 flex-1">
+                      <Icon name="CheckCircle2" size={15} className="text-emerald-500 flex-shrink-0" />
+                      <span>Черновик готов — AI заполнил описание</span>
+                    </div>
+                    <Link
+                      to="/professional-passport"
+                      onClick={() => setOpenArtifact(null)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-xl hover:bg-violet-100 transition-colors flex-shrink-0"
+                    >
+                      <Icon name="ArrowRight" size={12} />
+                      Открыть в Passport
+                    </Link>
+                  </>
                 ) : (
                   <>
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Добавь этот результат как evidence в Professional Passport</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-slate-500 leading-snug">Добавь результат как evidence в Professional Passport — AI подготовит черновик</p>
                     </div>
                     <button
                       disabled={evidenceSending === openArtifact.id}
                       onClick={async () => {
+                        analytics.evidenceBridgeClicked(projectId, openArtifact.id);
                         setEvidenceSending(openArtifact.id);
                         try {
-                          await passportApi.evidenceCreateFromArtifact(openArtifact.id, projectId);
+                          const res = await passportApi.evidenceCreateFromArtifact(openArtifact.id, projectId) as { ok?: boolean; draft?: { id: number }; already_exists?: boolean };
+                          analytics.evidenceDraftCreated(projectId, openArtifact.id, !!res.already_exists);
                           setEvidenceSent(prev => new Set(prev).add(openArtifact.id));
                         } catch {
-                          // silent
+                          // silent — не пугаем пользователя, кнопка вернётся доступной
                         } finally {
                           setEvidenceSending(null);
                         }

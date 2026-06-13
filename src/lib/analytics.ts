@@ -489,6 +489,33 @@ export type AnalyticsEvents = {
     hypothesis_id: number;
     new_status: string;
   };
+
+  // ── Evidence Bridge ─────────────────────────────────────────────────
+  // 70. Кнопка «Добавить в Passport» нажата
+  evidence_bridge_clicked: {
+    project_id: number;
+    artifact_id: number;
+  };
+
+  // 71. Черновик создан (AI отработал)
+  evidence_draft_created: {
+    project_id: number;
+    artifact_id: number;
+    already_existed: boolean;
+  };
+
+  // 72. Черновик подтверждён пользователем
+  evidence_draft_confirmed: {
+    draft_id: number;
+    project_id: number;
+    artifact_id: number;
+  };
+
+  // 73. Черновик отклонён
+  evidence_draft_rejected: {
+    draft_id: number;
+    project_id: number;
+  };
 };
 
 // --- Ядро ---
@@ -943,6 +970,24 @@ export const analytics = {
 
   workspaceHypothesisUpdated(projectId: number, hypothesisId: number, newStatus: string) {
     sendEvent("workspace_hypothesis_updated", { project_id: projectId, hypothesis_id: hypothesisId, new_status: newStatus });
+  },
+
+  // ── Evidence Bridge ─────────────────────────────────────────────────
+
+  evidenceBridgeClicked(projectId: number, artifactId: number) {
+    sendEvent("evidence_bridge_clicked", { project_id: projectId, artifact_id: artifactId });
+  },
+
+  evidenceDraftCreated(projectId: number, artifactId: number, alreadyExisted: boolean) {
+    sendEvent("evidence_draft_created", { project_id: projectId, artifact_id: artifactId, already_existed: alreadyExisted });
+  },
+
+  evidenceDraftConfirmed(draftId: number, projectId: number, artifactId: number) {
+    sendEvent("evidence_draft_confirmed", { draft_id: draftId, project_id: projectId, artifact_id: artifactId });
+  },
+
+  evidenceDraftRejected(draftId: number, projectId: number) {
+    sendEvent("evidence_draft_rejected", { draft_id: draftId, project_id: projectId });
   },
 };
 
