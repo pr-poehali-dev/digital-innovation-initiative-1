@@ -148,6 +148,13 @@ export default function EducationalPassportPage() {
       if (createPendingFile) {
         const uploadResult = await uploadEducationFile(newItem.id, createPendingFile);
         if (uploadResult.warning) alert("⚠️ " + uploadResult.warning);
+        if (uploadResult.parse_status === "done" && uploadResult.extracted) {
+          resetCreate();
+          load();
+          const full = await educationApi.get(newItem.id);
+          setConfirmItem(full);
+          return;
+        }
       }
 
       resetCreate();
@@ -210,6 +217,15 @@ export default function EducationalPassportPage() {
       if (editPendingFile) {
         const uploadResult = await uploadEducationFile(detailItem.id, editPendingFile);
         if (uploadResult.warning) alert("⚠️ " + uploadResult.warning);
+        if (uploadResult.parse_status === "done" && uploadResult.extracted) {
+          setEditMode(false);
+          setEditPendingFile(null);
+          load();
+          const full = await educationApi.get(detailItem.id);
+          setDetailItem(null);
+          setConfirmItem(full);
+          return;
+        }
       }
       const updated = await educationApi.get(detailItem.id);
       setDetailItem(updated);

@@ -481,7 +481,7 @@ export function fileToBase64(file: File): Promise<string> {
 
 const CHUNK_SIZE = 512 * 1024; // 512 KB — безопасно до лимита 1 МБ
 
-export async function uploadEducationFile(itemId: number, file: File): Promise<{ warning?: string }> {
+export async function uploadEducationFile(itemId: number, file: File): Promise<{ warning?: string; extracted?: Record<string, unknown>; parse_status?: string }> {
   if (file.size <= CHUNK_SIZE) {
     const fileData = await fileToBase64(file);
     return educationApi.uploadFile(itemId, file.name, file.type || "application/octet-stream", fileData);

@@ -268,7 +268,7 @@ def extract_text_from_file(file_bytes: bytes, mime: str) -> str:
 
 
 def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
-    """OCR через YandexGPT Vision (multimodal) — извлекает весь текст с изображения диплома/сертификата."""
+    """OCR через Yandex Vision OCR API v1 — распознаёт текст с PNG/JPG дипломов и сертификатов."""
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
@@ -277,24 +277,17 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
     b64 = base64.b64encode(image_bytes).decode("ascii")
     if not mime_type or mime_type == "application/octet-stream":
         mime_type = "image/png"
-    image_url = f"data:{mime_type};base64,{b64}"
+    # Yandex Vision OCR v1 — правильный endpoint для изображений
     payload = json.dumps({
-        "modelUri": f"gpt://{folder_id}/yandexgpt/latest",
-        "completionOptions": {"stream": False, "temperature": 0, "maxTokens": 4000},
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Извлеки весь текст с этого изображения документа (диплома, сертификата). Верни только текст документа, без пояснений."},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            }
-        ],
+        "mimeType": mime_type,
+        "languageCodes": ["ru", "en"],
+        "model": "page",
+        "content": b64,
     }).encode()
     req = urllib.request.Request(
-        "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+        "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText",
         data=payload,
-        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json", "x-folder-id": folder_id},
+        headers={"Authorization": f"Api-Key {api_key}", "Content-Type": "application/json", "x-folder-id": folder_id, "x-data-logging-enabled": "false"},
     )
     try:
         try:
@@ -302,11 +295,13 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
                 result = json.loads(resp.read())
         except urllib.error.HTTPError as http_err:
             body = http_err.read().decode("utf-8", errors="replace")[:500]
-            log.error("YandexGPT Vision HTTP %d: %s", http_err.code, body)
+            log.error("Yandex OCR HTTP %d: %s", http_err.code, body)
             return f"[Ошибка OCR: HTTP {http_err.code}: {body}]"
-        text = result.get("result", {}).get("alternatives", [{}])[0].get("message", {}).get("text", "")
-        log.info("OCR result length=%d", len(text))
-        return text[:30000] if text else "[OCR: текст не найден]"
+        # Извлекаем fullText из результата
+        text_annotation = result.get("result", {}).get("textAnnotation", {})
+        full_text = text_annotation.get("fullText", "")
+        log.info("OCR result length=%d", len(full_text))
+        return full_text[:30000] if full_text else "[OCR: текст не найден]"
     except Exception as e:
         log.error("OCR error mime=%s size=%d err=%s", mime_type, len(image_bytes), e)
         return f"[Ошибка OCR: {e}]"
