@@ -39,4 +39,15 @@ export const passportApi = {
 
   visibilityGet:    ()        => pGet("professional_visibility_get_me"),
   visibilityUpsert: (b: object) => pPost("professional_visibility_upsert_me", b),
+
+  // Evidence Bridge
+  evidenceDraftsList: () => pGet("evidence_drafts_list"),
+  evidenceCreateFromArtifact: (artifactId: number, projectId: number) =>
+    pPost("evidence_create_from_artifact", { artifact_id: artifactId, project_id: projectId }),
+  evidenceDraftConfirm: (id: number, fields?: Record<string, unknown>) =>
+    pPost("evidence_draft_confirm", { id, ...fields }),
+  evidenceDraftReject: (id: number) =>
+    pPost("evidence_draft_reject", { id }),
+  artifactEvidenceStatus: (artifactId: number) =>
+    pGet("artifact_evidence_status", { artifact_id: String(artifactId) }),
 };

@@ -22,10 +22,13 @@ Actions (user map):
 """
 import json
 import os
+import urllib.request
 import psycopg2
 
 DB     = os.environ["DATABASE_URL"]
 SCHEMA = os.environ.get("MAIN_DB_SCHEMA", "public")
+YANDEX_GPT_API_KEY = os.environ.get("YANDEX_GPT_API_KEY", "")
+YANDEX_FOLDER_ID   = os.environ.get("YANDEX_FOLDER_ID", "")
 S      = SCHEMA
 
 
@@ -818,6 +821,225 @@ def action_content_link_upsert(conn, actor, body):
         return resp({"ok": True, "id": new_id})
 
 
+# ── Evidence Bridge v1 ────────────────────────────────────────────────
+
+def _yandex_gpt(prompt: str, system: str = "") -> str:
+    """Вызов YandexGPT для AI-assisted evidence draft."""
+    url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+    messages = []
+    if system:
+        messages.append({"role": "system", "text": system})
+    messages.append({"role": "user", "text": prompt})
+    payload = json.dumps({
+        "modelUri": f"gpt://{YANDEX_FOLDER_ID}/yandexgpt/latest",
+        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": 1500},
+        "messages": messages,
+    }).encode()
+    req = urllib.request.Request(url, data=payload, headers={
+        "Authorization": f"Api-Key {YANDEX_GPT_API_KEY}",
+        "Content-Type": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=25) as r:
+        data = json.loads(r.read())
+    return data["result"]["alternatives"][0]["message"]["text"]
+
+
+def action_create_evidence_from_artifact(conn, user_id: int, body: dict) -> dict:
+    """
+    Evidence Bridge: создаёт черновик evidence из workspace_artifact.
+    AI предлагает title, description, outcome, role, skills.
+    Хранится в workspace_evidence_drafts (отдельная таблица, не требует user_competency_id).
+    """
+    artifact_id = body.get("artifact_id")
+    project_id  = body.get("project_id")
+    if not artifact_id or not project_id:
+        return resp({"error": "artifact_id and project_id required"}, 400)
+
+    # Читаем артефакт + проверяем доступ через project membership
+    row = fetch_one(conn, f"""
+        SELECT a.id, a.title, a.content, a.summary, a.artifact_type, a.mode,
+               p.title AS project_title
+        FROM {S}.workspace_artifacts a
+        JOIN {S}.projects p ON p.id = a.project_id
+        LEFT JOIN {S}.project_members m ON m.project_id = p.id AND m.user_id = {user_id}
+        WHERE a.id = %s AND a.project_id = %s
+          AND (p.owner_id = {user_id} OR m.user_id = {user_id})
+          AND p.archived_at IS NULL
+    """, (int(artifact_id), int(project_id)))
+    if not row:
+        return resp({"error": "Артефакт не найден или нет доступа"}, 403)
+
+    art_id, art_title, art_content, art_summary, art_type, art_mode, proj_title = row
+
+    # Idempotency: если черновик уже есть — возвращаем существующий
+    existing = fetch_one(conn, f"""
+        SELECT id, title, description, what_was_done, outcome, role_in_work,
+               skills_demonstrated_json, evidence_type, status
+        FROM {S}.workspace_evidence_drafts
+        WHERE user_id = {user_id} AND artifact_id = {int(art_id)}
+        LIMIT 1
+    """)
+    if existing:
+        return resp({
+            "ok": True, "already_exists": True,
+            "draft": {
+                "id": existing[0], "title": existing[1], "description": existing[2],
+                "what_was_done": existing[3], "outcome": existing[4],
+                "role_in_work": existing[5],
+                "skills_demonstrated": existing[6] if isinstance(existing[6], list) else [],
+                "evidence_type": existing[7], "status": existing[8],
+                "artifact_id": int(art_id), "project_id": int(project_id),
+            },
+        })
+
+    # AI-assisted draft
+    content_for_ai = (art_content or art_summary or "")[:2000]
+    ai_draft = {}
+    try:
+        system = (
+            "Ты помогаешь профессионалу оформить результат своей работы как evidence профессионального роста. "
+            "Отвечай строго в JSON, без markdown, без пояснений."
+        )
+        prompt = (
+            f"Проект: «{proj_title}»\n"
+            f"Артефакт: «{art_title}» (тип: {art_type}, режим: {art_mode})\n"
+            f"Содержимое:\n{content_for_ai}\n\n"
+            "Оформи этот результат как evidence профессионального роста. Формат JSON:\n"
+            "{\n"
+            '  "title": "Краткое название достижения (до 80 символов)",\n'
+            '  "description": "Что именно было сделано (2-3 предложения)",\n'
+            '  "what_was_done": "Конкретные действия: что анализировал, разработал, предложил",\n'
+            '  "outcome": "Результат: измеримый или качественный вывод",\n'
+            '  "role_in_work": "Роль: аналитик / стратег / PM / исследователь / эксперт",\n'
+            '  "skills_demonstrated": ["Навык 1", "Навык 2", "Навык 3"],\n'
+            '  "evidence_type": "project"\n'
+            "}"
+        )
+        raw = _yandex_gpt(prompt, system).strip()
+        if raw.startswith("```"):
+            raw = "\n".join(raw.split("\n")[1:]).rsplit("```", 1)[0]
+        ai_draft = json.loads(raw.strip())
+    except Exception:
+        ai_draft = {
+            "title": art_title[:80], "description": art_summary or "",
+            "what_was_done": "", "outcome": "",
+            "role_in_work": art_mode, "skills_demonstrated": [],
+            "evidence_type": "project",
+        }
+
+    title        = (ai_draft.get("title") or art_title)[:80]
+    description  = ai_draft.get("description") or ""
+    what_done    = ai_draft.get("what_was_done") or ""
+    outcome      = ai_draft.get("outcome") or ""
+    role         = ai_draft.get("role_in_work") or art_mode
+    skills       = ai_draft.get("skills_demonstrated") or []
+    etype        = ai_draft.get("evidence_type") or "project"
+
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            INSERT INTO {S}.workspace_evidence_drafts
+                (user_id, artifact_id, project_id, status, evidence_type,
+                 title, description, what_was_done, outcome, role_in_work,
+                 skills_demonstrated_json, ai_draft_json)
+            VALUES (%s, %s, %s, 'draft', %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            user_id, int(art_id), int(project_id), etype,
+            title, description, what_done, outcome, role,
+            json.dumps(skills, ensure_ascii=False),
+            json.dumps(ai_draft, ensure_ascii=False),
+        ))
+        ev_id = cur.fetchone()[0]
+    conn.commit()
+
+    return resp({"ok": True, "draft": {
+        "id": ev_id, "title": title, "description": description,
+        "what_was_done": what_done, "outcome": outcome, "role_in_work": role,
+        "skills_demonstrated": skills, "evidence_type": etype,
+        "status": "draft", "artifact_id": int(art_id), "project_id": int(project_id),
+    }})
+
+
+def action_evidence_drafts_list(conn, user_id: int) -> dict:
+    """Список черновиков evidence пользователя из Workspace."""
+    rows = fetch_all(conn, f"""
+        SELECT d.id, d.title, d.description, d.evidence_type,
+               d.what_was_done, d.outcome, d.role_in_work,
+               d.skills_demonstrated_json, d.artifact_id, d.project_id,
+               p.title AS project_title, a.title AS artifact_title,
+               d.status, d.created_at
+        FROM {S}.workspace_evidence_drafts d
+        LEFT JOIN {S}.workspace_artifacts a ON a.id = d.artifact_id
+        LEFT JOIN {S}.projects p ON p.id = d.project_id
+        WHERE d.user_id = {user_id} AND d.status = 'draft'
+        ORDER BY d.created_at DESC LIMIT 20
+    """)
+    return resp({"drafts": [{
+        "id": r[0], "title": r[1], "description": r[2], "evidence_type": r[3],
+        "what_was_done": r[4], "outcome": r[5], "role_in_work": r[6],
+        "skills_demonstrated": r[7] if isinstance(r[7], list) else [],
+        "artifact_id": r[8], "project_id": r[9],
+        "project_title": r[10], "artifact_title": r[11],
+        "status": r[12], "created_at": str(r[13]),
+    } for r in rows]})
+
+
+def action_evidence_draft_confirm(conn, user_id: int, body: dict) -> dict:
+    """Подтверждает черновик: переводит в status='confirmed'. Можно отредактировать поля перед сохранением."""
+    ev_id = body.get("id")
+    if not ev_id:
+        return resp({"error": "id required"}, 400)
+    row = fetch_one(conn, f"""
+        SELECT id FROM {S}.workspace_evidence_drafts
+        WHERE id = %s AND user_id = {user_id} AND status = 'draft'
+    """, (int(ev_id),))
+    if not row:
+        return resp({"error": "Черновик не найден или нет доступа"}, 403)
+
+    fields, vals = ["status = 'confirmed'", "reviewed_at = NOW()", "updated_at = NOW()"], []
+    for f in ("title", "description", "what_was_done", "outcome", "role_in_work", "evidence_type"):
+        if f in body:
+            fields.append(f"{f} = %s")
+            vals.append(body[f])
+    if "skills_demonstrated" in body:
+        fields.append("skills_demonstrated_json = %s")
+        vals.append(json.dumps(body["skills_demonstrated"], ensure_ascii=False))
+    vals.append(int(ev_id))
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {S}.workspace_evidence_drafts SET {', '.join(fields)} WHERE id = %s", vals)
+    conn.commit()
+    return resp({"ok": True})
+
+
+def action_evidence_draft_reject(conn, user_id: int, body: dict) -> dict:
+    """Отклоняет (удаляет) черновик."""
+    ev_id = body.get("id")
+    if not ev_id:
+        return resp({"error": "id required"}, 400)
+    row = fetch_one(conn, f"""
+        SELECT id FROM {S}.workspace_evidence_drafts
+        WHERE id = %s AND user_id = {user_id} AND status = 'draft'
+    """, (int(ev_id),))
+    if not row:
+        return resp({"error": "Черновик не найден или нет доступа"}, 403)
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {S}.workspace_evidence_drafts WHERE id = %s", (int(ev_id),))
+    conn.commit()
+    return resp({"ok": True})
+
+
+def action_artifact_evidence_status(conn, artifact_id: int, user_id: int) -> dict:
+    """Есть ли черновик или подтверждённый evidence для этого артефакта у пользователя."""
+    row = fetch_one(conn, f"""
+        SELECT id, status FROM {S}.workspace_evidence_drafts
+        WHERE artifact_id = %s AND user_id = {user_id}
+        ORDER BY created_at DESC LIMIT 1
+    """, (int(artifact_id),))
+    if not row:
+        return resp({"status": None, "evidence_id": None})
+    return resp({"status": row[1], "evidence_id": row[0]})
+
+
 def action_content_link_delete(conn, body):
     lid = body.get("id")
     if not lid:
@@ -888,6 +1110,9 @@ def handler(event: dict, context) -> dict:
         "professional_education_list_me", "professional_education_upsert_me", "professional_education_delete_me",
         "professional_work_experience_list_me", "professional_work_experience_upsert_me", "professional_work_experience_delete_me",
         "professional_visibility_get_me", "professional_visibility_upsert_me",
+        # Evidence Bridge
+        "evidence_create_from_artifact", "evidence_drafts_list",
+        "evidence_draft_confirm", "evidence_draft_reject", "artifact_evidence_status",
     }
 
     is_passport_action = action in PASSPORT_ACTIONS
@@ -936,6 +1161,22 @@ def handler(event: dict, context) -> dict:
             if action == "professional_visibility_upsert_me":
                 if method != "POST": return resp({"error": "POST required"}, 405)
                 return action_visibility_upsert_me(conn, user_id, body)
+            # ── Evidence Bridge ────────────────────────────────────────
+            if action == "evidence_create_from_artifact":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_create_evidence_from_artifact(conn, user_id, body)
+            if action == "evidence_drafts_list":
+                return action_evidence_drafts_list(conn, user_id)
+            if action == "evidence_draft_confirm":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_evidence_draft_confirm(conn, user_id, body)
+            if action == "evidence_draft_reject":
+                if method != "POST": return resp({"error": "POST required"}, 405)
+                return action_evidence_draft_reject(conn, user_id, body)
+            if action == "artifact_evidence_status":
+                art_id = qs.get("artifact_id") or body.get("artifact_id")
+                if not art_id: return resp({"error": "artifact_id required"}, 400)
+                return action_artifact_evidence_status(conn, int(art_id), user_id)
             return resp({"error": "unknown action"}, 400)
         finally:
             conn.close()

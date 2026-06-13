@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
+import { passportApi } from "@/lib/passportApi";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -106,6 +107,8 @@ export default function ProjectPage() {
   const [hypDraft, setHypDraft] = useState({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
   const [openHyp, setOpenHyp] = useState<Hypothesis | null>(null);
   const copilotEndRef = useRef<HTMLDivElement>(null);
+  const [evidenceSending, setEvidenceSending] = useState<number | null>(null);
+  const [evidenceSent, setEvidenceSent] = useState<Set<number>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
@@ -781,7 +784,7 @@ export default function ProjectPage() {
         {/* Модал артефакта */}
         {openArtifact && (
           <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setOpenArtifact(null)}>
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                 <div>
                   <p className="font-semibold text-slate-900">{openArtifact.title}</p>
@@ -791,6 +794,41 @@ export default function ProjectPage() {
               </div>
               <div className="overflow-y-auto flex-1 p-5">
                 <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{openArtifact.content}</p>
+              </div>
+              {/* Evidence Bridge CTA */}
+              <div className="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center gap-3">
+                {evidenceSent.has(openArtifact.id) ? (
+                  <div className="flex items-center gap-2 text-sm text-emerald-700">
+                    <Icon name="CheckCircle2" size={15} className="text-emerald-500" />
+                    Черновик отправлен в Passport — проверь в разделе «Сводка»
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex-1">
+                      <p className="text-xs text-slate-500">Добавь этот результат как evidence в Professional Passport</p>
+                    </div>
+                    <button
+                      disabled={evidenceSending === openArtifact.id}
+                      onClick={async () => {
+                        setEvidenceSending(openArtifact.id);
+                        try {
+                          await passportApi.evidenceCreateFromArtifact(openArtifact.id, projectId);
+                          setEvidenceSent(prev => new Set(prev).add(openArtifact.id));
+                        } catch {
+                          // silent
+                        } finally {
+                          setEvidenceSending(null);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-700 disabled:opacity-50 transition-colors flex-shrink-0"
+                    >
+                      {evidenceSending === openArtifact.id
+                        ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> AI готовит черновик...</>
+                        : <><Icon name="UserCircle" size={13} /> Добавить в Passport</>
+                      }
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

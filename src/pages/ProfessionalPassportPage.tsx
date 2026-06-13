@@ -602,9 +602,30 @@ function VisibilityTab() {
 
 // ── Summary Tab ───────────────────────────────────────────────────────
 
+type EvidenceDraft = {
+  id: number;
+  title: string;
+  description: string;
+  what_was_done: string;
+  outcome: string;
+  role_in_work: string;
+  skills_demonstrated: string[];
+  evidence_type: string;
+  artifact_id: number;
+  project_id: number;
+  project_title: string;
+  artifact_title: string;
+  status: string;
+  created_at: string;
+};
+
 function SummaryTab({ completion }: { completion: Completion | null }) {
   const [compSnap, setCompSnap] = useState<CompSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState<EvidenceDraft[]>([]);
+  const [openDraft, setOpenDraft] = useState<EvidenceDraft | null>(null);
+  const [draftEdit, setDraftEdit] = useState<Partial<EvidenceDraft>>({});
+  const [draftSaving, setDraftSaving] = useState(false);
 
   useEffect(() => {
     passportApi.summaryMe().then(d => {
@@ -615,7 +636,35 @@ function SummaryTab({ completion }: { completion: Completion | null }) {
       }
       setLoading(false);
     });
+    passportApi.evidenceDraftsList().then((d: { drafts?: EvidenceDraft[] }) => {
+      setDrafts(d.drafts || []);
+    }).catch(() => {});
   }, []);
+
+  const handleConfirm = async () => {
+    if (!openDraft) return;
+    setDraftSaving(true);
+    try {
+      await passportApi.evidenceDraftConfirm(openDraft.id, {
+        title: draftEdit.title ?? openDraft.title,
+        description: draftEdit.description ?? openDraft.description,
+        what_was_done: draftEdit.what_was_done ?? openDraft.what_was_done,
+        outcome: draftEdit.outcome ?? openDraft.outcome,
+        role_in_work: draftEdit.role_in_work ?? openDraft.role_in_work,
+        skills_demonstrated: draftEdit.skills_demonstrated ?? openDraft.skills_demonstrated,
+      });
+      setDrafts(prev => prev.filter(d => d.id !== openDraft.id));
+      setOpenDraft(null);
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    await passportApi.evidenceDraftReject(id);
+    setDrafts(prev => prev.filter(d => d.id !== id));
+    if (openDraft?.id === id) setOpenDraft(null);
+  };
 
   const LEVEL_LABELS: Record<number, string> = { 1: "Aware", 2: "Working", 3: "Independent", 4: "Advanced", 5: "Leading" };
   const LEVEL_COLORS: Record<number, string> = {
@@ -708,6 +757,131 @@ function SummaryTab({ completion }: { completion: Completion | null }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Evidence drafts from Workspace */}
+      {drafts.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-violet-100 flex items-center justify-center">
+              <Icon name="Package" size={13} className="text-violet-600" />
+            </div>
+            <span className="text-sm font-semibold text-slate-800">Черновики из Рабочего пространства</span>
+            <span className="ml-auto text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+              {drafts.length} {drafts.length === 1 ? "черновик" : "черновика"}
+            </span>
+          </div>
+          <p className="text-xs text-slate-500">AI подготовил описание ваших результатов. Проверьте и подтвердите — они будут добавлены в профиль как evidence.</p>
+          <div className="space-y-2">
+            {drafts.map(d => (
+              <div key={d.id} className="border border-slate-200 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 leading-snug">{d.title}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      из «{d.project_title}» · {d.artifact_title}
+                    </p>
+                  </div>
+                  <span className="text-[9px] font-bold bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded-full flex-shrink-0">черновик</span>
+                </div>
+                {d.outcome && (
+                  <p className="text-xs text-slate-600 leading-snug">{d.outcome}</p>
+                )}
+                {d.skills_demonstrated?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {d.skills_demonstrated.slice(0, 4).map(s => (
+                      <span key={s} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full">{s}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-1.5 pt-0.5">
+                  <button
+                    onClick={() => { setOpenDraft(d); setDraftEdit({}); }}
+                    className="flex-1 py-1.5 text-[11px] font-semibold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors"
+                  >
+                    Проверить и подтвердить
+                  </button>
+                  <button
+                    onClick={() => handleReject(d.id)}
+                    className="px-3 py-1.5 text-[11px] text-slate-500 hover:text-red-600 border border-slate-200 rounded-lg hover:border-red-200 transition-colors"
+                  >
+                    Отклонить
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Модал подтверждения черновика */}
+      {openDraft && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setOpenDraft(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <p className="font-semibold text-slate-900">Подтвердить evidence</p>
+                <p className="text-xs text-slate-400 mt-0.5">Отредактируй при необходимости — потом сохрани</p>
+              </div>
+              <button onClick={() => setOpenDraft(null)} className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-slate-100">
+                <Icon name="X" size={16} />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-5 space-y-3">
+              {[
+                { key: "title",        label: "Название",         type: "input" as const },
+                { key: "description",  label: "Описание",         type: "textarea" as const },
+                { key: "what_was_done",label: "Что было сделано", type: "textarea" as const },
+                { key: "outcome",      label: "Результат",        type: "textarea" as const },
+                { key: "role_in_work", label: "Роль",             type: "input" as const },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{f.label}</label>
+                  {f.type === "input" ? (
+                    <input
+                      className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      value={draftEdit[f.key as keyof EvidenceDraft] as string ?? openDraft[f.key as keyof EvidenceDraft] as string}
+                      onChange={e => setDraftEdit(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    />
+                  ) : (
+                    <textarea
+                      className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                      rows={2}
+                      value={draftEdit[f.key as keyof EvidenceDraft] as string ?? openDraft[f.key as keyof EvidenceDraft] as string}
+                      onChange={e => setDraftEdit(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              ))}
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Навыки (через запятую)</label>
+                <input
+                  className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  value={(draftEdit.skills_demonstrated ?? openDraft.skills_demonstrated).join(", ")}
+                  onChange={e => setDraftEdit(prev => ({ ...prev, skills_demonstrated: e.target.value.split(",").map(s => s.trim()).filter(Boolean) }))}
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-slate-100 flex gap-2">
+              <button
+                onClick={() => handleReject(openDraft.id)}
+                className="px-4 py-2 text-sm text-red-600 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+              >
+                Отклонить
+              </button>
+              <button
+                onClick={handleConfirm}
+                disabled={draftSaving}
+                className="flex-1 flex items-center justify-center gap-2 py-2 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 disabled:opacity-50 transition-colors"
+              >
+                {draftSaving ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Сохраняю...</> : <>
+                  <Icon name="CheckCircle2" size={15} />
+                  Подтвердить evidence
+                </>}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
