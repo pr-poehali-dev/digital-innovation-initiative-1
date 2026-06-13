@@ -821,6 +821,18 @@ def handle_upload_file(conn, user, body, request_id, origin):
         else:
             extracted = ai_extract_material(parsed_text)
 
+        # Нормализация типов: строковые поля всегда строки, hours — int или None
+        _str_fields = ("title", "institution_name", "field_of_study", "level",
+                       "issued_at", "grade", "summary", "author", "domain", "material_type")
+        for _f in _str_fields:
+            if _f in extracted and extracted[_f] is not None:
+                extracted[_f] = str(extracted[_f]).strip() or None
+        if "hours" in extracted and extracted["hours"] is not None:
+            try:
+                extracted["hours"] = int(float(str(extracted["hours"]).replace(",", ".")))
+            except (ValueError, TypeError):
+                extracted["hours"] = None
+
         # Сохраняем извлечённое
         topics = extracted.get("topics") or extracted.get("main_topics") or []
         competencies = extracted.get("suggested_competencies") or []

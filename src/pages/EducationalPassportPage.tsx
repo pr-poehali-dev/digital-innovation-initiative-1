@@ -875,11 +875,29 @@ function CreateModal(props: {
 
 
 function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string, unknown> }; onClose: () => void; onConfirmed: () => void }) {
-  // Единый адаптер: берём из карточки, если пусто — берём из extracted_data
   const ex = props.item.extracted_data || {};
-  const str = (key: string, fallback?: string) =>
-    (props.item[key as keyof EduItem] as string) || (ex[key] as string) || fallback || "";
+  const hasAI = Object.keys(ex).length > 0;
+
+  // Приоритет: свежее AI-извлечение > подтверждённое поле карточки
+  // Гарантируем строки (AI иногда возвращает числа)
+  const exStr = (key: string): string => {
+    const v = ex[key];
+    return v !== null && v !== undefined ? String(v).trim() : "";
+  };
+  const itemStr = (key: string): string => {
+    const v = props.item[key as keyof EduItem];
+    return typeof v === "string" ? v.trim() : "";
+  };
+  // Если AI-данные есть — берём из них, иначе из карточки
+  const best = (exKey: string, itemKey?: string): string =>
+    (hasAI ? exStr(exKey) : "") || itemStr(itemKey ?? exKey) || "";
+
   const arr = (itemKey: string, exKey: string): string[] => {
+    if (hasAI) {
+      const fromEx = ex[exKey];
+      if (Array.isArray(fromEx) && (fromEx as unknown[]).length > 0)
+        return (fromEx as unknown[]).map(String).filter(Boolean);
+    }
     const fromItem = props.item[itemKey as keyof EduItem];
     if (Array.isArray(fromItem) && (fromItem as string[]).length > 0) return fromItem as string[];
     const fromEx = ex[exKey];
@@ -887,10 +905,10 @@ function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string,
     return [];
   };
 
-  const [title, setTitle] = useState(str("title") || (ex.title as string) || "");
-  const [institution, setInstitution] = useState(str("institution_name") || (ex.institution_name as string) || "");
-  const [field, setField] = useState(str("field_of_study") || (ex.field_of_study as string) || "");
-  const [level, setLevel] = useState(str("level") || (ex.level as string) || "");
+  const [title, setTitle] = useState(best("title"));
+  const [institution, setInstitution] = useState(best("institution_name"));
+  const [field, setField] = useState(best("field_of_study"));
+  const [level, setLevel] = useState(best("level"));
   const [topics, setTopics] = useState<string[]>(arr("topics", "topics"));
   const [competencies, setCompetencies] = useState<string[]>(arr("competencies", "suggested_competencies"));
   const [studyStatus, setStudyStatus] = useState(props.item.study_status || "");
