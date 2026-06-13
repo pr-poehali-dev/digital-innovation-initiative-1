@@ -1,0 +1,31 @@
+{
+  "tests": [
+    {
+      "name": "lp.list requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "lp.list", "milestone_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unknown action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "lp.unknown"},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "lp.generate requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "lp.generate", "milestone_id": 1, "goal_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ const URLS = {
   learning: "https://functions.poehali.dev/e328c6f8-e450-4345-a38d-bc8e77e742e1",
   workspace: "https://functions.poehali.dev/6524fd83-ede7-4d1c-9424-8e67293d2495",
   goals: "https://functions.poehali.dev/97ab26dc-af56-4172-abc5-579979e30b01",
+  learningPack: "https://functions.poehali.dev/8ad151d1-d688-49c2-822a-5f5d366a8b3b",
 };
 
 function getSession(): string {
@@ -526,6 +527,19 @@ export async function uploadEducationFile(itemId: number, file: File): Promise<{
     total_chunks: totalChunks,
   }) as Promise<{ warning?: string }>;
 }
+
+export const learningPackApi = {
+  generate: (milestone_id: number, goal_id: number) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.generate", milestone_id, goal_id }),
+  list: (milestone_id: number) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.list", milestone_id }),
+  summarize: (material_id: number, milestone_id: number, summary_type = "brief") =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.summarize", material_id, milestone_id, summary_type }),
+  progress: (material_id: number, milestone_id: number, status: string) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.progress", material_id, milestone_id, status }),
+  status: (milestone_id: number) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.status", milestone_id }),
+};
 
 export const goalsApi = {
   list: (status?: string) =>
