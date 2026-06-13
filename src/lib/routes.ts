@@ -10,6 +10,7 @@ export const ROUTES = {
   publicProfile:  "/cabinet/public-profile",
   growth:         "/cabinet/growth",
   competencyMap:  "/cabinet/competency-map",
+  goals:          "/cabinet/goals",
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
@@ -70,6 +71,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "GraduationCap",
     items: [
       { id: "learning.main", label: "Учебный кабинет", icon: "GraduationCap", href: ROUTES.learning, active: true },
+      { id: "learning.goals", label: "Мои цели", icon: "Target", href: ROUTES.goals, active: true },
       { id: "learning.diplomas", label: "Дипломы и сертификаты", icon: "Award", href: ROUTES.passport, active: true },
     ],
   },

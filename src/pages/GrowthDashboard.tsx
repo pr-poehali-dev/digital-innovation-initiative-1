@@ -430,7 +430,7 @@ export default function GrowthDashboard() {
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-slate-800">Мои цели</h3>
-              <Link to="/cabinet/learning" className="text-[11px] font-semibold text-violet-600 hover:text-violet-700">
+              <Link to="/cabinet/goals" className="text-[11px] font-semibold text-violet-600 hover:text-violet-700">
                 Все →
               </Link>
             </div>
@@ -438,14 +438,14 @@ export default function GrowthDashboard() {
             {goals.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-5 text-center flex-1">
                 <div className="w-11 h-11 rounded-2xl bg-violet-50 flex items-center justify-center mb-2">
-                  <Icon name="GraduationCap" size={20} className="text-violet-400" />
+                  <Icon name="Target" size={20} className="text-violet-400" />
                 </div>
-                <p className="text-sm text-slate-500 font-medium">Нет учебных целей</p>
+                <p className="text-sm text-slate-500 font-medium">Нет целей развития</p>
                 <Link
-                  to="/cabinet/learning"
+                  to="/cabinet/goals"
                   className="mt-3 px-3.5 py-1.5 bg-violet-600 text-white text-xs font-semibold rounded-xl hover:bg-violet-700 transition-colors"
                 >
-                  + Создать цель
+                  + Поставить цель
                 </Link>
               </div>
             ) : (
@@ -460,7 +460,7 @@ export default function GrowthDashboard() {
                   const phase = dayNum === null ? null : dayNum <= 30 ? "0–30" : dayNum <= 60 ? "31–60" : "61–90";
 
                   return (
-                    <Link key={goal.id} to="/cabinet/learning" className="block group">
+                    <Link key={goal.id} to="/cabinet/goals" className="block group">
                       <div className="p-3 rounded-xl border border-slate-100 hover:border-violet-200 hover:bg-violet-50/40 transition-all">
                         <div className="flex items-start gap-2.5 mb-2">
                           <div className="w-6 h-6 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0 mt-0.5">

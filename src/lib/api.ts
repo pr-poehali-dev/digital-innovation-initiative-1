@@ -20,6 +20,7 @@ const URLS = {
   adminActivity: "https://functions.poehali.dev/c3350df2-e2f0-424c-acc4-036e65286249",
   learning: "https://functions.poehali.dev/e328c6f8-e450-4345-a38d-bc8e77e742e1",
   workspace: "https://functions.poehali.dev/6524fd83-ede7-4d1c-9424-8e67293d2495",
+  goals: "https://functions.poehali.dev/97ab26dc-af56-4172-abc5-579979e30b01",
 };
 
 function getSession(): string {
@@ -525,6 +526,25 @@ export async function uploadEducationFile(itemId: number, file: File): Promise<{
     total_chunks: totalChunks,
   }) as Promise<{ warning?: string }>;
 }
+
+export const goalsApi = {
+  list: (status?: string) =>
+    request(URLS.goals, "/", "POST", { action: "goals.list", status }),
+  get: (id: number) =>
+    request(URLS.goals, "/", "POST", { action: "goals.get", id }),
+  create: (data: Record<string, unknown>) =>
+    request(URLS.goals, "/", "POST", { action: "goals.create", ...data }),
+  update: (id: number, fields: Record<string, unknown>) =>
+    request(URLS.goals, "/", "POST", { action: "goals.update", id, ...fields }),
+  archive: (id: number) =>
+    request(URLS.goals, "/", "POST", { action: "goals.archive", id }),
+  analyze: (id: number) =>
+    request(URLS.goals, "/", "POST", { action: "goals.analyze", id }),
+  generatePath: (id: number) =>
+    request(URLS.goals, "/", "POST", { action: "goals.generate_path", id }),
+  updateMilestone: (id: number, status: string) =>
+    request(URLS.goals, "/", "POST", { action: "goals.update_milestone", id, status }),
+};
 
 export const walletApi = {
   getBalance: () =>
