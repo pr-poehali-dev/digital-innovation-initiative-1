@@ -88,6 +88,15 @@ export default function EducationalPassportPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [fileUrlLoading, setFileUrlLoading] = useState<number | null>(null);
 
+  const [editMode, setEditMode] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editIssuer, setEditIssuer] = useState("");
+  const [editField, setEditField] = useState("");
+  const [editIssuedAt, setEditIssuedAt] = useState("");
+  const [editHours, setEditHours] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+
   const load = () => {
     setLoading(true);
     educationApi.list(kindFilter, statusFilter)
@@ -172,6 +181,7 @@ export default function EducationalPassportPage() {
   };
 
   const openDetail = async (item: EduItem) => {
+    setEditMode(false);
     setDetailItem(item);
     setDetailLoading(true);
     try {
@@ -181,6 +191,40 @@ export default function EducationalPassportPage() {
       // оставляем базовые данные
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const startEdit = (item: EduItem) => {
+    setEditTitle(item.title);
+    setEditIssuer(item.institution_name || item.issuer_name || "");
+    setEditField(item.field_of_study || "");
+    setEditIssuedAt(item.issued_at ? item.issued_at.slice(0, 10) : "");
+    setEditHours(item.hours ? String(item.hours) : "");
+    setEditDesc(item.description || "");
+    setEditMode(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!detailItem) return;
+    setSaving(true);
+    try {
+      await educationApi.update(detailItem.id, {
+        title: editTitle.trim(),
+        institution_name: editIssuer.trim() || undefined,
+        issuer_name: editIssuer.trim() || undefined,
+        field_of_study: editField.trim() || undefined,
+        issued_at: editIssuedAt || undefined,
+        hours: editHours ? Number(editHours) : undefined,
+        description: editDesc.trim() || undefined,
+      });
+      const updated = await educationApi.get(detailItem.id);
+      setDetailItem(updated);
+      setEditMode(false);
+      load();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Ошибка сохранения");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -374,13 +418,21 @@ export default function EducationalPassportPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">{(KIND_LABELS[detailItem.kind] || KIND_LABELS.material).emoji}</span>
-                <span className="font-semibold">{detailItem.title}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xl flex-shrink-0">{(KIND_LABELS[detailItem.kind] || KIND_LABELS.material).emoji}</span>
+                <span className="font-semibold truncate">{editMode ? "Редактирование" : detailItem.title}</span>
               </div>
-              <button onClick={() => setDetailItem(null)} className="text-slate-400 hover:text-slate-700">
-                <Icon name="X" size={20} />
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {!editMode && !detailLoading && (
+                  <button onClick={() => startEdit(detailItem)} className="flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 border border-slate-200 hover:border-slate-400 rounded-lg px-2.5 py-1.5 transition-colors">
+                    <Icon name="Pencil" size={13} />
+                    Изменить
+                  </button>
+                )}
+                <button onClick={() => { setDetailItem(null); setEditMode(false); }} className="text-slate-400 hover:text-slate-700">
+                  <Icon name="X" size={20} />
+                </button>
+              </div>
             </div>
 
             {detailLoading && (
@@ -389,7 +441,54 @@ export default function EducationalPassportPage() {
               </div>
             )}
 
-            {!detailLoading && (
+            {!detailLoading && editMode && (
+              <div className="p-5 space-y-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Название *</label>
+                  <input value={editTitle} onChange={e => setEditTitle(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Учреждение / организация</label>
+                  <input value={editIssuer} onChange={e => setEditIssuer(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Направление / специальность</label>
+                  <input value={editField} onChange={e => setEditField(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs text-slate-500 block mb-1">Дата выдачи</label>
+                    <input type="date" value={editIssuedAt} onChange={e => setEditIssuedAt(e.target.value)}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                  </div>
+                  <div className="w-28">
+                    <label className="text-xs text-slate-500 block mb-1">Часы (необязательно)</label>
+                    <input type="number" value={editHours} onChange={e => setEditHours(e.target.value)} placeholder="0"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Описание / что изучал</label>
+                  <textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={handleSaveEdit} disabled={saving || !editTitle.trim()}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg py-2 text-sm font-medium transition-colors">
+                    {saving ? "Сохраняю..." : "Сохранить"}
+                  </button>
+                  <button onClick={() => setEditMode(false)}
+                    className="border border-slate-200 hover:border-slate-400 text-slate-600 rounded-lg px-4 py-2 text-sm transition-colors">
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!detailLoading && !editMode && (
               <div className="p-5 space-y-5">
                 {/* Статус и тип */}
                 <div className="flex flex-wrap gap-2">
