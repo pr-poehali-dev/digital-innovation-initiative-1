@@ -533,8 +533,10 @@ export const learningPackApi = {
     request(URLS.learningPack, "/", "POST", { action: "lp.generate", milestone_id, goal_id }),
   list: (milestone_id: number) =>
     request(URLS.learningPack, "/", "POST", { action: "lp.list", milestone_id }),
-  summarize: (material_id: number, milestone_id: number, summary_type = "brief") =>
-    request(URLS.learningPack, "/", "POST", { action: "lp.summarize", material_id, milestone_id, summary_type }),
+  reader: (material_id: number) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.reader", material_id }),
+  summarize: (material_id: number, milestone_id: number) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.summarize", material_id, milestone_id }),
   progress: (material_id: number, milestone_id: number, status: string) =>
     request(URLS.learningPack, "/", "POST", { action: "lp.progress", material_id, milestone_id, status }),
   status: (milestone_id: number) =>

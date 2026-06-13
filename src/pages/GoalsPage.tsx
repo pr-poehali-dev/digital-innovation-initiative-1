@@ -67,9 +67,18 @@ interface Material {
   trust_color: string;
   format: string;
   estimated_minutes: number | null;
+  availability_mode: string;
+  verification_status: string;
+  summary_basis: string;
+  has_reader: boolean;
+  has_assets: boolean;
   relevance_score: number;
   selection_reason: string | null;
   progress_status: string;
+  content_summary: string;
+  key_points: string[];
+  study_notes: string;
+  word_count: number;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -494,7 +503,6 @@ function MilestoneRow({
   const [loadingMaterials, setLoadingMaterials] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
-  const [summaries, setSummaries] = useState<Record<number, { text: string; loading: boolean }>>({});
 
   const loadMaterials = useCallback(async () => {
     try {
@@ -517,20 +525,9 @@ function MilestoneRow({
       await learningPackApi.generate(milestone.id, goalId);
       await loadMaterials();
     } catch (e) {
-      alert("Ошибка подбора материалов: " + (e as Error).message);
+      alert("Ошибка подбора: " + (e as Error).message);
     } finally {
       setGenerating(false);
-    }
-  };
-
-  const handleSummarize = async (mat: Material, type = "brief") => {
-    const key = mat.id;
-    setSummaries(prev => ({ ...prev, [key]: { text: prev[key]?.text || "", loading: true } }));
-    try {
-      const res = await learningPackApi.summarize(mat.id, milestone.id, type) as { summary: string };
-      setSummaries(prev => ({ ...prev, [key]: { text: res.summary, loading: false } }));
-    } catch (e) {
-      setSummaries(prev => ({ ...prev, [key]: { text: "Ошибка получения выжимки", loading: false } }));
     }
   };
 
@@ -538,16 +535,11 @@ function MilestoneRow({
     try {
       await learningPackApi.progress(mat.id, milestone.id, status);
       setMaterials(prev => prev.map(m => m.id === mat.id ? { ...m, progress_status: status } : m));
-      // Открываем URL только если материал ещё не изучен (не перезатираем прогресс done→opened)
-      if (status === "opened" && mat.url && mat.progress_status !== "done") {
-        window.open(mat.url, "_blank", "noopener");
-      }
     } catch (e) { console.error(e); }
   };
 
   return (
     <div className={`rounded-xl border transition-all ${milestone.status === "done" ? "border-emerald-100 bg-emerald-50/30" : "border-slate-100 bg-white"}`}>
-      {/* Milestone header */}
       <div className="flex items-start gap-3 px-4 py-3">
         <span className="text-xs text-slate-400 font-mono w-5 shrink-0 mt-0.5">{index + 1}</span>
         <div className="flex-1 min-w-0">
@@ -561,19 +553,13 @@ function MilestoneRow({
           </button>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={onToggle}
-            className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 transition-colors"
-          >
+          <button onClick={onToggle} className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 transition-colors">
             <Icon name="BookOpen" size={12} />
             <span className="hidden sm:inline">Материалы</span>
             <Icon name={isExpanded ? "ChevronUp" : "ChevronDown"} size={12} />
           </button>
-          <select
-            value={milestone.status}
-            onChange={e => onStatusChange(e.target.value)}
-            className={`text-[10px] font-semibold px-2 py-1 rounded-lg border-0 cursor-pointer outline-none ${MS_STATUS_COLORS[milestone.status]}`}
-          >
+          <select value={milestone.status} onChange={e => onStatusChange(e.target.value)}
+            className={`text-[10px] font-semibold px-2 py-1 rounded-lg border-0 cursor-pointer outline-none ${MS_STATUS_COLORS[milestone.status]}`}>
             <option value="planned">Запланировано</option>
             <option value="in_progress">В процессе</option>
             <option value="done">Готово</option>
@@ -581,55 +567,38 @@ function MilestoneRow({
         </div>
       </div>
 
-      {/* Materials panel */}
       {isExpanded && (
         <div className="border-t border-slate-100 px-4 py-4 space-y-3">
           {loadingMaterials ? (
             <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-violet-400" />
-              Загружаю материалы...
+              Загружаю...
             </div>
           ) : materials.length === 0 ? (
-            <div className="text-center py-4">
+            <div className="text-center py-5">
               <p className="text-xs text-slate-500 mb-3">
-                {jobStatus === "failed"
-                  ? "Ошибка подбора. Попробуй ещё раз."
-                  : "Материалы ещё не подобраны"}
+                {jobStatus === "failed" ? "Ошибка подбора. Попробуй ещё раз." : "Материалы ещё не подобраны"}
               </p>
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors mx-auto"
-              >
+              <button onClick={handleGenerate} disabled={generating}
+                className="flex items-center gap-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors mx-auto">
                 {generating
-                  ? <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Ищу материалы...</>
+                  ? <><div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />Подбираю и верифицирую...</>
                   : <><Icon name="Search" size={12} />Подобрать материалы</>}
               </button>
-              {generating && (
-                <p className="text-[10px] text-slate-400 mt-2">AI ищет реальные источники — займёт ~20 секунд</p>
-              )}
+              {generating && <p className="text-[10px] text-slate-400 mt-2">AI подбирает, проверяет ссылки и готовит конспекты — займёт ~40 секунд</p>}
             </div>
           ) : (
             <>
               <div className="space-y-3">
                 {materials.map(mat => (
-                  <MaterialCard
-                    key={mat.id}
-                    material={mat}
-                    summary={summaries[mat.id]}
-                    onOpen={() => handleProgress(mat, "opened")}
-                    onSummarize={() => handleSummarize(mat, "brief")}
-                    onMarkDone={() => handleProgress(mat, mat.progress_status === "done" ? "in_progress" : "done")}
-                  />
+                  <MaterialCard key={mat.id} material={mat} milestoneId={milestone.id}
+                    onProgressChange={(status) => handleProgress(mat, status)} />
                 ))}
               </div>
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="text-xs text-slate-400 hover:text-violet-600 transition-colors flex items-center gap-1"
-              >
+              <button onClick={handleGenerate} disabled={generating}
+                className="text-xs text-slate-400 hover:text-violet-600 transition-colors flex items-center gap-1">
                 <Icon name="RefreshCw" size={11} />
-                {generating ? "Ищу..." : "Обновить подборку"}
+                {generating ? "Обновляю..." : "Обновить подборку"}
               </button>
             </>
           )}
@@ -641,119 +610,192 @@ function MilestoneRow({
 
 // ── MaterialCard ──────────────────────────────────────────────────────────────
 
-function MaterialCard({
-  material, summary, onOpen, onSummarize, onMarkDone,
-}: {
-  material: Material;
-  summary?: { text: string; loading: boolean };
-  onOpen: () => void;
-  onSummarize: () => void;
-  onMarkDone: () => void;
+function MaterialCard({ material, milestoneId, onProgressChange }: {
+  material: Material; milestoneId: number; onProgressChange: (s: string) => void;
 }) {
-  const [showSummary, setShowSummary] = useState(false);
+  const [view, setView] = useState<"none" | "summary" | "reader">("none");
+  const [readerContent, setReaderContent] = useState<string>("");
+  const [readerLoading, setReaderLoading] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryData, setSummaryData] = useState<{ summary: string; key_points: string[]; study_notes: string } | null>(
+    material.has_assets && material.content_summary
+      ? { summary: material.content_summary, key_points: material.key_points, study_notes: material.study_notes }
+      : null
+  );
+
   const isDone = material.progress_status === "done";
+  const isInApp = material.has_reader;
   const iconName = FORMAT_ICON[material.format] || "FileText";
 
-  const handleSummarize = () => {
-    if (showSummary) {
-      setShowSummary(false);
-      return;
-    }
-    setShowSummary(true);
-    if (!summary?.text && !summary?.loading) onSummarize();
+  const handleReader = async () => {
+    if (view === "reader") { setView("none"); return; }
+    setView("reader");
+    if (readerContent) return;
+    setReaderLoading(true);
+    try {
+      const res = await learningPackApi.reader(material.id) as { reader_markdown: string };
+      setReaderContent(res.reader_markdown || "");
+      onProgressChange("in_progress");
+    } catch (e) { setReaderContent("Не удалось загрузить содержимое."); }
+    finally { setReaderLoading(false); }
+  };
+
+  const handleSummary = async () => {
+    if (view === "summary") { setView("none"); return; }
+    setView("summary");
+    if (summaryData) return;
+    if (!material.has_reader && material.summary_basis !== "content") return;
+    setSummaryLoading(true);
+    try {
+      const res = await learningPackApi.summarize(material.id, milestoneId) as { summary: string; key_points: string[]; study_notes: string };
+      setSummaryData({ summary: res.summary, key_points: res.key_points || [], study_notes: res.study_notes || "" });
+    } catch (e) { setSummaryData({ summary: "Не удалось получить выжимку.", key_points: [], study_notes: "" }); }
+    finally { setSummaryLoading(false); }
+  };
+
+  const handleOpenSource = () => {
+    if (material.progress_status !== "done") onProgressChange("opened");
+    window.open(material.url, "_blank", "noopener");
   };
 
   return (
-    <div className={`rounded-xl border p-3 transition-all ${isDone ? "border-emerald-100 bg-emerald-50/40 opacity-75" : "border-slate-100 bg-slate-50/50 hover:border-slate-200"}`}>
-      <div className="flex items-start gap-3">
-        {/* Format icon */}
-        <div className="w-8 h-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-          <Icon name={iconName} size={14} className="text-slate-500" />
+    <div className={`rounded-xl border transition-all ${isDone ? "border-emerald-100 bg-emerald-50/30" : "border-slate-100 bg-white hover:border-violet-200"}`}>
+      <div className="p-3">
+        <div className="flex items-start gap-3">
+          {/* Format icon + availability */}
+          <div className="relative shrink-0 mt-0.5">
+            <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center">
+              <Icon name={iconName} size={15} className="text-slate-500" />
+            </div>
+            {isInApp && (
+              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center" title="Доступен в кабинете">
+                <Icon name="Check" size={9} className="text-white" />
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start gap-2 mb-1">
+              <p className={`text-sm font-semibold leading-snug flex-1 ${isDone ? "line-through text-slate-400" : "text-slate-900"}`}>
+                {material.title}
+              </p>
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${TRUST_BADGE[material.trust_level] || TRUST_BADGE.C}`}>
+                {material.trust_label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-[10px] text-slate-400 mb-1.5 flex-wrap">
+              <span>{material.domain}</span>
+              {material.estimated_minutes && <><span>·</span><span className="flex items-center gap-0.5"><Icon name="Clock" size={9} />{material.estimated_minutes} мин</span></>}
+              {isInApp && <><span>·</span><span className="text-emerald-600 font-medium">Доступен в кабинете</span></>}
+              {material.word_count > 0 && <><span>·</span><span>{material.word_count} слов</span></>}
+              {material.progress_status !== "new" && <><span>·</span><span className={PROGRESS_COLORS[material.progress_status]}>{PROGRESS_LABELS[material.progress_status]}</span></>}
+            </div>
+
+            {material.selection_reason && (
+              <p className="text-[11px] text-slate-500 leading-snug italic">{material.selection_reason}</p>
+            )}
+          </div>
         </div>
 
-        <div className="flex-1 min-w-0">
-          {/* Title + trust */}
-          <div className="flex items-start gap-2 mb-1">
-            <p className={`text-sm font-medium leading-snug flex-1 ${isDone ? "line-through text-slate-400" : "text-slate-800"}`}>
-              {material.title}
-            </p>
-            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${TRUST_BADGE[material.trust_level] || TRUST_BADGE.C}`}>
-              {material.trust_label}
-            </span>
-          </div>
-
-          {/* Domain + time */}
-          <div className="flex items-center gap-2 text-[10px] text-slate-400 mb-2">
-            <span>{material.domain}</span>
-            {material.estimated_minutes && (
-              <>
-                <span>·</span>
-                <span className="flex items-center gap-0.5">
-                  <Icon name="Clock" size={9} />
-                  {material.estimated_minutes} мин
-                </span>
-              </>
-            )}
-            {material.progress_status !== "new" && (
-              <>
-                <span>·</span>
-                <span className={PROGRESS_COLORS[material.progress_status]}>
-                  {PROGRESS_LABELS[material.progress_status]}
-                </span>
-              </>
-            )}
-          </div>
-
-          {/* Selection reason */}
-          {material.selection_reason && (
-            <p className="text-[11px] text-slate-500 leading-snug mb-2 italic">{material.selection_reason}</p>
-          )}
-
-          {/* Summary */}
-          {showSummary && (
-            <div className="bg-white rounded-lg border border-slate-100 p-3 mb-2">
-              {summary?.loading ? (
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-violet-400" />
-                  AI готовит выжимку...
-                </div>
-              ) : (
-                <p className="text-xs text-slate-700 leading-relaxed">{summary?.text}</p>
-              )}
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={onOpen}
-              className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium transition-colors"
-            >
-              <Icon name="ExternalLink" size={11} />
-              Открыть
+        {/* Action buttons */}
+        <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+          {isInApp && (
+            <button onClick={handleReader}
+              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${view === "reader" ? "bg-violet-600 text-white" : "bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200"}`}>
+              <Icon name="BookOpen" size={11} />
+              {view === "reader" ? "Свернуть" : "Изучать"}
             </button>
-            <span className="text-slate-200">|</span>
-            <button
-              onClick={handleSummarize}
-              className="flex items-center gap-1 text-xs text-slate-500 hover:text-violet-600 transition-colors"
-            >
+          )}
+          {(material.has_assets || (isInApp && material.summary_basis === "content")) && (
+            <button onClick={handleSummary}
+              className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${view === "summary" ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"}`}>
               <Icon name="Zap" size={11} />
-              {showSummary ? "Скрыть выжимку" : "Кратко объяснить"}
+              {view === "summary" ? "Свернуть" : "Конспект"}
             </button>
-            <span className="text-slate-200">|</span>
-            <button
-              onClick={onMarkDone}
-              className={`flex items-center gap-1 text-xs transition-colors ${isDone ? "text-emerald-600 hover:text-slate-500" : "text-slate-400 hover:text-emerald-600"}`}
-            >
-              <Icon name={isDone ? "CheckCircle" : "Circle"} size={11} />
-              {isDone ? "Изучено" : "Отметить изученным"}
-            </button>
-          </div>
+          )}
+          <button onClick={handleOpenSource}
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-2 py-1.5 rounded-lg hover:bg-slate-50 border border-slate-100 transition-colors">
+            <Icon name="ExternalLink" size={11} />
+            Источник
+          </button>
+          <button onClick={() => onProgressChange(isDone ? "in_progress" : "done")}
+            className={`flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg border transition-colors ml-auto ${isDone ? "text-emerald-600 border-emerald-200 bg-emerald-50" : "text-slate-400 border-slate-100 hover:border-emerald-200 hover:text-emerald-600"}`}>
+            <Icon name={isDone ? "CheckCircle" : "Circle"} size={11} />
+            {isDone ? "Изучено" : "Отметить"}
+          </button>
         </div>
       </div>
+
+      {/* Reader panel */}
+      {view === "reader" && (
+        <div className="border-t border-slate-100 px-4 py-4">
+          {readerLoading ? (
+            <div className="flex items-center gap-2 text-xs text-slate-400 py-4 justify-center">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-400" />
+              Загружаю содержимое...
+            </div>
+          ) : (
+            <div className="prose prose-sm max-w-none text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
+              {readerContent || "Содержимое пустое."}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Summary panel */}
+      {view === "summary" && (
+        <div className="border-t border-slate-100 px-4 py-4 space-y-3">
+          {summaryLoading ? (
+            <div className="flex items-center gap-2 text-xs text-slate-400 py-4 justify-center">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-400" />
+              AI читает материал и готовит конспект...
+            </div>
+          ) : summaryData ? (
+            <>
+              {summaryData.summary && (
+                <div className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+                  <p className="text-[10px] text-amber-600 font-semibold uppercase tracking-wide mb-1.5">О чём материал</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">{summaryData.summary}</p>
+                </div>
+              )}
+              {summaryData.key_points && summaryData.key_points.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide mb-2">Ключевые тезисы</p>
+                  <ul className="space-y-1.5">
+                    {summaryData.key_points.map((kp, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="text-violet-500 font-bold shrink-0 mt-0.5">{i + 1}.</span>
+                        {kp}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {summaryData.study_notes && (
+                <div className="bg-violet-50 rounded-xl p-3 border border-violet-100">
+                  <p className="text-[10px] text-violet-600 font-semibold uppercase tracking-wide mb-1.5">Применение к шагу плана</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">{summaryData.study_notes}</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-slate-500 text-center py-2">Конспект будет готов после загрузки содержимого материала</p>
+          )}
+        </div>
+      )}
+
+      {/* source_only notice */}
+      {material.availability_mode === "source_only" && !isInApp && (
+        <div className="border-t border-slate-50 px-4 py-2">
+          <p className="text-[10px] text-slate-400">Платный курс или закрытая платформа — доступно только через источник</p>
+        </div>
+      )}
     </div>
   );
 }
+
+
 
 // ── CreateGoalModal ───────────────────────────────────────────────────────────
 
