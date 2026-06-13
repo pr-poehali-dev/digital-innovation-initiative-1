@@ -54,6 +54,16 @@ interface GapData {
   recommended_milestones: { title: string; description: string; timeframe: string }[];
 }
 
+interface ReadingListItem {
+  type: string;
+  title: string;
+  author: string;
+  where_to_find: string;
+  why: string;
+  level: string;
+  estimated_hours: number;
+}
+
 interface Material {
   id: number;
   mm_id: number;
@@ -113,6 +123,19 @@ const TRUST_BADGE: Record<string, string> = {
   A: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   B: "bg-blue-100 text-blue-700 border border-blue-200",
   C: "bg-slate-100 text-slate-500 border border-slate-200",
+};
+
+const RL_TYPE_ICON: Record<string, string> = {
+  book: "BookOpen", textbook: "BookOpen", course: "GraduationCap",
+  video_series: "Play",
+};
+const RL_TYPE_LABEL: Record<string, string> = {
+  book: "Книга", textbook: "Учебник", course: "Курс", video_series: "Видеокурс",
+};
+const RL_LEVEL_COLOR: Record<string, string> = {
+  "начальный": "bg-emerald-50 text-emerald-700",
+  "средний":   "bg-amber-50 text-amber-700",
+  "продвинутый": "bg-red-50 text-red-600",
 };
 
 const FORMAT_ICON: Record<string, string> = {
@@ -503,6 +526,9 @@ function MilestoneRow({
   const [loadingMaterials, setLoadingMaterials] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [showReadingList, setShowReadingList] = useState(false);
+  const [readingList, setReadingList] = useState<ReadingListItem[] | null>(null);
+  const [loadingRL, setLoadingRL] = useState(false);
 
   const loadMaterials = useCallback(async () => {
     try {
@@ -536,6 +562,18 @@ function MilestoneRow({
       await learningPackApi.progress(mat.id, milestone.id, status);
       setMaterials(prev => prev.map(m => m.id === mat.id ? { ...m, progress_status: status } : m));
     } catch (e) { console.error(e); }
+  };
+
+  const handleReadingList = async () => {
+    if (showReadingList) { setShowReadingList(false); return; }
+    setShowReadingList(true);
+    if (readingList) return;
+    setLoadingRL(true);
+    try {
+      const res = await learningPackApi.readingList(milestone.id, goalId) as { reading_list: ReadingListItem[] };
+      setReadingList(res.reading_list || []);
+    } catch (e) { setReadingList([]); }
+    finally { setLoadingRL(false); }
   };
 
   return (
@@ -617,6 +655,73 @@ function MilestoneRow({
                   {generating ? "Обновляю..." : "Обновить подборку"}
                 </button>
               )}
+
+              {/* Reading List */}
+              <div className="border-t border-slate-100 pt-3 mt-1">
+                <button onClick={handleReadingList}
+                  className="flex items-center gap-2 text-xs text-slate-500 hover:text-violet-600 font-medium transition-colors w-full">
+                  <Icon name="BookMarked" size={13} className="shrink-0" />
+                  <span className="flex-1 text-left">
+                    {showReadingList ? "Скрыть список литературы" : "Список литературы для самостоятельного изучения"}
+                  </span>
+                  <Icon name={showReadingList ? "ChevronUp" : "ChevronDown"} size={12} className="shrink-0" />
+                </button>
+
+                {showReadingList && (
+                  <div className="mt-3 space-y-2">
+                    {loadingRL ? (
+                      <div className="flex items-center gap-2 text-xs text-slate-400 py-3 justify-center">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-400" />
+                        AI составляет список литературы...
+                      </div>
+                    ) : readingList && readingList.length > 0 ? (
+                      <>
+                        <p className="text-[10px] text-slate-400 pb-1">
+                          Найди эти материалы самостоятельно и загрузи в <span className="text-violet-600 font-medium">Образовательный паспорт</span> — AI учтёт их в анализе компетенций
+                        </p>
+                        {readingList.map((item, i) => (
+                          <div key={i} className="bg-slate-50 rounded-xl border border-slate-100 p-3">
+                            <div className="flex items-start gap-2 mb-1.5">
+                              <div className="w-7 h-7 rounded-lg bg-white border border-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                                <Icon name={RL_TYPE_ICON[item.type] || "BookOpen"} size={13} className="text-slate-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-slate-800 leading-snug">{item.title}</p>
+                                {item.author && <p className="text-[10px] text-slate-400 mt-0.5">{item.author}</p>}
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${RL_LEVEL_COLOR[item.level] || "bg-slate-100 text-slate-500"}`}>
+                                  {item.level}
+                                </span>
+                                <span className="text-[9px] text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">
+                                  {RL_TYPE_LABEL[item.type] || item.type}
+                                </span>
+                              </div>
+                            </div>
+                            {item.why && <p className="text-xs text-slate-600 leading-snug ml-9 mb-1">{item.why}</p>}
+                            <div className="flex items-center gap-3 ml-9">
+                              {item.where_to_find && (
+                                <span className="text-[10px] text-violet-600 flex items-center gap-1">
+                                  <Icon name="Search" size={9} />
+                                  {item.where_to_find}
+                                </span>
+                              )}
+                              {item.estimated_hours > 0 && (
+                                <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                                  <Icon name="Clock" size={9} />
+                                  ~{item.estimated_hours} ч
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : readingList !== null ? (
+                      <p className="text-xs text-slate-400 text-center py-2">Не удалось составить список. Попробуй ещё раз.</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -647,7 +752,7 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
   const handleReader = async () => {
     if (view === "reader") { setView("none"); return; }
     setView("reader");
-    if (readerContent) return;
+    if (readerContent) { return; }
     setReaderLoading(true);
     try {
       const res = await learningPackApi.reader(material.id) as { reader_markdown: string };
@@ -744,19 +849,48 @@ function MaterialCard({ material, milestoneId, onProgressChange }: {
         </div>
       </div>
 
-      {/* Reader panel */}
+      {/* Reader — fullscreen overlay */}
       {view === "reader" && (
-        <div className="border-t border-slate-100 px-4 py-4">
-          {readerLoading ? (
-            <div className="flex items-center gap-2 text-xs text-slate-400 py-4 justify-center">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-400" />
-              Загружаю содержимое...
+        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+          {/* Reader header */}
+          <div className="flex items-center gap-4 px-6 py-4 border-b border-slate-100 bg-white shrink-0">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-slate-400 mb-0.5">{material.domain}</p>
+              <h2 className="text-base font-bold text-slate-900 leading-snug truncate">{material.title}</h2>
             </div>
-          ) : (
-            <div className="prose prose-sm max-w-none text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
-              {readerContent || "Содержимое пустое."}
+            <div className="flex items-center gap-2 shrink-0">
+              {material.word_count > 0 && (
+                <span className="text-xs text-slate-400">{material.word_count} слов</span>
+              )}
+              <button onClick={handleOpenSource}
+                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-600 border border-slate-200 px-3 py-1.5 rounded-lg transition-colors">
+                <Icon name="ExternalLink" size={12} />
+                Источник
+              </button>
+              <button onClick={() => onProgressChange(isDone ? "in_progress" : "done")}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${isDone ? "text-emerald-600 border-emerald-200 bg-emerald-50" : "text-slate-500 border-slate-200 hover:border-emerald-300 hover:text-emerald-600"}`}>
+                <Icon name={isDone ? "CheckCircle" : "Circle"} size={12} />
+                {isDone ? "Изучено" : "Отметить изученным"}
+              </button>
+              <button onClick={() => setView("none")}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-500 hover:text-slate-800">
+                <Icon name="X" size={18} />
+              </button>
             </div>
-          )}
+          </div>
+          {/* Reader content */}
+          <div className="flex-1 overflow-y-auto">
+            {readerLoading ? (
+              <div className="flex flex-col items-center justify-center h-64 gap-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500" />
+                <p className="text-sm text-slate-400">Загружаю содержимое...</p>
+              </div>
+            ) : (
+              <div className="max-w-3xl mx-auto px-6 py-8 text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-sans">
+                {readerContent || "Содержимое пустое."}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

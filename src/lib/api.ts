@@ -541,6 +541,8 @@ export const learningPackApi = {
     request(URLS.learningPack, "/", "POST", { action: "lp.progress", material_id, milestone_id, status }),
   status: (milestone_id: number) =>
     request(URLS.learningPack, "/", "POST", { action: "lp.status", milestone_id }),
+  readingList: (milestone_id: number, goal_id: number) =>
+    request(URLS.learningPack, "/", "POST", { action: "lp.reading_list", milestone_id, goal_id }),
 };
 
 export const goalsApi = {

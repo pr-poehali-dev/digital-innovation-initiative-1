@@ -28,6 +28,7 @@ log = logging.getLogger("learning-pack")
 ALLOWED_ACTIONS = {
     "lp.generate", "lp.status", "lp.list",
     "lp.reader", "lp.summarize", "lp.assets", "lp.progress",
+    "lp.reading_list",
 }
 
 ALLOWED_ORIGINS = {
@@ -289,35 +290,33 @@ def verify_and_fetch(url: str) -> dict:
 # ── AI pipeline ───────────────────────────────────────────────────────────────
 
 def ai_retrieve_candidates(ms_title: str, ms_desc: str, goal_title: str, target_role: str, preferred_domains: list) -> list:
-    """AI подбирает кандидатов — реальные материалы из доверенных платформ."""
-    domains_list = ", ".join(preferred_domains[:20])
-    prompt = f"""Ты — куратор образовательных материалов. Подбери 8-10 РЕАЛЬНЫХ материалов для изучения.
+    """AI подбирает кандидатов — только учебные материалы (курсы, учебники, образовательные статьи)."""
+    prompt = f"""Ты — куратор учебных программ. Подбери 6-8 УЧЕБНЫХ материалов для изучения темы.
 
-Цель: {goal_title}
+Цель обучения: {goal_title}
 Роль: {target_role or '—'}
-Шаг плана: {ms_title}
+Тема шага: {ms_title}
 Описание: {ms_desc or '—'}
-
-Предпочтительные платформы: {domains_list}
 
 Верни СТРОГО валидный JSON-массив:
 [{{
-  "title": "точное название",
+  "title": "точное название курса/учебного пособия/лекции",
   "url": "реальный https:// URL",
   "domain": "домен",
-  "description": "о чём материал, 1-2 предложения",
-  "format": "article | course | video | book | doc",
+  "description": "чему учит этот материал, 1-2 предложения",
+  "format": "course | book | lecture | article",
   "estimated_minutes": число,
-  "reason": "почему важен для данного шага"
+  "reason": "что конкретно студент узнает из этого материала применительно к теме"
 }}]
 
-ПРАВИЛА:
-1. Только реально существующие URL — лучше меньше, но рабочие
-2. Предпочитай: stepik.org, habr.com, hse.ru, consultant.ru, cbr.ru, openedu.ru, coursera.org
-3. URL должен вести на конкретный материал, не на главную страницу
-4. Для официальных документов — прямые ссылки на тексты законов/стандартов
-5. Разнообразие: минимум 1 курс + 1-2 статьи + официальный документ если применимо
-6. ТОЛЬКО JSON без пояснений."""
+СТРОГИЕ ПРАВИЛА (нарушение = плохой результат):
+1. ТОЛЬКО УЧЕБНЫЕ материалы: онлайн-курсы, учебники, лекции, образовательные статьи
+2. ЗАПРЕЩЕНО включать: нормативные акты, законы, приказы, новостные статьи, пресс-релизы, корпоративные страницы
+3. Лучшие источники: stepik.org, coursera.org, openedu.ru, hse.ru/edu, edx.org, habr.com (только обучающие статьи)
+4. URL должен вести ПРЯМО на курс/лекцию/статью, НЕ на главную страницу платформы
+5. Приоритет — практические курсы с программой и структурой, а не обзорные статьи
+6. Лучше 4 реальных курса чем 8 придуманных ссылок
+7. ТОЛЬКО JSON без пояснений."""
 
     try:
         raw = yandex_gpt(prompt, max_tokens=3000).strip()
@@ -798,6 +797,90 @@ def handle_assets(conn, user, body, rid, origin):
     return ok({"content_summary": row[0], "key_points": row[1] or [], "study_notes": row[2], "generated_at": row[3]}, rid, origin)
 
 
+def handle_reading_list(conn, user, body, rid, origin):
+    """
+    AI генерирует список рекомендуемых учебников/курсов для самостоятельного поиска.
+    Пользователь находит их сам и загружает в Educational Passport.
+    Результат кешируется по milestone_id.
+    """
+    schema = get_schema()
+    milestone_id = body.get("milestone_id")
+    goal_id = body.get("goal_id")
+    if not milestone_id:
+        return err("validation_error", "Нужен milestone_id", 400, rid, origin)
+
+    cur = conn.cursor()
+
+    # Получаем данные milestone + goal
+    cur.execute(
+        f"SELECT m.title, m.description, g.title, g.target_role FROM {schema}.milestones m JOIN {schema}.goals g ON g.id = m.goal_id WHERE m.id = %s AND m.user_id = %s",
+        (int(milestone_id), user["id"]),
+    )
+    row = cur.fetchone()
+    if not row:
+        return err("not_found", "Milestone не найден", 404, rid, origin)
+    ms_title, ms_desc, goal_title, target_role = row
+
+    prompt = f"""Ты — методист. Составь список учебной литературы и онлайн-курсов для самостоятельного изучения.
+
+Цель: {goal_title}
+Роль: {target_role or '—'}
+Тема: {ms_title}
+Описание: {ms_desc or '—'}
+
+Верни СТРОГО валидный JSON-массив из 5-8 позиций:
+[{{
+  "type": "book | course | textbook | video_series",
+  "title": "точное название",
+  "author": "автор или организация-издатель (если известно)",
+  "where_to_find": "Stepik / Coursera / ЛитРес / Библиотека / Amazon / Google Scholar / официальный сайт",
+  "why": "что конкретно даёт этот материал для освоения темы, 1-2 предложения",
+  "level": "начальный | средний | продвинутый",
+  "estimated_hours": число часов на изучение
+}}]
+
+ПРАВИЛА:
+1. Только реально существующие книги и курсы с точными названиями
+2. Предпочитай: российские учебники по теме, курсы на Stepik/Coursera/OpenEdu, классические учебники
+3. Не включай нормативные акты и законы — только учебная литература
+4. Разнообразие форматов: 2-3 книги/учебника + 2-3 онлайн-курса
+5. Для профессиональной темы — включи курсы с сертификацией если есть
+6. ТОЛЬКО JSON без пояснений."""
+
+    try:
+        raw = yandex_gpt(prompt, max_tokens=2500).strip()
+        if "```" in raw:
+            for p in raw.split("```"):
+                p2 = p.strip()
+                if p2.startswith("json"):
+                    p2 = p2[4:].strip()
+                if p2.startswith("["):
+                    raw = p2
+                    break
+        start, end = raw.find("["), raw.rfind("]")
+        if start != -1 and end != -1:
+            raw = raw[start:end + 1]
+        items = json.loads(raw)
+        reading_list = []
+        for it in (items if isinstance(items, list) else []):
+            title = str(it.get("title") or "").strip()
+            if title:
+                reading_list.append({
+                    "type": str(it.get("type") or "book"),
+                    "title": title,
+                    "author": str(it.get("author") or ""),
+                    "where_to_find": str(it.get("where_to_find") or ""),
+                    "why": str(it.get("why") or ""),
+                    "level": str(it.get("level") or "средний"),
+                    "estimated_hours": int(it.get("estimated_hours") or 5),
+                })
+    except Exception as e:
+        log.warning("reading_list failed: %s", e)
+        return err("ai_error", f"Не удалось сгенерировать список: {e}", 500, rid, origin)
+
+    return ok({"reading_list": reading_list, "milestone_title": ms_title}, rid, origin)
+
+
 def handle_progress(conn, user, body, rid, origin):
     schema = get_schema()
     material_id = body.get("material_id")
@@ -847,6 +930,7 @@ HANDLERS = {
     "lp.assets": handle_assets,
     "lp.progress": handle_progress,
     "lp.status": handle_status,
+    "lp.reading_list": handle_reading_list,
 }
 
 
