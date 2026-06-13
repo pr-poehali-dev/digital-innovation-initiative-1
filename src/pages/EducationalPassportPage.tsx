@@ -862,12 +862,24 @@ function CreateModal(props: {
 
 
 function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string, unknown> }; onClose: () => void; onConfirmed: () => void }) {
-  const [title, setTitle] = useState(props.item.title || "");
-  const [institution, setInstitution] = useState(props.item.institution_name || "");
-  const [field, setField] = useState(props.item.field_of_study || "");
-  const [level, setLevel] = useState(props.item.level || "");
-  const [topics, setTopics] = useState<string[]>(props.item.topics || []);
-  const [competencies, setCompetencies] = useState<string[]>(props.item.competencies || []);
+  // Единый адаптер: берём из карточки, если пусто — берём из extracted_data
+  const ex = props.item.extracted_data || {};
+  const str = (key: string, fallback?: string) =>
+    (props.item[key as keyof EduItem] as string) || (ex[key] as string) || fallback || "";
+  const arr = (itemKey: string, exKey: string): string[] => {
+    const fromItem = props.item[itemKey as keyof EduItem];
+    if (Array.isArray(fromItem) && (fromItem as string[]).length > 0) return fromItem as string[];
+    const fromEx = ex[exKey];
+    if (Array.isArray(fromEx)) return (fromEx as unknown[]).map(String).filter(Boolean);
+    return [];
+  };
+
+  const [title, setTitle] = useState(str("title") || (ex.title as string) || "");
+  const [institution, setInstitution] = useState(str("institution_name") || (ex.institution_name as string) || "");
+  const [field, setField] = useState(str("field_of_study") || (ex.field_of_study as string) || "");
+  const [level, setLevel] = useState(str("level") || (ex.level as string) || "");
+  const [topics, setTopics] = useState<string[]>(arr("topics", "topics"));
+  const [competencies, setCompetencies] = useState<string[]>(arr("competencies", "suggested_competencies"));
   const [studyStatus, setStudyStatus] = useState(props.item.study_status || "");
   const [saving, setSaving] = useState(false);
   const isMaterial = MATERIAL_KINDS.includes(props.item.kind);

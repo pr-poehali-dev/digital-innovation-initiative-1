@@ -277,7 +277,16 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
     b64 = base64.b64encode(image_bytes).decode("ascii")
     if not mime_type or mime_type == "application/octet-stream":
         mime_type = "image/png"
-    # Yandex Vision OCR v1 — правильный endpoint для изображений
+    # Yandex Vision OCR v1 принимает MIME-тип в формате image/jpeg, image/png, application/pdf
+    # Нормализуем к стандартным MIME
+    mime_map = {
+        "image/jpg": "image/jpeg",
+        "image/JPG": "image/jpeg",
+        "image/PNG": "image/png",
+        "image/JPEG": "image/jpeg",
+    }
+    mime_type = mime_map.get(mime_type, mime_type)
+    log.info("OCR start mime=%s size=%d", mime_type, len(image_bytes))
     payload = json.dumps({
         "mimeType": mime_type,
         "languageCodes": ["ru", "en"],
@@ -662,6 +671,16 @@ def handle_upload_file(conn, user, body, request_id, origin):
     kind = row[1]
 
     file_bytes = base64.b64decode(file_data_b64)
+    file_size = len(file_bytes)
+
+    # Дедупликация: проверяем, есть ли уже файл с таким именем и размером
+    cur.execute(
+        f"SELECT id FROM {schema}.education_item_files WHERE education_item_id = %s AND original_name = %s AND size_bytes = %s",
+        (int(item_id), filename, file_size),
+    )
+    if cur.fetchone():
+        return err_response("duplicate_file", f"Файл '{filename}' уже прикреплён к этой записи", 409, request_id, origin)
+
     s3_key = f"education/{user['id']}/{item_id}_{filename}"
 
     # Загружаем в S3
@@ -717,7 +736,9 @@ def handle_upload_file(conn, user, body, request_id, origin):
                 topics_json = %s,
                 competencies_json = %s,
                 status = 'needs_review',
-                source_type = 'ai_extracted'
+                source_type = 'ai_extracted',
+                is_confirmed = false,
+                confirmed_at = NULL
                 WHERE id = %s""",
             (
                 json.dumps(extracted, ensure_ascii=False),
@@ -1039,8 +1060,12 @@ def handle_get_file_url(conn, user, body, request_id, origin):
         return err_response("access_denied", "Нет доступа", 403, request_id, origin)
 
     s3_key, original_name, mime_type = row[0], row[1], row[2]
-    access_key = os.environ.get("AWS_ACCESS_KEY_ID", "")
-    url = f"https://cdn.poehali.dev/projects/{access_key}/bucket/{s3_key}"
+    s3 = get_s3()
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": "files", "Key": s3_key},
+        ExpiresIn=300,  # 5 минут
+    )
     return ok_response({"url": url, "filename": original_name, "mime": mime_type}, request_id, origin)
 
 
