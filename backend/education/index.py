@@ -310,10 +310,11 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
         return "[OCR: PDF без текстового слоя]"
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
-    log.info("OCR via YandexGPT vision start mime=%s size=%d", mime_type, len(image_bytes))
+    log.info("OCR via YandexGPT OpenAI-compat start mime=%s size=%d", mime_type, len(image_bytes))
 
+    # Яндекс поддерживает OpenAI-совместимый API — image_url с data:... работает
     payload = json.dumps({
-        "modelUri": f"gpt://{folder_id}/yandexgpt-lite/latest",
+        "model": f"gpt://{folder_id}/yandexgpt/latest",
         "messages": [
             {
                 "role": "user",
@@ -333,11 +334,12 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
                 ]
             }
         ],
-        "completionOptions": {"stream": False, "temperature": 0, "maxTokens": 4000}
+        "max_tokens": 4000,
+        "temperature": 0
     }).encode()
 
     req = urllib.request.Request(
-        "https://llm.api.cloud.yandex.net/foundationModels/v1/completion",
+        "https://ai.api.cloud.yandex.net/v1/chat/completions",
         data=payload,
         headers={
             "Authorization": f"Api-Key {api_key}",
@@ -353,8 +355,8 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
             body = http_err.read().decode("utf-8", errors="replace")[:500]
             log.error("YandexGPT Vision HTTP %d: %s", http_err.code, body)
             return f"[Ошибка OCR: HTTP {http_err.code}: {body}]"
-        text = result.get("result", {}).get("alternatives", [{}])[0].get("message", {}).get("text", "")
-        log.info("YandexGPT Vision OCR done len=%d", len(text))
+        text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        log.info("YandexGPT Vision OCR done len=%d preview=%r", len(text), text[:100])
         return text[:30000] if text else "[OCR: текст не найден]"
     except Exception as e:
         log.error("YandexGPT Vision OCR error: %s", e, exc_info=True)
