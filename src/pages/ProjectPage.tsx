@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi } from "@/lib/api";
+import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import HelpPanel from "@/components/HelpPanel";
@@ -83,7 +83,28 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"tasks" | "docs" | "team">("tasks");
+  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team">("overview");
+
+  // Workspace state
+  type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string };
+  type Artifact = { id: number; title: string; artifact_type: string; summary: string; mode: string; created_at: string; content?: string };
+  type WsContext = { goals_text: string; constraints_text: string; key_facts_text: string; stakeholders_text: string; updated_at?: string } | null;
+
+  const [wsContext, setWsContext] = useState<WsContext>(null);
+  const [wsContextEdit, setWsContextEdit] = useState(false);
+  const [wsContextDraft, setWsContextDraft] = useState({ goals_text: "", constraints_text: "", key_facts_text: "", stakeholders_text: "" });
+  const [hypotheses, setHypotheses] = useState<Hypothesis[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [openArtifact, setOpenArtifact] = useState<Artifact | null>(null);
+  const [copilotMsg, setCopilotMsg] = useState("");
+  const [copilotMode, setCopilotMode] = useState("analyst");
+  const [copilotSave, setCopilotSave] = useState(false);
+  const [copilotLoading, setCopilotLoading] = useState(false);
+  const [copilotHistory, setCopilotHistory] = useState<{ q: string; a: string; artifact_id?: number }[]>([]);
+  const [hypForm, setHypForm] = useState(false);
+  const [hypDraft, setHypDraft] = useState({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
+  const [openHyp, setOpenHyp] = useState<Hypothesis | null>(null);
+  const copilotEndRef = useRef<HTMLDivElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState("");
@@ -101,6 +122,12 @@ export default function ProjectPage() {
     projectsApi.get(projectId).then((d) => setProject(d)).catch(() => {});
     documentsApi.list(projectId).then((d) => setDocs(d.documents || [])).catch(() => {});
     tasksApi.list(projectId).then((d) => setTasks(d.tasks || [])).catch(() => {});
+    workspaceApi.getContext(projectId).then((d: { context: WsContext }) => {
+      setWsContext(d.context);
+      if (d.context) setWsContextDraft({ goals_text: d.context.goals_text, constraints_text: d.context.constraints_text, key_facts_text: d.context.key_facts_text, stakeholders_text: d.context.stakeholders_text });
+    }).catch(() => {});
+    workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+    workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
   };
 
   useEffect(() => { load(); }, [projectId]);
@@ -224,6 +251,47 @@ export default function ProjectPage() {
     }
   };
 
+  const handleCopilot = async () => {
+    if (!copilotMsg.trim() || copilotLoading) return;
+    const q = copilotMsg;
+    setCopilotMsg("");
+    setCopilotLoading(true);
+    try {
+      const res = await workspaceApi.copilot({ project_id: projectId, message: q, mode: copilotMode, save_as_artifact: copilotSave, artifact_type: "analysis" }) as { answer: string; artifact_id?: number };
+      setCopilotHistory(prev => [...prev, { q, a: res.answer, artifact_id: res.artifact_id }]);
+      if (res.artifact_id) workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
+      setTimeout(() => copilotEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    } catch {
+      setCopilotHistory(prev => [...prev, { q, a: "Не удалось получить ответ. Попробуй ещё раз." }]);
+    } finally {
+      setCopilotLoading(false);
+    }
+  };
+
+  const handleSaveContext = async () => {
+    await workspaceApi.updateContext(projectId, wsContextDraft);
+    setWsContextEdit(false);
+    workspaceApi.getContext(projectId).then((d: { context: WsContext }) => setWsContext(d.context)).catch(() => {});
+  };
+
+  const handleCreateHypothesis = async () => {
+    if (!hypDraft.title.trim()) return;
+    await workspaceApi.createHypothesis({ project_id: projectId, ...hypDraft });
+    setHypForm(false);
+    setHypDraft({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
+    workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+  };
+
+  const handleHypStatus = async (id: number, status: string) => {
+    await workspaceApi.updateHypothesis({ id, status });
+    workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+  };
+
+  const handleOpenArtifact = async (id: number) => {
+    const res = await workspaceApi.getArtifact(id) as { artifact: Artifact };
+    setOpenArtifact(res.artifact);
+  };
+
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -338,21 +406,386 @@ export default function ProjectPage() {
           ]}
         />
 
-        <div className="flex gap-1 mb-6 border-b">
-          {(["tasks", "docs", "team"] as const).map((t) => (
+        <div className="flex gap-0.5 mb-6 border-b overflow-x-auto">
+          {([
+            { key: "overview",    label: "🏠 Обзор" },
+            { key: "copilot",     label: "🤖 AI Copilot" },
+            { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
+            { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
+            { key: "tasks",       label: `📋 Задания (${tasks.length})` },
+            { key: "docs",        label: `📄 Файлы (${docs.length})` },
+            { key: "team",        label: "👥 Команда" },
+          ] as const).map((t) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                tab === t
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`whitespace-nowrap px-3.5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t.key
                   ? "border-slate-800 text-slate-900"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {t === "tasks" ? `Задания (${tasks.length})` : t === "docs" ? `Материалы (${docs.length})` : "Команда"}
+              {t.label}
             </button>
           ))}
         </div>
+
+        {/* ── Обзор ── */}
+        {tab === "overview" && (
+          <div className="space-y-5">
+            {/* Карточки-счётчики */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: "Гипотез", count: hypotheses.length, active: hypotheses.filter(h => h.status === "open" || h.status === "testing").length, icon: "Lightbulb", color: "text-amber-600 bg-amber-50" },
+                { label: "Артефактов", count: artifacts.length, active: 0, icon: "Package", color: "text-violet-600 bg-violet-50" },
+                { label: "Файлов", count: docs.length, active: docs.filter(d => d.status === "ready").length, icon: "FileText", color: "text-blue-600 bg-blue-50" },
+                { label: "Заданий", count: tasks.length, active: tasks.filter(t => t.status === "completed").length, icon: "CheckSquare", color: "text-emerald-600 bg-emerald-50" },
+              ].map(c => (
+                <div key={c.label} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.color}`}>
+                    <Icon name={c.icon} size={18} />
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-slate-900">{c.count}</p>
+                    <p className="text-xs text-slate-500">{c.label}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Контекст пространства */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl bg-slate-800 flex items-center justify-center">
+                    <Icon name="Map" size={14} className="text-white" />
+                  </div>
+                  <span className="font-semibold text-slate-900">Контекст пространства</span>
+                </div>
+                <button onClick={() => setWsContextEdit(!wsContextEdit)} className="text-xs text-violet-600 hover:text-violet-800 font-medium">
+                  {wsContextEdit ? "Отмена" : "Редактировать"}
+                </button>
+              </div>
+              {wsContextEdit ? (
+                <div className="space-y-3">
+                  {[
+                    { key: "goals_text",        label: "Цели и задачи пространства",       placeholder: "Чего хотим достичь в этом проекте?" },
+                    { key: "constraints_text",   label: "Ограничения",                      placeholder: "Что нельзя, какие ресурсы, сроки..." },
+                    { key: "key_facts_text",     label: "Ключевые факты / контекст",        placeholder: "Важные вещи, которые AI должен знать..." },
+                    { key: "stakeholders_text",  label: "Стейкхолдеры",                     placeholder: "Кто вовлечён, кто принимает решения..." },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{f.label}</label>
+                      <textarea
+                        className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                        rows={2}
+                        placeholder={f.placeholder}
+                        value={wsContextDraft[f.key as keyof typeof wsContextDraft]}
+                        onChange={e => setWsContextDraft(prev => ({ ...prev, [f.key]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                  <button onClick={handleSaveContext} className="w-full py-2 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 transition-colors">
+                    Сохранить контекст
+                  </button>
+                </div>
+              ) : wsContext && (wsContext.goals_text || wsContext.key_facts_text || wsContext.constraints_text) ? (
+                <div className="space-y-3">
+                  {wsContext.goals_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Цели</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.goals_text}</p></div>}
+                  {wsContext.constraints_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Ограничения</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.constraints_text}</p></div>}
+                  {wsContext.key_facts_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Ключевые факты</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.key_facts_text}</p></div>}
+                  {wsContext.stakeholders_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Стейкхолдеры</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.stakeholders_text}</p></div>}
+                </div>
+              ) : (
+                <div className="py-6 text-center">
+                  <p className="text-sm text-slate-400 mb-3">Добавь контекст — AI будет использовать его в каждом ответе</p>
+                  <button onClick={() => setWsContextEdit(true)} className="text-sm text-violet-600 font-medium hover:text-violet-800">Добавить контекст</button>
+                </div>
+              )}
+            </div>
+
+            {/* Открытые гипотезы */}
+            {hypotheses.filter(h => h.status === "open" || h.status === "testing").length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon name="Lightbulb" size={15} className="text-amber-600" />
+                  <span className="text-sm font-semibold text-slate-800">Активные гипотезы</span>
+                </div>
+                <div className="space-y-2">
+                  {hypotheses.filter(h => h.status === "open" || h.status === "testing").slice(0, 3).map(h => (
+                    <div key={h.id} onClick={() => { setOpenHyp(h); setTab("hypotheses"); }} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-amber-100 cursor-pointer hover:border-amber-300 transition-colors">
+                      <span className="text-sm text-slate-700 font-medium leading-snug">{h.title}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ml-2 flex-shrink-0 ${h.status === "testing" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{h.status === "testing" ? "проверяется" : "открыта"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Последние артефакты */}
+            {artifacts.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Icon name="Package" size={15} className="text-violet-600" />
+                  <span className="text-sm font-semibold text-slate-800">Последние артефакты</span>
+                </div>
+                <div className="space-y-2">
+                  {artifacts.slice(0, 3).map(a => (
+                    <div key={a.id} onClick={() => handleOpenArtifact(a.id)} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800 truncate">{a.title}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{a.summary?.slice(0, 80)}...</p>
+                      </div>
+                      <Icon name="ChevronRight" size={13} className="text-slate-400 flex-shrink-0 ml-2" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── AI Copilot ── */}
+        {tab === "copilot" && (
+          <div className="space-y-4">
+            {/* Режим */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2.5">Режим AI</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: "analyst",    label: "🔍 Аналитик",   desc: "анализ, gap, summary" },
+                  { key: "strategist", label: "🎯 Стратег",    desc: "гипотезы, roadmap" },
+                  { key: "pm",         label: "📋 PM",         desc: "задачи, план, критерии" },
+                  { key: "researcher", label: "🔬 Исследователь", desc: "обзоры, сравнения" },
+                ].map(m => (
+                  <button key={m.key} onClick={() => setCopilotMode(m.key)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${copilotMode === m.key ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>
+                    {m.label}
+                    <span className="text-[10px] opacity-60">{m.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 mt-3">
+                <input type="checkbox" id="ws-save" checked={copilotSave} onChange={e => setCopilotSave(e.target.checked)} className="w-4 h-4 rounded" />
+                <label htmlFor="ws-save" className="text-xs text-slate-600 cursor-pointer">Сохранять ответы как артефакты</label>
+              </div>
+            </div>
+
+            {/* История */}
+            <div className="space-y-3 min-h-[200px]">
+              {copilotHistory.length === 0 && (
+                <div className="bg-gradient-to-br from-slate-50 to-violet-50 border border-slate-200 rounded-2xl p-6 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
+                    <Icon name="Sparkles" size={22} className="text-violet-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800">AI Copilot знает контекст проекта</p>
+                    <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Он читает твои файлы, гипотезы и контекст пространства — не нужно вставлять всё в промпт вручную</p>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 pt-1">
+                    {["Проанализируй текущие гипотезы", "Сделай summary по файлам", "Предложи следующие шаги"].map(s => (
+                      <button key={s} onClick={() => setCopilotMsg(s)} className="text-xs px-3 py-1.5 bg-white border border-violet-200 text-violet-700 rounded-full hover:bg-violet-50 transition-colors">{s}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {copilotHistory.map((h, i) => (
+                <div key={i} className="space-y-2">
+                  <div className="flex justify-end">
+                    <div className="bg-slate-800 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm">{h.q}</div>
+                  </div>
+                  <div className="flex gap-2.5">
+                    <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Icon name="Sparkles" size={13} className="text-violet-600" />
+                    </div>
+                    <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 flex-1">
+                      <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{h.a}</p>
+                      {h.artifact_id && (
+                        <button onClick={() => handleOpenArtifact(h.artifact_id!)} className="mt-2 flex items-center gap-1 text-[11px] text-violet-600 hover:text-violet-800 font-medium">
+                          <Icon name="Package" size={11} />
+                          Сохранён как артефакт
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {copilotLoading && (
+                <div className="flex gap-2.5">
+                  <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Sparkles" size={13} className="text-violet-600" />
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-slate-500">AI анализирует проект...</span>
+                  </div>
+                </div>
+              )}
+              <div ref={copilotEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="flex gap-2 bg-white border border-slate-200 rounded-2xl p-3">
+              <textarea
+                className="flex-1 text-sm resize-none focus:outline-none min-h-[44px] max-h-[120px] text-slate-800"
+                placeholder="Что нужно проанализировать, исследовать или подготовить?"
+                value={copilotMsg}
+                onChange={e => setCopilotMsg(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleCopilot(); } }}
+              />
+              <button onClick={handleCopilot} disabled={!copilotMsg.trim() || copilotLoading}
+                className="self-end flex items-center justify-center w-10 h-10 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white rounded-xl transition-colors flex-shrink-0">
+                <Icon name="Send" size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Гипотезы ── */}
+        {tab === "hypotheses" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Гипотезы и эксперименты</p>
+              <button onClick={() => setHypForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-700 transition-colors">
+                <Icon name="Plus" size={12} />
+                Новая гипотеза
+              </button>
+            </div>
+
+            {hypForm && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Новая гипотеза</p>
+                {[
+                  { key: "title", label: "Формулировка *", placeholder: "Если мы сделаем X, то Y увеличится на Z%", required: true },
+                  { key: "statement", label: "Детальное описание", placeholder: "Почему мы так думаем?" },
+                  { key: "assumptions", label: "Предпосылки", placeholder: "Что должно быть верным для этой гипотезы?" },
+                  { key: "success_criteria", label: "Критерии успеха", placeholder: "Как поймём, что гипотеза подтвердилась?" },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{f.label}</label>
+                    <input className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      placeholder={f.placeholder}
+                      value={hypDraft[f.key as keyof typeof hypDraft]}
+                      onChange={e => setHypDraft(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <select className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm" value={hypDraft.priority} onChange={e => setHypDraft(prev => ({ ...prev, priority: e.target.value }))}>
+                    <option value="high">🔴 Высокий приоритет</option>
+                    <option value="medium">🟡 Средний</option>
+                    <option value="low">🟢 Низкий</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setHypForm(false)} className="flex-1 py-2 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
+                  <button onClick={handleCreateHypothesis} disabled={!hypDraft.title.trim()} className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">Создать</button>
+                </div>
+              </div>
+            )}
+
+            {hypotheses.length === 0 && !hypForm ? (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Lightbulb" size={28} className="text-amber-400 mx-auto mb-3" />
+                <p className="font-semibold text-slate-700 mb-1">Нет гипотез</p>
+                <p className="text-sm text-slate-400 mb-4">Добавь гипотезы для проверки — AI поможет их проанализировать</p>
+                <button onClick={() => setHypForm(true)} className="text-sm text-violet-600 font-medium hover:text-violet-800">Добавить первую гипотезу</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {[
+                  { status: "open",      label: "Открытые",       color: "border-amber-200 bg-amber-50" },
+                  { status: "testing",   label: "Проверяются",    color: "border-blue-200 bg-blue-50" },
+                  { status: "confirmed", label: "Подтверждены",   color: "border-emerald-200 bg-emerald-50" },
+                  { status: "rejected",  label: "Отклонены",      color: "border-slate-200 bg-slate-50" },
+                ].map(group => {
+                  const grouped = hypotheses.filter(h => h.status === group.status);
+                  if (!grouped.length) return null;
+                  return (
+                    <div key={group.status}>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{group.label} ({grouped.length})</p>
+                      <div className="space-y-2">
+                        {grouped.map(h => (
+                          <div key={h.id} className={`rounded-2xl border p-4 space-y-2 ${group.color}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-semibold text-slate-800 leading-snug flex-1">{h.title}</p>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${h.priority === "high" ? "bg-red-100 text-red-700" : h.priority === "low" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
+                                {h.priority === "high" ? "HIGH" : h.priority === "low" ? "LOW" : "MED"}
+                              </span>
+                            </div>
+                            {h.statement && <p className="text-xs text-slate-600 leading-snug">{h.statement}</p>}
+                            {h.success_criteria && <p className="text-[11px] text-slate-500"><span className="font-semibold">Критерий:</span> {h.success_criteria}</p>}
+                            {h.conclusion && <p className="text-[11px] text-emerald-700 font-medium"><span className="font-semibold">Вывод:</span> {h.conclusion}</p>}
+                            {/* Статусные кнопки */}
+                            <div className="flex gap-1 pt-1 flex-wrap">
+                              {h.status !== "open"      && <button onClick={() => handleHypStatus(h.id, "open")}      className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded-full hover:bg-slate-50 text-slate-600">→ открыта</button>}
+                              {h.status !== "testing"   && <button onClick={() => handleHypStatus(h.id, "testing")}   className="text-[10px] px-2 py-0.5 bg-white border border-blue-200 rounded-full hover:bg-blue-50 text-blue-600">→ проверяется</button>}
+                              {h.status !== "confirmed" && <button onClick={() => handleHypStatus(h.id, "confirmed")} className="text-[10px] px-2 py-0.5 bg-white border border-emerald-200 rounded-full hover:bg-emerald-50 text-emerald-600">→ подтверждена</button>}
+                              {h.status !== "rejected"  && <button onClick={() => handleHypStatus(h.id, "rejected")}  className="text-[10px] px-2 py-0.5 bg-white border border-red-200 rounded-full hover:bg-red-50 text-red-600">→ отклонена</button>}
+                              <button onClick={() => { setCopilotMsg(`Проанализируй гипотезу: "${h.title}". ${h.statement}`); setTab("copilot"); }}
+                                className="text-[10px] px-2 py-0.5 bg-violet-600 text-white rounded-full hover:bg-violet-700">🤖 спросить AI</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Артефакты ── */}
+        {tab === "artifacts" && (
+          <div className="space-y-4">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Артефакты — результаты AI-работы в этом пространстве</p>
+            {artifacts.length === 0 ? (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Package" size={28} className="text-violet-400 mx-auto mb-3" />
+                <p className="font-semibold text-slate-700 mb-1">Артефактов пока нет</p>
+                <p className="text-sm text-slate-400 mb-4">Включи «Сохранять как артефакт» в AI Copilot — ответы будут сохраняться здесь</p>
+                <button onClick={() => setTab("copilot")} className="text-sm text-violet-600 font-medium hover:text-violet-800">Открыть Copilot</button>
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-3">
+                {artifacts.map(a => (
+                  <div key={a.id} onClick={() => handleOpenArtifact(a.id)}
+                    className="bg-white border border-slate-200 rounded-2xl p-4 cursor-pointer hover:border-violet-300 hover:shadow-sm transition-all space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-800 leading-snug flex-1">{a.title}</p>
+                      <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full flex-shrink-0">{a.artifact_type}</span>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-snug line-clamp-2">{a.summary}</p>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                      <Icon name="Sparkles" size={9} />
+                      <span>{a.mode}</span>
+                      <span>·</span>
+                      <span>{new Date(a.created_at).toLocaleDateString("ru-RU")}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Модал артефакта */}
+        {openArtifact && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setOpenArtifact(null)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                <div>
+                  <p className="font-semibold text-slate-900">{openArtifact.title}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{openArtifact.artifact_type} · {openArtifact.mode}</p>
+                </div>
+                <button onClick={() => setOpenArtifact(null)} className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-slate-100"><Icon name="X" size={16} /></button>
+              </div>
+              <div className="overflow-y-auto flex-1 p-5">
+                <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{openArtifact.content}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {tab === "tasks" && (
           <div className="space-y-3">

@@ -19,6 +19,7 @@ const URLS = {
   adminAudit: "https://functions.poehali.dev/f647adda-565a-4846-9b28-4462ebcf2ade",
   adminActivity: "https://functions.poehali.dev/c3350df2-e2f0-424c-acc4-036e65286249",
   learning: "https://functions.poehali.dev/e328c6f8-e450-4345-a38d-bc8e77e742e1",
+  workspace: "https://functions.poehali.dev/6524fd83-ede7-4d1c-9424-8e67293d2495",
 };
 
 function getSession(): string {
@@ -529,4 +530,25 @@ export const learningApi = {
     request(URLS.learning, `/?action=topic_memory&goal_id=${goal_id}&topic_id=${topic_id}`, "GET"),
   getReviewTopics: (goal_id: number) =>
     request(URLS.learning, `/?action=review_topics&goal_id=${goal_id}`, "GET"),
+};
+
+export const workspaceApi = {
+  getContext: (projectId: number) =>
+    request(URLS.workspace, `/?action=context&project_id=${projectId}`, "GET"),
+  updateContext: (projectId: number, data: { goals_text?: string; constraints_text?: string; key_facts_text?: string; stakeholders_text?: string }) =>
+    request(URLS.workspace, "/?action=context", "PUT", { project_id: projectId, ...data }),
+  getHypotheses: (projectId: number) =>
+    request(URLS.workspace, `/?action=hypotheses&project_id=${projectId}`, "GET"),
+  createHypothesis: (data: { project_id: number; title: string; statement?: string; assumptions?: string; success_criteria?: string; priority?: string }) =>
+    request(URLS.workspace, "/?action=create_hypothesis", "POST", data),
+  updateHypothesis: (data: { id: number; title?: string; statement?: string; assumptions?: string; success_criteria?: string; status?: string; conclusion?: string; priority?: string }) =>
+    request(URLS.workspace, "/?action=update_hypothesis", "PUT", data),
+  getArtifacts: (projectId: number) =>
+    request(URLS.workspace, `/?action=artifacts&project_id=${projectId}`, "GET"),
+  getArtifact: (id: number) =>
+    request(URLS.workspace, `/?action=artifact&id=${id}`, "GET"),
+  getAiRuns: (projectId: number) =>
+    request(URLS.workspace, `/?action=ai_runs&project_id=${projectId}`, "GET"),
+  copilot: (data: { project_id: number; message: string; mode?: string; save_as_artifact?: boolean; artifact_title?: string; artifact_type?: string }) =>
+    request(URLS.workspace, "/?action=copilot", "POST", data),
 };
