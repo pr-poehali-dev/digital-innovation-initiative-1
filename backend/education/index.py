@@ -317,7 +317,9 @@ def ocr_image_bytes(image_bytes: bytes, mime_type: str = "") -> str:
         # Извлекаем fullText из результата
         text_annotation = result.get("result", {}).get("textAnnotation", {})
         full_text = text_annotation.get("fullText", "")
-        log.info("OCR result length=%d", len(full_text))
+        log.info("OCR result length=%d raw_keys=%s", len(full_text), list(result.keys()))
+        if not full_text:
+            log.warning("OCR empty result: %s", json.dumps(result, ensure_ascii=False)[:500])
         return full_text[:30000] if full_text else "[OCR: текст не найден]"
     except Exception as e:
         log.error("OCR error mime=%s size=%d err=%s", mime_type, len(image_bytes), e)

@@ -62,6 +62,18 @@ const SOURCE_LABELS: Record<string, string> = {
   ai_extracted: "AI извлёк",
 };
 
+const LEVEL_LABELS: Record<string, string> = {
+  bachelor: "Бакалавриат",
+  master: "Магистратура",
+  specialist: "Специалитет",
+  phd: "Аспирантура / PhD",
+  professional: "Доп. профессиональное",
+  online: "Онлайн-курс",
+  basic: "Базовый",
+  advanced: "Продвинутый",
+  expert: "Экспертный",
+};
+
 const FORMAL_KINDS = ["degree", "certificate", "course", "program"];
 const MATERIAL_KINDS = ["book", "lecture", "presentation", "methodology", "notes", "article", "material"];
 
@@ -554,7 +566,7 @@ export default function EducationalPassportPage() {
                   {detailItem.level && (
                     <div>
                       <p className="text-xs text-slate-500">Уровень</p>
-                      <p className="text-sm">{detailItem.level}</p>
+                      <p className="text-sm">{LEVEL_LABELS[detailItem.level] || detailItem.level}</p>
                     </div>
                   )}
                   {detailItem.issued_at && (
@@ -924,7 +936,13 @@ function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string,
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1.5">Уровень</label>
-              <input value={level} onChange={(e) => setLevel(e.target.value)} placeholder="bachelor / online / ..." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
+              <select value={level} onChange={(e) => setLevel(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">— не указан —</option>
+                {Object.entries(LEVEL_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+                {level && !LEVEL_LABELS[level] && <option value={level}>{level}</option>}
+              </select>
             </div>
           </div>
 
