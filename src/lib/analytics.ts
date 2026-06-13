@@ -407,6 +407,40 @@ export type AnalyticsEvents = {
     topic_id: number;
     minutes: number;
   };
+
+  // 58. Quiz завершён
+  learning_quiz_completed: {
+    goal_id: number;
+    topic_id: number;
+    score: number;
+    total_questions: number;
+  };
+
+  // 59. Тема помечена на повторение
+  learning_memory_flagged_review: {
+    goal_id: number;
+    topic_id: number;
+    review_priority: string;
+  };
+
+  // 60. Открыта тема на повторение
+  learning_review_topic_opened: {
+    goal_id: number;
+    topic_id: number;
+  };
+
+  // 61. Запущена remediation-сессия
+  learning_review_session_started: {
+    goal_id: number;
+    topic_id: number;
+    minutes: number;
+  };
+
+  // 62. Повторный quiz
+  learning_review_quiz_retaken: {
+    goal_id: number;
+    topic_id: number;
+  };
 };
 
 // --- Ядро ---
@@ -806,6 +840,26 @@ export const analytics = {
 
   learningFirstSessionStarted(goalId: number, topicId: number, minutes: number) {
     sendEvent("learning_first_session_started", { goal_id: goalId, topic_id: topicId, minutes });
+  },
+
+  learningQuizCompleted(goalId: number, topicId: number, score: number, total: number) {
+    sendEvent("learning_quiz_completed", { goal_id: goalId, topic_id: topicId, score, total_questions: total });
+  },
+
+  learningMemoryFlaggedReview(goalId: number, topicId: number, priority: string) {
+    sendEvent("learning_memory_flagged_review", { goal_id: goalId, topic_id: topicId, review_priority: priority });
+  },
+
+  learningReviewTopicOpened(goalId: number, topicId: number) {
+    sendEvent("learning_review_topic_opened", { goal_id: goalId, topic_id: topicId });
+  },
+
+  learningReviewSessionStarted(goalId: number, topicId: number, minutes: number) {
+    sendEvent("learning_review_session_started", { goal_id: goalId, topic_id: topicId, minutes });
+  },
+
+  learningReviewQuizRetaken(goalId: number, topicId: number) {
+    sendEvent("learning_review_quiz_retaken", { goal_id: goalId, topic_id: topicId });
   },
 };
 

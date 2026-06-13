@@ -85,6 +85,27 @@ type QuizQuestion = {
   options: string[];
   correct: number;
   explanation: string;
+  concept_tag?: string;
+};
+
+type TopicMemory = {
+  attempts_count: number;
+  last_score: number;
+  best_score: number;
+  weak_concepts: { tag: string; wrong_count: number }[];
+  needs_review: boolean;
+  review_priority: "high" | "medium" | "none";
+  last_quiz_at?: string | null;
+};
+
+type QuizResult = {
+  score: number;
+  correct: number;
+  total: number;
+  weak_concepts: { tag: string; wrong_count: number }[];
+  wrong_questions: { idx: number; question: string; concept_tag: string; correct: number; chosen: number | null }[];
+  needs_review: boolean;
+  review_priority: string;
 };
 
 type SessionData = {
@@ -164,6 +185,12 @@ export default function LearningPage() {
   // Онбординг: показываем первую тему из онбординга сразу
   const [onboardingFirstTopic, setOnboardingFirstTopic] = useState<Topic | null>(null);
 
+  // Memory Layer
+  const [topicMemory, setTopicMemory] = useState<TopicMemory | null>(null);
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+  const [quizStartTime, setQuizStartTime] = useState<number | null>(null);
+  const [reviewTopics, setReviewTopics] = useState<{ topic_id: number; title: string; last_score: number; weak_concepts: { tag: string; wrong_count: number }[]; review_priority: string }[]>([]);
+
   useEffect(() => {
     loadGoals();
   }, []);
@@ -193,16 +220,18 @@ export default function LearningPage() {
   }
 
   async function loadGoalData(goalId: number) {
-    const [topicsData, notesData, progressData, checkinsData] = await Promise.all([
+    const [topicsData, notesData, progressData, checkinsData, reviewData] = await Promise.all([
       learningApi.getTopics(goalId) as Promise<{ topics: Topic[] }>,
       learningApi.getNotes(goalId) as Promise<{ notes: Note[] }>,
       learningApi.getProgress(goalId) as Promise<{ progress: Progress }>,
       learningApi.getCheckins(goalId).catch(() => ({ checkins: [] })) as Promise<{ checkins: typeof checkins }>,
+      learningApi.getReviewTopics(goalId).catch(() => ({ review_topics: [] })) as Promise<{ review_topics: typeof reviewTopics }>,
     ]);
     setTopics(topicsData.topics || []);
     setNotes(notesData.notes || []);
     setProgress(progressData.progress || null);
     setCheckins(checkinsData.checkins || []);
+    setReviewTopics(reviewData.review_topics || []);
   }
 
   async function handleCreateGoal() {
@@ -319,6 +348,8 @@ export default function LearningPage() {
     setQuizQuestions([]);
     setQuizAnswers({});
     setQuizSubmitted(false);
+    setQuizResult(null);
+    setTopicMemory(null);
     if (!activeGoal) return;
     setTopicPackLoading(true);
     try {
@@ -327,8 +358,9 @@ export default function LearningPage() {
         topic_title: topic.title,
         goal_title: activeGoal.title,
         mode: "full",
-      }) as { pack: TopicPack };
+      }) as { pack: TopicPack; memory?: TopicMemory | null };
       setTopicPack(data.pack);
+      setTopicMemory(data.memory || null);
     } catch {
       toast({ title: "AI не смог загрузить тему, попробуй ещё раз", variant: "destructive" });
     } finally {
@@ -362,14 +394,17 @@ export default function LearningPage() {
     setQuizQuestions([]);
     setQuizAnswers({});
     setQuizSubmitted(false);
+    setQuizResult(null);
+    setQuizStartTime(Date.now());
     try {
       const data = await learningApi.topicLearn({
         topic_id: activeTopic.id,
         topic_title: activeTopic.title,
         goal_title: activeGoal.title,
         mode: "quiz",
-      }) as { questions: QuizQuestion[] };
+      }) as { questions: QuizQuestion[]; memory?: TopicMemory | null };
       setQuizQuestions(data.questions || []);
+      if (data.memory) setTopicMemory(data.memory);
     } catch {
       toast({ title: "Не удалось загрузить проверку", variant: "destructive" });
     } finally {
@@ -655,6 +690,41 @@ export default function LearningPage() {
                 {/* Вкладка: Plan */}
                 {tab === "plan" && (
                   <div className="space-y-3">
+                    {/* Review-карточка: темы с пробелами */}
+                    {reviewTopics.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2.5">
+                        <div className="flex items-center gap-2">
+                          <Icon name="RotateCcw" size={13} className="text-amber-600 flex-shrink-0" />
+                          <span className="text-xs font-bold text-slate-700">
+                            {reviewTopics.length === 1
+                              ? "Есть тема, к которой стоит вернуться"
+                              : `Есть ${reviewTopics.length} темы, к которым стоит вернуться`}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {reviewTopics.slice(0, 3).map(r => (
+                            <button
+                              key={r.topic_id}
+                              onClick={() => {
+                                const t = topics.find(t => t.id === r.topic_id);
+                                if (t && activeGoal) {
+                                  analytics.learningReviewTopicOpened(activeGoal.id, r.topic_id);
+                                  openTopic(t);
+                                }
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-amber-100 hover:border-amber-300 hover:bg-amber-50 transition-colors text-left group"
+                            >
+                              <span className="text-xs font-medium text-slate-700 leading-snug flex-1">{r.title}</span>
+                              <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                                <span className="text-[10px] text-slate-400">{r.last_score}%</span>
+                                <Icon name="ChevronRight" size={11} className="text-amber-400 group-hover:text-amber-600 transition-colors" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {activeGoal.ai_plan && (
                       <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 text-sm text-violet-800">
                         {activeGoal.ai_plan.summary}
@@ -700,14 +770,30 @@ export default function LearningPage() {
                                       className={`px-4 py-2.5 flex items-center gap-3 transition-colors group cursor-pointer ${
                                         isActive ? "bg-violet-50 border-l-2 border-violet-500" : "hover:bg-slate-50"
                                       }`}
-                                      onClick={() => isActive ? setActiveTopic(null) : openTopic(topic)}
+                                      onClick={() => {
+                                        const needsReview = reviewTopics.some(r => r.topic_id === topic.id);
+                                        if (isActive) { setActiveTopic(null); } else {
+                                          if (needsReview && activeGoal) analytics.learningReviewTopicOpened(activeGoal.id, topic.id);
+                                          openTopic(topic);
+                                        }
+                                      }}
                                     >
                                       <div className={`flex-shrink-0 w-2.5 h-2.5 rounded-full ${cur.dot}`} />
-                                      <span className={`text-sm flex-1 leading-snug ${
+                                      <span className={`text-sm flex-1 leading-snug min-w-0 ${
                                         isActive ? "text-violet-700 font-medium" :
                                         topic.status === "applied" ? "text-slate-500" : "text-slate-700"
                                       }`}>
                                         {topic.title}
+                                        {reviewTopics.find(r => r.topic_id === topic.id) && (
+                                          <span className={`ml-1.5 inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                            reviewTopics.find(r => r.topic_id === topic.id)?.review_priority === "high"
+                                              ? "bg-red-50 text-red-600 border-red-200"
+                                              : "bg-amber-50 text-amber-600 border-amber-200"
+                                          }`}>
+                                            <Icon name="AlertCircle" size={8} />
+                                            повторить
+                                          </span>
+                                        )}
                                       </span>
                                       {/* Кнопка «Учить» */}
                                       <button
@@ -991,6 +1077,59 @@ export default function LearningPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Memory: блок "нужно повторить" — если есть память с пробелами */}
+                {topicMemory && topicMemory.needs_review && topicTab === "learn" && !topicPackLoading && (
+                  <div className={`rounded-2xl p-3.5 space-y-2.5 border ${
+                    topicMemory.review_priority === "high"
+                      ? "bg-red-50 border-red-200"
+                      : "bg-amber-50 border-amber-200"
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      <Icon name="AlertCircle" size={14} className={topicMemory.review_priority === "high" ? "text-red-500" : "text-amber-500"} />
+                      <span className="text-xs font-bold text-slate-700">
+                        {topicMemory.review_priority === "high" ? "Есть серьёзные пробелы — стоит повторить" : "Есть места, которые стоит закрепить"}
+                      </span>
+                      <span className="ml-auto text-[10px] font-semibold text-slate-400">
+                        Последний результат: {topicMemory.last_score}%
+                      </span>
+                    </div>
+                    {topicMemory.weak_concepts.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {topicMemory.weak_concepts.slice(0, 3).map(w => (
+                          <span key={w.tag} className="text-[10px] font-medium bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                            {w.tag.replace(/_/g, " ")}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          if (activeGoal && activeTopic) analytics.learningReviewSessionStarted(activeGoal.id, activeTopic.id, 20);
+                          setTopicTab("session");
+                          setSessionMinutes(20);
+                          if (!sessionData && !sessionLoading) loadSession(20);
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 text-[10px] font-bold py-1.5 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+                      >
+                        <Icon name="PlayCircle" size={11} />
+                        Сессия по пробелам
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (activeGoal && activeTopic) analytics.learningReviewQuizRetaken(activeGoal.id, activeTopic.id);
+                          setTopicTab("quiz");
+                          loadQuiz();
+                        }}
+                        className="flex-1 flex items-center justify-center gap-1 text-[10px] font-semibold py-1.5 bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
+                      >
+                        <Icon name="RotateCcw" size={11} />
+                        Проверить снова
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* CTA: первая сессия — показывается всегда на вкладке Учить поверх контента */}
                 {topicTab === "learn" && !topicPackLoading && topicPack && (
@@ -1409,20 +1548,112 @@ export default function LearningPage() {
 
                         {!quizSubmitted ? (
                           <button
-                            onClick={() => setQuizSubmitted(true)}
+                            onClick={async () => {
+                              setQuizSubmitted(true);
+                              if (!activeGoal || !activeTopic) return;
+                              const duration = quizStartTime ? Math.round((Date.now() - quizStartTime) / 1000) : undefined;
+                              const answersMap: Record<string, number> = {};
+                              Object.entries(quizAnswers).forEach(([k, v]) => { answersMap[k] = v; });
+                              try {
+                                const res = await learningApi.saveQuizResult({
+                                  goal_id: activeGoal.id,
+                                  topic_id: activeTopic.id,
+                                  quiz_payload: quizQuestions,
+                                  user_answers: answersMap,
+                                  duration_sec: duration,
+                                }) as QuizResult;
+                                setQuizResult(res);
+                                analytics.learningQuizCompleted(activeGoal.id, activeTopic.id, res.score, res.total);
+                                if (res.needs_review) {
+                                  analytics.learningMemoryFlaggedReview(activeGoal.id, activeTopic.id, res.review_priority);
+                                  // Обновляем reviewTopics
+                                  const rd = await learningApi.getReviewTopics(activeGoal.id) as { review_topics: typeof reviewTopics };
+                                  setReviewTopics(rd.review_topics || []);
+                                }
+                              } catch {
+                                // Тихий фолбек: quiz работает, память просто не сохранилась
+                              }
+                            }}
                             disabled={Object.keys(quizAnswers).length < quizQuestions.length}
                             className="w-full py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:opacity-40 transition-colors"
                           >
                             Проверить ответы
                           </button>
                         ) : (
-                          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2">
-                            <p className="text-sm font-bold text-slate-800">
-                              Результат: {Object.entries(quizAnswers).filter(([qi, oi]) => quizQuestions[+qi]?.correct === oi).length} / {quizQuestions.length}
-                            </p>
-                            <button onClick={loadQuiz} className="w-full py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-colors">
-                              Пройти ещё раз
-                            </button>
+                          <div className="space-y-3">
+                            {/* Score card */}
+                            <div className={`rounded-2xl p-4 space-y-3 ${
+                              quizResult && quizResult.score >= 80 ? "bg-emerald-50 border border-emerald-200"
+                              : quizResult && quizResult.score >= 60 ? "bg-amber-50 border border-amber-200"
+                              : "bg-red-50 border border-red-200"
+                            }`}>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Результат</p>
+                                  <p className="text-2xl font-bold text-slate-900 mt-0.5">
+                                    {quizResult ? `${quizResult.score}%` : `${Object.entries(quizAnswers).filter(([qi, oi]) => quizQuestions[+qi]?.correct === oi).length} / ${quizQuestions.length}`}
+                                  </p>
+                                </div>
+                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                                  quizResult && quizResult.score >= 80 ? "bg-emerald-100"
+                                  : quizResult && quizResult.score >= 60 ? "bg-amber-100"
+                                  : "bg-red-100"
+                                }`}>
+                                  <Icon name={quizResult && quizResult.score >= 80 ? "Trophy" : quizResult && quizResult.score >= 60 ? "AlertCircle" : "Target"} size={22}
+                                    className={quizResult && quizResult.score >= 80 ? "text-emerald-600" : quizResult && quizResult.score >= 60 ? "text-amber-600" : "text-red-500"} />
+                                </div>
+                              </div>
+
+                              {/* Слабые концепты */}
+                              {quizResult && quizResult.weak_concepts.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-600 mb-1.5">Стоит повторить:</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {quizResult.weak_concepts.map(w => (
+                                      <span key={w.tag} className="text-[10px] font-medium bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-full">
+                                        {w.tag.replace(/_/g, " ")}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Рекомендация */}
+                              {quizResult && quizResult.needs_review && (
+                                <p className="text-xs text-slate-600 leading-snug">
+                                  {quizResult.score < 60
+                                    ? "Рекомендую пройти сессию по этой теме ещё раз — есть пробелы, которые стоит закрыть."
+                                    : "Неплохо! Есть несколько аспектов, которые стоит повторить для уверенного понимания."}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* CTA кнопки */}
+                            <div className="flex gap-2">
+                              {quizResult && quizResult.needs_review && (
+                                <button
+                                  onClick={() => {
+                                    if (activeGoal && activeTopic) analytics.learningReviewSessionStarted(activeGoal.id, activeTopic.id, 20);
+                                    setTopicTab("session");
+                                    setSessionMinutes(20);
+                                    if (!sessionData && !sessionLoading) loadSession(20);
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-violet-600 text-white rounded-xl text-xs font-bold hover:bg-violet-700 transition-colors"
+                                >
+                                  <Icon name="PlayCircle" size={13} />
+                                  Сессия по пробелам
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  if (activeGoal && activeTopic) analytics.learningReviewQuizRetaken(activeGoal.id, activeTopic.id);
+                                  loadQuiz();
+                                }}
+                                className="flex-1 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-colors"
+                              >
+                                Пройти ещё раз
+                              </button>
+                            </div>
                           </div>
                         )}
                       </>

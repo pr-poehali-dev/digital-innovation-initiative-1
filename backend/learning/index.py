@@ -707,6 +707,175 @@ def handler(event: dict, context) -> dict:
             ]
             return cors({"ok": True, "checkins": checkins})
 
+        # ── Memory: сохранить результат quiz ──────────────────────────
+        if method == "POST" and action == "save_quiz_result":
+            goal_id      = body.get("goal_id")
+            topic_id     = body.get("topic_id")
+            quiz_payload = body.get("quiz_payload") or []   # список вопросов с concept_tag
+            user_answers = body.get("user_answers") or {}   # {str(idx): int(chosen)}
+            duration_sec = body.get("duration_sec")
+
+            if not goal_id or not topic_id or not quiz_payload:
+                return cors({"ok": False, "error": {"message": "Нужны goal_id, topic_id, quiz_payload"}}, 400)
+
+            # ── Считаем score на сервере ──────────────────────────────
+            total = len(quiz_payload)
+            correct = 0
+            wrong_questions = []
+            weak_set: dict = {}   # concept_tag → count_wrong
+
+            for idx, q in enumerate(quiz_payload):
+                chosen = user_answers.get(str(idx))
+                right  = q.get("correct", -1)
+                tag    = q.get("concept_tag") or "general"
+                if chosen is not None and int(chosen) == int(right):
+                    correct += 1
+                else:
+                    wrong_questions.append({
+                        "idx": idx,
+                        "question": q.get("question", ""),
+                        "concept_tag": tag,
+                        "correct": right,
+                        "chosen": chosen,
+                    })
+                    weak_set[tag] = weak_set.get(tag, 0) + 1
+
+            score = round(correct / total * 100, 1) if total > 0 else 0
+            # Топ слабых концептов (сортируем по частоте ошибок)
+            weak_concepts = [
+                {"tag": t, "wrong_count": c}
+                for t, c in sorted(weak_set.items(), key=lambda x: -x[1])
+            ]
+
+            # ── Сохраняем attempt ─────────────────────────────────────
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.learning_quiz_attempts
+                        (user_id, goal_id, topic_id, score, correct_count, total_questions,
+                         weak_concepts, quiz_payload, user_answers, duration_sec)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id""",
+                    (user_id, goal_id, topic_id, score, correct, total,
+                     json.dumps(weak_concepts, ensure_ascii=False),
+                     json.dumps(quiz_payload, ensure_ascii=False),
+                     json.dumps(user_answers, ensure_ascii=False),
+                     duration_sec),
+                )
+                attempt_id = cur.fetchone()[0]
+
+            # ── Обновляем summary memory (UPSERT) ─────────────────────
+            # review_priority: high (<60), medium (60-79), none (>=80)
+            if score < 60:
+                review_priority = "high"
+            elif score < 80:
+                review_priority = "medium"
+            else:
+                review_priority = "none"
+
+            needs_review = score < 80 or bool(weak_concepts)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, attempts_count, best_score, weak_concepts
+                        FROM {SCHEMA}.learning_topic_memory
+                        WHERE user_id = %s AND goal_id = %s AND topic_id = %s""",
+                    (user_id, goal_id, topic_id),
+                )
+                existing = cur.fetchone()
+
+            if existing:
+                mem_id, prev_attempts, prev_best, prev_weak_json = existing
+                prev_weak = prev_weak_json if isinstance(prev_weak_json, list) else []
+                # Мёржим концепты: суммируем wrong_count
+                merged: dict = {w["tag"]: w["wrong_count"] for w in prev_weak}
+                for w in weak_concepts:
+                    merged[w["tag"]] = merged.get(w["tag"], 0) + w["wrong_count"]
+                merged_list = [{"tag": t, "wrong_count": c} for t, c in sorted(merged.items(), key=lambda x: -x[1])]
+                new_best = max(float(prev_best), score)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""UPDATE {SCHEMA}.learning_topic_memory
+                            SET attempts_count = %s, last_score = %s, best_score = %s,
+                                weak_concepts = %s, needs_review = %s,
+                                review_priority = %s, last_quiz_at = NOW(), updated_at = NOW()
+                            WHERE id = %s""",
+                        (prev_attempts + 1, score, new_best,
+                         json.dumps(merged_list, ensure_ascii=False),
+                         needs_review, review_priority, mem_id),
+                    )
+            else:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.learning_topic_memory
+                            (user_id, goal_id, topic_id, attempts_count, last_score, best_score,
+                             weak_concepts, needs_review, review_priority, last_quiz_at)
+                            VALUES (%s, %s, %s, 1, %s, %s, %s, %s, %s, NOW())""",
+                        (user_id, goal_id, topic_id, score, score,
+                         json.dumps(weak_concepts, ensure_ascii=False),
+                         needs_review, review_priority),
+                    )
+
+            conn.commit()
+            return cors({
+                "ok": True,
+                "attempt_id": attempt_id,
+                "score": score,
+                "correct": correct,
+                "total": total,
+                "weak_concepts": weak_concepts,
+                "wrong_questions": wrong_questions,
+                "needs_review": needs_review,
+                "review_priority": review_priority,
+            })
+
+        # ── Memory: получить память по теме ───────────────────────────
+        if method == "GET" and action == "topic_memory":
+            topic_id = qs.get("topic_id")
+            goal_id  = qs.get("goal_id")
+            if not topic_id or not goal_id:
+                return cors({"ok": False, "error": {"message": "Нужны topic_id и goal_id"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT attempts_count, last_score, best_score, weak_concepts,
+                               needs_review, review_priority, last_quiz_at
+                        FROM {SCHEMA}.learning_topic_memory
+                        WHERE user_id = %s AND goal_id = %s AND topic_id = %s""",
+                    (user_id, int(goal_id), int(topic_id)),
+                )
+                row = cur.fetchone()
+            if not row:
+                return cors({"ok": True, "memory": None})
+            return cors({"ok": True, "memory": {
+                "attempts_count": row[0], "last_score": float(row[1]), "best_score": float(row[2]),
+                "weak_concepts": row[3] if isinstance(row[3], list) else [],
+                "needs_review": row[4], "review_priority": row[5],
+                "last_quiz_at": str(row[6]) if row[6] else None,
+            }})
+
+        # ── Memory: список тем с review для цели ──────────────────────
+        if method == "GET" and action == "review_topics":
+            goal_id = qs.get("goal_id")
+            if not goal_id:
+                return cors({"ok": False, "error": {"message": "Нужен goal_id"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT m.topic_id, t.title, m.last_score, m.best_score,
+                               m.weak_concepts, m.review_priority, m.attempts_count
+                        FROM {SCHEMA}.learning_topic_memory m
+                        JOIN {SCHEMA}.learning_topics t ON t.id = m.topic_id
+                        WHERE m.user_id = %s AND m.goal_id = %s AND m.needs_review = TRUE
+                        ORDER BY CASE m.review_priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END""",
+                    (user_id, int(goal_id)),
+                )
+                rows = cur.fetchall()
+            topics_review = [
+                {"topic_id": r[0], "title": r[1], "last_score": float(r[2]), "best_score": float(r[3]),
+                 "weak_concepts": r[4] if isinstance(r[4], list) else [],
+                 "review_priority": r[5], "attempts_count": r[6]}
+                for r in rows
+            ]
+            return cors({"ok": True, "review_topics": topics_review})
+
         # ── AI-режим обучения по теме ─────────────────────────────────
         if method == "POST" and action == "topic_learn":
             topic_id    = body.get("topic_id")
@@ -717,7 +886,7 @@ def handler(event: dict, context) -> dict:
             if not topic_title:
                 return cors({"ok": False, "error": {"message": "Нужен topic_title"}}, 400)
 
-            # Контекст роли: передаётся из goal_title, помогает AI давать релевантные примеры
+            # Контекст роли
             role_ctx = ""
             if goal_title:
                 role_ctx = (
@@ -725,6 +894,45 @@ def handler(event: dict, context) -> dict:
                     "Пользователь — практик, изучает для применения в работе, "
                     "не студент. Все объяснения и примеры привязывай к этому контексту."
                 )
+
+            # ── Загружаем memory по теме (если есть topic_id) ─────────
+            memory = None
+            if topic_id:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT attempts_count, last_score, best_score, weak_concepts,
+                                   needs_review, review_priority
+                            FROM {SCHEMA}.learning_topic_memory
+                            WHERE user_id = %s AND topic_id = %s""",
+                        (user_id, int(topic_id)),
+                    )
+                    mem_row = cur.fetchone()
+                if mem_row:
+                    memory = {
+                        "attempts_count": mem_row[0],
+                        "last_score": float(mem_row[1]),
+                        "best_score": float(mem_row[2]),
+                        "weak_concepts": mem_row[3] if isinstance(mem_row[3], list) else [],
+                        "needs_review": mem_row[4],
+                        "review_priority": mem_row[5],
+                    }
+
+            # Memory-контекст для промптов
+            memory_ctx = ""
+            if memory and memory["attempts_count"] > 0:
+                weak_tags = [w["tag"] for w in memory["weak_concepts"][:3]]
+                memory_ctx = (
+                    f"\n\nПАМЯТЬ О ПОЛЬЗОВАТЕЛЕ: он уже изучал эту тему {memory['attempts_count']} раз(а). "
+                    f"Последний результат проверки знаний: {memory['last_score']}%. "
+                )
+                if weak_tags:
+                    memory_ctx += (
+                        f"Слабые места (здесь были ошибки): {', '.join(weak_tags)}. "
+                        "Уделяй особое внимание этим аспектам — объясняй их более детально и приводи дополнительные примеры. "
+                        "Не пересказывай тему заново — фокусируйся на пробелах."
+                    )
+                else:
+                    memory_ctx += "Повтори ключевые моменты, которые чаще вызывают затруднения."
 
             # Единый materials-промпт с provenance
             MATERIALS_SCHEMA = (
@@ -759,7 +967,7 @@ def handler(event: dict, context) -> dict:
                 )
                 prompt = (
                     f"Тема: «{topic_title}»\n"
-                    f"{role_ctx}\n\n"
+                    f"{role_ctx}{memory_ctx}\n\n"
                     "Дай структурированное объяснение в формате JSON:\n"
                     "{\n"
                     '  "what": "Что это такое (2-3 предложения простым языком)",\n'
@@ -771,7 +979,7 @@ def handler(event: dict, context) -> dict:
                 )
                 result = parse_json(yandex_gpt(prompt, system),
                                     {"what": "", "why": "", "key_concepts": [], "common_mistakes": [], "practical_tip": ""})
-                return cors({"ok": True, "explanation": result})
+                return cors({"ok": True, "explanation": result, "memory": memory})
 
             if mode == "materials":
                 system = (
@@ -796,6 +1004,15 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": True, "materials": mats})
 
             if mode == "quiz":
+                # Если есть память — акцентируем вопросы на слабые концепты
+                weak_focus = ""
+                if memory and memory["weak_concepts"]:
+                    weak_tags = [w["tag"] for w in memory["weak_concepts"][:3]]
+                    weak_focus = (
+                        f"\nВАЖНО: у пользователя были ошибки в прошлый раз по темам: {', '.join(weak_tags)}. "
+                        "Сделай 2-3 вопроса прицельно по этим аспектам (targeted questions). "
+                        "Остальные вопросы — общие по теме."
+                    )
                 system = (
                     "Ты преподаватель-эксперт. Составляй вопросы, проверяющие понимание концепций, "
                     "а не механическое запоминание терминов. Вопросы должны выявлять реальные пробелы. "
@@ -803,12 +1020,14 @@ def handler(event: dict, context) -> dict:
                 )
                 prompt = (
                     f"Тема: «{topic_title}»\n"
-                    f"{role_ctx}\n\n"
+                    f"{role_ctx}{weak_focus}\n\n"
                     "Составь 5 вопросов с вариантами ответов для проверки понимания темы.\n"
                     "Вопросы должны проверять:\n"
                     "- понимание концепции, а не определения наизусть;\n"
                     "- умение отличить правильное от похожего неправильного;\n"
                     "- применение в практической ситуации.\n\n"
+                    "Для каждого вопроса укажи concept_tag — короткую метку концепта (snake_case, например: "
+                    "preventive_vs_detective, three_lines_model, risk_appetite, control_owner).\n\n"
                     "Формат JSON:\n"
                     "{\n"
                     '  "questions": [\n'
@@ -816,25 +1035,36 @@ def handler(event: dict, context) -> dict:
                     '      "question": "Текст вопроса",\n'
                     '      "options": ["Вариант А", "Вариант Б", "Вариант В", "Вариант Г"],\n'
                     '      "correct": 0,\n'
-                    '      "explanation": "Почему правильный ответ правильный, и в чём ошибка в остальных"\n'
+                    '      "explanation": "Почему правильный ответ правильный, и в чём ошибка в остальных",\n'
+                    '      "concept_tag": "snake_case_название_концепта"\n'
                     "    }\n"
                     "  ]\n"
                     "}"
                 )
                 result = parse_json(yandex_gpt(prompt, system), {"questions": []})
-                return cors({"ok": True, "questions": result.get("questions", [])})
+                return cors({"ok": True, "questions": result.get("questions", []), "memory": memory})
 
             if mode == "session":
                 minutes = int(body.get("minutes", 30))
-                # Масштабируем глубину под длину сессии
                 depth = "краткий" if minutes <= 20 else ("стандартный" if minutes <= 30 else "углублённый")
+                # Если есть память — строим remediation-сессию
+                remediation_ctx = ""
+                if memory and memory["weak_concepts"]:
+                    weak_tags = [w["tag"] for w in memory["weak_concepts"][:3]]
+                    remediation_ctx = (
+                        f"\nВАЖНО: это remediation-сессия. Пользователь уже изучал тему, "
+                        f"результат проверки: {memory['last_score']}%. "
+                        f"Слабые места: {', '.join(weak_tags)}. "
+                        "Не пересказывай базовые вещи заново. "
+                        "Сфокусируй сессию на разборе именно этих пробелов с новыми примерами и объяснениями."
+                    )
                 system = (
                     "Ты наставник. Составляй структурированные учебные сессии. "
                     "Включай практические кейсы из реальной жизни. Отвечай СТРОГО в JSON."
                 )
                 prompt = (
                     f"Тема: «{topic_title}»\n"
-                    f"{role_ctx}\n"
+                    f"{role_ctx}{remediation_ctx}\n"
                     f"Длина сессии: {minutes} минут. Уровень детализации: {depth}.\n\n"
                     "Составь учебную сессию в формате JSON:\n"
                     "{\n"
@@ -855,7 +1085,7 @@ def handler(event: dict, context) -> dict:
                 )
                 result = parse_json(yandex_gpt(prompt, system),
                                     {"intro": "", "key_points": [], "terms": [], "practical_case": "", "reflection_questions": [], "takeaway": "", "next_step": ""})
-                return cors({"ok": True, "session": result})
+                return cors({"ok": True, "session": result, "memory": memory})
 
             # mode == "full": полный пакет при открытии темы
             system = (
@@ -868,7 +1098,7 @@ def handler(event: dict, context) -> dict:
             )
             prompt = (
                 f"Тема: «{topic_title}»\n"
-                f"{role_ctx}\n\n"
+                f"{role_ctx}{memory_ctx}\n\n"
                 "Составь полный учебный пакет в формате JSON:\n"
                 "{\n"
                 '  "explanation": {\n'
@@ -889,7 +1119,7 @@ def handler(event: dict, context) -> dict:
             pack = parse_json(yandex_gpt(prompt, system),
                               {"explanation": {"what": "", "why": "", "practical_tip": ""}, "terms": [], "materials": [], "questions": [], "next_step": ""})
             pack["materials"] = enrich_materials(pack.get("materials", []))
-            return cors({"ok": True, "pack": pack})
+            return cors({"ok": True, "pack": pack, "memory": memory})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 

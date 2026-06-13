@@ -523,4 +523,10 @@ export const learningApi = {
   getCheckins: (goal_id: number) => request(URLS.learning, `/?action=checkins&goal_id=${goal_id}`, "GET"),
   topicLearn: (data: { topic_id?: number; topic_title: string; goal_title?: string; mode: "full" | "explain" | "materials" | "quiz" | "session"; minutes?: number }) =>
     request(URLS.learning, "/?action=topic_learn", "POST", data),
+  saveQuizResult: (data: { goal_id: number; topic_id: number; quiz_payload: unknown[]; user_answers: Record<string, number>; duration_sec?: number }) =>
+    request(URLS.learning, "/?action=save_quiz_result", "POST", data),
+  getTopicMemory: (goal_id: number, topic_id: number) =>
+    request(URLS.learning, `/?action=topic_memory&goal_id=${goal_id}&topic_id=${topic_id}`, "GET"),
+  getReviewTopics: (goal_id: number) =>
+    request(URLS.learning, `/?action=review_topics&goal_id=${goal_id}`, "GET"),
 };
