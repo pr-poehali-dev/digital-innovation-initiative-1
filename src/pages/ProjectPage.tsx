@@ -716,8 +716,8 @@ export default function ProjectPage() {
               ))}
             </div>
 
-            {/* ── Динамическая подсказка следующего шага ── */}
-            {(() => {
+            {/* ── Динамическая подсказка следующего шага — скрывается если показан post-action hint ── */}
+            {!postActionHint && (() => {
               type Step = { icon: string; text: string; tab: string; cta: string; color: string };
               const step: Step | null =
                 docs.length === 0 && processes.length === 0 && painPoints.length === 0
@@ -1373,109 +1373,95 @@ export default function ProjectPage() {
         {tab === "tasks" && (
           <div className="space-y-3">
             {tasks.length === 0 ? (
-              <div className="space-y-4">
-                {/* Empty state — дружелюбный с карточками */}
-                <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center mb-2">
-                  <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto mb-4">
-                    <Icon name="Sparkles" size={26} className="text-orange-400" />
+              <div className="space-y-3">
+                {/* Empty state */}
+                <div className="border-2 border-dashed border-slate-200 rounded-2xl p-7 text-center">
+                  <div className="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto mb-3">
+                    <Icon name="Sparkles" size={22} className="text-orange-400" />
                   </div>
-                  <p className="font-semibold text-foreground text-lg mb-1">Заданий пока нет</p>
-                  <p className="text-sm text-muted-foreground mb-5 max-w-sm mx-auto">
-                    Создайте первое задание — AI прочитает ваши материалы и подготовит результат
+                  <p className="font-semibold text-foreground text-base mb-1">Заданий пока нет</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground mb-4 leading-snug">
+                    Создайте первое задание — AI прочитает материалы и подготовит результат
                   </p>
                   <Link
                     to={`/cabinet/project/${projectId}/new-task`}
-                    className="inline-flex items-center gap-2 bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors"
+                    className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-700 active:bg-slate-900 transition-colors"
                   >
                     <Icon name="Plus" size={15} />
                     Создать первое задание
                   </Link>
                 </div>
 
-                {/* Карточки быстрых сценариев */}
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">Что можно сделать</p>
-                <div className="grid sm:grid-cols-2 gap-3">
+                {/* Быстрые сценарии — вертикально на мобайле */}
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Что можно сделать</p>
+                <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-3 sm:space-y-0">
                   {[
-                    {
-                      emoji: "✨", title: "Создать презентацию",
-                      desc: "AI соберёт PPTX из ваших документов по теме",
-                      color: "border-orange-200 bg-orange-50/50 hover:border-orange-300",
-                      link: `/cabinet/project/${projectId}/new-task`,
-                    },
-                    {
-                      emoji: "🛡", title: "Проверить готовую презентацию",
-                      desc: "Загрузите PPTX — AI найдёт ошибки и даст правки",
-                      color: "border-blue-200 bg-blue-50/50 hover:border-blue-300",
-                      link: `/cabinet/project/${projectId}/audit`,
-                    },
-                    {
-                      emoji: "📝", title: "Подготовить доклад или анализ",
-                      desc: "AI напишет текст, ответит на вопрос или составит план",
-                      color: "border-green-200 bg-green-50/50 hover:border-green-300",
-                      link: `/cabinet/project/${projectId}/new-task`,
-                    },
-                    {
-                      emoji: "🔍", title: "Найти в материалах",
-                      desc: "Умный поиск по всем загруженным документам проекта",
-                      color: "border-slate-200 bg-slate-50/50 hover:border-slate-300",
-                      link: `/cabinet/project/${projectId}/search`,
-                    },
+                    { emoji: "✨", title: "Создать презентацию",        desc: "AI соберёт PPTX из ваших документов по теме",            color: "border-orange-200 bg-orange-50/50 active:bg-orange-100", link: `/cabinet/project/${projectId}/new-task` },
+                    { emoji: "🛡", title: "Проверить презентацию",      desc: "Загрузите PPTX — AI найдёт ошибки и даст правки",        color: "border-blue-200 bg-blue-50/50 active:bg-blue-100",       link: `/cabinet/project/${projectId}/audit` },
+                    { emoji: "📝", title: "Подготовить доклад или анализ", desc: "AI напишет текст или составит план",                  color: "border-green-200 bg-green-50/50 active:bg-green-100",    link: `/cabinet/project/${projectId}/new-task` },
+                    { emoji: "🔍", title: "Найти в материалах",         desc: "Умный поиск по всем загруженным документам",             color: "border-slate-200 bg-slate-50/50 active:bg-slate-100",    link: `/cabinet/project/${projectId}/search` },
                   ].map((s) => (
                     <Link key={s.title} to={s.link}
-                      className={`flex items-start gap-3 border rounded-xl p-4 transition-all ${s.color}`}>
+                      className={`flex items-center gap-3 border rounded-xl p-3 transition-all ${s.color}`}>
                       <span className="text-xl flex-shrink-0">{s.emoji}</span>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">{s.title}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{s.desc}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 truncate">{s.title}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{s.desc}</p>
                       </div>
-                      <Icon name="ChevronRight" size={14} className="text-slate-400 ml-auto flex-shrink-0 mt-0.5" />
+                      <Icon name="ChevronRight" size={14} className="text-slate-400 flex-shrink-0" />
                     </Link>
                   ))}
                 </div>
               </div>
             ) : (
               <>
-              {/* Quick action bar — когда уже есть задания */}
-              <div className="flex flex-wrap gap-2 mb-1 pb-4 border-b border-slate-100">
-                {[
-                  { emoji: "✨", label: "Новое задание", link: `/cabinet/project/${projectId}/new-task`, cls: "bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100" },
-                  { emoji: "🛡", label: "Аудит PPTX", link: `/cabinet/project/${projectId}/audit`, cls: "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100" },
-                  { emoji: "🔍", label: "Поиск по материалам", link: `/cabinet/project/${projectId}/search`, cls: "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100" },
-                ].map((a) => (
-                  <Link key={a.label} to={a.link}
-                    className={`inline-flex items-center gap-1.5 border text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${a.cls}`}>
-                    <span>{a.emoji}</span>{a.label}
+                {/* Quick actions — горизонтальный скролл на мобайле */}
+                <div className="flex gap-2 overflow-x-auto pb-3 border-b border-slate-100" style={{ scrollbarWidth: "none" }}>
+                  {[
+                    { emoji: "✨", label: "Новое задание",      link: `/cabinet/project/${projectId}/new-task`, cls: "bg-orange-50 border-orange-200 text-orange-700" },
+                    { emoji: "🛡", label: "Аудит PPTX",         link: `/cabinet/project/${projectId}/audit`,    cls: "bg-blue-50 border-blue-200 text-blue-700" },
+                    { emoji: "🔍", label: "Поиск",              link: `/cabinet/project/${projectId}/search`,   cls: "bg-slate-50 border-slate-200 text-slate-700" },
+                  ].map((a) => (
+                    <Link key={a.label} to={a.link}
+                      className={`inline-flex items-center gap-1.5 border text-xs font-medium px-3 py-1.5 rounded-lg flex-shrink-0 ${a.cls}`}>
+                      <span>{a.emoji}</span>{a.label}
+                    </Link>
+                  ))}
+                </div>
+
+                {/* Карточки заданий */}
+                {tasks.map((t) => (
+                  <Link
+                    key={t.id}
+                    to={`/cabinet/project/${projectId}/task/${t.id}`}
+                    className="flex items-start gap-3 border rounded-xl p-3 bg-card hover:border-orange-300 active:bg-orange-50/30 hover:shadow-sm transition-all group"
+                  >
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-orange-50 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Icon name="Sparkles" size={16} className="text-orange-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {/* Строка 1: название */}
+                      <p className="text-sm font-medium text-slate-900 group-hover:text-orange-600 transition-colors leading-snug truncate">{t.title}</p>
+                      {/* Строка 2: тип + тема */}
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {TASK_TYPE_LABELS[t.task_type] || t.task_type}
+                        {t.topic && ` · ${t.topic}`}
+                      </p>
+                      {/* Строка 3: статус + автор */}
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          t.versions > 0
+                            ? "bg-green-100 text-green-700"
+                            : "bg-slate-100 text-slate-500"
+                        }`}>
+                          {t.versions > 0 ? `${t.versions} версий` : "Не запущено"}
+                        </span>
+                        {t.created_by && <span className="text-[10px] text-muted-foreground truncate">{t.created_by}</span>}
+                      </div>
+                    </div>
+                    <Icon name="ChevronRight" size={15} className="text-slate-300 flex-shrink-0 mt-1" />
                   </Link>
                 ))}
-              </div>
-              {tasks.map((t) => (
-                <Link
-                  key={t.id}
-                  to={`/cabinet/project/${projectId}/task/${t.id}`}
-                  className="flex items-center gap-4 border rounded-xl p-4 bg-card hover:border-orange-300 hover:shadow-sm transition-all group"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-950/30 flex items-center justify-center flex-shrink-0">
-                    <Icon name="Sparkles" size={18} className="text-orange-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium group-hover:text-orange-600 transition-colors">{t.title}</p>
-                    <p className="text-sm text-muted-foreground mt-0.5">
-                      {TASK_TYPE_LABELS[t.task_type] || t.task_type}
-                      {t.topic && ` · ${t.topic}`}
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className={`text-xs px-2 py-1 rounded-full mb-1 inline-block ${
-                      t.versions > 0
-                        ? "bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400"
-                        : "bg-muted text-muted-foreground"
-                    }`}>
-                      {t.versions > 0 ? `${t.versions} версий` : "Не запущено"}
-                    </div>
-                    <p className="text-xs text-muted-foreground">{t.created_by}</p>
-                  </div>
-                </Link>
-              ))}
               </>
             )}
           </div>
@@ -1686,60 +1672,81 @@ export default function ProjectPage() {
         )}
 
         {tab === "team" && (
-          <div className="space-y-6">
-            <div className="space-y-2">
-              {project.members.map((m) => (
-                <div key={m.id} className="flex items-center gap-3 border rounded-xl p-3.5 bg-card">
-                  <div className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-950/30 flex items-center justify-center flex-shrink-0">
-                    <Icon name="User" size={16} className="text-orange-600" />
+          <div className="space-y-4">
+            {/* Список участников */}
+            {project.members.length === 0 ? (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-7 text-center">
+                <Icon name="Users" size={26} className="text-slate-300 mx-auto mb-2" />
+                <p className="font-semibold text-slate-700 text-sm mb-1">Участников пока нет</p>
+                <p className="text-xs text-slate-400 mb-3 leading-snug">
+                  Добавьте участников, чтобы назначать владельцев инициатив и задач
+                </p>
+                {project.my_role === "owner" && (
+                  <button
+                    onClick={() => setShowInvite(true)}
+                    className="text-xs text-slate-700 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50"
+                  >
+                    + Пригласить участника
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {project.members.map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 border rounded-xl p-3 bg-card">
+                    <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+                      <Icon name="User" size={14} className="text-orange-600" />
+                    </div>
+                    {/* Текстовый блок — обязательно min-w-0 */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{m.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                    </div>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                      m.role === "owner"
+                        ? "bg-orange-100 text-orange-600"
+                        : "bg-slate-100 text-slate-500"
+                    }`}>
+                      {m.role === "owner" ? "Владелец" : "Участник"}
+                    </span>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{m.name}</p>
-                    <p className="text-xs text-muted-foreground">{m.email}</p>
-                  </div>
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    m.role === "owner"
-                      ? "bg-orange-100 text-orange-600 dark:bg-orange-950/50 dark:text-orange-400"
-                      : "bg-muted text-muted-foreground"
-                  }`}>
-                    {m.role === "owner" ? "Владелец" : "Участник"}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
-            {project.my_role === "owner" && (
+            {/* Форма приглашения */}
+            {project.my_role === "owner" && project.members.length > 0 && (
               <div>
                 {!showInvite ? (
                   <button
                     onClick={() => setShowInvite(true)}
-                    className="flex items-center gap-2 border rounded-xl p-3.5 w-full text-sm text-muted-foreground hover:text-foreground hover:border-orange-300 transition-colors"
+                    className="flex items-center gap-2 border rounded-xl p-3 w-full text-sm text-muted-foreground hover:text-foreground hover:border-orange-300 active:bg-orange-50 transition-colors"
                   >
-                    <Icon name="UserPlus" size={16} />
+                    <Icon name="UserPlus" size={15} />
                     Пригласить участника по email
                   </button>
                 ) : (
-                  <form onSubmit={handleInvite} className="border rounded-xl p-4 space-y-3">
-                    <p className="text-sm font-medium">Пригласить по email</p>
+                  <form onSubmit={handleInvite} className="border rounded-xl p-3 space-y-2.5">
+                    <p className="text-sm font-semibold text-slate-800">Пригласить по email</p>
                     <input
                       type="email"
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       placeholder="email@example.com"
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
                     />
                     {inviteMsg && (
-                      <p className={`text-sm ${inviteMsg.startsWith("✓") ? "text-green-600" : "text-red-500"}`}>
+                      <p className={`text-xs ${inviteMsg.startsWith("✓") ? "text-green-600" : "text-red-500"}`}>
                         {inviteMsg}
                       </p>
                     )}
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 pt-0.5">
                       <button type="button" onClick={() => { setShowInvite(false); setInviteMsg(""); }}
-                        className="flex-1 border rounded-lg py-2 text-sm hover:bg-muted transition-colors">
+                        className="flex-1 border rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">
                         Отмена
                       </button>
                       <button type="submit"
-                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg py-2 text-sm font-medium transition-colors">
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium transition-colors">
                         Пригласить
                       </button>
                     </div>
@@ -1748,19 +1755,20 @@ export default function ProjectPage() {
               </div>
             )}
 
+            {/* История активности */}
             {project.activity.length > 0 && (
               <div>
-                <p className="text-sm font-medium mb-3 text-muted-foreground">История активности</p>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">История активности</p>
                 <div className="space-y-2">
                   {project.activity.slice(0, 10).map((a, i) => (
-                    <div key={i} className="flex items-start gap-2 text-sm">
+                    <div key={i} className="flex items-start gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-orange-400 mt-1.5 flex-shrink-0" />
-                      <span>
+                      <p className="text-xs text-slate-700 flex-1 min-w-0 leading-snug">
                         <span className="font-medium">{a.user_name}</span>{" "}
                         <span className="text-muted-foreground">{ACTION_LABELS[a.action] || a.action}</span>
                         {a.details && <span className="text-muted-foreground"> «{a.details}»</span>}
-                      </span>
-                      <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">
+                      </p>
+                      <span className="text-[10px] text-muted-foreground flex-shrink-0 mt-0.5">
                         {new Date(a.created_at).toLocaleDateString("ru-RU")}
                       </span>
                     </div>
