@@ -411,13 +411,14 @@ export default function TaskPage() {
 
   return (
     <Layout>
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link to="/cabinet" className="hover:text-foreground">Проекты</Link>
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4 sm:mb-6">
+          <Link to={`/cabinet/project/${projectId}`} className="hover:text-foreground flex items-center gap-1">
+            <Icon name="ChevronLeft" size={14} />
+            <span>Проект</span>
+          </Link>
           <Icon name="ChevronRight" size={14} />
-          <Link to={`/cabinet/project/${projectId}`} className="hover:text-foreground">Проект</Link>
-          <Icon name="ChevronRight" size={14} />
-          <span className="text-foreground font-medium">{task.title}</span>
+          <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">{task.title}</span>
         </div>
 
         <HelpPanel
@@ -462,30 +463,24 @@ export default function TaskPage() {
           ]}
         />
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 space-y-4">
-            <TaskSidebar
-              task={task}
-              activeRun={activeRun}
-              onOpenSettings={() => setShowSettings(true)}
-              onLoadRun={loadRun}
-            />
-          </div>
+        {/* На мобайле: контент первым, сайдбар после. На десктопе: сайдбар слева, контент справа */}
+        <div className="flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6">
 
-          <div className="lg:col-span-2 space-y-4">
+          {/* ── Основной контент — на мобайле первым ── */}
+          <div className="lg:col-span-2 lg:order-2 space-y-4">
             {task.runs.length === 0 && !activeRun && (
-              <div className="border rounded-2xl p-8 bg-card text-center">
-                <div className="w-14 h-14 rounded-2xl bg-orange-50 dark:bg-orange-950/30 flex items-center justify-center mx-auto mb-4">
-                  <Icon name="Sparkles" size={24} className="text-orange-500" />
+              <div className="border rounded-2xl p-5 sm:p-8 bg-card text-center">
+                <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto mb-3 sm:mb-4">
+                  <Icon name="Sparkles" size={20} className="text-orange-500" />
                 </div>
-                <h3 className="font-semibold mb-2">Готово к запуску</h3>
-                <p className="text-sm text-muted-foreground mb-6">
+                <h3 className="font-semibold mb-1.5 sm:mb-2">Готово к запуску</h3>
+                <p className="text-xs sm:text-sm text-muted-foreground mb-4 sm:mb-6 leading-snug">
                   {task.documents.length === 0
-                    ? "Задание настроено. Можно запустить генерацию (без привязанных документов AI будет работать только с темой)."
-                    : `Задание настроено с ${task.documents.length} документами. Нажмите запустить.`
+                    ? "Можно запустить генерацию — без документов AI будет работать только с темой."
+                    : `Задание настроено с ${task.documents.length} документами. Нажмите «Запустить AI».`
                   }
                 </p>
-                <div className="mb-4">
+                <div className="mb-3 sm:mb-4">
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
@@ -494,13 +489,14 @@ export default function TaskPage() {
                     className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500 resize-none"
                   />
                 </div>
-                <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mb-4 text-sm">
+                {/* Чекбоксы — вертикально на мобайле */}
+                <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-center gap-2 sm:gap-x-6 mb-4 text-sm">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={useWebSearch}
                       onChange={(e) => setUseWebSearch(e.target.checked)}
-                      className="w-4 h-4 rounded accent-slate-800" />
-                    <Icon name="Globe" size={14} className="text-slate-600" />
-                    <span>Интернет</span>
+                      className="w-4 h-4 rounded accent-slate-800 flex-shrink-0" />
+                    <Icon name="Globe" size={14} className="text-slate-600 flex-shrink-0" />
+                    <span>Поиск в интернете</span>
                   </label>
                   {supportsVisuals ? (
                     <>
@@ -512,8 +508,8 @@ export default function TaskPage() {
                             if (!val) setAllowAiImages(false);
                             analytics.visualsToggle(val, tId, task.task_type, supportsVisuals, visualsReason);
                           }}
-                          className="w-4 h-4 rounded accent-slate-800" />
-                        <Icon name="LayoutTemplate" size={14} className="text-slate-600" />
+                          className="w-4 h-4 rounded accent-slate-800 flex-shrink-0" />
+                        <Icon name="LayoutTemplate" size={14} className="text-slate-600 flex-shrink-0" />
                         <span>Генерировать визуалы</span>
                       </label>
                       <label className={`flex items-center gap-2 ${useVisuals ? "cursor-pointer" : "opacity-40 cursor-not-allowed"}`}>
@@ -524,17 +520,19 @@ export default function TaskPage() {
                             analytics.aiImagesToggle(val, tId, task.task_type, useVisuals);
                           }}
                           disabled={!useVisuals}
-                          className="w-4 h-4 rounded accent-slate-800" />
-                        <Icon name="Image" size={14} className="text-slate-600" />
+                          className="w-4 h-4 rounded accent-slate-800 flex-shrink-0" />
+                        <Icon name="Image" size={14} className="text-slate-600 flex-shrink-0" />
                         <span>Картинки AI</span>
                       </label>
                     </>
                   ) : (
                     <span className="text-xs text-slate-400 flex items-center gap-1.5">
-                      <Icon name="Info" size={13} />
-                      {task.task_type === "revise"
-                        ? "Визуалы доступны если дорабатывается презентация"
-                        : "Визуалы доступны для «Подготовить презентацию» и «По образцу»"}
+                      <Icon name="Info" size={13} className="flex-shrink-0" />
+                      <span className="text-left">
+                        {task.task_type === "revise"
+                          ? "Визуалы доступны если дорабатывается презентация"
+                          : "Визуалы доступны для «Подготовить презентацию» и «По образцу»"}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -542,7 +540,7 @@ export default function TaskPage() {
                 <button
                   onClick={() => handleGenerate(false)}
                   disabled={generating}
-                  className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 mx-auto"
+                  className="flex items-center justify-center gap-2 w-full sm:w-auto bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 mx-auto"
                 >
                   <Icon name="Sparkles" size={16} />
                   {generating ? "Генерирую..." : "Запустить AI"}
@@ -574,6 +572,16 @@ export default function TaskPage() {
               onRestoreAi={handleRestoreAi}
               onEditingVisualPromptChange={setEditingVisualPrompt}
               contentRef={contentRef}
+            />
+          </div>
+
+          {/* ── Сайдбар — на мобайле после контента ── */}
+          <div className="lg:col-span-1 lg:order-1 space-y-3 sm:space-y-4">
+            <TaskSidebar
+              task={task}
+              activeRun={activeRun}
+              onOpenSettings={() => setShowSettings(true)}
+              onLoadRun={loadRun}
             />
           </div>
         </div>
