@@ -161,17 +161,20 @@ export default function CabinetPage() {
           </div>
         </Link>
 
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold">Мои проекты</h1>
-            <p className="text-muted-foreground text-sm mt-1">Создавайте проекты для разных задач и загружайте материалы</p>
+            <div className="flex items-center gap-2 mb-0.5">
+              <Icon name="Briefcase" size={20} className="text-slate-700" />
+              <h1 className="text-2xl font-bold">Рабочий кабинет</h1>
+            </div>
+            <p className="text-muted-foreground text-sm">Кейсы трансформации — выберите кейс чтобы открыть кабинет</p>
           </div>
           <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             <Icon name="Plus" size={16} />
-            Новый проект
+            Новый кейс
           </button>
         </div>
 
@@ -179,7 +182,7 @@ export default function CabinetPage() {
         {showCreate && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
             <div className="bg-card border rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <h2 className="text-lg font-semibold mb-5">Новый проект</h2>
+              <h2 className="text-lg font-semibold mb-5">Новый кейс</h2>
               <form onSubmit={create} className="space-y-4">
                 <div>
                   <label className="text-sm font-medium text-muted-foreground block mb-1.5">Название *</label>
@@ -285,10 +288,13 @@ export default function CabinetPage() {
         ) : projects.length === 0 ? (
           <div className="text-center py-20 text-muted-foreground">
             <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
-              <Icon name="FolderOpen" size={28} />
+              <Icon name="Briefcase" size={28} />
             </div>
-            <p className="font-medium text-foreground mb-1">Проектов пока нет</p>
-            <p className="text-sm">Создайте первый проект и начните работу с документами</p>
+            <p className="font-medium text-foreground mb-1">Кейсов пока нет</p>
+            <p className="text-sm mb-4">Создайте первый кейс — опишите процессы, боли, гипотезы и дайте AI проанализировать</p>
+            <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700">
+              <Icon name="Plus" size={15} /> Создать первый кейс
+            </button>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
@@ -300,9 +306,9 @@ export default function CabinetPage() {
                 <div className="flex items-start justify-between mb-3">
                   <button
                     onClick={() => navigate(`/cabinet/project/${p.id}`)}
-                    className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-950/30 flex items-center justify-center"
+                    className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"
                   >
-                    <Icon name="Folder" size={20} className="text-orange-500" />
+                    <Icon name="Briefcase" size={20} className="text-slate-700" />
                   </button>
                   <div className="flex items-center gap-2">
                     {p.my_role === "owner" && (
@@ -352,20 +358,27 @@ export default function CabinetPage() {
                 )}
 
                 <Link to={`/cabinet/project/${p.id}`} className="block">
-                  <h3 className="font-semibold mb-1 group-hover:text-slate-900 transition-colors">{p.title}</h3>
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <h3 className="font-semibold group-hover:text-slate-900 transition-colors leading-snug">{p.title}</h3>
+                  </div>
                   {p.description && (
                     <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{p.description}</p>
                   )}
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground mt-3">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-3">
                     <span className="flex items-center gap-1">
                       <Icon name="FileText" size={12} />
                       {p.doc_count} файлов
                     </span>
                     <span className="flex items-center gap-1">
                       <Icon name="ListTodo" size={12} />
-                      {p.task_count} заданий
+                      {p.task_count} задач
                     </span>
-                    <span className="ml-auto">{new Date(p.updated_at).toLocaleDateString("ru-RU")}</span>
+                    <span className="ml-auto text-slate-400">{new Date(p.updated_at).toLocaleDateString("ru-RU")}</span>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1 text-xs font-medium text-violet-600 group-hover:text-violet-800 transition-colors">
+                    <Icon name="Briefcase" size={12} />
+                    Открыть кабинет
+                    <Icon name="ChevronRight" size={12} className="ml-auto" />
                   </div>
                 </Link>
               </div>

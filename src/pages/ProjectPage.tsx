@@ -398,17 +398,21 @@ export default function ProjectPage() {
   return (
     <Layout>
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link to="/cabinet" className="hover:text-foreground transition-colors">Проекты</Link>
-          <Icon name="ChevronRight" size={14} />
-          <span className="text-foreground font-medium">{project.title}</span>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+          <Link to="/cabinet/projects" className="flex items-center gap-1 hover:text-foreground transition-colors">
+            <Icon name="Briefcase" size={13} />
+            Рабочий кабинет
+          </Link>
+          <Icon name="ChevronRight" size={13} />
+          <span className="text-foreground font-medium truncate">{project.title}</span>
         </div>
 
         <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold">{project.title}</h1>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Кейс трансформации</p>
+            <h1 className="text-2xl font-bold leading-tight">{project.title}</h1>
             {project.description && (
-              <p className="text-muted-foreground text-sm mt-1">{project.description}</p>
+              <p className="text-muted-foreground text-sm mt-1 max-w-2xl">{project.description}</p>
             )}
           </div>
           <div className="flex gap-2">
@@ -437,40 +441,31 @@ export default function ProjectPage() {
         </div>
 
         <HelpPanel
-          title="Как работать с проектом"
-          summary="Проект — ваше рабочее пространство. Загрузите материалы, создайте задание — AI сделает презентацию."
+          title="Как работать с кабинетом"
+          summary="Это рабочий кабинет кейса трансформации. Опишите процесс, зафиксируйте боли, оцените AI-потенциал — и получите готовую инициативу."
           steps={[
-            { num: 1, title: "Загрузите материалы", description: "Перейдите на вкладку «Материалы» и загрузите документы: конспекты, статьи, стандарты, шаблоны." },
-            { num: 2, title: "Создайте задание", description: "Нажмите «Новое задание» — выберите тип (презентация, анализ, доклад) и опишите тему." },
-            { num: 3, title: "Запустите AI", description: "На странице задания нажмите «Запустить AI». AI прочитает ваши материалы и создаст результат." },
-            { num: 4, title: "Проверьте или скачайте", description: "Просмотрите результат, скачайте PPTX или запустите аудит готовой презентации." },
+            { num: 1, title: "Опишите процесс", description: "Вкладка «Процессы» — добавьте шаги as-is: кто делает, в какой системе, где боли и ручной труд." },
+            { num: 2, title: "Зафиксируйте боли", description: "Вкладка «Боли» — добавьте вручную или используйте AI-экстракцию из любого текста описания." },
+            { num: 3, title: "Оцените AI-потенциал", description: "Вкладка «AI-оценка» — опишите операцию, AI скажет нужен ли ИИ и какого типа решение." },
+            { num: 4, title: "Запустите AI Оператора", description: "На вкладке «Обзор» нажмите «Запустить анализ» — AI сам прочитает весь кейс и выдаст структурированный разбор." },
           ]}
           sections={[
             {
-              title: "Какие роли у документов",
-              icon: "Tag",
+              title: "Что значат вкладки",
+              icon: "Layers",
               subsections: [
-                { title: "📜 Стандарт / Критерии", content: "Нормативные требования и чеклисты. AI сверяет с ними содержимое." },
-                { title: "📋 Образец / Шаблон", content: "Пример структуры и оформления. AI берёт форму, но не предметный смысл." },
-                { title: "📚 Источник", content: "Основные материалы — лекции, статьи, конспекты. AI использует как фактическую базу." },
-                { title: "📎 Дополнительный", content: "Вспомогательные материалы для контекста." },
+                { title: "⚙️ Процессы", content: "Описание as-is и to-be: шаги, роли, системы, ручные операции, AI-потенциал каждого шага." },
+                { title: "🔥 Боли", content: "Ручной труд, дублирование, задержки, контрольные разрывы — с типом, влиянием и корневой причиной." },
+                { title: "📌 Бенчмарки", content: "Внешние практики и референсы с оценкой применимости к вашему кейсу." },
+                { title: "🧠 AI-оценка", content: "Где нужен GenAI, ML, RPA, rule engine или BI — структурированный вердикт с рисками и quick wins." },
+                { title: "🚀 Инициативы", content: "Решения готовые к реализации: с эффектом, усилием, владельцем и статусом продвижения." },
               ],
-            },
-            {
-              title: "Что такое Аудит",
-              icon: "ShieldCheck",
-              content: "Аудит проверяет готовую PPTX на соответствие вашим документам. Найдёт противоречия, отсутствующие разделы, неточные формулировки. Доступен через кнопку «Аудит» в правом углу.",
-            },
-            {
-              title: "Что такое Поиск",
-              icon: "Search",
-              content: "Семантический поиск по всем загруженным материалам. Найдите нужную цитату или факт в своих документах без ручного просмотра.",
             },
           ]}
           tips={[
-            { kind: "tip", text: "Назначайте роли документам — это помогает AI правильно расставить приоритеты при генерации." },
-            { kind: "warning", text: "Без загруженных материалов AI будет опираться только на общие знания, а не на ваши источники." },
-            { kind: "example", text: "Хороший стек: Программа курса (Критерии) + 3–5 лекций (Источник) + образец презентации (Шаблон)." },
+            { kind: "tip", text: "Сначала заполните Процессы и Боли — тогда AI Оператор даст конкретный, а не общий анализ." },
+            { kind: "warning", text: "AI-оценка без описания процессов будет поверхностной. Чем больше данных — тем точнее вывод." },
+            { kind: "example", text: "Хороший кейс: as-is процесс (5+ шагов) + 4–6 болей + 2–3 гипотезы + 1 бенчмарк." },
           ]}
         />
 
