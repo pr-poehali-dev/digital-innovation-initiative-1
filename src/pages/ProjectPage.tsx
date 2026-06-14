@@ -656,6 +656,36 @@ export default function ProjectPage() {
               ))}
             </div>
 
+            {/* ── Динамическая подсказка следующего шага ── */}
+            {(() => {
+              type Step = { icon: string; text: string; tab: string; cta: string; color: string };
+              const step: Step | null =
+                docs.length === 0 && processes.length === 0 && painPoints.length === 0
+                  ? { icon: "Upload", text: "Загрузите документ или опишите первый процесс — это даст AI нужный контекст.", tab: "docs", cta: "Загрузить документ", color: "border-blue-200 bg-blue-50 text-blue-800" }
+                  : processes.length === 0
+                  ? { icon: "Workflow", text: "Опишите процесс as-is — шаги, роли, системы. Это основа для AI-анализа.", tab: "process", cta: "Добавить процесс", color: "border-slate-200 bg-slate-50 text-slate-700" }
+                  : painPoints.length === 0
+                  ? { icon: "Flame", text: "Зафиксируйте боли в процессе — ручной труд, дублирование, задержки.", tab: "pains", cta: "Добавить боль", color: "border-orange-200 bg-orange-50 text-orange-800" }
+                  : hypotheses.length === 0
+                  ? { icon: "Lightbulb", text: "Сформулируйте гипотезу улучшения на основе зафиксированных болей.", tab: "hypotheses", cta: "Создать гипотезу", color: "border-amber-200 bg-amber-50 text-amber-800" }
+                  : initiatives.length === 0
+                  ? { icon: "Rocket", text: "Превратите гипотезу в инициативу — с владельцем, эффектом и статусом.", tab: "initiatives", cta: "Создать инициативу", color: "border-violet-200 bg-violet-50 text-violet-800" }
+                  : null;
+              if (!step) return null;
+              return (
+                <div className={`border rounded-xl px-3 py-2.5 flex items-center gap-2.5 ${step.color}`}>
+                  <Icon name={step.icon} size={15} className="flex-shrink-0 opacity-70" />
+                  <p className="text-xs leading-snug flex-1">{step.text}</p>
+                  <button
+                    onClick={() => setTab(step.tab as Parameters<typeof setTab>[0])}
+                    className="text-xs font-semibold whitespace-nowrap underline underline-offset-2 flex-shrink-0 opacity-80 hover:opacity-100"
+                  >
+                    {step.cta} →
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* ── AI Operator ── */}
             {(() => {
               const status  = aiData?.ai_status ?? "idle";
@@ -1169,27 +1199,41 @@ export default function ProjectPage() {
 
         {/* ── Артефакты ── */}
         {tab === "artifacts" && (
-          <div className="space-y-4">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Артефакты — результаты AI-работы в этом пространстве</p>
+          <div className="space-y-3">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Артефакты — результаты AI-работы в кейсе</p>
+
+            {/* Empty state */}
             {artifacts.length === 0 ? (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                <Icon name="Package" size={28} className="text-violet-400 mx-auto mb-3" />
-                <p className="font-semibold text-slate-700 mb-1">Артефактов пока нет</p>
-                <p className="text-sm text-slate-400 mb-4">Включи «Сохранять как артефакт» в AI Copilot — ответы будут сохраняться здесь</p>
-                <button onClick={() => setTab("copilot")} className="text-sm text-violet-600 font-medium hover:text-violet-800">Открыть Copilot</button>
+                <Icon name="Package" size={28} className="text-violet-400 mx-auto mb-2" />
+                <p className="font-semibold text-slate-700 mb-1 text-sm">Артефактов пока нет</p>
+                <p className="text-xs text-slate-400 mb-3 leading-snug">Включи «Сохранять как артефакт» в AI Copilot — ответы будут сохраняться здесь</p>
+                <button
+                  onClick={() => setTab("copilot")}
+                  className="inline-flex items-center gap-1.5 text-xs text-violet-600 font-semibold border border-violet-200 rounded-lg px-3 py-2 hover:bg-violet-50"
+                >
+                  <Icon name="Sparkles" size={12} /> Открыть AI Copilot
+                </button>
               </div>
             ) : (
-              <div className="grid sm:grid-cols-2 gap-3">
+              /* Вертикальный стек на мобайле, 2 колонки на sm+ */
+              <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-3 sm:space-y-0">
                 {artifacts.map(a => (
-                  <div key={a.id} onClick={() => handleOpenArtifact(a.id)}
-                    className="bg-white border border-slate-200 rounded-2xl p-4 cursor-pointer hover:border-violet-300 hover:shadow-sm transition-all space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-800 leading-snug flex-1">{a.title}</p>
-                      <span className="text-[9px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full flex-shrink-0">{a.artifact_type}</span>
+                  <div
+                    key={a.id}
+                    onClick={() => handleOpenArtifact(a.id)}
+                    className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 cursor-pointer hover:border-violet-300 active:bg-violet-50 hover:shadow-sm transition-all"
+                  >
+                    {/* Строка 1: заголовок + тип */}
+                    <div className="flex items-start gap-2 mb-1.5">
+                      <p className="text-sm font-semibold text-slate-800 leading-snug flex-1 min-w-0 line-clamp-2">{a.title}</p>
+                      <span className="text-[9px] font-bold bg-violet-100 text-violet-600 px-1.5 py-0.5 rounded-full flex-shrink-0 whitespace-nowrap">{a.artifact_type}</span>
                     </div>
-                    <p className="text-xs text-slate-500 leading-snug line-clamp-2">{a.summary}</p>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                      <Icon name="Sparkles" size={9} />
+                    {/* Строка 2: summary */}
+                    <p className="text-xs text-slate-500 leading-snug line-clamp-2 mb-2">{a.summary}</p>
+                    {/* Строка 3: мета */}
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                      <Icon name="Sparkles" size={9} className="text-violet-400" />
                       <span>{a.mode}</span>
                       <span>·</span>
                       <span>{new Date(a.created_at).toLocaleDateString("ru-RU")}</span>
@@ -1963,28 +2007,50 @@ export default function ProjectPage() {
 
         {/* ── Бенчмарки ── */}
         {tab === "benchmarks" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-slate-500">Внешние практики и референсы — что работает у других</p>
-              <button onClick={() => setShowBenchmarkForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
-                <Icon name="Plus" size={13} /> Добавить бенчмарк
+          <div className="space-y-3">
+            {/* Заголовок */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs sm:text-sm text-slate-500 leading-snug">Внешние практики и референсы — что работает у других</p>
+              <button onClick={() => setShowBenchmarkForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 flex-shrink-0">
+                <Icon name="Plus" size={13} /> Добавить
               </button>
             </div>
+
+            {/* Форма нового бенчмарка */}
             {showBenchmarkForm && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новый бенчмарк</p>
-                <input placeholder="Название практики / кейса" value={benchmarkDraft.title} onChange={e => setBenchmarkDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
-                <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Источник (компания / ресурс)" value={benchmarkDraft.source_name} onChange={e => setBenchmarkDraft(d => ({ ...d, source_name: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                  <input placeholder="Ссылка (URL)" value={benchmarkDraft.source_url} onChange={e => setBenchmarkDraft(d => ({ ...d, source_url: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                </div>
-                <input placeholder="Отрасль" value={benchmarkDraft.industry} onChange={e => setBenchmarkDraft(d => ({ ...d, industry: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                <textarea placeholder="Что было сделано — суть практики" rows={2} value={benchmarkDraft.summary} onChange={e => setBenchmarkDraft(d => ({ ...d, summary: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <textarea placeholder="Наблюдаемый эффект / результат" rows={2} value={benchmarkDraft.observed_effect} onChange={e => setBenchmarkDraft(d => ({ ...d, observed_effect: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <textarea placeholder="Применимость к нам — что можно взять" rows={2} value={benchmarkDraft.applicability} onChange={e => setBenchmarkDraft(d => ({ ...d, applicability: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <textarea placeholder="Заметки / ограничения" rows={2} value={benchmarkDraft.notes} onChange={e => setBenchmarkDraft(d => ({ ...d, notes: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <div className="flex gap-2">
-                  <button onClick={() => setShowBenchmarkForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                <input
+                  placeholder="Название практики / кейса *"
+                  value={benchmarkDraft.title}
+                  onChange={e => setBenchmarkDraft(d => ({ ...d, title: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+                {/* Источник и ссылка — вертикально на мобайле */}
+                <input
+                  placeholder="Источник (компания / ресурс)"
+                  value={benchmarkDraft.source_name}
+                  onChange={e => setBenchmarkDraft(d => ({ ...d, source_name: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                />
+                <input
+                  placeholder="Ссылка (URL)"
+                  value={benchmarkDraft.source_url}
+                  onChange={e => setBenchmarkDraft(d => ({ ...d, source_url: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                />
+                <input
+                  placeholder="Отрасль"
+                  value={benchmarkDraft.industry}
+                  onChange={e => setBenchmarkDraft(d => ({ ...d, industry: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                />
+                <textarea placeholder="Что было сделано — суть практики" rows={2} value={benchmarkDraft.summary} onChange={e => setBenchmarkDraft(d => ({ ...d, summary: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Наблюдаемый эффект / результат" rows={2} value={benchmarkDraft.observed_effect} onChange={e => setBenchmarkDraft(d => ({ ...d, observed_effect: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Применимость к нам — что можно взять" rows={2} value={benchmarkDraft.applicability} onChange={e => setBenchmarkDraft(d => ({ ...d, applicability: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Заметки / ограничения" rows={2} value={benchmarkDraft.notes} onChange={e => setBenchmarkDraft(d => ({ ...d, notes: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none" />
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowBenchmarkForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!benchmarkDraft.title.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
                     await workspaceApi.createBenchmark({ project_id: projectId, ...benchmarkDraft });
@@ -1992,34 +2058,69 @@ export default function ProjectPage() {
                     setShowBenchmarkForm(false);
                     workspaceApi.getBenchmarks(projectId).then((d: { benchmarks: Benchmark[] }) => setBenchmarks(d.benchmarks || [])).catch(() => {});
                     setWbLoading(false);
-                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
                     {wbLoading ? "Сохраняю..." : "Сохранить"}
                   </button>
                 </div>
               </div>
             )}
+
+            {/* Empty state с next-step подсказкой */}
             {benchmarks.length === 0 && !showBenchmarkForm && (
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
-                <Icon name="BookMarked" size={32} className="text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500 text-sm">Бенчмарков пока нет</p>
-                <p className="text-xs text-slate-400 mt-1">Добавьте практики из других банков, компаний, исследований</p>
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="BookMarked" size={28} className="text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-600 font-semibold text-sm mb-1">Бенчмарков пока нет</p>
+                <p className="text-xs text-slate-400 mb-3 leading-snug">Добавьте практики из других компаний или исследований — AI сможет сопоставить их с вашими гипотезами</p>
+                <button onClick={() => setShowBenchmarkForm(true)} className="text-xs text-slate-700 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
+                  + Добавить первый бенчмарк
+                </button>
               </div>
             )}
-            <div className="space-y-3">
+
+            {/* Карточки бенчмарков */}
+            <div className="space-y-2.5">
               {benchmarks.map(b => (
-                <div key={b.id} className="bg-white border border-slate-200 rounded-2xl p-4">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <p className="font-semibold text-slate-900 text-sm">{b.title}</p>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {b.confidence_level && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{b.confidence_level === "high" ? "высокая доказательность" : b.confidence_level === "medium" ? "средняя" : "низкая"}</span>}
-                      {b.source_url && <a href={b.source_url} target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:text-violet-800"><Icon name="ExternalLink" size={13} /></a>}
-                    </div>
+                <div key={b.id} className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4">
+                  {/* Строка 1: название + бейджи */}
+                  <p className="font-semibold text-slate-900 text-sm leading-snug mb-1.5">{b.title}</p>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    {b.confidence_level && (
+                      <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">
+                        {b.confidence_level === "high" ? "высокая доказательность" : b.confidence_level === "medium" ? "средняя" : "низкая"}
+                      </span>
+                    )}
+                    {b.source_name && (
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                        📎 <span className="truncate max-w-[140px]">{b.source_name}</span>
+                        {b.industry && <span className="text-slate-300">· {b.industry}</span>}
+                      </span>
+                    )}
+                    {b.source_url && (
+                      <a href={b.source_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-violet-600 hover:text-violet-800 flex items-center gap-0.5">
+                        <Icon name="ExternalLink" size={11} /> Источник
+                      </a>
+                    )}
                   </div>
-                  {b.source_name && <p className="text-xs text-slate-400 mb-2">📎 {b.source_name}{b.industry ? ` · ${b.industry}` : ""}</p>}
-                  {b.summary && <p className="text-xs text-slate-600 mb-1"><span className="font-medium">Что сделано:</span> {b.summary}</p>}
-                  {b.observed_effect && <p className="text-xs text-slate-600 mb-1"><span className="font-medium">Эффект:</span> {b.observed_effect}</p>}
-                  {b.applicability && <div className="mt-2 bg-green-50 border border-green-100 rounded-lg px-3 py-2"><p className="text-xs text-green-800"><span className="font-semibold">Применимость:</span> {b.applicability}</p></div>}
-                  {b.notes && <p className="text-xs text-slate-400 mt-2 italic">{b.notes}</p>}
+                  {/* Строка 2: что сделано / эффект */}
+                  {b.summary && (
+                    <p className="text-xs text-slate-600 mb-1 leading-snug">
+                      <span className="font-medium">Что сделано:</span> <span className="line-clamp-2">{b.summary}</span>
+                    </p>
+                  )}
+                  {b.observed_effect && (
+                    <p className="text-xs text-slate-600 mb-1 leading-snug">
+                      <span className="font-medium">Эффект:</span> {b.observed_effect}
+                    </p>
+                  )}
+                  {/* Строка 3: применимость — выделена зелёным */}
+                  {b.applicability && (
+                    <div className="mt-2 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+                      <p className="text-xs text-green-800 leading-snug">
+                        <span className="font-semibold">Применимость:</span> {b.applicability}
+                      </p>
+                    </div>
+                  )}
+                  {b.notes && <p className="text-xs text-slate-400 mt-2 italic leading-snug line-clamp-2">{b.notes}</p>}
                 </div>
               ))}
             </div>
