@@ -610,12 +610,19 @@ export default function ProjectPage() {
           ]}
         />
 
-        {/* Вкладки — горизонтальный скролл с автопрокруткой к активной */}
+        {/* Вкладки — горизонтальный скролл без vertical jitter */}
         <div className="relative mb-4 sm:mb-6">
+          {/* Нижняя линия — отдельный элемент, не border на скролл-контейнере */}
+          <div className="absolute bottom-0 left-0 right-0 h-px bg-slate-200 pointer-events-none" />
+
           <div
             ref={tabsRef}
-            className="flex gap-0 border-b overflow-x-auto scrollbar-none scroll-smooth"
-            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+            className="flex gap-0 overflow-x-auto"
+            style={{
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+              WebkitOverflowScrolling: "touch",
+            }}
           >
             {([
               { key: "overview",    label: "🏠 Обзор" },
@@ -636,22 +643,27 @@ export default function ProjectPage() {
                 data-tab={t.key}
                 onClick={() => {
                   setTab(t.key);
-                  // автоскролл к активной вкладке
                   const el = tabsRef.current?.querySelector(`[data-tab="${t.key}"]`) as HTMLElement;
-                  el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+                  el?.scrollIntoView({ block: "nearest", inline: "center" });
                 }}
-                className={`whitespace-nowrap px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors flex-shrink-0 ${
+                className={`relative whitespace-nowrap px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm font-medium transition-colors flex-shrink-0 ${
                   tab === t.key
-                    ? "border-slate-800 text-slate-900"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
+                    ? "text-slate-900"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {t.label}
+                {/* Индикатор активной вкладки — абсолютный, не влияет на высоту */}
+                {tab === t.key && (
+                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-slate-800 rounded-t-full" />
+                )}
               </button>
             ))}
           </div>
-          {/* Тень-индикатор: есть ещё вкладки справа */}
-          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background to-transparent pointer-events-none" />
+
+          {/* Тени-индикаторы слева и справа */}
+          <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-background to-transparent pointer-events-none" />
+          <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none" />
         </div>
 
         {/* ── Post-action banner — показывается поверх любой вкладки ── */}
