@@ -1349,20 +1349,24 @@ export default function ProjectPage() {
         )}
 
         {tab === "docs" && (
-          <div className="space-y-4">
-            <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
-                <Icon name="Upload" size={22} className="text-slate-600" />
+          <div className="space-y-3">
+            {/* Зона загрузки */}
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 sm:p-6">
+              <div className="flex flex-col items-center text-center mb-4">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-2.5">
+                  <Icon name="Upload" size={20} className="text-slate-600" />
+                </div>
+                <p className="font-medium text-sm sm:text-base mb-0.5">Загрузить материал</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">PDF, DOCX, PPTX — до 100 МБ</p>
               </div>
-              <p className="font-medium mb-1">Загрузить материал</p>
-              <p className="text-sm text-muted-foreground mb-4">PDF, DOCX или PPTX — до 100 МБ</p>
 
-              <div className="max-w-xs mx-auto mb-4 text-left">
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Тип материала</label>
+              {/* Тип материала — полная ширина */}
+              <div className="mb-3">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">Тип материала</label>
                 <select
                   value={uploadCategory}
                   onChange={(e) => setUploadCategory(e.target.value)}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-slate-500"
                 >
                   {CATEGORIES.map((c) => (
                     <option key={c.value} value={c.value}>{c.label}</option>
@@ -1370,57 +1374,45 @@ export default function ProjectPage() {
                 </select>
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".pdf,.docx,.pptx"
-                  onChange={handleUpload}
-                  className="hidden"
-                  id="file-upload"
-                />
+              {/* Кнопки загрузки — вертикально на мобайле */}
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input ref={fileRef} type="file" accept=".pdf,.docx,.pptx" onChange={handleUpload} className="hidden" id="file-upload" />
                 <label
                   htmlFor="file-upload"
-                  className={`inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                  className={`flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors flex-1 ${uploading ? "opacity-50 pointer-events-none" : ""}`}
                 >
                   <Icon name="Upload" size={14} />
-                  {uploading ? "Загружаю..." : "Документ"}
+                  {uploading ? "Загружаю..." : "Загрузить документ"}
                 </label>
 
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={(e) => handleMediaUpload(e, "image")}
-                  className="hidden"
-                  id="photo-upload"
-                />
-                <label
-                  htmlFor="photo-upload"
-                  className={`inline-flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
-                >
-                  <Icon name="Camera" size={14} />
-                  Фото (OCR)
-                </label>
+                <div className="flex gap-2">
+                  <input type="file" accept="image/*" capture="environment" onChange={(e) => handleMediaUpload(e, "image")} className="hidden" id="photo-upload" />
+                  <label
+                    htmlFor="photo-upload"
+                    className={`flex items-center justify-center gap-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors flex-1 sm:flex-none ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                  >
+                    <Icon name="Camera" size={14} />
+                    Фото
+                  </label>
 
-                <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={(e) => handleMediaUpload(e, "audio")}
-                  className="hidden"
-                  id="audio-upload"
-                />
-                <label
-                  htmlFor="audio-upload"
-                  className={`inline-flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${uploading ? "opacity-50 pointer-events-none" : ""}`}
-                >
-                  <Icon name="Mic" size={14} />
-                  Аудио
-                </label>
+                  <input type="file" accept="audio/*" onChange={(e) => handleMediaUpload(e, "audio")} className="hidden" id="audio-upload" />
+                  <label
+                    htmlFor="audio-upload"
+                    className={`flex items-center justify-center gap-1.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 px-3 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition-colors flex-1 sm:flex-none ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+                  >
+                    <Icon name="Mic" size={14} />
+                    Аудио
+                  </label>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-3">Фото — распознаётся текст с доски / тетради. Аудио (OGG до 1 МБ) — расшифровывается лекция.</p>
+
+              <p className="text-[10px] sm:text-xs text-slate-400 mt-2.5 text-center leading-snug">
+                Фото — распознаётся текст с доски / тетради. Аудио (OGG до 1 МБ) — расшифровывается лекция.
+              </p>
+
+              {/* Прогресс загрузки */}
               {uploading && uploadProgress > 0 && (
-                <div className="mt-3 max-w-xs mx-auto">
+                <div className="mt-3">
                   <div className="flex justify-between text-xs text-slate-500 mb-1">
                     <span>Загружаю...</span>
                     <span>{uploadProgress}%</span>
@@ -1430,69 +1422,113 @@ export default function ProjectPage() {
                   </div>
                 </div>
               )}
-              {uploadError && <p className="text-red-500 text-sm mt-2">{uploadError}</p>}
+              {uploadError && <p className="text-red-500 text-xs mt-2 text-center">{uploadError}</p>}
             </div>
 
+            {/* Список документов */}
             {docs.length === 0 ? (
-              <p className="text-center text-muted-foreground text-sm py-4">Материалов пока нет</p>
+              <div className="text-center text-muted-foreground text-sm py-6">
+                <Icon name="FileText" size={24} className="mx-auto mb-2 text-slate-300" />
+                Материалов пока нет
+              </div>
             ) : (
               <div className="space-y-2">
                 {docs.map((doc) => {
                   const cat = CATEGORIES.find((c) => c.value === doc.category) || CATEGORIES[CATEGORIES.length - 1];
                   const mediaIcon = doc.media_type === "image" ? "Camera" : doc.media_type === "audio" ? "Mic" : cat.icon;
                   const mediaLabel = doc.media_type === "image" ? "Фото" : doc.media_type === "audio" ? "Аудио" : cat.label;
+
+                  // Статус документа
+                  const STATUS_CFG: Record<string, { label: string; color: string }> = {
+                    ready:       { label: "Готов",        color: "bg-emerald-100 text-emerald-700" },
+                    processing:  { label: "Обработка...", color: "bg-blue-100 text-blue-700" },
+                    ocr_running: { label: "OCR...",        color: "bg-blue-100 text-blue-700" },
+                    queued:      { label: "В очереди",    color: "bg-slate-100 text-slate-500" },
+                    uploaded:    { label: "Загружен",     color: "bg-slate-100 text-slate-500" },
+                    failed:      { label: "Ошибка",       color: "bg-red-100 text-red-700" },
+                    archived:    { label: "Архив",        color: "bg-slate-100 text-slate-400" },
+                  };
+                  const statusCfg = STATUS_CFG[doc.status] || { label: doc.status, color: "bg-slate-100 text-slate-500" };
+                  const isProcessing = ["processing", "ocr_running", "queued", "uploaded"].includes(doc.status);
+
                   return (
-                    <div key={doc.id} className="relative flex items-center gap-3 border border-slate-200 rounded-xl p-3.5 bg-card">
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${cat.color}`}>
-                        <Icon name={mediaIcon} size={16} fallback="FileText" />
+                    <div key={doc.id} className={`relative border rounded-xl p-3 bg-card ${doc.status === "archived" ? "opacity-60" : "border-slate-200"}`}>
+                      {/* Строка 1: иконка + имя + меню */}
+                      <div className="flex items-start gap-2.5">
+                        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${cat.color}`}>
+                          <Icon name={mediaIcon} size={15} fallback="FileText" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium leading-snug truncate pr-1">{doc.name}</p>
+                          {/* Строка 2: мета — тип · размер · страницы */}
+                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                            <span className="text-[10px] text-slate-500 font-medium">{mediaLabel}</span>
+                            <span className="text-[10px] text-slate-400">·</span>
+                            <span className="text-[10px] text-slate-500">{doc.file_type.toUpperCase()}</span>
+                            <span className="text-[10px] text-slate-400">·</span>
+                            <span className="text-[10px] text-slate-500">{formatSize(doc.file_size)}</span>
+                            {doc.page_count ? (
+                              <>
+                                <span className="text-[10px] text-slate-400">·</span>
+                                <span className="text-[10px] text-slate-500">{doc.page_count} стр.</span>
+                              </>
+                            ) : null}
+                          </div>
+                          {/* Строка 3: статус + анимация если идёт обработка */}
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${statusCfg.color}`}>
+                              {statusCfg.label}
+                            </span>
+                            {isProcessing && (
+                              <div className="w-2.5 h-2.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                            )}
+                          </div>
+                        </div>
+                        {/* Меню действий — всегда справа */}
+                        <button
+                          onClick={() => setMenuDocId(menuDocId === doc.id ? null : doc.id)}
+                          className="p-2 rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-500 flex-shrink-0 -mr-1 -mt-0.5"
+                          title="Действия"
+                        >
+                          <Icon name="MoreVertical" size={16} />
+                        </button>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{doc.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          <span className="font-medium">{mediaLabel}</span>
-                          {" · "}{doc.file_type.toUpperCase()}
-                          {" · "}{formatSize(doc.file_size)}
-                          {doc.page_count ? ` · ${doc.page_count} стр.` : ""}
-                          {" · "}{doc.uploaded_by}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleOpenDoc(doc.id)}
-                        title="Открыть"
-                        className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
-                      >
-                        <Icon name="Eye" size={13} />
-                        <span className="hidden sm:inline">Открыть</span>
-                      </button>
-                      <Link
-                        to={`/cabinet/project/${projectId}/document/${doc.id}`}
-                        className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
-                        title="Чат с документом"
-                      >
-                        <Icon name="MessageCircle" size={13} />
-                        <span className="hidden sm:inline">Спросить</span>
-                      </Link>
-                      <button
-                        onClick={() => setMenuDocId(menuDocId === doc.id ? null : doc.id)}
-                        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
-                        title="Действия"
-                      >
-                        <Icon name="MoreVertical" size={16} />
-                      </button>
+
+                      {/* Строка 4: кнопки действий — под именем файла */}
+                      {doc.status !== "archived" && (
+                        <div className="flex gap-1.5 mt-2.5 ml-10 sm:ml-11">
+                          <button
+                            onClick={() => handleOpenDoc(doc.id)}
+                            className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
+                          >
+                            <Icon name="Eye" size={13} />
+                            Открыть
+                          </button>
+                          <Link
+                            to={`/cabinet/project/${projectId}/document/${doc.id}`}
+                            className="flex items-center gap-1 text-xs bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg transition-colors"
+                          >
+                            <Icon name="MessageCircle" size={13} />
+                            Спросить AI
+                          </Link>
+                        </div>
+                      )}
+
+                      {/* Dropdown меню */}
                       {menuDocId === doc.id && (
                         <>
                           <div className="fixed inset-0 z-10" onClick={() => setMenuDocId(null)} />
-                          <div className="absolute right-2 top-full mt-1 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-48">
+                          <div className="absolute right-2 top-10 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-48">
                             <button
                               onClick={() => { setMenuDocId(null); setRenamingDoc({ id: doc.id, name: doc.name }); setRenameValue(doc.name); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
                             >
                               <Icon name="Pencil" size={14} />
                               Переименовать
                             </button>
                             <button
                               onClick={() => { setMenuDocId(null); handleOpenDoc(doc.id); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
                             >
                               <Icon name="Download" size={14} />
                               Скачать оригинал
@@ -1500,7 +1536,7 @@ export default function ProjectPage() {
                             <div className="border-t border-slate-100 my-1" />
                             <button
                               onClick={() => { setMenuDocId(null); setConfirmDelete({ id: doc.id, name: doc.name }); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left"
+                              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 text-left"
                             >
                               <Icon name="Trash2" size={14} />
                               Удалить
