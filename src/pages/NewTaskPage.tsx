@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { documentsApi, tasksApi } from "@/lib/api";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
+import HelpPanel from "@/components/HelpPanel";
 
 interface Document {
   id: number;
@@ -186,18 +187,50 @@ export default function NewTaskPage() {
 
   return (
     <Layout>
-      <div className="max-w-3xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
-          <Link to="/cabinet" className="hover:text-foreground">Проекты</Link>
+      <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4 sm:mb-6">
+          <Link to="/cabinet" className="hover:text-foreground hidden sm:inline">Проекты</Link>
+          <Icon name="ChevronRight" size={14} className="hidden sm:inline" />
+          <Link to={`/cabinet/project/${projectId}`} className="hover:text-foreground flex items-center gap-1">
+            <Icon name="ChevronLeft" size={14} />
+            <span>Назад</span>
+          </Link>
           <Icon name="ChevronRight" size={14} />
-          <Link to={`/cabinet/project/${projectId}`} className="hover:text-foreground">Проект</Link>
-          <Icon name="ChevronRight" size={14} />
-          <span className="text-foreground font-medium">Новое задание</span>
+          <span className="text-foreground font-medium truncate">Новое задание</span>
         </div>
 
-        <h1 className="text-2xl font-bold mb-8">Новое задание для AI</h1>
+        <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Новое задание для AI</h1>
 
-        <form onSubmit={handleCreate} className="space-y-8">
+        <HelpPanel
+          title="Как создать задание"
+          summary="Выберите тип, заполните параметры, назначьте роли документам и нажмите «Создать задание»."
+          steps={[
+            { num: 1, title: "Выберите тип задания", description: "Презентация, анализ, текст, ответ на вопрос — тип определяет что AI создаст на выходе." },
+            { num: 2, title: "Заполните параметры", description: "Тема и название — обязательны. Аудитория, стиль и дополнительные инструкции повышают точность результата." },
+            { num: 3, title: "Назначьте роли документам", description: "Для каждого документа выберите роль: Стандарт, Содержание, Методика, Образец, Фон. AI соблюдает иерархию." },
+          ]}
+          sections={[
+            {
+              title: "Роли документов",
+              icon: "Tag",
+              subsections: [
+                { title: "📜 Стандарт", content: "Нормативный документ с обязательными требованиями. Наивысший приоритет." },
+                { title: "📄 Содержание", content: "Основные материалы по теме — AI берёт из них факты и структуру." },
+                { title: "📐 Методика", content: "Методические указания — AI следует их логике и подходу." },
+                { title: "🎨 Образец формата", content: "PPTX-шаблон или пример — AI воспроизводит структуру и стиль." },
+                { title: "📚 Фон", content: "Контекстные материалы — AI использует как дополнительный источник." },
+                { title: "🚫 Исключить", content: "Документ не участвует в этом задании." },
+              ],
+            },
+          ]}
+          tips={[
+            { kind: "tip", text: "Чем точнее тема и аудитория — тем лучше результат. Пример: «8 слайдов для научного совета по теме управления рисками»." },
+            { kind: "warning", text: "Без загруженных документов AI работает только на общих знаниях — без ваших материалов." },
+            { kind: "example", text: "Для «Презентации по образцу»: прикрепите PPTX с ролью «Образец формата» и включите «Обязательно использовать»." },
+          ]}
+        />
+
+        <form onSubmit={handleCreate} className="space-y-6 sm:space-y-8">
           <div>
             <p className="text-sm font-semibold mb-3">Тип задания *</p>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -402,7 +435,7 @@ export default function NewTaskPage() {
                       {/* 2. Дополнительные настройки — только если выбрана нормальная роль */}
                       {cfg.role && cfg.role !== "excluded" && (
                         <>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-2 sm:grid sm:grid-cols-2 sm:gap-2 sm:space-y-0">
                             {/* Режим использования */}
                             {usageOptions.length > 0 && (
                               <div>
@@ -410,7 +443,7 @@ export default function NewTaskPage() {
                                 <select
                                   value={cfg.usage_mode}
                                   onChange={(e) => updateDocConfig(doc.id, { usage_mode: e.target.value })}
-                                  className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
+                                  className="w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
                                 >
                                   <option value="">по умолчанию</option>
                                   {usageOptions.map((m) => (
@@ -426,7 +459,7 @@ export default function NewTaskPage() {
                               <select
                                 value={cfg.priority}
                                 onChange={(e) => updateDocConfig(doc.id, { priority: e.target.value })}
-                                className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
+                                className="w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500"
                               >
                                 {PRIORITIES.map((p) => (
                                   <option key={p.value} value={p.value}>{p.label}</option>
