@@ -85,12 +85,59 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team">("overview");
+  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives">("overview");
 
   // Workspace state
   type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string };
   type Artifact = { id: number; title: string; artifact_type: string; summary: string; mode: string; created_at: string; content?: string };
   type WsContext = { goals_text: string; constraints_text: string; key_facts_text: string; stakeholders_text: string; updated_at?: string } | null;
+
+  // Transformation Workbench types
+  type ProcessStep = { id: number; step_order: number; title: string; role_name: string; description: string; system_name: string; is_manual: boolean; pain_point: string; control_point: string; automation_potential: string; ai_potential: string; duration_minutes: number | null };
+  type Process = { id: number; title: string; description: string; owner_name: string; department: string; maturity_level: string; digital_maturity: string; ai_potential: string; step_count: number; steps: ProcessStep[] };
+  type PainPoint = { id: number; pain_type: string; description: string; impact_level: string; frequency: string; root_cause: string };
+  type Benchmark = { id: number; title: string; source_name: string; source_url: string; industry: string; organization_name: string; benchmark_type: string; summary: string; observed_effect: string; applicability: string; confidence_level: string; notes: string; relevance_note: string };
+  type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
+  type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string };
+
+  // Transformation Workbench state
+  const [processes, setProcesses] = useState<Process[]>([]);
+  const [painPoints, setPainPoints] = useState<PainPoint[]>([]);
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [aiOpportunities, setAiOpportunities] = useState<AiOpportunity[]>([]);
+  const [initiatives, setInitiatives] = useState<Initiative[]>([]);
+  // Process forms
+  const [showProcessForm, setShowProcessForm] = useState(false);
+  const [processDraft, setProcessDraft] = useState({ title: "", description: "", owner_name: "", department: "" });
+  const [expandedProcess, setExpandedProcess] = useState<number | null>(null);
+  const [stepDraft, setStepDraft] = useState<Record<number, { title: string; role_name: string; system_name: string; is_manual: boolean; pain_point: string; ai_potential: string }>>({});
+  const [showStepForm, setShowStepForm] = useState<number | null>(null);
+  // Pain form
+  const [showPainForm, setShowPainForm] = useState(false);
+  const [painDraft, setPainDraft] = useState({ description: "", pain_type: "manual_work", impact_level: "medium", frequency: "", root_cause: "" });
+  const [aiExtractLoading, setAiExtractLoading] = useState(false);
+  const [aiExtractText, setAiExtractText] = useState("");
+  // Benchmark form
+  const [showBenchmarkForm, setShowBenchmarkForm] = useState(false);
+  const [benchmarkDraft, setBenchmarkDraft] = useState({ title: "", source_name: "", source_url: "", industry: "", summary: "", observed_effect: "", applicability: "", notes: "" });
+  // AI opportunity form
+  const [showAiForm, setShowAiForm] = useState(false);
+  const [aiDraft, setAiDraft] = useState({ title: "", current_manual_operation: "", data_type: "mixed", proposed_solution_type: "none", expected_effect: "", risks: "", human_in_loop: true, recommendation: "assess" });
+  const [aiAssessText, setAiAssessText] = useState("");
+  const [aiAssessLoading, setAiAssessLoading] = useState(false);
+  const [aiAssessResult, setAiAssessResult] = useState<Record<string, unknown> | null>(null);
+  // Initiative form
+  const [showInitiativeForm, setShowInitiativeForm] = useState(false);
+  const [initiativeDraft, setInitiativeDraft] = useState({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "" });
+  const [wbLoading, setWbLoading] = useState(false);
+
+  const loadWorkbench = () => {
+    workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
+    workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
+    workspaceApi.getBenchmarks(projectId).then((d: { benchmarks: Benchmark[] }) => setBenchmarks(d.benchmarks || [])).catch(() => {});
+    workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
+    workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
+  };
 
   const [wsContext, setWsContext] = useState<WsContext>(null);
   const [wsContextEdit, setWsContextEdit] = useState(false);
@@ -134,7 +181,7 @@ export default function ProjectPage() {
     workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
   };
 
-  useEffect(() => { load(); analytics.workspaceOpened(projectId, "overview"); }, [projectId]);
+  useEffect(() => { load(); loadWorkbench(); analytics.workspaceOpened(projectId, "overview"); }, [projectId]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -422,7 +469,12 @@ export default function ProjectPage() {
           {([
             { key: "overview",    label: "🏠 Обзор" },
             { key: "copilot",     label: "🤖 AI Copilot" },
+            { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
+            { key: "pains",       label: `🔥 Боли${painPoints.length ? ` (${painPoints.length})` : ""}` },
             { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
+            { key: "benchmarks",  label: `📌 Бенчмарки${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
+            { key: "ai",          label: `🧠 AI-оценка${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
+            { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
             { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
             { key: "tasks",       label: `📋 Задания (${tasks.length})` },
             { key: "docs",        label: `📄 Файлы (${docs.length})` },
@@ -449,9 +501,9 @@ export default function ProjectPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
                 { label: "Гипотез", count: hypotheses.length, active: hypotheses.filter(h => h.status === "open" || h.status === "testing").length, icon: "Lightbulb", color: "text-amber-600 bg-amber-50" },
-                { label: "Артефактов", count: artifacts.length, active: 0, icon: "Package", color: "text-violet-600 bg-violet-50" },
+                { label: "Болей", count: painPoints.length, active: painPoints.filter(p => p.impact_level === "critical" || p.impact_level === "high").length, icon: "Flame", color: "text-red-600 bg-red-50" },
+                { label: "Инициатив", count: initiatives.length, active: initiatives.filter(i => i.status === "pilot" || i.status === "implementation").length, icon: "Rocket", color: "text-violet-600 bg-violet-50" },
                 { label: "Файлов", count: docs.length, active: docs.filter(d => d.status === "ready").length, icon: "FileText", color: "text-blue-600 bg-blue-50" },
-                { label: "Заданий", count: tasks.length, active: tasks.filter(t => t.status === "completed").length, icon: "CheckSquare", color: "text-emerald-600 bg-emerald-50" },
               ].map(c => (
                 <div key={c.label} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.color}`}>
@@ -1228,6 +1280,544 @@ export default function ProjectPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Процессы ── */}
+        {tab === "process" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">Опишите процессы as-is: шаги, роли, системы, контроли</p>
+              <button onClick={() => setShowProcessForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
+                <Icon name="Plus" size={13} /> Добавить процесс
+              </button>
+            </div>
+            {showProcessForm && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Новый процесс</p>
+                <input placeholder="Название процесса" value={processDraft.title} onChange={e => setProcessDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <input placeholder="Подразделение-владелец" value={processDraft.department} onChange={e => setProcessDraft(d => ({ ...d, department: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <textarea placeholder="Краткое описание / цель процесса" rows={2} value={processDraft.description} onChange={e => setProcessDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none" />
+                <div className="flex gap-2">
+                  <button onClick={() => setShowProcessForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                  <button disabled={!processDraft.title.trim() || wbLoading} onClick={async () => {
+                    setWbLoading(true);
+                    await workspaceApi.createProcess({ project_id: projectId, ...processDraft });
+                    setProcessDraft({ title: "", description: "", owner_name: "", department: "" });
+                    setShowProcessForm(false);
+                    workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
+                    setWbLoading(false);
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                    {wbLoading ? "Сохраняю..." : "Создать"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {processes.length === 0 && !showProcessForm && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
+                <Icon name="Workflow" size={32} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm mb-1">Процессов пока нет</p>
+                <p className="text-xs text-slate-400">Добавьте as-is описание процесса — шаги, роли, системы, боли</p>
+              </div>
+            )}
+            {processes.map(proc => (
+              <div key={proc.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50" onClick={() => setExpandedProcess(expandedProcess === proc.id ? null : proc.id)}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-slate-900 text-sm">{proc.title}</p>
+                      {proc.department && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{proc.department}</span>}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${proc.ai_potential === 'high' ? 'bg-violet-100 text-violet-700' : proc.ai_potential === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                        AI: {proc.ai_potential === 'high' ? 'высокий' : proc.ai_potential === 'medium' ? 'средний' : proc.ai_potential === 'low' ? 'низкий' : 'не оценён'}
+                      </span>
+                    </div>
+                    {proc.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{proc.description}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 ml-2">
+                    <span className="text-xs text-slate-400">{proc.step_count} шагов</span>
+                    <Icon name={expandedProcess === proc.id ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400" />
+                  </div>
+                </div>
+                {expandedProcess === proc.id && (
+                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
+                    {proc.steps.map((step, idx) => (
+                      <div key={step.id} className="flex gap-3">
+                        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600">{idx + 1}</div>
+                        <div className="flex-1 bg-slate-50 rounded-xl p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium text-slate-800">{step.title}</p>
+                            <div className="flex gap-1 flex-shrink-0">
+                              {step.is_manual && <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-semibold">ручной</span>}
+                              {step.ai_potential !== 'none' && <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-semibold">AI: {step.ai_potential}</span>}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                            {step.role_name && <span className="text-xs text-slate-500">👤 {step.role_name}</span>}
+                            {step.system_name && <span className="text-xs text-slate-500">🖥 {step.system_name}</span>}
+                            {step.duration_minutes && <span className="text-xs text-slate-500">⏱ {step.duration_minutes} мин</span>}
+                          </div>
+                          {step.pain_point && <p className="text-xs text-red-600 mt-1">🔥 {step.pain_point}</p>}
+                          {step.control_point && <p className="text-xs text-blue-600 mt-0.5">🔒 {step.control_point}</p>}
+                        </div>
+                      </div>
+                    ))}
+                    {showStepForm === proc.id ? (
+                      <div className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-200">
+                        <p className="text-xs font-semibold text-slate-700">Новый шаг</p>
+                        <input placeholder="Название шага" value={stepDraft[proc.id]?.title || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], title: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-slate-400" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input placeholder="Роль / исполнитель" value={stepDraft[proc.id]?.role_name || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], role_name: e.target.value } }))} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none" />
+                          <input placeholder="Система / инструмент" value={stepDraft[proc.id]?.system_name || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], system_name: e.target.value } }))} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none" />
+                        </div>
+                        <input placeholder="Боль / проблема на этом шаге" value={stepDraft[proc.id]?.pain_point || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], pain_point: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none text-red-700 placeholder:text-red-300" />
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                            <input type="checkbox" checked={stepDraft[proc.id]?.is_manual ?? true} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], is_manual: e.target.checked } }))} />
+                            Ручной
+                          </label>
+                          <select value={stepDraft[proc.id]?.ai_potential || "none"} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], ai_potential: e.target.value } }))} className="border border-slate-200 rounded px-1.5 py-1 text-xs">
+                            <option value="none">AI: нет</option>
+                            <option value="low">AI: низкий</option>
+                            <option value="medium">AI: средний</option>
+                            <option value="high">AI: высокий</option>
+                          </select>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => setShowStepForm(null)} className="flex-1 border border-slate-200 rounded-lg py-1.5 text-xs hover:bg-slate-100">Отмена</button>
+                          <button disabled={!stepDraft[proc.id]?.title?.trim() || wbLoading} onClick={async () => {
+                            const s = stepDraft[proc.id] || {};
+                            setWbLoading(true);
+                            await workspaceApi.createProcessStep({ process_id: proc.id, project_id: projectId, ...s });
+                            setShowStepForm(null);
+                            workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
+                            setWbLoading(false);
+                          }} className="flex-1 bg-slate-800 text-white rounded-lg py-1.5 text-xs font-semibold disabled:opacity-50">
+                            {wbLoading ? "..." : "Добавить"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={() => setShowStepForm(proc.id)} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 transition-colors pl-9">
+                        <Icon name="Plus" size={12} /> Добавить шаг
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Боли ── */}
+        {tab === "pains" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">Фиксируйте ручной труд, дублирование, задержки, контрольные разрывы</p>
+              <button onClick={() => setShowPainForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
+                <Icon name="Plus" size={13} /> Добавить боль
+              </button>
+            </div>
+            {/* AI-экстракция болей */}
+            <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
+              <p className="text-xs font-semibold text-violet-800 mb-2">🧠 Извлечь боли с помощью AI</p>
+              <textarea placeholder="Опишите ситуацию или процесс — AI выделит боли и проблемы..." rows={3} value={aiExtractText} onChange={e => setAiExtractText(e.target.value)} className="w-full border border-violet-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none mb-2" />
+              <button disabled={!aiExtractText.trim() || aiExtractLoading} onClick={async () => {
+                setAiExtractLoading(true);
+                try {
+                  const res = await workspaceApi.aiExtractPains(projectId, aiExtractText) as { pains: PainPoint[] };
+                  for (const p of res.pains || []) {
+                    await workspaceApi.createPainPoint({ project_id: projectId, ...p });
+                  }
+                  setAiExtractText("");
+                  workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
+                } finally { setAiExtractLoading(false); }
+              }} className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 disabled:opacity-50">
+                {aiExtractLoading ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</> : <><Icon name="Sparkles" size={12} /> Извлечь боли</>}
+              </button>
+            </div>
+            {showPainForm && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Новая боль / узкое место</p>
+                <textarea placeholder="Опишите конкретную боль" rows={2} value={painDraft.description} onChange={e => setPainDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Тип</p>
+                    <select value={painDraft.pain_type} onChange={e => setPainDraft(d => ({ ...d, pain_type: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none">
+                      <option value="manual_work">Ручной труд</option>
+                      <option value="duplication">Дублирование</option>
+                      <option value="delay">Задержки</option>
+                      <option value="lack_of_visibility">Нет прозрачности</option>
+                      <option value="control_gap">Контрольный разрыв</option>
+                      <option value="data_quality">Качество данных</option>
+                      <option value="error_rate">Ошибки</option>
+                      <option value="compliance_burden">Регуляторная нагрузка</option>
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Влияние</p>
+                    <select value={painDraft.impact_level} onChange={e => setPainDraft(d => ({ ...d, impact_level: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none">
+                      <option value="critical">Критическое</option>
+                      <option value="high">Высокое</option>
+                      <option value="medium">Среднее</option>
+                      <option value="low">Низкое</option>
+                    </select>
+                  </div>
+                </div>
+                <input placeholder="Частота (ежедневно, еженедельно...)" value={painDraft.frequency} onChange={e => setPainDraft(d => ({ ...d, frequency: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                <input placeholder="Корневая причина (опционально)" value={painDraft.root_cause} onChange={e => setPainDraft(d => ({ ...d, root_cause: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                <div className="flex gap-2">
+                  <button onClick={() => setShowPainForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                  <button disabled={!painDraft.description.trim() || wbLoading} onClick={async () => {
+                    setWbLoading(true);
+                    await workspaceApi.createPainPoint({ project_id: projectId, ...painDraft });
+                    setPainDraft({ description: "", pain_type: "manual_work", impact_level: "medium", frequency: "", root_cause: "" });
+                    setShowPainForm(false);
+                    workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
+                    setWbLoading(false);
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                    {wbLoading ? "Сохраняю..." : "Добавить"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {painPoints.length === 0 && !showPainForm && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
+                <Icon name="Flame" size={32} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm">Болей пока нет</p>
+                <p className="text-xs text-slate-400 mt-1">Добавьте вручную или используйте AI-экстракцию</p>
+              </div>
+            )}
+            {painPoints.length > 0 && (
+              <div className="space-y-2">
+                {painPoints.map(p => {
+                  const impactColor = p.impact_level === "critical" ? "bg-red-100 text-red-700 border-red-200" : p.impact_level === "high" ? "bg-orange-100 text-orange-700 border-orange-200" : p.impact_level === "medium" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-slate-100 text-slate-600 border-slate-200";
+                  const PAIN_LABELS: Record<string, string> = { manual_work: "Ручной труд", duplication: "Дублирование", delay: "Задержки", lack_of_visibility: "Нет прозрачности", control_gap: "Контрольный разрыв", data_quality: "Качество данных", error_rate: "Ошибки", compliance_burden: "Регуляторная нагрузка" };
+                  return (
+                    <div key={p.id} className={`border rounded-xl p-3.5 ${impactColor}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium flex-1">{p.description}</p>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/60 flex-shrink-0">{p.impact_level === "critical" ? "Критично" : p.impact_level === "high" ? "Высокое" : p.impact_level === "medium" ? "Среднее" : "Низкое"}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                        <span className="text-xs opacity-70">{PAIN_LABELS[p.pain_type] || p.pain_type}</span>
+                        {p.frequency && <span className="text-xs opacity-70">📅 {p.frequency}</span>}
+                        {p.root_cause && <span className="text-xs opacity-70">🔍 {p.root_cause}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Бенчмарки ── */}
+        {tab === "benchmarks" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">Внешние практики и референсы — что работает у других</p>
+              <button onClick={() => setShowBenchmarkForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
+                <Icon name="Plus" size={13} /> Добавить бенчмарк
+              </button>
+            </div>
+            {showBenchmarkForm && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Новый бенчмарк</p>
+                <input placeholder="Название практики / кейса" value={benchmarkDraft.title} onChange={e => setBenchmarkDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input placeholder="Источник (компания / ресурс)" value={benchmarkDraft.source_name} onChange={e => setBenchmarkDraft(d => ({ ...d, source_name: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                  <input placeholder="Ссылка (URL)" value={benchmarkDraft.source_url} onChange={e => setBenchmarkDraft(d => ({ ...d, source_url: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                </div>
+                <input placeholder="Отрасль" value={benchmarkDraft.industry} onChange={e => setBenchmarkDraft(d => ({ ...d, industry: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                <textarea placeholder="Что было сделано — суть практики" rows={2} value={benchmarkDraft.summary} onChange={e => setBenchmarkDraft(d => ({ ...d, summary: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Наблюдаемый эффект / результат" rows={2} value={benchmarkDraft.observed_effect} onChange={e => setBenchmarkDraft(d => ({ ...d, observed_effect: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Применимость к нам — что можно взять" rows={2} value={benchmarkDraft.applicability} onChange={e => setBenchmarkDraft(d => ({ ...d, applicability: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Заметки / ограничения" rows={2} value={benchmarkDraft.notes} onChange={e => setBenchmarkDraft(d => ({ ...d, notes: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <div className="flex gap-2">
+                  <button onClick={() => setShowBenchmarkForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                  <button disabled={!benchmarkDraft.title.trim() || wbLoading} onClick={async () => {
+                    setWbLoading(true);
+                    await workspaceApi.createBenchmark({ project_id: projectId, ...benchmarkDraft });
+                    setBenchmarkDraft({ title: "", source_name: "", source_url: "", industry: "", summary: "", observed_effect: "", applicability: "", notes: "" });
+                    setShowBenchmarkForm(false);
+                    workspaceApi.getBenchmarks(projectId).then((d: { benchmarks: Benchmark[] }) => setBenchmarks(d.benchmarks || [])).catch(() => {});
+                    setWbLoading(false);
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                    {wbLoading ? "Сохраняю..." : "Сохранить"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {benchmarks.length === 0 && !showBenchmarkForm && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
+                <Icon name="BookMarked" size={32} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm">Бенчмарков пока нет</p>
+                <p className="text-xs text-slate-400 mt-1">Добавьте практики из других банков, компаний, исследований</p>
+              </div>
+            )}
+            <div className="space-y-3">
+              {benchmarks.map(b => (
+                <div key={b.id} className="bg-white border border-slate-200 rounded-2xl p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="font-semibold text-slate-900 text-sm">{b.title}</p>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {b.confidence_level && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{b.confidence_level === "high" ? "высокая доказательность" : b.confidence_level === "medium" ? "средняя" : "низкая"}</span>}
+                      {b.source_url && <a href={b.source_url} target="_blank" rel="noopener noreferrer" className="text-violet-600 hover:text-violet-800"><Icon name="ExternalLink" size={13} /></a>}
+                    </div>
+                  </div>
+                  {b.source_name && <p className="text-xs text-slate-400 mb-2">📎 {b.source_name}{b.industry ? ` · ${b.industry}` : ""}</p>}
+                  {b.summary && <p className="text-xs text-slate-600 mb-1"><span className="font-medium">Что сделано:</span> {b.summary}</p>}
+                  {b.observed_effect && <p className="text-xs text-slate-600 mb-1"><span className="font-medium">Эффект:</span> {b.observed_effect}</p>}
+                  {b.applicability && <div className="mt-2 bg-green-50 border border-green-100 rounded-lg px-3 py-2"><p className="text-xs text-green-800"><span className="font-semibold">Применимость:</span> {b.applicability}</p></div>}
+                  {b.notes && <p className="text-xs text-slate-400 mt-2 italic">{b.notes}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── AI-оценка ── */}
+        {tab === "ai" && (
+          <div className="space-y-4">
+            {/* AI-ассессмент */}
+            <div className="bg-gradient-to-br from-violet-50 to-slate-50 border border-violet-100 rounded-2xl p-4 space-y-3">
+              <p className="text-sm font-semibold text-violet-900">🧠 Быстрая оценка применимости AI</p>
+              <p className="text-xs text-violet-700">Опишите процесс или операцию — AI скажет нужен ли ИИ, какой тип и какие риски</p>
+              <textarea placeholder="Опишите процесс: что происходит сейчас, кто участвует, какие данные, где ручной труд..." rows={4} value={aiAssessText} onChange={e => setAiAssessText(e.target.value)} className="w-full border border-violet-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
+              <button disabled={!aiAssessText.trim() || aiAssessLoading} onClick={async () => {
+                setAiAssessLoading(true);
+                setAiAssessResult(null);
+                try {
+                  const res = await workspaceApi.aiAssess(projectId, aiAssessText) as { assessment: Record<string, unknown> };
+                  setAiAssessResult(res.assessment);
+                } finally { setAiAssessLoading(false); }
+              }} className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                {aiAssessLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</> : <><Icon name="Sparkles" size={14} /> Оценить</>}
+              </button>
+              {aiAssessResult && (
+                <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${(aiAssessResult.ai_recommended as boolean) ? "bg-green-50 border border-green-200" : "bg-slate-50 border border-slate-200"}`}>
+                    <Icon name={aiAssessResult.ai_recommended ? "CheckCircle" : "XCircle"} size={16} className={aiAssessResult.ai_recommended ? "text-green-600" : "text-slate-400"} />
+                    <span className="font-semibold text-sm">{aiAssessResult.recommendation_label as string}</span>
+                    {aiAssessResult.solution_label && <span className="text-xs text-slate-500 ml-auto">→ {aiAssessResult.solution_label as string}</span>}
+                  </div>
+                  {Array.isArray(aiAssessResult.key_operations) && (aiAssessResult.key_operations as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-1.5">Операции для автоматизации:</p>
+                      <ul className="space-y-1">{(aiAssessResult.key_operations as string[]).map((op, i) => <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5"><span className="text-violet-500 flex-shrink-0">•</span>{op}</li>)}</ul>
+                    </div>
+                  )}
+                  {Array.isArray(aiAssessResult.risks) && (aiAssessResult.risks as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-1.5">Риски:</p>
+                      <ul className="space-y-1">{(aiAssessResult.risks as string[]).map((r, i) => <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5"><span className="text-orange-500 flex-shrink-0">⚠</span>{r}</li>)}</ul>
+                    </div>
+                  )}
+                  {Array.isArray(aiAssessResult.quick_wins) && (aiAssessResult.quick_wins as string[]).length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-1.5">Quick wins прямо сейчас:</p>
+                      <ul className="space-y-1">{(aiAssessResult.quick_wins as string[]).map((w, i) => <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5"><span className="text-green-500 flex-shrink-0">✓</span>{w}</li>)}</ul>
+                    </div>
+                  )}
+                  {aiAssessResult.next_step && <div className="bg-violet-50 rounded-lg px-3 py-2"><p className="text-xs font-semibold text-violet-800">Следующий шаг:</p><p className="text-xs text-violet-700 mt-0.5">{aiAssessResult.next_step as string}</p></div>}
+                  <button onClick={async () => {
+                    const r = aiAssessResult;
+                    await workspaceApi.createAiOpportunity({
+                      project_id: projectId,
+                      title: aiAssessText.slice(0, 80),
+                      current_manual_operation: aiAssessText,
+                      proposed_solution_type: (r.solution_type as string) || "none",
+                      recommendation: (r.recommendation_label as string) || "assess",
+                      risks: Array.isArray(r.risks) ? (r.risks as string[]).join("; ") : "",
+                      human_in_loop: Boolean(r.human_in_loop),
+                    });
+                    workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
+                    setAiAssessResult(null);
+                    setAiAssessText("");
+                  }} className="flex items-center gap-1.5 text-xs text-violet-700 hover:text-violet-900 font-semibold">
+                    <Icon name="Save" size={12} /> Сохранить как AI-возможность
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-slate-800">Сохранённые AI-возможности ({aiOpportunities.length})</p>
+              <button onClick={() => setShowAiForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-600 rounded-lg text-xs font-semibold hover:bg-slate-50">
+                <Icon name="Plus" size={13} /> Добавить вручную
+              </button>
+            </div>
+            {showAiForm && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <input placeholder="Название (что автоматизируем)" value={aiDraft.title} onChange={e => setAiDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <textarea placeholder="Текущая ручная операция" rows={2} value={aiDraft.current_manual_operation} onChange={e => setAiDraft(d => ({ ...d, current_manual_operation: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <select value={aiDraft.proposed_solution_type} onChange={e => setAiDraft(d => ({ ...d, proposed_solution_type: e.target.value }))} className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                    <option value="none">Тип решения</option>
+                    <option value="genai">GenAI</option>
+                    <option value="ml">ML / классический AI</option>
+                    <option value="rpa">RPA / боты</option>
+                    <option value="rule_engine">Rule engine</option>
+                    <option value="workflow">Workflow автоматизация</option>
+                    <option value="bi">BI / аналитика</option>
+                    <option value="idp">IDP / распознавание</option>
+                    <option value="hybrid">Гибрид</option>
+                  </select>
+                  <select value={aiDraft.recommendation} onChange={e => setAiDraft(d => ({ ...d, recommendation: e.target.value }))} className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                    <option value="recommended">AI рекомендован</option>
+                    <option value="possible">AI возможен</option>
+                    <option value="assess">Требует оценки</option>
+                    <option value="no_ai">AI не нужен</option>
+                    <option value="automate_first">Сначала автоматизация</option>
+                  </select>
+                </div>
+                <textarea placeholder="Ожидаемый эффект" rows={2} value={aiDraft.expected_effect} onChange={e => setAiDraft(d => ({ ...d, expected_effect: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Риски" rows={2} value={aiDraft.risks} onChange={e => setAiDraft(d => ({ ...d, risks: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={aiDraft.human_in_loop} onChange={e => setAiDraft(d => ({ ...d, human_in_loop: e.target.checked }))} />
+                  Требует проверки человеком (human-in-the-loop)
+                </label>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowAiForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                  <button disabled={!aiDraft.title.trim() || wbLoading} onClick={async () => {
+                    setWbLoading(true);
+                    await workspaceApi.createAiOpportunity({ project_id: projectId, ...aiDraft });
+                    setAiDraft({ title: "", current_manual_operation: "", data_type: "mixed", proposed_solution_type: "none", expected_effect: "", risks: "", human_in_loop: true, recommendation: "assess" });
+                    setShowAiForm(false);
+                    workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
+                    setWbLoading(false);
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                    {wbLoading ? "Сохраняю..." : "Сохранить"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {aiOpportunities.length === 0 && !showAiForm && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Cpu" size={32} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm">Нет сохранённых AI-возможностей</p>
+                <p className="text-xs text-slate-400 mt-1">Используйте ассессмент выше или добавьте вручную</p>
+              </div>
+            )}
+            <div className="space-y-3">
+              {aiOpportunities.map(opp => {
+                const recColor = opp.recommendation === "recommended" ? "bg-green-50 border-green-200 text-green-800" : opp.recommendation === "possible" ? "bg-blue-50 border-blue-200 text-blue-800" : opp.recommendation === "no_ai" ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-amber-50 border-amber-200 text-amber-800";
+                const SOL_LABELS: Record<string, string> = { genai: "GenAI", ml: "ML", rpa: "RPA", rule_engine: "Rule engine", workflow: "Workflow", bi: "BI/аналитика", idp: "IDP", hybrid: "Гибрид", none: "Не определён" };
+                return (
+                  <div key={opp.id} className={`border rounded-2xl p-4 ${recColor}`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="font-semibold text-sm">{opp.title}</p>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/60 flex-shrink-0">{SOL_LABELS[opp.proposed_solution_type] || opp.proposed_solution_type}</span>
+                    </div>
+                    {opp.current_manual_operation && <p className="text-xs opacity-80 mb-1"><span className="font-medium">Сейчас:</span> {opp.current_manual_operation}</p>}
+                    {opp.expected_effect && <p className="text-xs opacity-80 mb-1"><span className="font-medium">Эффект:</span> {opp.expected_effect}</p>}
+                    {opp.risks && <p className="text-xs opacity-70 mb-1"><span className="font-medium">Риски:</span> {opp.risks}</p>}
+                    <div className="flex items-center gap-2 mt-2">
+                      {opp.human_in_loop && <span className="text-[10px] bg-white/60 px-1.5 py-0.5 rounded font-medium">👤 human-in-loop</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Инициативы ── */}
+        {tab === "initiatives" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">Решения готовые к реализации — с приоритетом и ответственным</p>
+              <button onClick={() => setShowInitiativeForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
+                <Icon name="Plus" size={13} /> Добавить инициативу
+              </button>
+            </div>
+            {showInitiativeForm && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Новая инициатива</p>
+                <input placeholder="Название инициативы" value={initiativeDraft.title} onChange={e => setInitiativeDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <textarea placeholder="Описание — что планируем сделать" rows={2} value={initiativeDraft.description} onChange={e => setInitiativeDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input placeholder="Владелец" value={initiativeDraft.owner_name} onChange={e => setInitiativeDraft(d => ({ ...d, owner_name: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                  <select value={initiativeDraft.priority} onChange={e => setInitiativeDraft(d => ({ ...d, priority: e.target.value }))} className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                    <option value="critical">Критический</option>
+                    <option value="high">Высокий</option>
+                    <option value="medium">Средний</option>
+                    <option value="low">Низкий</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Эффект (1–5)</p>
+                    <input type="range" min={1} max={5} value={initiativeDraft.impact_score} onChange={e => setInitiativeDraft(d => ({ ...d, impact_score: Number(e.target.value) }))} className="w-full" />
+                    <p className="text-xs text-center font-bold text-slate-700">{initiativeDraft.impact_score}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Усилие (1–5)</p>
+                    <input type="range" min={1} max={5} value={initiativeDraft.effort_score} onChange={e => setInitiativeDraft(d => ({ ...d, effort_score: Number(e.target.value) }))} className="w-full" />
+                    <p className="text-xs text-center font-bold text-slate-700">{initiativeDraft.effort_score}</p>
+                  </div>
+                </div>
+                <select value={initiativeDraft.status} onChange={e => setInitiativeDraft(d => ({ ...d, status: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                  <option value="idea">Идея</option>
+                  <option value="preparation">Подготовка</option>
+                  <option value="approval">Согласование</option>
+                  <option value="in_plan">В плане</option>
+                  <option value="pilot">Пилот</option>
+                  <option value="implementation">Реализация</option>
+                  <option value="done">Завершена</option>
+                </select>
+                <input placeholder="Следующий шаг" value={initiativeDraft.next_step} onChange={e => setInitiativeDraft(d => ({ ...d, next_step: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                <div className="flex gap-2">
+                  <button onClick={() => setShowInitiativeForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                  <button disabled={!initiativeDraft.title.trim() || wbLoading} onClick={async () => {
+                    setWbLoading(true);
+                    await workspaceApi.createInitiative({ project_id: projectId, ...initiativeDraft });
+                    setInitiativeDraft({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "" });
+                    setShowInitiativeForm(false);
+                    workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
+                    setWbLoading(false);
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                    {wbLoading ? "Сохраняю..." : "Сохранить"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {initiatives.length === 0 && !showInitiativeForm && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
+                <Icon name="Rocket" size={32} className="text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm">Инициатив пока нет</p>
+                <p className="text-xs text-slate-400 mt-1">Создайте инициативу из кейса — с эффектом, усилием и статусом</p>
+              </div>
+            )}
+            <div className="space-y-3">
+              {initiatives.map(init => {
+                const STATUS_MAP: Record<string, { label: string; color: string }> = {
+                  idea: { label: "Идея", color: "bg-slate-100 text-slate-600" },
+                  preparation: { label: "Подготовка", color: "bg-amber-100 text-amber-700" },
+                  approval: { label: "Согласование", color: "bg-blue-100 text-blue-700" },
+                  in_plan: { label: "В плане", color: "bg-indigo-100 text-indigo-700" },
+                  pilot: { label: "Пилот", color: "bg-violet-100 text-violet-700" },
+                  implementation: { label: "Реализация", color: "bg-green-100 text-green-700" },
+                  done: { label: "Завершена", color: "bg-emerald-100 text-emerald-700" },
+                };
+                const s = STATUS_MAP[init.status] || { label: init.status, color: "bg-slate-100 text-slate-600" };
+                const priorityBorder = init.priority === "critical" ? "border-red-300" : init.priority === "high" ? "border-orange-300" : "border-slate-200";
+                return (
+                  <div key={init.id} className={`bg-white border rounded-2xl p-4 ${priorityBorder}`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <p className="font-semibold text-slate-900 text-sm">{init.title}</p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${s.color}`}>{s.label}</span>
+                    </div>
+                    {init.description && <p className="text-xs text-slate-600 mb-2">{init.description}</p>}
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <span>📈 Эффект: <b className="text-slate-700">{init.impact_score}/5</b></span>
+                      <span>💪 Усилие: <b className="text-slate-700">{init.effort_score}/5</b></span>
+                      {init.owner_name && <span>👤 {init.owner_name}</span>}
+                    </div>
+                    {init.next_step && <div className="mt-2 bg-amber-50 rounded-lg px-3 py-2"><p className="text-xs text-amber-800">→ <span className="font-medium">Следующий шаг:</span> {init.next_step}</p></div>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

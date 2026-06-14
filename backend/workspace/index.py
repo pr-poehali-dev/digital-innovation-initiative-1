@@ -505,6 +505,520 @@ def handler(event: dict, context) -> dict:
                 "context_summary": context_summary,
             })
 
+        # ── Шаги процесса ─────────────────────────────────────────────
+        if action == "process_steps":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT id, step_order, title, role_name, description, system_name,
+                                   is_manual, pain_point, control_point, automation_potential, ai_potential, duration_minutes
+                            FROM {SCHEMA}.wb_process_steps
+                            WHERE process_id IN (
+                                SELECT id FROM {SCHEMA}.wb_processes WHERE user_id = %s AND is_archived = FALSE
+                            ) AND is_archived = FALSE
+                            ORDER BY step_order""",
+                        (user_id,),
+                    )
+                    rows = cur.fetchall()
+                return cors({"ok": True, "steps": [
+                    {"id": r[0], "step_order": r[1], "title": r[2], "role_name": r[3],
+                     "description": r[4], "system_name": r[5], "is_manual": r[6],
+                     "pain_point": r[7], "control_point": r[8],
+                     "automation_potential": r[9], "ai_potential": r[10], "duration_minutes": r[11]}
+                    for r in rows
+                ]})
+
+            if method == "POST":
+                proc_id = int(body.get("process_id") or 0)
+                title   = (body.get("title") or "").strip()
+                if not proc_id or not title:
+                    return cors({"ok": False, "error": {"message": "Нужны process_id и title"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT COUNT(*) FROM {SCHEMA}.wb_process_steps WHERE process_id = %s AND is_archived = FALSE",
+                        (proc_id,)
+                    )
+                    order = cur.fetchone()[0]
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_process_steps
+                            (process_id, step_order, title, role_name, description, system_name,
+                             is_manual, pain_point, control_point, automation_potential, ai_potential, duration_minutes)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (proc_id, order, title,
+                         body.get("role_name", ""), body.get("description", ""),
+                         body.get("system_name", ""), body.get("is_manual", True),
+                         body.get("pain_point", ""), body.get("control_point", ""),
+                         body.get("automation_potential", "none"),
+                         body.get("ai_potential", "none"),
+                         body.get("duration_minutes")),
+                    )
+                    step_id = cur.fetchone()[0]
+                conn.commit()
+                return cors({"ok": True, "id": step_id})
+
+            if method == "PUT":
+                step_id = int(body.get("id") or 0)
+                if not step_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                fields = ["updated_at = NOW()"]
+                vals   = []
+                for f in ("title", "role_name", "description", "system_name", "is_manual",
+                          "pain_point", "control_point", "automation_potential", "ai_potential",
+                          "duration_minutes", "step_order"):
+                    if f in body:
+                        fields.append(f"{f} = %s")
+                        vals.append(body[f])
+                vals.append(step_id)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_process_steps SET {', '.join(fields)} WHERE id = %s", vals)
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── Процессы ──────────────────────────────────────────────────
+        if action == "processes":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT p.id, p.title, p.description, p.owner_name, p.department,
+                                   p.maturity_level, p.digital_maturity, p.ai_potential,
+                                   COUNT(s.id) as step_count
+                            FROM {SCHEMA}.wb_processes p
+                            LEFT JOIN {SCHEMA}.wb_process_steps s ON s.process_id = p.id AND s.is_archived = FALSE
+                            WHERE p.user_id = %s AND p.is_archived = FALSE
+                            GROUP BY p.id ORDER BY p.created_at DESC""",
+                        (user_id,),
+                    )
+                    rows = cur.fetchall()
+
+                processes = []
+                for r in rows:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""SELECT id, step_order, title, role_name, system_name, is_manual,
+                                       pain_point, automation_potential, ai_potential, duration_minutes, description, control_point
+                                FROM {SCHEMA}.wb_process_steps
+                                WHERE process_id = %s AND is_archived = FALSE
+                                ORDER BY step_order""",
+                            (r[0],),
+                        )
+                        steps = [{"id": s[0], "step_order": s[1], "title": s[2], "role_name": s[3],
+                                  "system_name": s[4], "is_manual": s[5], "pain_point": s[6],
+                                  "automation_potential": s[7], "ai_potential": s[8],
+                                  "duration_minutes": s[9], "description": s[10], "control_point": s[11]}
+                                 for s in cur.fetchall()]
+                    processes.append({
+                        "id": r[0], "title": r[1], "description": r[2],
+                        "owner_name": r[3], "department": r[4],
+                        "maturity_level": r[5], "digital_maturity": r[6],
+                        "ai_potential": r[7], "step_count": r[8], "steps": steps,
+                    })
+                return cors({"ok": True, "processes": processes})
+
+            if method == "POST":
+                title = (body.get("title") or "").strip()
+                if not title:
+                    return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_processes
+                            (user_id, title, description, owner_name, department, objective,
+                             input_desc, output_desc, systems, maturity_level, digital_maturity, ai_potential)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (user_id, title,
+                         body.get("description", ""), body.get("owner_name", ""),
+                         body.get("department", ""), body.get("objective", ""),
+                         body.get("input_desc", ""), body.get("output_desc", ""),
+                         body.get("systems", ""),
+                         body.get("maturity_level", "initial"),
+                         body.get("digital_maturity", "paper"),
+                         body.get("ai_potential", "unknown")),
+                    )
+                    proc_id = cur.fetchone()[0]
+                    # Добавляем линк к проекту
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_case_process_links (case_id, process_id)
+                            VALUES (%s, %s) ON CONFLICT DO NOTHING""",
+                        (project_id, proc_id),
+                    )
+                conn.commit()
+                return cors({"ok": True, "id": proc_id})
+
+            if method == "PUT":
+                proc_id = int(body.get("id") or 0)
+                if not proc_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                fields = ["updated_at = NOW()"]
+                vals   = []
+                for f in ("title", "description", "owner_name", "department", "objective",
+                          "input_desc", "output_desc", "systems", "maturity_level",
+                          "digital_maturity", "ai_potential"):
+                    if f in body:
+                        fields.append(f"{f} = %s")
+                        vals.append(body[f])
+                vals.append(proc_id)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_processes SET {', '.join(fields)} WHERE id = %s", vals)
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── Боли / узкие места ────────────────────────────────────────
+        if action == "pain_points":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT id, pain_type, description, impact_level, frequency, root_cause
+                            FROM {SCHEMA}.wb_pain_points
+                            WHERE case_id = %s AND is_archived = FALSE
+                            ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                                     created_at DESC""",
+                        (project_id,),
+                    )
+                    rows = cur.fetchall()
+                return cors({"ok": True, "pain_points": [
+                    {"id": r[0], "pain_type": r[1], "description": r[2],
+                     "impact_level": r[3], "frequency": r[4], "root_cause": r[5]}
+                    for r in rows
+                ]})
+
+            if method == "POST":
+                desc = (body.get("description") or "").strip()
+                if not desc:
+                    return cors({"ok": False, "error": {"message": "Нужно description"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_pain_points
+                            (case_id, pain_type, description, impact_level, frequency, root_cause)
+                            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (project_id, body.get("pain_type", "manual_work"), desc,
+                         body.get("impact_level", "medium"),
+                         body.get("frequency", ""), body.get("root_cause", "")),
+                    )
+                    pp_id = cur.fetchone()[0]
+                conn.commit()
+                return cors({"ok": True, "id": pp_id})
+
+            if method == "PUT":
+                pp_id = int(body.get("id") or 0)
+                if not pp_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                fields = ["updated_at = NOW()"]
+                vals   = []
+                for f in ("pain_type", "description", "impact_level", "frequency", "root_cause"):
+                    if f in body:
+                        fields.append(f"{f} = %s")
+                        vals.append(body[f])
+                if body.get("archive"):
+                    fields.append("is_archived = TRUE")
+                vals.append(pp_id)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_pain_points SET {', '.join(fields)} WHERE id = %s", vals)
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── Бенчмарки ─────────────────────────────────────────────────
+        if action == "benchmarks":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT b.id, b.title, b.source_name, b.source_url, b.industry,
+                                   b.organization_name, b.benchmark_type, b.summary,
+                                   b.observed_effect, b.applicability, b.confidence_level,
+                                   b.notes, cb.relevance_note
+                            FROM {SCHEMA}.wb_benchmarks b
+                            JOIN {SCHEMA}.wb_case_benchmarks cb ON cb.benchmark_id = b.id
+                            WHERE cb.case_id = %s AND b.is_archived = FALSE
+                            ORDER BY b.created_at DESC""",
+                        (project_id,),
+                    )
+                    rows = cur.fetchall()
+                return cors({"ok": True, "benchmarks": [
+                    {"id": r[0], "title": r[1], "source_name": r[2], "source_url": r[3],
+                     "industry": r[4], "organization_name": r[5], "benchmark_type": r[6],
+                     "summary": r[7], "observed_effect": r[8], "applicability": r[9],
+                     "confidence_level": r[10], "notes": r[11], "relevance_note": r[12]}
+                    for r in rows
+                ]})
+
+            if method == "POST":
+                title = (body.get("title") or "").strip()
+                if not title:
+                    return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_benchmarks
+                            (user_id, title, source_name, source_url, industry, organization_name,
+                             benchmark_type, summary, what_was_done, observed_effect,
+                             applicability, confidence_level, limitations, notes)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (user_id, title,
+                         body.get("source_name", ""), body.get("source_url", ""),
+                         body.get("industry", ""), body.get("organization_name", ""),
+                         body.get("benchmark_type", "digitalization"),
+                         body.get("summary", ""), body.get("what_was_done", ""),
+                         body.get("observed_effect", ""), body.get("applicability", ""),
+                         body.get("confidence_level", "medium"),
+                         body.get("limitations", ""), body.get("notes", "")),
+                    )
+                    bm_id = cur.fetchone()[0]
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_case_benchmarks (case_id, benchmark_id, relevance_note)
+                            VALUES (%s, %s, %s) ON CONFLICT (case_id, benchmark_id) DO NOTHING""",
+                        (project_id, bm_id, body.get("relevance_note", "")),
+                    )
+                conn.commit()
+                return cors({"ok": True, "id": bm_id})
+
+            if method == "PUT":
+                bm_id = int(body.get("id") or 0)
+                if not bm_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                fields = ["updated_at = NOW()"]
+                vals   = []
+                for f in ("title", "source_name", "source_url", "industry", "organization_name",
+                          "benchmark_type", "summary", "what_was_done", "observed_effect",
+                          "applicability", "confidence_level", "notes"):
+                    if f in body:
+                        fields.append(f"{f} = %s")
+                        vals.append(body[f])
+                vals.append(bm_id)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_benchmarks SET {', '.join(fields)} WHERE id = %s", vals)
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── AI Opportunities ──────────────────────────────────────────
+        if action == "ai_opportunities":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT id, title, current_manual_operation, data_type,
+                                   proposed_solution_type, use_case_type, expected_effect,
+                                   risks, security_notes, human_in_loop, recommendation
+                            FROM {SCHEMA}.wb_ai_opportunities
+                            WHERE case_id = %s AND is_archived = FALSE
+                            ORDER BY created_at DESC""",
+                        (project_id,),
+                    )
+                    rows = cur.fetchall()
+                return cors({"ok": True, "opportunities": [
+                    {"id": r[0], "title": r[1], "current_manual_operation": r[2],
+                     "data_type": r[3], "proposed_solution_type": r[4], "use_case_type": r[5],
+                     "expected_effect": r[6], "risks": r[7], "security_notes": r[8],
+                     "human_in_loop": r[9], "recommendation": r[10]}
+                    for r in rows
+                ]})
+
+            if method == "POST":
+                title = (body.get("title") or "").strip()
+                if not title:
+                    return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_ai_opportunities
+                            (case_id, user_id, title, current_manual_operation, data_type,
+                             proposed_solution_type, use_case_type, expected_effect,
+                             required_data, quality_requirements, risks, security_notes,
+                             human_in_loop, recommendation)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (project_id, user_id, title,
+                         body.get("current_manual_operation", ""),
+                         body.get("data_type", "mixed"),
+                         body.get("proposed_solution_type", "none"),
+                         body.get("use_case_type", ""),
+                         body.get("expected_effect", ""),
+                         body.get("required_data", ""),
+                         body.get("quality_requirements", ""),
+                         body.get("risks", ""),
+                         body.get("security_notes", ""),
+                         body.get("human_in_loop", True),
+                         body.get("recommendation", "assess")),
+                    )
+                    opp_id = cur.fetchone()[0]
+                conn.commit()
+                return cors({"ok": True, "id": opp_id})
+
+            if method == "PUT":
+                opp_id = int(body.get("id") or 0)
+                if not opp_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                fields = ["updated_at = NOW()"]
+                vals   = []
+                for f in ("title", "current_manual_operation", "data_type", "proposed_solution_type",
+                          "use_case_type", "expected_effect", "required_data", "quality_requirements",
+                          "risks", "security_notes", "human_in_loop", "recommendation"):
+                    if f in body:
+                        fields.append(f"{f} = %s")
+                        vals.append(body[f])
+                if body.get("archive"):
+                    fields.append("is_archived = TRUE")
+                vals.append(opp_id)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_ai_opportunities SET {', '.join(fields)} WHERE id = %s", vals)
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── AI-ассессмент (быстрая оценка применимости AI) ───────────
+        if method == "POST" and action == "ai_assess":
+            project_id  = int(body.get("project_id") or 0)
+            process_desc = (body.get("process_description") or "").strip()
+            if not project_id or not process_desc:
+                return cors({"ok": False, "error": {"message": "Нужны project_id и process_description"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            prompt = f"""Ты эксперт по цифровизации и ИИ в корпоративных процессах.
+
+Проанализируй описание процесса и дай структурированную оценку применимости ИИ.
+
+ОПИСАНИЕ ПРОЦЕССА:
+{process_desc}
+
+Верни СТРОГО валидный JSON:
+{{
+  "ai_recommended": true/false,
+  "recommendation_label": "AI рекомендован" / "AI возможен" / "Сначала автоматизация" / "AI пока рано" / "AI не нужен",
+  "solution_type": "genai" / "ml" / "rpa" / "rule_engine" / "workflow" / "bi" / "none",
+  "solution_label": "читаемое название типа решения",
+  "key_operations": ["список ручных операций которые можно автоматизировать"],
+  "data_requirements": "какие данные нужны",
+  "risks": ["главные риски"],
+  "human_in_loop": true/false,
+  "human_in_loop_reason": "почему нужен / не нужен контроль человека",
+  "quick_wins": ["что можно сделать прямо сейчас без ИИ"],
+  "next_step": "конкретный следующий шаг"
+}}
+
+ТОЛЬКО JSON без пояснений."""
+
+            result_text = yandex_gpt(prompt, max_tokens=1500)
+            try:
+                start, end = result_text.find("{"), result_text.rfind("}")
+                result = json.loads(result_text[start:end+1])
+            except Exception:
+                result = {"ai_recommended": False, "recommendation_label": "Не удалось проанализировать", "solution_type": "none"}
+
+            return cors({"ok": True, "assessment": result})
+
+        # ── AI: выделить боли из описания ────────────────────────────
+        if method == "POST" and action == "ai_extract_pains":
+            project_id = int(body.get("project_id") or 0)
+            text       = (body.get("text") or "").strip()
+            if not project_id or not text:
+                return cors({"ok": False, "error": {"message": "Нужны project_id и text"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            prompt = f"""Из описания процесса или ситуации выдели боли, узкие места и проблемы.
+
+ТЕКСТ:
+{text[:3000]}
+
+Верни СТРОГО валидный JSON — массив болей:
+[
+  {{
+    "description": "конкретное описание боли",
+    "pain_type": "manual_work" / "duplication" / "delay" / "lack_of_visibility" / "control_gap" / "data_quality" / "error_rate" / "compliance_burden",
+    "impact_level": "critical" / "high" / "medium" / "low",
+    "frequency": "ежедневно" / "еженедельно" / "ежемесячно" / "разово",
+    "root_cause": "предполагаемая корневая причина"
+  }}
+]
+
+ТОЛЬКО JSON массив без пояснений."""
+
+            result_text = yandex_gpt(prompt, max_tokens=2000)
+            try:
+                start, end = result_text.find("["), result_text.rfind("]")
+                pains = json.loads(result_text[start:end+1])
+            except Exception:
+                pains = []
+
+            return cors({"ok": True, "pains": pains})
+
+        # ── Инициативы ────────────────────────────────────────────────
+        if action == "initiatives":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT id, title, description, owner_name, priority,
+                                   impact_score, effort_score, status, next_step,
+                                   target_start_date, target_end_date
+                            FROM {SCHEMA}.wb_initiatives
+                            WHERE case_id = %s AND is_archived = FALSE
+                            ORDER BY impact_score DESC, created_at DESC""",
+                        (project_id,),
+                    )
+                    rows = cur.fetchall()
+                return cors({"ok": True, "initiatives": [
+                    {"id": r[0], "title": r[1], "description": r[2], "owner_name": r[3],
+                     "priority": r[4], "impact_score": r[5], "effort_score": r[6],
+                     "status": r[7], "next_step": r[8],
+                     "target_start_date": str(r[9]) if r[9] else None,
+                     "target_end_date": str(r[10]) if r[10] else None}
+                    for r in rows
+                ]})
+
+            if method == "POST":
+                title = (body.get("title") or "").strip()
+                if not title:
+                    return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_initiatives
+                            (case_id, user_id, title, description, owner_name, priority,
+                             impact_score, effort_score, status, next_step)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (project_id, user_id, title,
+                         body.get("description", ""), body.get("owner_name", ""),
+                         body.get("priority", "medium"),
+                         body.get("impact_score", 3), body.get("effort_score", 3),
+                         body.get("status", "idea"), body.get("next_step", "")),
+                    )
+                    init_id = cur.fetchone()[0]
+                conn.commit()
+                return cors({"ok": True, "id": init_id})
+
+            if method == "PUT":
+                init_id = int(body.get("id") or 0)
+                if not init_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                fields = ["updated_at = NOW()"]
+                vals   = []
+                for f in ("title", "description", "owner_name", "priority",
+                          "impact_score", "effort_score", "status", "next_step"):
+                    if f in body:
+                        fields.append(f"{f} = %s")
+                        vals.append(body[f])
+                vals.append(init_id)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_initiatives SET {', '.join(fields)} WHERE id = %s", vals)
+                conn.commit()
+                return cors({"ok": True})
+
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 
     finally:

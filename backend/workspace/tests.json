@@ -1,34 +1,10 @@
 {
   "tests": [
-    {
-      "name": "OPTIONS preflight",
-      "method": "OPTIONS",
-      "path": "/",
-      "expectedStatus": 200
-    },
-    {
-      "name": "Unauthorized",
-      "method": "GET",
-      "path": "/?action=context&project_id=1",
-      "expectedStatus": 401,
-      "expectedBody": {"ok": false},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Unauthorized hypotheses",
-      "method": "GET",
-      "path": "/?action=hypotheses&project_id=1",
-      "expectedStatus": 401,
-      "expectedBody": {"ok": false},
-      "bodyMatcher": "partial"
-    },
-    {
-      "name": "Unauthorized artifacts",
-      "method": "GET",
-      "path": "/?action=artifacts&project_id=1",
-      "expectedStatus": 401,
-      "expectedBody": {"ok": false},
-      "bodyMatcher": "partial"
-    }
+    {"name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200},
+    {"name": "Unauth context", "method": "GET", "path": "/?action=context&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth processes", "method": "GET", "path": "/?action=processes&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth pain_points", "method": "GET", "path": "/?action=pain_points&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth benchmarks", "method": "GET", "path": "/?action=benchmarks&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unknown action", "method": "GET", "path": "/?action=unknown_xyz", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"}
   ]
 }

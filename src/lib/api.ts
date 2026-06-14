@@ -638,4 +638,43 @@ export const workspaceApi = {
     request(URLS.workspace, `/?action=ai_runs&project_id=${projectId}`, "GET"),
   copilot: (data: { project_id: number; message: string; mode?: string; save_as_artifact?: boolean; artifact_title?: string; artifact_type?: string }) =>
     request(URLS.workspace, "/?action=copilot", "POST", data),
+  // ── Transformation Workbench ──────────────────────────────────────
+  getProcesses: (projectId: number) =>
+    request(URLS.workspace, `/?action=processes&project_id=${projectId}`, "GET"),
+  createProcess: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=processes", "POST", data),
+  updateProcess: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=processes", "PUT", data),
+  createProcessStep: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=process_steps", "POST", data),
+  updateProcessStep: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=process_steps", "PUT", data),
+  getPainPoints: (projectId: number) =>
+    request(URLS.workspace, `/?action=pain_points&project_id=${projectId}`, "GET"),
+  createPainPoint: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=pain_points", "POST", data),
+  updatePainPoint: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=pain_points", "PUT", data),
+  getBenchmarks: (projectId: number) =>
+    request(URLS.workspace, `/?action=benchmarks&project_id=${projectId}`, "GET"),
+  createBenchmark: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=benchmarks", "POST", data),
+  updateBenchmark: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=benchmarks", "PUT", data),
+  getAiOpportunities: (projectId: number) =>
+    request(URLS.workspace, `/?action=ai_opportunities&project_id=${projectId}`, "GET"),
+  createAiOpportunity: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=ai_opportunities", "POST", data),
+  updateAiOpportunity: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=ai_opportunities", "PUT", data),
+  aiAssess: (projectId: number, processDescription: string) =>
+    request(URLS.workspace, "/?action=ai_assess", "POST", { project_id: projectId, process_description: processDescription }),
+  aiExtractPains: (projectId: number, text: string) =>
+    request(URLS.workspace, "/?action=ai_extract_pains", "POST", { project_id: projectId, text }),
+  getInitiatives: (projectId: number) =>
+    request(URLS.workspace, `/?action=initiatives&project_id=${projectId}`, "GET"),
+  createInitiative: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=initiatives", "POST", data),
+  updateInitiative: (data: Record<string, unknown>) =>
+    request(URLS.workspace, "/?action=initiatives", "PUT", data),
 };
