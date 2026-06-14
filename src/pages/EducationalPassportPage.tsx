@@ -288,35 +288,38 @@ export default function EducationalPassportPage() {
 
   return (
     <Layout>
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-          <Link to="/cabinet" className="hover:text-foreground">Кабинет</Link>
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3 sm:mb-4">
+          <Link to="/cabinet" className="hover:text-foreground flex items-center gap-1">
+            <Icon name="ChevronLeft" size={14} />
+            Кабинет
+          </Link>
           <Icon name="ChevronRight" size={14} />
-          <span className="text-foreground font-medium">Паспорт образования</span>
+          <span className="text-foreground font-medium truncate">Паспорт образования</span>
         </div>
 
-        <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold">📜 Паспорт образования</h1>
-            <p className="text-muted-foreground text-sm mt-1 max-w-2xl">
-              Добавьте дипломы, сертификаты и материалы, которые вы изучали. Система будет учитывать это
-              в образовательном профиле и при построении целей.
+        <div className="flex items-start justify-between mb-4 sm:mb-6 gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold">📜 Паспорт образования</h1>
+            <p className="text-muted-foreground text-xs sm:text-sm mt-1 leading-snug">
+              Добавьте дипломы, сертификаты и материалы. Система учтёт их в профиле и при построении целей.
             </p>
           </div>
-          <div className="flex gap-2">
+          {/* На мобайле — кнопки в колонку под заголовком */}
+          <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
             <button
               onClick={() => setShowCreate("formal")}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white px-3 py-2 rounded-lg text-xs sm:text-sm font-medium"
             >
-              <Icon name="GraduationCap" size={16} />
-              Добавить документ
+              <Icon name="GraduationCap" size={14} />
+              <span className="hidden xs:inline sm:inline">Добавить</span> документ
             </button>
             <button
               onClick={() => setShowCreate("material")}
-              className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium"
+              className="flex items-center gap-1.5 border border-slate-300 hover:bg-slate-50 active:bg-slate-100 text-slate-700 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium"
             >
-              <Icon name="BookOpen" size={16} />
-              Добавить материал
+              <Icon name="BookOpen" size={14} />
+              <span className="hidden xs:inline sm:inline">Добавить</span> материал
             </button>
           </div>
         </div>
@@ -364,12 +367,14 @@ export default function EducationalPassportPage() {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
-              <Icon name="GraduationCap" size={28} className="text-slate-500" />
+          <div className="text-center py-12 sm:py-16">
+            <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
+              <Icon name="GraduationCap" size={24} className="text-slate-500" />
             </div>
-            <p className="font-medium text-foreground mb-1">Паспорт пока пустой</p>
-            <p className="text-sm text-muted-foreground mb-4">Добавьте свои дипломы, сертификаты или учебные материалы</p>
+            <p className="font-semibold text-foreground mb-1">Паспорт пока пустой</p>
+            <p className="text-xs sm:text-sm text-muted-foreground mb-4 max-w-xs mx-auto leading-snug">
+              Добавьте свои дипломы, сертификаты или учебные материалы
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -449,9 +454,9 @@ export default function EducationalPassportPage() {
 
       {/* Детальная карточка записи — боковая панель */}
       {detailItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-start justify-end z-50" onClick={() => setDetailItem(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-start sm:justify-end z-50" onClick={() => setDetailItem(null)}>
           <div
-            className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-2xl"
+            className="bg-white w-full sm:max-w-lg sm:h-full max-h-[90vh] overflow-y-auto shadow-2xl rounded-t-2xl sm:rounded-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
@@ -777,7 +782,7 @@ function CreateModal(props: {
 
           {props.mode === "formal" && (
             <>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1.5">Направление</label>
                   <input
@@ -948,7 +953,7 @@ function ConfirmModal(props: { item: EduItem & { extracted_data?: Record<string,
             <label className="text-xs font-semibold text-slate-700 block mb-1.5">Учреждение / источник</label>
             <input value={institution} onChange={(e) => setInstitution(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1.5">Направление</label>
               <input value={field} onChange={(e) => setField(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white" />
