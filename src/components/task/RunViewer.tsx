@@ -188,20 +188,21 @@ export default function RunViewer({
 
       {(activeRun || loadingRun) && (
         <div ref={contentRef} className="border rounded-2xl bg-card overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
+          {/* Шапка: версия + экспорт. На мобайле — 2 строки */}
+          <div className="px-4 py-3 border-b flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
-              <Icon name="Sparkles" size={16} className="text-orange-500" />
+              <Icon name="Sparkles" size={16} className="text-orange-500 flex-shrink-0" />
               <span className="text-sm font-medium">
                 {loadingRun ? "Загрузка..." : `Версия ${activeRun?.version}`}
               </span>
               {activeRun?.status === "done" && (
-                <span className="text-xs bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 px-2 py-0.5 rounded-full">Готово</span>
+                <span className="text-xs bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 px-2 py-0.5 rounded-full flex-shrink-0">Готово</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={onCopy}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1.5"
               >
                 <Icon name="Copy" size={13} />
                 Скопировать
@@ -209,7 +210,7 @@ export default function RunViewer({
               <button
                 onClick={onExportPptx}
                 disabled={exporting || loadingRun}
-                className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
               >
                 <Icon name="Download" size={13} />
                 PPTX
@@ -217,7 +218,7 @@ export default function RunViewer({
               <button
                 onClick={onExportDocx}
                 disabled={exporting || loadingRun}
-                className="flex items-center gap-1.5 text-xs bg-blue-700 hover:bg-blue-800 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs bg-blue-700 hover:bg-blue-800 active:bg-blue-900 text-white px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
               >
                 <Icon name="FileText" size={13} />
                 DOCX
@@ -241,45 +242,45 @@ export default function RunViewer({
                   </p>
                   <div className="space-y-1.5 text-xs">
                     {activeRun.influence_map.structure_from && activeRun.influence_map.structure_from.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-purple-700 min-w-[100px]">📜 Структура:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.structure_from.join(", ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-purple-700 flex-shrink-0">📜 Структура:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.structure_from.join(", ")}</span>
                       </div>
                     )}
                     {activeRun.influence_map.content_from && activeRun.influence_map.content_from.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-green-700 min-w-[100px]">📚 Контент:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.content_from.join(", ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-green-700 flex-shrink-0">📚 Контент:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.content_from.join(", ")}</span>
                       </div>
                     )}
                     {activeRun.influence_map.format_from && activeRun.influence_map.format_from.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-blue-700 min-w-[100px]">🎨 Формат:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.format_from.join(", ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-blue-700 flex-shrink-0">🎨 Формат:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.format_from.join(", ")}</span>
                       </div>
                     )}
                     {activeRun.influence_map.methodology_from && activeRun.influence_map.methodology_from.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-cyan-700 min-w-[100px]">🧭 Методика:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.methodology_from.join(", ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-cyan-700 flex-shrink-0">🧭 Методика:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.methodology_from.join(", ")}</span>
                       </div>
                     )}
                     {activeRun.influence_map.ai_additions && activeRun.influence_map.ai_additions.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-slate-600 min-w-[100px]">🤖 От AI:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.ai_additions.join("; ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-slate-600 flex-shrink-0">🤖 От AI:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.ai_additions.join("; ")}</span>
                       </div>
                     )}
                     {activeRun.influence_map.ignored && activeRun.influence_map.ignored.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-amber-700 min-w-[100px]">⚠️ Пропущено:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.ignored.join(", ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-amber-700 flex-shrink-0">⚠️ Пропущено:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.ignored.join(", ")}</span>
                       </div>
                     )}
                     {activeRun.influence_map.conflicts_resolved && activeRun.influence_map.conflicts_resolved.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="font-medium text-red-700 min-w-[100px]">⚖️ Конфликты:</span>
-                        <span className="text-slate-700">{activeRun.influence_map.conflicts_resolved.join("; ")}</span>
+                      <div className="flex flex-col sm:flex-row sm:gap-2">
+                        <span className="font-medium text-red-700 flex-shrink-0">⚖️ Конфликты:</span>
+                        <span className="text-slate-700 break-words">{activeRun.influence_map.conflicts_resolved.join("; ")}</span>
                       </div>
                     )}
                   </div>
@@ -334,7 +335,7 @@ export default function RunViewer({
                                 <span className="text-xs font-semibold text-slate-700">
                                   Слайд {vp.slide_index}
                                 </span>
-                                <span className="text-xs text-slate-500 truncate max-w-[180px]">
+                                <span className="text-xs text-slate-500 truncate max-w-[120px] sm:max-w-[200px]">
                                   {vp.slide_title}
                                 </span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[vp.generation_status] || "bg-slate-100 text-slate-600"}`}>
