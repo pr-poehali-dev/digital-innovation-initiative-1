@@ -534,9 +534,18 @@ function MilestoneRow({
 
   const loadMaterials = useCallback(async () => {
     try {
-      const res = await learningPackApi.list(milestone.id) as { materials: Material[]; job: { status: string } | null };
+      const res = await learningPackApi.list(milestone.id) as {
+        materials: Material[];
+        needs_refresh?: boolean;
+        readable_count?: number;
+        job: { status: string } | null;
+      };
       setMaterials(res.materials || []);
       setJobStatus(res.job?.status || null);
+      // Если legacy pipeline и нет читаемых — сразу показываем баннер обновления
+      if (res.needs_refresh && (res.readable_count ?? 0) === 0) {
+        setGenerateError("legacy");
+      }
     } catch (e) { console.error(e); }
   }, [milestone.id]);
 
@@ -618,10 +627,21 @@ function MilestoneRow({
           ) : materials.length === 0 ? (
             <div className="py-4 space-y-3">
               {/* Error state */}
-              {generateError && (
+              {generateError === "legacy" && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <p className="text-xs font-semibold text-amber-700 mb-0.5">Подборка устарела</p>
+                  <p className="text-[11px] text-amber-600 mb-2">Эти материалы подобраны старой версией. Обнови — система найдёт статьи, которые точно открываются в кабинете.</p>
+                  <button onClick={() => { setGenerateError(null); handleGenerate(); }} disabled={generating}
+                    className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white rounded-lg transition-colors">
+                    {generating ? <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" /> : <Icon name="RefreshCw" size={11} />}
+                    {generating ? "Обновляю..." : "Обновить подборку"}
+                  </button>
+                </div>
+              )}
+              {generateError && generateError !== "legacy" && (
                 <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
                   <p className="text-xs font-semibold text-red-600 mb-0.5">Не удалось подобрать материалы</p>
-                  <p className="text-[11px] text-red-500 mb-2">Возможные причины: источник долго отвечал, сервис временно недоступен.</p>
+                  <p className="text-[11px] text-red-500 mb-2">Попробуй ещё раз или открой список литературы.</p>
                   <div className="flex gap-2">
                     <button onClick={handleGenerate} disabled={generating}
                       className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-lg transition-colors">

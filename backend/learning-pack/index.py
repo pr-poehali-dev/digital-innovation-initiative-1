@@ -717,12 +717,12 @@ def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
                         (mat_id, milestone_id, assets.get("summary", ""), kp, assets.get("study_notes", ""), content_hash),
                     )
 
-            # milestone_materials
+            # milestone_materials — помечаем corpus_v1 для отслеживания поколения
             selection_reason = c.get("reason") or assets.get("relevance", "")
             cur.execute(
                 f"""INSERT INTO {schema}.milestone_materials
-                    (milestone_id, goal_id, user_id, material_id, relevance_score, selection_reason, sort_order)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                    (milestone_id, goal_id, user_id, material_id, relevance_score, selection_reason, sort_order, pipeline_version)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'corpus_v1')""",
                 (milestone_id, goal_id, user_id, mat_id, 0.8, selection_reason, sort_i),
             )
             saved += 1
@@ -793,7 +793,7 @@ def handle_list(conn, user, body, rid, origin):
                    mm.relevance_score, mm.selection_reason, mm.sort_order,
                    ump.status,
                    mla.content_summary, mla.key_points, mla.study_notes,
-                   ms.word_count
+                   ms.word_count, mm.pipeline_version
             FROM {schema}.milestone_materials mm
             JOIN {schema}.materials m ON m.id = mm.material_id
             LEFT JOIN {schema}.user_material_progress ump
@@ -802,20 +802,26 @@ def handle_list(conn, user, body, rid, origin):
                 ON mla.material_id = m.id AND mla.milestone_id = %s
             LEFT JOIN {schema}.material_snapshots ms ON ms.material_id = m.id
             WHERE mm.milestone_id = %s AND mm.user_id = %s
-            ORDER BY mm.sort_order""",
+            ORDER BY
+                CASE WHEN m.availability_mode = 'in_app' THEN 0 ELSE 1 END,
+                mm.sort_order""",
         (user["id"], int(milestone_id), int(milestone_id), int(milestone_id), user["id"]),
     )
-    materials = []
-    for row in cur.fetchall():
+    all_rows = cur.fetchall()
+    readable = []
+    supplemental = []
+    needs_refresh = False
+
+    for row in all_rows:
         (mm_id, mat_id, url, domain, title, description,
          source_type, trust_level, fmt, est_min,
          avail_mode, verif_status, summary_basis,
          relevance, selection_reason, sort_order,
          prog_status,
          content_summary, key_points, study_notes,
-         word_count) = row
+         word_count, pipeline_ver) = row
 
-        materials.append({
+        item = {
             "mm_id": mm_id, "id": mat_id,
             "url": url, "domain": domain, "title": title, "description": description,
             "source_type": source_type, "trust_level": trust_level,
@@ -835,7 +841,24 @@ def handle_list(conn, user, body, rid, origin):
             "key_points": key_points or [],
             "study_notes": study_notes or "",
             "word_count": word_count or 0,
-        })
+            "pipeline_version": pipeline_ver or "legacy",
+        }
+
+        # Legacy pipeline — пользователю нужно обновить подборку
+        if (pipeline_ver or "legacy") == "legacy":
+            needs_refresh = True
+
+        # Разделяем: читаемые vs платные/закрытые
+        if avail_mode == "in_app":
+            readable.append(item)
+        else:
+            # source_only — только в supplemental, не в primary
+            item["verification_status"] = "source_only"
+            supplemental.append(item)
+
+    # Если 0 читаемых и всё legacy — ставим флаг обновления
+    if needs_refresh and not readable:
+        needs_refresh = True
 
     cur.execute(
         f"SELECT status, materials_found, error_text FROM {schema}.learning_jobs WHERE user_id=%s AND milestone_id=%s ORDER BY created_at DESC LIMIT 1",
@@ -844,7 +867,13 @@ def handle_list(conn, user, body, rid, origin):
     job = cur.fetchone()
     job_data = {"status": job[0], "materials_found": job[1], "error": job[2]} if job else None
 
-    return ok({"materials": materials, "job": job_data}, rid, origin)
+    return ok({
+        "materials": readable,            # только in_app — для основного блока
+        "supplemental": supplemental,     # source_only — для отдельного блока
+        "needs_refresh": needs_refresh,   # legacy pipeline — просим обновить
+        "readable_count": len(readable),
+        "job": job_data,
+    }, rid, origin)
 
 
 def handle_reader(conn, user, body, rid, origin):
