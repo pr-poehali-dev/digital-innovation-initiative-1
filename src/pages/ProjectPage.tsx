@@ -213,6 +213,7 @@ export default function ProjectPage() {
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
     projectsApi.get(projectId).then((d) => setProject(d)).catch(() => {});
@@ -513,45 +514,48 @@ export default function ProjectPage() {
 
   return (
     <Layout>
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
           <Link to="/cabinet/projects" className="flex items-center gap-1 hover:text-foreground transition-colors">
             <Icon name="Briefcase" size={13} />
-            Рабочий кабинет
+            <span className="hidden sm:inline">Рабочий кабинет</span>
           </Link>
           <Icon name="ChevronRight" size={13} />
-          <span className="text-foreground font-medium truncate">{project.title}</span>
+          <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">{project.title}</span>
         </div>
 
-        <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Кейс трансформации</p>
-            <h1 className="text-2xl font-bold leading-tight">{project.title}</h1>
+        <div className="flex items-start justify-between mb-4 sm:mb-6 gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Кейс трансформации</p>
+            <h1 className="text-lg sm:text-2xl font-bold leading-tight truncate">{project.title}</h1>
             {project.description && (
-              <p className="text-muted-foreground text-sm mt-1 max-w-2xl">{project.description}</p>
+              <p className="text-muted-foreground text-xs sm:text-sm mt-0.5 sm:mt-1 line-clamp-2 sm:max-w-2xl">{project.description}</p>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1.5 flex-shrink-0">
             <Link
               to={`/cabinet/project/${projectId}/audit`}
-              className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              title="Аудит"
             >
               <Icon name="ShieldCheck" size={16} />
-              Аудит
+              <span className="hidden sm:inline">Аудит</span>
             </Link>
             <Link
               to={`/cabinet/project/${projectId}/search`}
-              className="flex items-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              title="Поиск"
             >
               <Icon name="Search" size={16} />
-              Поиск
+              <span className="hidden sm:inline">Поиск</span>
             </Link>
             <Link
               to={`/cabinet/project/${projectId}/new-task`}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              title="Новое задание"
             >
               <Icon name="Plus" size={16} />
-              Новое задание
+              <span className="hidden sm:inline">Новое задание</span>
             </Link>
           </div>
         </div>
@@ -585,53 +589,68 @@ export default function ProjectPage() {
           ]}
         />
 
-        <div className="flex gap-0.5 mb-6 border-b overflow-x-auto">
-          {([
-            { key: "overview",    label: "🏠 Обзор" },
-            { key: "copilot",     label: "🤖 AI Copilot" },
-            { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
-            { key: "pains",       label: `🔥 Боли${painPoints.length ? ` (${painPoints.length})` : ""}` },
-            { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
-            { key: "benchmarks",  label: `📌 Бенчмарки${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
-            { key: "ai",          label: `🧠 AI-оценка${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
-            { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
-            { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
-            { key: "tasks",       label: `📋 Задания (${tasks.length})` },
-            { key: "docs",        label: `📄 Файлы (${docs.length})` },
-            { key: "team",        label: "👥 Команда" },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`whitespace-nowrap px-3.5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                tab === t.key
-                  ? "border-slate-800 text-slate-900"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
+        {/* Вкладки — горизонтальный скролл с автопрокруткой к активной */}
+        <div className="relative mb-4 sm:mb-6">
+          <div
+            ref={tabsRef}
+            className="flex gap-0 border-b overflow-x-auto scrollbar-none scroll-smooth"
+            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          >
+            {([
+              { key: "overview",    label: "🏠 Обзор" },
+              { key: "copilot",     label: "🤖 AI Copilot" },
+              { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
+              { key: "pains",       label: `🔥 Боли${painPoints.length ? ` (${painPoints.length})` : ""}` },
+              { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
+              { key: "benchmarks",  label: `📌 Бенчмарки${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
+              { key: "ai",          label: `🧠 AI-оценка${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
+              { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
+              { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
+              { key: "tasks",       label: `📋 Задания (${tasks.length})` },
+              { key: "docs",        label: `📄 Файлы (${docs.length})` },
+              { key: "team",        label: "👥 Команда" },
+            ] as const).map((t) => (
+              <button
+                key={t.key}
+                data-tab={t.key}
+                onClick={() => {
+                  setTab(t.key);
+                  // автоскролл к активной вкладке
+                  const el = tabsRef.current?.querySelector(`[data-tab="${t.key}"]`) as HTMLElement;
+                  el?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+                }}
+                className={`whitespace-nowrap px-3 sm:px-3.5 py-2 sm:py-2.5 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors flex-shrink-0 ${
+                  tab === t.key
+                    ? "border-slate-800 text-slate-900"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {/* Тень-индикатор: есть ещё вкладки справа */}
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background to-transparent pointer-events-none" />
         </div>
 
         {/* ── Обзор ── */}
         {tab === "overview" && (
           <div className="space-y-5">
             {/* Карточки-счётчики */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               {[
-                { label: "Гипотез", count: hypotheses.length, active: hypotheses.filter(h => h.status === "open" || h.status === "testing").length, icon: "Lightbulb", color: "text-amber-600 bg-amber-50" },
-                { label: "Болей", count: painPoints.length, active: painPoints.filter(p => p.impact_level === "critical" || p.impact_level === "high").length, icon: "Flame", color: "text-red-600 bg-red-50" },
-                { label: "Инициатив", count: initiatives.length, active: initiatives.filter(i => i.status === "pilot" || i.status === "implementation").length, icon: "Rocket", color: "text-violet-600 bg-violet-50" },
-                { label: "Файлов", count: docs.length, active: docs.filter(d => d.status === "ready").length, icon: "FileText", color: "text-blue-600 bg-blue-50" },
+                { label: "Гипотез", count: hypotheses.length, icon: "Lightbulb", color: "text-amber-600 bg-amber-50" },
+                { label: "Болей", count: painPoints.length, icon: "Flame", color: "text-red-600 bg-red-50" },
+                { label: "Инициатив", count: initiatives.length, icon: "Rocket", color: "text-violet-600 bg-violet-50" },
+                { label: "Файлов", count: docs.length, icon: "FileText", color: "text-blue-600 bg-blue-50" },
               ].map(c => (
-                <div key={c.label} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.color}`}>
-                    <Icon name={c.icon} size={18} />
+                <div key={c.label} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex items-center gap-2 sm:gap-3">
+                  <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0 ${c.color}`}>
+                    <Icon name={c.icon} size={16} />
                   </div>
                   <div>
-                    <p className="text-xl font-bold text-slate-900">{c.count}</p>
-                    <p className="text-xs text-slate-500">{c.label}</p>
+                    <p className="text-lg sm:text-xl font-bold text-slate-900">{c.count}</p>
+                    <p className="text-[10px] sm:text-xs text-slate-500">{c.label}</p>
                   </div>
                 </div>
               ))}
