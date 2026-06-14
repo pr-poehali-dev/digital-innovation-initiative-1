@@ -666,146 +666,161 @@ export default function ProjectPage() {
               const stageLabel = (stage && AI_STAGE_LABELS[stage]) || "ИИ анализирует кейс...";
 
               return (
-                <div className="bg-gradient-to-br from-slate-900 to-violet-950 rounded-2xl p-5 text-white">
-                  {/* Header */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-xl bg-violet-500/30 flex items-center justify-center">
+                <div className="bg-gradient-to-br from-slate-900 to-violet-950 rounded-2xl p-4 text-white">
+                  {/* Header — двухстрочный на мобайле */}
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="w-7 h-7 rounded-xl bg-violet-500/30 flex items-center justify-center flex-shrink-0">
                         <Icon name="BrainCircuit" size={15} className="text-violet-300" />
                       </div>
-                      <span className="font-semibold text-sm">AI Оператор</span>
-                      {isRunning && (
-                        <span className="flex items-center gap-1 text-[10px] text-violet-300">
-                          <div className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-pulse" />
-                          {stageLabel}
-                        </span>
-                      )}
-                      {!isRunning && status === "ready" && !isStale && (
-                        <span className="text-[10px] text-green-400">готово</span>
-                      )}
-                      {!isRunning && isStale && result && (
-                        <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">данные обновились</span>
-                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-sm">AI Оператор</span>
+                          {!isRunning && status === "ready" && !isStale && (
+                            <span className="text-[10px] text-green-400">готово</span>
+                          )}
+                          {!isRunning && isStale && result && (
+                            <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">обновились данные</span>
+                          )}
+                        </div>
+                        {isRunning && (
+                          <span className="flex items-center gap-1 text-[10px] text-violet-300 mt-0.5">
+                            <div className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-pulse flex-shrink-0" />
+                            {stageLabel}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       disabled={isRunning || aiLoading}
                       onClick={runAiAnalysis}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 rounded-lg text-xs font-semibold transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 disabled:opacity-40 rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
                     >
                       {isRunning
-                        ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</>
-                        : <><Icon name="Sparkles" size={12} /> {result ? "Обновить" : "Запустить анализ"}</>}
+                        ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /></>
+                        : <><Icon name="Sparkles" size={12} /> {result ? "Обновить" : "Анализ"}</>}
                     </button>
                   </div>
 
-                  {/* Plashka: файлы ещё обрабатываются */}
+                  {/* Plashki — компактные */}
                   {aiData?.has_pending_files && !isRunning && (
-                    <div className="mb-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
-                      <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                      <p className="text-xs text-blue-300">
-                        Обрабатываю {aiData.pending_files_count === 1 ? "документ" : `${aiData.pending_files_count} документа`} — AI запустится автоматически после извлечения текста
+                    <div className="mb-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2 flex items-start gap-2">
+                      <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-blue-300 leading-snug">
+                        Обрабатываю {aiData.pending_files_count === 1 ? "документ" : `${aiData.pending_files_count} документа`} — AI запустится автоматически
                       </p>
                     </div>
                   )}
-
-                  {/* Plashka: polling timeout */}
                   {pollTimeout && (
-                    <div className="mb-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
-                      <Icon name="Clock" size={13} className="text-amber-400 flex-shrink-0" />
-                      <p className="text-xs text-amber-300">Анализ занимает больше времени обычного. Можно подождать или запустить повторно.</p>
+                    <div className="mb-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 flex items-start gap-2">
+                      <Icon name="Clock" size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-300 leading-snug">Анализ занимает больше времени. Можно подождать или запустить повторно.</p>
                     </div>
                   )}
-
-                  {/* Plashka: stale — данные обновились поверх результата */}
                   {isStale && result && !isRunning && (
-                    <div className="mb-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
-                      <Icon name="RefreshCw" size={13} className="text-amber-400 flex-shrink-0 animate-spin" />
-                      <p className="text-xs text-amber-300">В кейсе появились новые данные — запускаю обновлённый анализ</p>
+                    <div className="mb-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 flex items-start gap-2">
+                      <Icon name="RefreshCw" size={13} className="text-amber-400 flex-shrink-0 animate-spin mt-0.5" />
+                      <p className="text-xs text-amber-300 leading-snug">Новые данные в кейсе — запускаю обновлённый анализ</p>
                     </div>
                   )}
 
-                  {/* Состояние 1: пустой кейс (idle, нет результата, кейс пуст) */}
+                  {/* Состояние 1: пустой кейс */}
                   {status === "idle" && !result && !aiLoading && (
                     <div className="text-center py-5">
                       <Icon name="PackageOpen" size={28} className="text-slate-600 mx-auto mb-2" />
-                      <p className="text-sm text-slate-400">Добавьте описание, процесс или боли — AI начнёт анализ автоматически</p>
+                      <p className="text-sm text-slate-400 leading-snug">Добавьте описание, процесс или боли — AI начнёт анализ автоматически</p>
                     </div>
                   )}
 
-                  {/* Состояние 2: идёт анализ — skeleton + подпись этапа */}
+                  {/* Состояние 2: skeleton */}
                   {isRunning && !result && (
-                    <div className="space-y-3 animate-pulse">
-                      <div className="flex gap-3">
-                        <div className="flex-1 bg-white/5 rounded-xl h-20" />
-                        <div className="w-20 bg-white/5 rounded-xl h-20" />
-                      </div>
-                      <div className="bg-white/5 rounded-xl h-12" />
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-white/5 rounded-xl h-24" />
-                        <div className="bg-white/5 rounded-xl h-24" />
-                      </div>
+                    <div className="space-y-2.5 animate-pulse">
+                      <div className="bg-white/5 rounded-xl h-16" />
+                      <div className="bg-white/5 rounded-xl h-10" />
+                      <div className="bg-white/5 rounded-xl h-10" />
+                      <div className="bg-white/5 rounded-xl h-20" />
                       <p className="text-xs text-slate-500 text-center">{stageLabel}</p>
                     </div>
                   )}
 
-                  {/* Состояние 3: ошибка без результата */}
+                  {/* Состояние 3: ошибка */}
                   {status === "failed" && !result && (
                     <div className="text-center py-4">
                       <Icon name="AlertCircle" size={24} className="text-red-400 mx-auto mb-2" />
-                      {aiData?.ai_last_error && <p className="text-xs text-slate-500 mb-2">{aiData.ai_last_error}</p>}
+                      {aiData?.ai_last_error && <p className="text-xs text-slate-500 mb-2 leading-snug">{aiData.ai_last_error}</p>}
                       <p className="text-sm text-slate-400 mb-3">Не удалось завершить анализ</p>
-                      <button onClick={runAiAnalysis} className="text-xs text-violet-400 hover:text-violet-300 underline">Повторить</button>
+                      <button onClick={runAiAnalysis} className="text-xs px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white font-semibold">Повторить</button>
                     </div>
                   )}
 
-                  {/* Состояния 4 и 5: есть результат (ready / stale / running поверх старого) */}
+                  {/* Состояние 4–5: результат */}
                   {result && (
-                    <div className="space-y-3">
-                      <div className="flex gap-3">
-                        <div className="flex-1 bg-white/5 rounded-xl p-3">
-                          <p className="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wide">Суть кейса</p>
-                          <p className="text-sm text-slate-200 leading-relaxed">{result.summary}</p>
+                    <div className="space-y-2.5">
+                      {/* Summary + score — вертикально на мобайле */}
+                      <div className="bg-white/5 rounded-xl p-3">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Суть кейса</p>
+                          <div className="flex items-baseline gap-0.5 flex-shrink-0">
+                            <span className="text-xl font-bold text-white">{result.readiness_score}</span>
+                            <span className="text-xs text-slate-400">/10</span>
+                            <span className="text-[9px] text-slate-500 ml-1">готовность</span>
+                          </div>
                         </div>
-                        <div className="flex-shrink-0 w-20 bg-white/5 rounded-xl p-3 flex flex-col items-center justify-center">
-                          <p className="text-2xl font-bold text-white">{result.readiness_score}<span className="text-sm text-slate-400">/10</span></p>
-                          <p className="text-[10px] text-slate-400 text-center mt-0.5">готовность</p>
-                        </div>
+                        <p className="text-sm text-slate-200 leading-relaxed">{result.summary}</p>
                       </div>
 
+                      {/* Ключевой инсайт */}
                       {result.key_insight && (
                         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
                           <p className="text-xs text-amber-400 font-semibold mb-1">💡 Ключевой инсайт</p>
-                          <p className="text-sm text-amber-100">{result.key_insight}</p>
+                          <p className="text-xs sm:text-sm text-amber-100 leading-snug">{result.key_insight}</p>
                         </div>
                       )}
 
+                      {/* Вердикт */}
                       <div className={`rounded-xl p-3 ${result.ai_verdict === "AI рекомендован" ? "bg-green-500/10 border border-green-500/20" : result.ai_verdict?.includes("Сначала") ? "bg-orange-500/10 border border-orange-500/20" : "bg-blue-500/10 border border-blue-500/20"}`}>
-                        <div className="flex items-center gap-2 mb-1">
-                          <Icon name={result.ai_verdict === "AI рекомендован" ? "CheckCircle" : "Info"} size={13} className={result.ai_verdict === "AI рекомендован" ? "text-green-400" : "text-blue-400"} />
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Icon name={result.ai_verdict === "AI рекомендован" ? "CheckCircle" : "Info"} size={13} className={`flex-shrink-0 ${result.ai_verdict === "AI рекомендован" ? "text-green-400" : "text-blue-400"}`} />
                           <p className="text-xs font-bold text-white">{result.ai_verdict}</p>
                         </div>
-                        {result.ai_verdict_reason && <p className="text-xs text-slate-300">{result.ai_verdict_reason}</p>}
+                        {result.ai_verdict_reason && <p className="text-xs text-slate-300 leading-snug">{result.ai_verdict_reason}</p>}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
-                        {result.quick_wins?.length > 0 && (
-                          <div className="bg-white/5 rounded-xl p-3">
-                            <p className="text-[10px] text-green-400 font-bold uppercase tracking-wide mb-2">✓ Quick wins</p>
-                            <ul className="space-y-1">{result.quick_wins.map((w, i) => <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className="text-green-400 flex-shrink-0">•</span>{w}</li>)}</ul>
-                          </div>
-                        )}
-                        {result.gaps?.length > 0 && (
-                          <div className="bg-white/5 rounded-xl p-3">
-                            <p className="text-[10px] text-orange-400 font-bold uppercase tracking-wide mb-2">⚠ Пробелы</p>
-                            <ul className="space-y-1">{result.gaps.map((g, i) => <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className="text-orange-400 flex-shrink-0">•</span>{g}</li>)}</ul>
-                          </div>
-                        )}
-                      </div>
+                      {/* Quick wins + Пробелы — вертикально на мобайле */}
+                      {(result.quick_wins?.length > 0 || result.gaps?.length > 0) && (
+                        <div className="space-y-2">
+                          {result.quick_wins?.length > 0 && (
+                            <div className="bg-white/5 rounded-xl p-3">
+                              <p className="text-[10px] text-green-400 font-bold uppercase tracking-wide mb-2">✓ Quick wins</p>
+                              <ul className="space-y-1.5">
+                                {result.quick_wins.map((w: string, i: number) => (
+                                  <li key={i} className="text-xs text-slate-300 flex items-start gap-1.5 leading-snug">
+                                    <span className="text-green-400 flex-shrink-0 mt-0.5">•</span>{w}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {result.gaps?.length > 0 && (
+                            <div className="bg-white/5 rounded-xl p-3">
+                              <p className="text-[10px] text-orange-400 font-bold uppercase tracking-wide mb-2">⚠ Пробелы</p>
+                              <ul className="space-y-1.5">
+                                {result.gaps.map((g: string, i: number) => (
+                                  <li key={i} className="text-xs text-slate-300 flex items-start gap-1.5 leading-snug">
+                                    <span className="text-orange-400 flex-shrink-0 mt-0.5">•</span>{g}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
+                      {/* Следующее действие */}
                       {result.next_action && (
-                        <div className="bg-violet-600/30 border border-violet-500/30 rounded-xl px-4 py-3">
+                        <div className="bg-violet-600/30 border border-violet-500/30 rounded-xl px-3 py-3">
                           <p className="text-[10px] text-violet-300 font-bold uppercase tracking-wide mb-1">→ Следующее действие</p>
-                          <p className="text-sm text-white font-medium">{result.next_action}</p>
+                          <p className="text-sm text-white font-medium leading-snug">{result.next_action}</p>
                         </div>
                       )}
                     </div>
