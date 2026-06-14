@@ -213,25 +213,7 @@ export default function ProjectPage() {
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const tabsRef = useRef<HTMLDivElement>(null);
-  const [tabsScroll, setTabsScroll] = useState({ atStart: true, atEnd: false });
 
-  const updateTabsScroll = () => {
-    const el = tabsRef.current;
-    if (!el) return;
-    setTabsScroll({
-      atStart: el.scrollLeft <= 4,
-      atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4,
-    });
-  };
-
-  useEffect(() => {
-    const el = tabsRef.current;
-    if (!el) return;
-    updateTabsScroll();
-    el.addEventListener("scroll", updateTabsScroll, { passive: true });
-    return () => el.removeEventListener("scroll", updateTabsScroll);
-  }, []);
 
   // ── Post-action hints ──────────────────────────────────────────────────────
   type PostActionKind =
@@ -643,20 +625,9 @@ export default function ProjectPage() {
           ]}
         />
 
-        {/* Вкладки — горизонтальный скролл без vertical jitter */}
-        <div className="relative mb-4 sm:mb-6">
-          {/* Нижняя линия — отдельный элемент, не border на скролл-контейнере */}
-          <div className="absolute bottom-0 left-0 right-0 h-px bg-slate-200 pointer-events-none" />
-
-          <div
-            ref={tabsRef}
-            className="flex gap-0 overflow-x-auto"
-            style={{
-              scrollbarWidth: "none",
-              msOverflowStyle: "none",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
+        {/* Вкладки — flex-wrap, без скролла */}
+        <div className="mb-4 sm:mb-6 border-b border-slate-200">
+          <div className="flex flex-wrap gap-x-0 gap-y-0">
             {([
               { key: "overview",    label: "🏠 Обзор" },
               { key: "copilot",     label: "🤖 AI Copilot" },
@@ -674,36 +645,17 @@ export default function ProjectPage() {
               <button
                 key={t.key}
                 data-tab={t.key}
-                onClick={() => {
-                  setTab(t.key);
-                  const el = tabsRef.current?.querySelector(`[data-tab="${t.key}"]`) as HTMLElement;
-                  el?.scrollIntoView({ block: "nearest", inline: "center" });
-                  setTimeout(updateTabsScroll, 150);
-                }}
-                className={`relative whitespace-nowrap px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm font-medium transition-colors flex-shrink-0 ${
+                onClick={() => setTab(t.key)}
+                className={`whitespace-nowrap px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px ${
                   tab === t.key
-                    ? "text-slate-900"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "text-slate-900 border-slate-800"
+                    : "text-muted-foreground hover:text-foreground border-transparent"
                 }`}
               >
                 {t.label}
-                {/* Индикатор активной вкладки — абсолютный, не влияет на высоту */}
-                {tab === t.key && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-slate-800 rounded-t-full" />
-                )}
               </button>
             ))}
           </div>
-
-          {/* Тени-индикаторы — показываются только когда есть скрытый контент */}
-          {!tabsScroll.atStart && (
-            <div className="absolute left-0 top-0 bottom-px w-8 bg-gradient-to-r from-background to-transparent pointer-events-none" />
-          )}
-          {!tabsScroll.atEnd && (
-            <div className="absolute right-0 top-0 bottom-px w-10 bg-gradient-to-l from-background to-transparent pointer-events-none flex items-center justify-end pr-1">
-              <Icon name="ChevronRight" size={14} className="text-slate-400 flex-shrink-0" />
-            </div>
-          )}
         </div>
 
         {/* ── Post-action banner — показывается поверх любой вкладки ── */}
