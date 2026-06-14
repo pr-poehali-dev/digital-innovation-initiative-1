@@ -112,19 +112,19 @@ export default function CabinetPage() {
 
   return (
     <Layout>
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
         {/* Виджет: Образовательный профиль */}
         <Link
           to="/cabinet/passport"
-          className="block mb-6 border border-slate-200 rounded-2xl p-5 bg-gradient-to-br from-slate-50 to-white hover:border-slate-400 transition-colors"
+          className="block mb-4 sm:mb-6 border border-slate-200 rounded-2xl p-4 sm:p-5 bg-gradient-to-br from-slate-50 to-white hover:border-slate-400 active:bg-slate-50 transition-colors"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-2xl">📜</span>
-                <h2 className="font-semibold">Мой образовательный профиль</h2>
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="text-xl sm:text-2xl flex-shrink-0">📜</span>
+                <h2 className="font-semibold text-sm sm:text-base truncate">Мой образовательный профиль</h2>
                 {eduSummary?.needs_review_total && eduSummary.needs_review_total > 0 ? (
-                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium flex-shrink-0">
                     {eduSummary.needs_review_total} ждут проверки
                   </span>
                 ) : null}
@@ -161,20 +161,20 @@ export default function CabinetPage() {
           </div>
         </Link>
 
-        <div className="flex items-center justify-between mb-6">
-          <div>
+        <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6">
+          <div className="min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
-              <Icon name="Briefcase" size={20} className="text-slate-700" />
-              <h1 className="text-2xl font-bold">Рабочий кабинет</h1>
+              <Icon name="Briefcase" size={18} className="text-slate-700 flex-shrink-0" />
+              <h1 className="text-xl sm:text-2xl font-bold truncate">Рабочий кабинет</h1>
             </div>
-            <p className="text-muted-foreground text-sm">Кейсы трансформации — выберите кейс чтобы открыть кабинет</p>
+            <p className="text-muted-foreground text-xs sm:text-sm leading-snug">Кейсы трансформации — выберите кейс чтобы открыть кабинет</p>
           </div>
           <button
             onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-white px-3 py-2 sm:px-4 rounded-lg text-sm font-medium transition-colors flex-shrink-0"
           >
-            <Icon name="Plus" size={16} />
-            Новый кейс
+            <Icon name="Plus" size={15} />
+            <span className="hidden xs:inline sm:inline">Новый</span> кейс
           </button>
         </div>
 
@@ -280,45 +280,50 @@ export default function CabinetPage() {
         )}
 
         {loading ? (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="border rounded-2xl p-5 animate-pulse bg-muted/30 h-32" />
+              <div key={i} className="border rounded-2xl p-4 animate-pulse bg-muted/30 h-28" />
             ))}
           </div>
         ) : projects.length === 0 ? (
-          <div className="text-center py-20 text-muted-foreground">
-            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
-              <Icon name="Briefcase" size={28} />
+          <div className="text-center py-12 sm:py-16 text-muted-foreground">
+            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3">
+              <Icon name="Briefcase" size={24} />
             </div>
-            <p className="font-medium text-foreground mb-1">Кейсов пока нет</p>
-            <p className="text-sm mb-4">Создайте первый кейс — опишите процессы, боли, гипотезы и дайте AI проанализировать</p>
-            <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700">
+            <p className="font-semibold text-foreground mb-1">Кейсов пока нет</p>
+            <p className="text-xs sm:text-sm mb-4 leading-snug max-w-xs mx-auto">
+              Создайте первый кейс — опишите процессы, боли, гипотезы и дайте AI проанализировать
+            </p>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="inline-flex items-center gap-2 bg-slate-800 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-700 active:bg-slate-900"
+            >
               <Icon name="Plus" size={15} /> Создать первый кейс
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             {projects.map((p) => (
               <div
                 key={p.id}
-                className="relative border border-slate-200 rounded-2xl p-5 bg-card hover:border-slate-400 hover:shadow-sm transition-all group"
+                className="relative border border-slate-200 rounded-2xl p-4 sm:p-5 bg-card hover:border-slate-400 hover:shadow-sm active:bg-slate-50 transition-all group"
               >
-                <div className="flex items-start justify-between mb-3">
+                {/* Шапка карточки: иконка + роль + меню */}
+                <div className="flex items-start justify-between mb-2.5">
                   <button
                     onClick={() => navigate(`/cabinet/project/${p.id}`)}
-                    className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"
+                    className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-100 flex items-center justify-center"
                   >
-                    <Icon name="Briefcase" size={20} className="text-slate-700" />
+                    <Icon name="Briefcase" size={18} className="text-slate-700" />
                   </button>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     {p.my_role === "owner" && (
-                      <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">Владелец</span>
+                      <span className="text-[10px] sm:text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">Владелец</span>
                     )}
-                    {/* Меню действий — только для владельца */}
                     {p.my_role === "owner" && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setMenuProjectId(menuProjectId === p.id ? null : p.id); }}
-                        className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+                        className="p-1.5 rounded-lg hover:bg-slate-100 active:bg-slate-200 text-slate-500"
                         title="Действия"
                       >
                         <Icon name="MoreVertical" size={16} />
@@ -327,20 +332,21 @@ export default function CabinetPage() {
                   </div>
                 </div>
 
+                {/* Dropdown меню */}
                 {menuProjectId === p.id && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setMenuProjectId(null)} />
-                    <div className="absolute right-3 top-14 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-48">
+                    <div className="absolute right-3 top-12 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-48">
                       <button
                         onClick={() => openEdit(p)}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
                       >
                         <Icon name="Pencil" size={14} />
                         Редактировать
                       </button>
                       <button
                         onClick={() => { setMenuProjectId(null); navigate(`/cabinet/project/${p.id}`); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 text-left"
                       >
                         <Icon name="FolderOpen" size={14} />
                         Открыть
@@ -348,7 +354,7 @@ export default function CabinetPage() {
                       <div className="border-t border-slate-100 my-1" />
                       <button
                         onClick={() => { setMenuProjectId(null); setConfirmArchive(p); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left"
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 text-left"
                       >
                         <Icon name="Trash2" size={14} />
                         Удалить
@@ -357,28 +363,31 @@ export default function CabinetPage() {
                   </>
                 )}
 
+                {/* Основное тело карточки */}
                 <Link to={`/cabinet/project/${p.id}`} className="block">
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <h3 className="font-semibold group-hover:text-slate-900 transition-colors leading-snug">{p.title}</h3>
-                  </div>
+                  {/* Название */}
+                  <h3 className="font-semibold text-slate-900 leading-snug mb-1 line-clamp-2">{p.title}</h3>
+                  {/* Описание */}
                   {p.description && (
-                    <p className="text-sm text-muted-foreground mb-3 line-clamp-2">{p.description}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground mb-2.5 line-clamp-2 leading-snug">{p.description}</p>
                   )}
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground mt-3">
+                  {/* Мета — flex-wrap чтобы дата не давила файлы/задачи */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mt-2.5">
                     <span className="flex items-center gap-1">
-                      <Icon name="FileText" size={12} />
+                      <Icon name="FileText" size={11} />
                       {p.doc_count} файлов
                     </span>
                     <span className="flex items-center gap-1">
-                      <Icon name="ListTodo" size={12} />
+                      <Icon name="ListTodo" size={11} />
                       {p.task_count} задач
                     </span>
-                    <span className="ml-auto text-slate-400">{new Date(p.updated_at).toLocaleDateString("ru-RU")}</span>
+                    <span className="text-slate-400">{new Date(p.updated_at).toLocaleDateString("ru-RU")}</span>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1 text-xs font-medium text-violet-600 group-hover:text-violet-800 transition-colors">
-                    <Icon name="Briefcase" size={12} />
+                  {/* CTA */}
+                  <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center gap-1 text-xs font-medium text-violet-600 group-hover:text-violet-800 transition-colors">
+                    <Icon name="Briefcase" size={11} />
                     Открыть кабинет
-                    <Icon name="ChevronRight" size={12} className="ml-auto" />
+                    <Icon name="ChevronRight" size={11} className="ml-auto" />
                   </div>
                 </Link>
               </div>
