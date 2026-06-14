@@ -424,7 +424,7 @@ export default function CompetencyMapPage() {
   return (
     <Layout>
       <div className="min-h-screen bg-slate-50">
-        <div className="max-w-2xl mx-auto px-4 py-8 space-y-5">
+        <div className="max-w-2xl mx-auto px-3 sm:px-4 py-4 sm:py-8 space-y-4 sm:space-y-5">
 
           {/* Header */}
           <div className="flex items-start gap-4">
@@ -568,16 +568,16 @@ export default function CompetencyMapPage() {
               )}
 
               {/* Summary */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 {[
                   { label: "Компетенций",  value: data.summary.total_competencies, icon: "LayoutGrid", color: "text-slate-700" },
                   { label: "Verified",     value: data.summary.verified_count,     icon: "BadgeCheck",  color: "text-emerald-600" },
                   { label: "Доменов",      value: data.summary.domains_covered,    icon: "Layers",      color: "text-violet-600" },
                 ].map(s => (
-                  <div key={s.label} className="bg-white rounded-2xl border border-slate-200 px-4 py-4 text-center">
-                    <Icon name={s.icon} size={18} className={`${s.color} mx-auto mb-1.5`} />
-                    <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">{s.label}</p>
+                  <div key={s.label} className="bg-white rounded-2xl border border-slate-200 px-2 sm:px-4 py-3 sm:py-4 text-center">
+                    <Icon name={s.icon} size={16} className={`${s.color} mx-auto mb-1`} />
+                    <p className={`text-lg sm:text-xl font-bold ${s.color}`}>{s.value}</p>
+                    <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 leading-tight">{s.label}</p>
                   </div>
                 ))}
               </div>
@@ -603,8 +603,8 @@ export default function CompetencyMapPage() {
                           }}
                         >
                           <span className={`w-2 h-2 rounded-full flex-shrink-0 ${conf.dot}`} />
-                          <span className="text-sm text-slate-800 font-medium flex-1">{tc.name}</span>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${conf.color}`}>{conf.label}</span>
+                          <span className="text-sm text-slate-800 font-medium flex-1 min-w-0 truncate">{tc.name}</span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0 ${conf.color}`}>{conf.label}</span>
                         </div>
                       );
                     })}
