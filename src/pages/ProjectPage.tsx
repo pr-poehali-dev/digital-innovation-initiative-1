@@ -908,68 +908,74 @@ export default function ProjectPage() {
 
         {/* ── AI Copilot ── */}
         {tab === "copilot" && (
-          <div className="space-y-4">
-            {/* Режим */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-4">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2.5">Режим AI</p>
-              <div className="flex flex-wrap gap-2">
+          <div className="space-y-3">
+            {/* Режим AI — горизонтальный скролл на мобайле */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Режим AI</p>
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
                 {[
-                  { key: "analyst",    label: "🔍 Аналитик",   desc: "анализ, gap, summary" },
-                  { key: "strategist", label: "🎯 Стратег",    desc: "гипотезы, roadmap" },
-                  { key: "pm",         label: "📋 PM",         desc: "задачи, план, критерии" },
-                  { key: "researcher", label: "🔬 Исследователь", desc: "обзоры, сравнения" },
+                  { key: "analyst",    label: "🔍 Аналитик" },
+                  { key: "strategist", label: "🎯 Стратег" },
+                  { key: "pm",         label: "📋 PM" },
+                  { key: "researcher", label: "🔬 Исследователь" },
                 ].map(m => (
                   <button key={m.key} onClick={() => setCopilotMode(m.key)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${copilotMode === m.key ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${copilotMode === m.key ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>
                     {m.label}
-                    <span className="text-[10px] opacity-60">{m.desc}</span>
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-2 mt-3">
-                <input type="checkbox" id="ws-save" checked={copilotSave} onChange={e => setCopilotSave(e.target.checked)} className="w-4 h-4 rounded" />
-                <label htmlFor="ws-save" className="text-xs text-slate-600 cursor-pointer">Сохранять ответы как артефакты</label>
-              </div>
+              <label className="flex items-center gap-2 mt-2.5 cursor-pointer">
+                <input type="checkbox" id="ws-save" checked={copilotSave} onChange={e => setCopilotSave(e.target.checked)} className="w-4 h-4 rounded flex-shrink-0" />
+                <span className="text-xs text-slate-600">Сохранять ответы как артефакты</span>
+              </label>
             </div>
 
             {/* История */}
-            <div className="space-y-3 min-h-[200px]">
+            <div className="space-y-3 min-h-[160px]">
               {copilotHistory.length === 0 && (
-                <div className="bg-gradient-to-br from-slate-50 to-violet-50 border border-slate-200 rounded-2xl p-6 text-center space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
-                    <Icon name="Sparkles" size={22} className="text-violet-600" />
+                <div className="bg-gradient-to-br from-slate-50 to-violet-50 border border-slate-200 rounded-2xl p-5 text-center space-y-3">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
+                    <Icon name="Sparkles" size={20} className="text-violet-600" />
                   </div>
                   <div>
-                    <p className="font-semibold text-slate-800">AI Copilot знает контекст проекта</p>
-                    <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Он читает твои файлы, гипотезы и контекст пространства — не нужно вставлять всё в промпт вручную</p>
+                    <p className="font-semibold text-slate-800 text-sm">AI Copilot знает контекст проекта</p>
+                    <p className="text-xs text-slate-500 mt-1">Читает файлы, гипотезы и контекст — вставлять в промпт вручную не нужно</p>
                   </div>
-                  <div className="flex flex-wrap justify-center gap-2 pt-1">
-                    {["Проанализируй текущие гипотезы", "Сделай summary по файлам", "Предложи следующие шаги"].map(s => (
-                      <button key={s} onClick={() => setCopilotMsg(s)} className="text-xs px-3 py-1.5 bg-white border border-violet-200 text-violet-700 rounded-full hover:bg-violet-50 transition-colors">{s}</button>
+                  {/* Быстрые подсказки — горизонтальный скролл */}
+                  <div className="flex gap-2 overflow-x-auto pb-1 justify-start sm:justify-center" style={{ scrollbarWidth: "none" }}>
+                    {["Проанализируй гипотезы", "Summary по файлам", "Предложи шаги"].map(s => (
+                      <button key={s} onClick={() => setCopilotMsg(s)}
+                        className="flex-shrink-0 text-xs px-3 py-1.5 bg-white border border-violet-200 text-violet-700 rounded-full hover:bg-violet-50 transition-colors">
+                        {s}
+                      </button>
                     ))}
                   </div>
                 </div>
               )}
+
               {copilotHistory.map((h, i) => {
                 const isLast = i === copilotHistory.length - 1;
                 const nextHints: Record<string, string[]> = {
-                  analyst:    ["Найди слабые места в анализе", "Сравни с лучшими практиками", "Сделай executive summary"],
-                  strategist: ["Оформи как гипотезу", "Предложи метрики успеха", "Составь roadmap на 3 месяца"],
-                  pm:         ["Разбей на задачи с дедлайнами", "Определи риски", "Кто отвечает за каждый шаг?"],
-                  researcher: ["Найди контраргументы", "Какие источники подтверждают?", "Сравни с аналогами на рынке"],
+                  analyst:    ["Слабые места", "Сравни с практиками", "Executive summary"],
+                  strategist: ["Оформи гипотезу", "Метрики успеха", "Roadmap на 3 мес."],
+                  pm:         ["Задачи с дедлайнами", "Риски", "Кто отвечает?"],
+                  researcher: ["Контраргументы", "Источники", "Сравни с рынком"],
                 };
-                const hints = nextHints[copilotMode] ?? ["Углуби анализ", "Предложи следующие шаги", "Сохрани как артефакт"];
+                const hints = nextHints[copilotMode] ?? ["Углуби анализ", "Следующие шаги", "Сохрани артефакт"];
                 return (
                   <div key={i} className="space-y-2">
+                    {/* Вопрос пользователя */}
                     <div className="flex justify-end">
-                      <div className="bg-slate-800 text-white rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%] text-sm">{h.q}</div>
+                      <div className="bg-slate-800 text-white rounded-2xl rounded-tr-sm px-3 py-2.5 max-w-[85%] text-sm break-words leading-snug">{h.q}</div>
                     </div>
-                    <div className="flex gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <Icon name="Sparkles" size={13} className="text-violet-600" />
+                    {/* Ответ AI */}
+                    <div className="flex gap-2">
+                      <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Icon name="Sparkles" size={12} className="text-violet-600" />
                       </div>
-                      <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 flex-1">
-                        <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{h.a}</p>
+                      <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-3 py-2.5 flex-1 min-w-0">
+                        <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap break-words">{h.a}</p>
                         {h.artifact_id && (
                           <button onClick={() => handleOpenArtifact(h.artifact_id!)} className="mt-2 flex items-center gap-1 text-[11px] text-violet-600 hover:text-violet-800 font-medium">
                             <Icon name="Package" size={11} />
@@ -978,11 +984,12 @@ export default function ProjectPage() {
                         )}
                       </div>
                     </div>
+                    {/* Быстрые действия после последнего ответа */}
                     {isLast && !copilotLoading && (
-                      <div className="flex flex-wrap gap-1.5 pl-9 pt-0.5">
+                      <div className="flex gap-1.5 pl-8 sm:pl-9 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
                         {hints.map(hint => (
                           <button key={hint} onClick={() => setCopilotMsg(hint)}
-                            className="text-[11px] px-2.5 py-1 bg-violet-50 border border-violet-100 text-violet-600 rounded-full hover:bg-violet-100 transition-colors">
+                            className="flex-shrink-0 text-[11px] px-2.5 py-1 bg-violet-50 border border-violet-100 text-violet-600 rounded-full hover:bg-violet-100 transition-colors">
                             {hint}
                           </button>
                         ))}
@@ -991,33 +998,40 @@ export default function ProjectPage() {
                   </div>
                 );
               })}
+
+              {/* Индикатор загрузки */}
               {copilotLoading && (
-                <div className="flex gap-2.5">
-                  <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
-                    <Icon name="Sparkles" size={13} className="text-violet-600" />
+                <div className="flex gap-2">
+                  <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+                    <Icon name="Sparkles" size={12} className="text-violet-600" />
                   </div>
-                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm text-slate-500">AI анализирует проект...</span>
+                  <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
+                    <div className="w-3.5 h-3.5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-slate-500">AI анализирует...</span>
                   </div>
                 </div>
               )}
               <div ref={copilotEndRef} />
             </div>
 
-            {/* Input */}
-            <div className="flex gap-2 bg-white border border-slate-200 rounded-2xl p-3">
-              <textarea
-                className="flex-1 text-sm resize-none focus:outline-none min-h-[44px] max-h-[120px] text-slate-800"
-                placeholder="Что нужно проанализировать, исследовать или подготовить?"
-                value={copilotMsg}
-                onChange={e => setCopilotMsg(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleCopilot(); } }}
-              />
-              <button onClick={handleCopilot} disabled={!copilotMsg.trim() || copilotLoading}
-                className="self-end flex items-center justify-center w-10 h-10 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white rounded-xl transition-colors flex-shrink-0">
-                <Icon name="Send" size={16} />
-              </button>
+            {/* Composer — sticky на мобайле */}
+            <div className="sticky bottom-0 pb-safe">
+              <div className="flex gap-2 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-sm">
+                <textarea
+                  className="flex-1 text-sm resize-none focus:outline-none min-h-[44px] max-h-[120px] text-slate-800 placeholder:text-slate-400 py-1.5 px-1"
+                  placeholder="Что нужно проанализировать или подготовить?"
+                  value={copilotMsg}
+                  onChange={e => setCopilotMsg(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleCopilot(); } }}
+                />
+                <button
+                  onClick={handleCopilot}
+                  disabled={!copilotMsg.trim() || copilotLoading}
+                  className="self-end flex items-center justify-center w-10 h-10 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 disabled:opacity-40 text-white rounded-xl transition-colors flex-shrink-0"
+                >
+                  <Icon name="Send" size={16} />
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1999,81 +2013,153 @@ export default function ProjectPage() {
 
         {/* ── AI-оценка ── */}
         {tab === "ai" && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {/* AI-ассессмент */}
-            <div className="bg-gradient-to-br from-violet-50 to-slate-50 border border-violet-100 rounded-2xl p-4 space-y-3">
+            <div className="bg-gradient-to-br from-violet-50 to-slate-50 border border-violet-100 rounded-2xl p-3 sm:p-4 space-y-2.5">
               <p className="text-sm font-semibold text-violet-900">🧠 Быстрая оценка применимости AI</p>
-              <p className="text-xs text-violet-700">Опишите процесс или операцию — AI скажет нужен ли ИИ, какой тип и какие риски</p>
-              <textarea placeholder="Опишите процесс: что происходит сейчас, кто участвует, какие данные, где ручной труд..." rows={4} value={aiAssessText} onChange={e => setAiAssessText(e.target.value)} className="w-full border border-violet-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none" />
-              <button disabled={!aiAssessText.trim() || aiAssessLoading} onClick={async () => {
-                setAiAssessLoading(true);
-                setAiAssessResult(null);
-                try {
-                  const res = await workspaceApi.aiAssess(projectId, aiAssessText) as { assessment: Record<string, unknown> };
-                  setAiAssessResult(res.assessment);
-                } finally { setAiAssessLoading(false); }
-              }} className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                {aiAssessLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</> : <><Icon name="Sparkles" size={14} /> Оценить</>}
+              <p className="text-xs text-violet-600 leading-snug">Опишите процесс — AI скажет нужен ли ИИ, какой тип и какие риски</p>
+              <textarea
+                placeholder="Что происходит сейчас, кто участвует, какие данные, где ручной труд..."
+                rows={3}
+                value={aiAssessText}
+                onChange={e => setAiAssessText(e.target.value)}
+                className="w-full border border-violet-200 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none"
+              />
+              <button
+                disabled={!aiAssessText.trim() || aiAssessLoading}
+                onClick={async () => {
+                  setAiAssessLoading(true);
+                  setAiAssessResult(null);
+                  try {
+                    const res = await workspaceApi.aiAssess(projectId, aiAssessText) as { assessment: Record<string, unknown> };
+                    setAiAssessResult(res.assessment);
+                  } finally { setAiAssessLoading(false); }
+                }}
+                className="flex items-center justify-center gap-1.5 w-full sm:w-auto px-4 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors"
+              >
+                {aiAssessLoading
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</>
+                  : <><Icon name="Sparkles" size={14} /> Оценить</>}
               </button>
+
+              {/* Результат ассессмента */}
               {aiAssessResult && (
-                <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                  <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${(aiAssessResult.ai_recommended as boolean) ? "bg-green-50 border border-green-200" : "bg-slate-50 border border-slate-200"}`}>
-                    <Icon name={aiAssessResult.ai_recommended ? "CheckCircle" : "XCircle"} size={16} className={aiAssessResult.ai_recommended ? "text-green-600" : "text-slate-400"} />
-                    <span className="font-semibold text-sm">{aiAssessResult.recommendation_label as string}</span>
-                    {aiAssessResult.solution_label && <span className="text-xs text-slate-500 ml-auto">→ {aiAssessResult.solution_label as string}</span>}
+                <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2.5">
+                  {/* Вердикт */}
+                  <div className={`flex items-start gap-2 px-3 py-2.5 rounded-xl ${(aiAssessResult.ai_recommended as boolean) ? "bg-green-50 border border-green-200" : "bg-slate-50 border border-slate-200"}`}>
+                    <Icon name={aiAssessResult.ai_recommended ? "CheckCircle" : "XCircle"} size={16} className={`flex-shrink-0 mt-0.5 ${aiAssessResult.ai_recommended ? "text-green-600" : "text-slate-400"}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm leading-snug">{aiAssessResult.recommendation_label as string}</p>
+                      {aiAssessResult.solution_label && (
+                        <p className="text-xs text-slate-500 mt-0.5">→ {aiAssessResult.solution_label as string}</p>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Операции */}
                   {Array.isArray(aiAssessResult.key_operations) && (aiAssessResult.key_operations as string[]).length > 0 && (
                     <div>
-                      <p className="text-xs font-semibold text-slate-700 mb-1.5">Операции для автоматизации:</p>
-                      <ul className="space-y-1">{(aiAssessResult.key_operations as string[]).map((op, i) => <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5"><span className="text-violet-500 flex-shrink-0">•</span>{op}</li>)}</ul>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Операции для автоматизации</p>
+                      <ul className="space-y-1">
+                        {(aiAssessResult.key_operations as string[]).map((op, i) => (
+                          <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5 leading-snug">
+                            <span className="text-violet-500 flex-shrink-0 mt-0.5">•</span>{op}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
-                  {Array.isArray(aiAssessResult.risks) && (aiAssessResult.risks as string[]).length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-slate-700 mb-1.5">Риски:</p>
-                      <ul className="space-y-1">{(aiAssessResult.risks as string[]).map((r, i) => <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5"><span className="text-orange-500 flex-shrink-0">⚠</span>{r}</li>)}</ul>
-                    </div>
-                  )}
+
+                  {/* Quick wins */}
                   {Array.isArray(aiAssessResult.quick_wins) && (aiAssessResult.quick_wins as string[]).length > 0 && (
                     <div>
-                      <p className="text-xs font-semibold text-slate-700 mb-1.5">Quick wins прямо сейчас:</p>
-                      <ul className="space-y-1">{(aiAssessResult.quick_wins as string[]).map((w, i) => <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5"><span className="text-green-500 flex-shrink-0">✓</span>{w}</li>)}</ul>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Quick wins</p>
+                      <ul className="space-y-1">
+                        {(aiAssessResult.quick_wins as string[]).map((w, i) => (
+                          <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5 leading-snug">
+                            <span className="text-green-500 flex-shrink-0 mt-0.5">✓</span>{w}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
-                  {aiAssessResult.next_step && <div className="bg-violet-50 rounded-lg px-3 py-2"><p className="text-xs font-semibold text-violet-800">Следующий шаг:</p><p className="text-xs text-violet-700 mt-0.5">{aiAssessResult.next_step as string}</p></div>}
-                  <button onClick={async () => {
-                    const r = aiAssessResult;
-                    await workspaceApi.createAiOpportunity({
-                      project_id: projectId,
-                      title: aiAssessText.slice(0, 80),
-                      current_manual_operation: aiAssessText,
-                      proposed_solution_type: (r.solution_type as string) || "none",
-                      recommendation: (r.recommendation_label as string) || "assess",
-                      risks: Array.isArray(r.risks) ? (r.risks as string[]).join("; ") : "",
-                      human_in_loop: Boolean(r.human_in_loop),
-                    });
-                    workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
-                    setAiAssessResult(null);
-                    setAiAssessText("");
-                  }} className="flex items-center gap-1.5 text-xs text-violet-700 hover:text-violet-900 font-semibold">
-                    <Icon name="Save" size={12} /> Сохранить как AI-возможность
+
+                  {/* Риски */}
+                  {Array.isArray(aiAssessResult.risks) && (aiAssessResult.risks as string[]).length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Риски</p>
+                      <ul className="space-y-1">
+                        {(aiAssessResult.risks as string[]).map((r, i) => (
+                          <li key={i} className="text-xs text-slate-600 flex items-start gap-1.5 leading-snug">
+                            <span className="text-orange-500 flex-shrink-0 mt-0.5">⚠</span>{r}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Следующий шаг */}
+                  {aiAssessResult.next_step && (
+                    <div className="bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
+                      <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide mb-0.5">Следующий шаг</p>
+                      <p className="text-xs text-violet-800 leading-snug">{aiAssessResult.next_step as string}</p>
+                    </div>
+                  )}
+
+                  {/* CTA — на всю ширину */}
+                  <button
+                    onClick={async () => {
+                      const r = aiAssessResult;
+                      await workspaceApi.createAiOpportunity({
+                        project_id: projectId,
+                        title: aiAssessText.slice(0, 80),
+                        current_manual_operation: aiAssessText,
+                        proposed_solution_type: (r.solution_type as string) || "none",
+                        recommendation: (r.recommendation_label as string) || "assess",
+                        risks: Array.isArray(r.risks) ? (r.risks as string[]).join("; ") : "",
+                        human_in_loop: Boolean(r.human_in_loop),
+                      });
+                      workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
+                      setAiAssessResult(null);
+                      setAiAssessText("");
+                    }}
+                    className="flex items-center justify-center gap-1.5 w-full py-2.5 text-sm text-violet-700 border border-violet-200 rounded-xl hover:bg-violet-50 font-semibold transition-colors"
+                  >
+                    <Icon name="Save" size={13} /> Сохранить как AI-возможность
                   </button>
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-800">Сохранённые AI-возможности ({aiOpportunities.length})</p>
-              <button onClick={() => setShowAiForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-600 rounded-lg text-xs font-semibold hover:bg-slate-50">
-                <Icon name="Plus" size={13} /> Добавить вручную
+
+            {/* Заголовок списка */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-800">AI-возможности ({aiOpportunities.length})</p>
+              <button onClick={() => setShowAiForm(true)} className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-semibold hover:bg-slate-50 flex-shrink-0">
+                <Icon name="Plus" size={13} /> Добавить
               </button>
             </div>
+
+            {/* Форма ручного добавления */}
             {showAiForm && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
-                <input placeholder="Название (что автоматизируем)" value={aiDraft.title} onChange={e => setAiDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
-                <textarea placeholder="Текущая ручная операция" rows={2} value={aiDraft.current_manual_operation} onChange={e => setAiDraft(d => ({ ...d, current_manual_operation: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <div className="grid grid-cols-2 gap-3">
-                  <select value={aiDraft.proposed_solution_type} onChange={e => setAiDraft(d => ({ ...d, proposed_solution_type: e.target.value }))} className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
-                    <option value="none">Тип решения</option>
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
+                <input
+                  placeholder="Название (что автоматизируем) *"
+                  value={aiDraft.title}
+                  onChange={e => setAiDraft(d => ({ ...d, title: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+                <textarea
+                  placeholder="Текущая ручная операция"
+                  rows={2}
+                  value={aiDraft.current_manual_operation}
+                  onChange={e => setAiDraft(d => ({ ...d, current_manual_operation: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none"
+                />
+                {/* Select'ы — вертикально */}
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Тип решения</label>
+                  <select value={aiDraft.proposed_solution_type} onChange={e => setAiDraft(d => ({ ...d, proposed_solution_type: e.target.value }))} className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
+                    <option value="none">Не определён</option>
                     <option value="genai">GenAI</option>
                     <option value="ml">ML / классический AI</option>
                     <option value="rpa">RPA / боты</option>
@@ -2083,7 +2169,10 @@ export default function ProjectPage() {
                     <option value="idp">IDP / распознавание</option>
                     <option value="hybrid">Гибрид</option>
                   </select>
-                  <select value={aiDraft.recommendation} onChange={e => setAiDraft(d => ({ ...d, recommendation: e.target.value }))} className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Рекомендация</label>
+                  <select value={aiDraft.recommendation} onChange={e => setAiDraft(d => ({ ...d, recommendation: e.target.value }))} className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
                     <option value="recommended">AI рекомендован</option>
                     <option value="possible">AI возможен</option>
                     <option value="assess">Требует оценки</option>
@@ -2091,14 +2180,14 @@ export default function ProjectPage() {
                     <option value="automate_first">Сначала автоматизация</option>
                   </select>
                 </div>
-                <textarea placeholder="Ожидаемый эффект" rows={2} value={aiDraft.expected_effect} onChange={e => setAiDraft(d => ({ ...d, expected_effect: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <textarea placeholder="Риски" rows={2} value={aiDraft.risks} onChange={e => setAiDraft(d => ({ ...d, risks: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Ожидаемый эффект" rows={2} value={aiDraft.expected_effect} onChange={e => setAiDraft(d => ({ ...d, expected_effect: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none" />
+                <textarea placeholder="Риски" rows={2} value={aiDraft.risks} onChange={e => setAiDraft(d => ({ ...d, risks: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none" />
                 <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-                  <input type="checkbox" checked={aiDraft.human_in_loop} onChange={e => setAiDraft(d => ({ ...d, human_in_loop: e.target.checked }))} />
-                  Требует проверки человеком (human-in-the-loop)
+                  <input type="checkbox" checked={aiDraft.human_in_loop} onChange={e => setAiDraft(d => ({ ...d, human_in_loop: e.target.checked }))} className="w-4 h-4 flex-shrink-0" />
+                  Human-in-the-loop (требует проверки человеком)
                 </label>
-                <div className="flex gap-2">
-                  <button onClick={() => setShowAiForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowAiForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!aiDraft.title.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
                     await workspaceApi.createAiOpportunity({ project_id: projectId, ...aiDraft });
@@ -2106,35 +2195,63 @@ export default function ProjectPage() {
                     setShowAiForm(false);
                     workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
                     setWbLoading(false);
-                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
                     {wbLoading ? "Сохраняю..." : "Сохранить"}
                   </button>
                 </div>
               </div>
             )}
+
+            {/* Пустое состояние */}
             {aiOpportunities.length === 0 && !showAiForm && (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                <Icon name="Cpu" size={32} className="text-slate-300 mx-auto mb-3" />
+                <Icon name="Cpu" size={28} className="text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-500 text-sm">Нет сохранённых AI-возможностей</p>
                 <p className="text-xs text-slate-400 mt-1">Используйте ассессмент выше или добавьте вручную</p>
               </div>
             )}
-            <div className="space-y-3">
+
+            {/* Карточки AI-возможностей */}
+            <div className="space-y-2.5">
               {aiOpportunities.map(opp => {
-                const recColor = opp.recommendation === "recommended" ? "bg-green-50 border-green-200 text-green-800" : opp.recommendation === "possible" ? "bg-blue-50 border-blue-200 text-blue-800" : opp.recommendation === "no_ai" ? "bg-slate-50 border-slate-200 text-slate-600" : "bg-amber-50 border-amber-200 text-amber-800";
-                const SOL_LABELS: Record<string, string> = { genai: "GenAI", ml: "ML", rpa: "RPA", rule_engine: "Rule engine", workflow: "Workflow", bi: "BI/аналитика", idp: "IDP", hybrid: "Гибрид", none: "Не определён" };
+                const REC_CFG: Record<string, { bg: string; border: string; text: string; badge: string }> = {
+                  recommended:    { bg: "bg-green-50",  border: "border-green-200",  text: "text-green-800",  badge: "bg-green-100 text-green-700" },
+                  possible:       { bg: "bg-blue-50",   border: "border-blue-200",   text: "text-blue-800",   badge: "bg-blue-100 text-blue-700" },
+                  no_ai:          { bg: "bg-slate-50",  border: "border-slate-200",  text: "text-slate-700",  badge: "bg-slate-100 text-slate-600" },
+                  automate_first: { bg: "bg-amber-50",  border: "border-amber-200",  text: "text-amber-800",  badge: "bg-amber-100 text-amber-700" },
+                  assess:         { bg: "bg-amber-50",  border: "border-amber-200",  text: "text-amber-800",  badge: "bg-amber-100 text-amber-700" },
+                };
+                const cfg = REC_CFG[opp.recommendation] || REC_CFG.assess;
+                const SOL_LABELS: Record<string, string> = { genai: "GenAI", ml: "ML", rpa: "RPA", rule_engine: "Rule engine", workflow: "Workflow", bi: "BI/аналитика", idp: "IDP", hybrid: "Гибрид", none: "Тип не задан" };
                 return (
-                  <div key={opp.id} className={`border rounded-2xl p-4 ${recColor}`}>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <p className="font-semibold text-sm">{opp.title}</p>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/60 flex-shrink-0">{SOL_LABELS[opp.proposed_solution_type] || opp.proposed_solution_type}</span>
+                  <div key={opp.id} className={`border rounded-2xl p-3 sm:p-4 ${cfg.bg} ${cfg.border}`}>
+                    {/* Строка 1: название */}
+                    <p className={`font-semibold text-sm leading-snug mb-2 ${cfg.text}`}>{opp.title}</p>
+                    {/* Строка 2: бейджи */}
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cfg.badge}`}>
+                        {SOL_LABELS[opp.proposed_solution_type] || opp.proposed_solution_type}
+                      </span>
+                      {opp.human_in_loop && (
+                        <span className="text-[10px] bg-white/70 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200">👤 human-in-loop</span>
+                      )}
                     </div>
-                    {opp.current_manual_operation && <p className="text-xs opacity-80 mb-1"><span className="font-medium">Сейчас:</span> {opp.current_manual_operation}</p>}
-                    {opp.expected_effect && <p className="text-xs opacity-80 mb-1"><span className="font-medium">Эффект:</span> {opp.expected_effect}</p>}
-                    {opp.risks && <p className="text-xs opacity-70 mb-1"><span className="font-medium">Риски:</span> {opp.risks}</p>}
-                    <div className="flex items-center gap-2 mt-2">
-                      {opp.human_in_loop && <span className="text-[10px] bg-white/60 px-1.5 py-0.5 rounded font-medium">👤 human-in-loop</span>}
-                    </div>
+                    {/* Строка 3: детали */}
+                    {opp.current_manual_operation && (
+                      <p className={`text-xs mb-1 leading-snug ${cfg.text} opacity-80`}>
+                        <span className="font-medium">Сейчас:</span> <span className="line-clamp-2">{opp.current_manual_operation}</span>
+                      </p>
+                    )}
+                    {opp.expected_effect && (
+                      <p className={`text-xs mb-1 leading-snug ${cfg.text} opacity-80`}>
+                        <span className="font-medium">Эффект:</span> {opp.expected_effect}
+                      </p>
+                    )}
+                    {opp.risks && (
+                      <p className={`text-xs leading-snug ${cfg.text} opacity-70`}>
+                        <span className="font-medium">Риски:</span> <span className="line-clamp-2">{opp.risks}</span>
+                      </p>
+                    )}
                   </div>
                 );
               })}
