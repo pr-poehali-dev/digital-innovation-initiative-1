@@ -1582,21 +1582,24 @@ export default function ProjectPage() {
 
         {/* ── Процессы ── */}
         {tab === "process" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-slate-500">Опишите процессы as-is: шаги, роли, системы, контроли</p>
-              <button onClick={() => setShowProcessForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
-                <Icon name="Plus" size={13} /> Добавить процесс
+          <div className="space-y-3">
+            {/* Заголовок вкладки */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs sm:text-sm text-slate-500 leading-snug">Опишите процессы as-is: шаги, роли, системы, контроли</p>
+              <button onClick={() => setShowProcessForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 flex-shrink-0">
+                <Icon name="Plus" size={13} /> <span className="hidden xs:inline">Добавить</span> процесс
               </button>
             </div>
+
+            {/* Форма нового процесса */}
             {showProcessForm && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новый процесс</p>
-                <input placeholder="Название процесса" value={processDraft.title} onChange={e => setProcessDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
-                <input placeholder="Подразделение-владелец" value={processDraft.department} onChange={e => setProcessDraft(d => ({ ...d, department: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
-                <textarea placeholder="Краткое описание / цель процесса" rows={2} value={processDraft.description} onChange={e => setProcessDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none" />
-                <div className="flex gap-2">
-                  <button onClick={() => setShowProcessForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                <input placeholder="Название процесса *" value={processDraft.title} onChange={e => setProcessDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <input placeholder="Подразделение-владелец" value={processDraft.department} onChange={e => setProcessDraft(d => ({ ...d, department: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
+                <textarea placeholder="Краткое описание / цель" rows={2} value={processDraft.description} onChange={e => setProcessDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none" />
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowProcessForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!processDraft.title.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
                     await workspaceApi.createProcess({ project_id: projectId, ...processDraft });
@@ -1604,83 +1607,99 @@ export default function ProjectPage() {
                     setShowProcessForm(false);
                     workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
                     setWbLoading(false);
-                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
-                    {wbLoading ? "Сохраняю..." : "Создать"}
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
+                    {wbLoading ? "Создаю..." : "Создать"}
                   </button>
                 </div>
               </div>
             )}
+
+            {/* Пустое состояние */}
             {processes.length === 0 && !showProcessForm && (
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
-                <Icon name="Workflow" size={32} className="text-slate-300 mx-auto mb-3" />
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Workflow" size={28} className="text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-500 text-sm mb-1">Процессов пока нет</p>
-                <p className="text-xs text-slate-400">Добавьте as-is описание процесса — шаги, роли, системы, боли</p>
+                <p className="text-xs text-slate-400">Добавьте as-is описание — шаги, роли, системы, боли</p>
+                <button onClick={() => setShowProcessForm(true)} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
+                  + Добавить первый процесс
+                </button>
               </div>
             )}
+
+            {/* Список процессов */}
             {processes.map(proc => (
               <div key={proc.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50" onClick={() => setExpandedProcess(expandedProcess === proc.id ? null : proc.id)}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-slate-900 text-sm">{proc.title}</p>
-                      {proc.department && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{proc.department}</span>}
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${proc.ai_potential === 'high' ? 'bg-violet-100 text-violet-700' : proc.ai_potential === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                {/* Заголовок процесса — кликабельный */}
+                <div
+                  className="flex items-center justify-between p-3 sm:p-4 cursor-pointer hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                  onClick={() => setExpandedProcess(expandedProcess === proc.id ? null : proc.id)}
+                >
+                  <div className="flex-1 min-w-0 pr-2">
+                    <p className="font-semibold text-slate-900 text-sm leading-snug truncate">{proc.title}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                      {proc.department && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">{proc.department}</span>}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${proc.ai_potential === 'high' ? 'bg-violet-100 text-violet-700' : proc.ai_potential === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
                         AI: {proc.ai_potential === 'high' ? 'высокий' : proc.ai_potential === 'medium' ? 'средний' : proc.ai_potential === 'low' ? 'низкий' : 'не оценён'}
                       </span>
+                      <span className="text-[10px] text-slate-400">{proc.step_count} шагов</span>
                     </div>
-                    {proc.description && <p className="text-xs text-slate-500 mt-0.5 truncate">{proc.description}</p>}
+                    {proc.description && <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{proc.description}</p>}
                   </div>
-                  <div className="flex items-center gap-2 ml-2">
-                    <span className="text-xs text-slate-400">{proc.step_count} шагов</span>
-                    <Icon name={expandedProcess === proc.id ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400" />
-                  </div>
+                  <Icon name={expandedProcess === proc.id ? "ChevronUp" : "ChevronDown"} size={18} className="text-slate-400 flex-shrink-0" />
                 </div>
+
+                {/* Раскрытые шаги */}
                 {expandedProcess === proc.id && (
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-3 space-y-3">
+                  <div className="border-t border-slate-100 px-3 sm:px-4 pb-3 pt-2 space-y-2">
                     {proc.steps.map((step, idx) => (
-                      <div key={step.id} className="flex gap-3">
-                        <div className="flex-shrink-0 w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600">{idx + 1}</div>
-                        <div className="flex-1 bg-slate-50 rounded-xl p-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium text-slate-800">{step.title}</p>
+                      <div key={step.id} className="flex gap-2">
+                        <div className="flex-shrink-0 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600 mt-0.5">{idx + 1}</div>
+                        <div className="flex-1 bg-slate-50 rounded-xl p-2.5 min-w-0">
+                          {/* Строка: название + теги */}
+                          <div className="flex items-start gap-1.5 flex-wrap">
+                            <p className="text-xs sm:text-sm font-medium text-slate-800 flex-1 min-w-0">{step.title}</p>
                             <div className="flex gap-1 flex-shrink-0">
-                              {step.is_manual && <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-semibold">ручной</span>}
-                              {step.ai_potential !== 'none' && <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-semibold">AI: {step.ai_potential}</span>}
+                              {step.is_manual && <span className="text-[9px] sm:text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-semibold whitespace-nowrap">ручной</span>}
+                              {step.ai_potential !== 'none' && <span className="text-[9px] sm:text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-semibold whitespace-nowrap">AI: {step.ai_potential}</span>}
                             </div>
                           </div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
-                            {step.role_name && <span className="text-xs text-slate-500">👤 {step.role_name}</span>}
-                            {step.system_name && <span className="text-xs text-slate-500">🖥 {step.system_name}</span>}
-                            {step.duration_minutes && <span className="text-xs text-slate-500">⏱ {step.duration_minutes} мин</span>}
-                          </div>
-                          {step.pain_point && <p className="text-xs text-red-600 mt-1">🔥 {step.pain_point}</p>}
-                          {step.control_point && <p className="text-xs text-blue-600 mt-0.5">🔒 {step.control_point}</p>}
+                          {/* Мета-данные шага — в одну строку с переносом */}
+                          {(step.role_name || step.system_name || step.duration_minutes) && (
+                            <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                              {step.role_name && <span className="text-[10px] text-slate-500">👤 {step.role_name}</span>}
+                              {step.system_name && <span className="text-[10px] text-slate-500">🖥 {step.system_name}</span>}
+                              {step.duration_minutes && <span className="text-[10px] text-slate-500">⏱ {step.duration_minutes} мин</span>}
+                            </div>
+                          )}
+                          {step.pain_point && <p className="text-[10px] sm:text-xs text-red-600 mt-1 line-clamp-2">🔥 {step.pain_point}</p>}
+                          {step.control_point && <p className="text-[10px] sm:text-xs text-blue-600 mt-0.5 line-clamp-1">🔒 {step.control_point}</p>}
                         </div>
                       </div>
                     ))}
+
+                    {/* Форма нового шага */}
                     {showStepForm === proc.id ? (
-                      <div className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-200">
+                      <div className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-200 ml-7">
                         <p className="text-xs font-semibold text-slate-700">Новый шаг</p>
-                        <input placeholder="Название шага" value={stepDraft[proc.id]?.title || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], title: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-slate-400" />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input placeholder="Роль / исполнитель" value={stepDraft[proc.id]?.role_name || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], role_name: e.target.value } }))} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none" />
-                          <input placeholder="Система / инструмент" value={stepDraft[proc.id]?.system_name || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], system_name: e.target.value } }))} className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none" />
-                        </div>
-                        <input placeholder="Боль / проблема на этом шаге" value={stepDraft[proc.id]?.pain_point || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], pain_point: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none text-red-700 placeholder:text-red-300" />
-                        <div className="flex items-center gap-2">
+                        <input placeholder="Название шага *" value={stepDraft[proc.id]?.title || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], title: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-slate-400" />
+                        {/* На мобайле — вертикально, на десктопе — grid */}
+                        <input placeholder="Роль / исполнитель" value={stepDraft[proc.id]?.role_name || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], role_name: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none" />
+                        <input placeholder="Система / инструмент" value={stepDraft[proc.id]?.system_name || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], system_name: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none" />
+                        <input placeholder="Боль / проблема на этом шаге" value={stepDraft[proc.id]?.pain_point || ""} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], pain_point: e.target.value } }))} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none text-red-700 placeholder:text-red-300" />
+                        <div className="flex items-center gap-3">
                           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-                            <input type="checkbox" checked={stepDraft[proc.id]?.is_manual ?? true} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], is_manual: e.target.checked } }))} />
+                            <input type="checkbox" checked={stepDraft[proc.id]?.is_manual ?? true} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], is_manual: e.target.checked } }))} className="w-4 h-4" />
                             Ручной
                           </label>
-                          <select value={stepDraft[proc.id]?.ai_potential || "none"} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], ai_potential: e.target.value } }))} className="border border-slate-200 rounded px-1.5 py-1 text-xs">
+                          <select value={stepDraft[proc.id]?.ai_potential || "none"} onChange={e => setStepDraft(d => ({ ...d, [proc.id]: { ...d[proc.id], ai_potential: e.target.value } }))} className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-sm">
                             <option value="none">AI: нет</option>
                             <option value="low">AI: низкий</option>
                             <option value="medium">AI: средний</option>
                             <option value="high">AI: высокий</option>
                           </select>
                         </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setShowStepForm(null)} className="flex-1 border border-slate-200 rounded-lg py-1.5 text-xs hover:bg-slate-100">Отмена</button>
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={() => setShowStepForm(null)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-100">Отмена</button>
                           <button disabled={!stepDraft[proc.id]?.title?.trim() || wbLoading} onClick={async () => {
                             const s = stepDraft[proc.id] || {};
                             setWbLoading(true);
@@ -1688,14 +1707,14 @@ export default function ProjectPage() {
                             setShowStepForm(null);
                             workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
                             setWbLoading(false);
-                          }} className="flex-1 bg-slate-800 text-white rounded-lg py-1.5 text-xs font-semibold disabled:opacity-50">
+                          }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
                             {wbLoading ? "..." : "Добавить"}
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <button onClick={() => setShowStepForm(proc.id)} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 transition-colors pl-9">
-                        <Icon name="Plus" size={12} /> Добавить шаг
+                      <button onClick={() => setShowStepForm(proc.id)} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors ml-7 py-1.5 px-2 rounded-lg hover:bg-slate-100">
+                        <Icon name="Plus" size={13} /> Добавить шаг
                       </button>
                     )}
                   </div>
@@ -1707,63 +1726,84 @@ export default function ProjectPage() {
 
         {/* ── Боли ── */}
         {tab === "pains" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-slate-500">Фиксируйте ручной труд, дублирование, задержки, контрольные разрывы</p>
-              <button onClick={() => setShowPainForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
-                <Icon name="Plus" size={13} /> Добавить боль
+          <div className="space-y-3">
+            {/* Заголовок */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs sm:text-sm text-slate-500 leading-snug">Фиксируйте ручной труд, дублирование, задержки, разрывы</p>
+              <button onClick={() => setShowPainForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 flex-shrink-0">
+                <Icon name="Plus" size={13} /> Добавить
               </button>
             </div>
-            {/* AI-экстракция болей */}
-            <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
+
+            {/* AI-экстракция */}
+            <div className="bg-violet-50 border border-violet-100 rounded-2xl p-3 sm:p-4">
               <p className="text-xs font-semibold text-violet-800 mb-2">🧠 Извлечь боли с помощью AI</p>
-              <textarea placeholder="Опишите ситуацию или процесс — AI выделит боли и проблемы..." rows={3} value={aiExtractText} onChange={e => setAiExtractText(e.target.value)} className="w-full border border-violet-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none mb-2" />
-              <button disabled={!aiExtractText.trim() || aiExtractLoading} onClick={async () => {
-                setAiExtractLoading(true);
-                try {
-                  const res = await workspaceApi.aiExtractPains(projectId, aiExtractText) as { pains: PainPoint[] };
-                  for (const p of res.pains || []) {
-                    await workspaceApi.createPainPoint({ project_id: projectId, ...p });
-                  }
-                  setAiExtractText("");
-                  workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
-                } finally { setAiExtractLoading(false); }
-              }} className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 disabled:opacity-50">
-                {aiExtractLoading ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</> : <><Icon name="Sparkles" size={12} /> Извлечь боли</>}
+              <textarea
+                placeholder="Опишите ситуацию или процесс — AI выделит боли..."
+                rows={3}
+                value={aiExtractText}
+                onChange={e => setAiExtractText(e.target.value)}
+                className="w-full border border-violet-200 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none mb-2"
+              />
+              <button
+                disabled={!aiExtractText.trim() || aiExtractLoading}
+                onClick={async () => {
+                  setAiExtractLoading(true);
+                  try {
+                    const res = await workspaceApi.aiExtractPains(projectId, aiExtractText) as { pains: PainPoint[] };
+                    for (const p of res.pains || []) {
+                      await workspaceApi.createPainPoint({ project_id: projectId, ...p });
+                    }
+                    setAiExtractText("");
+                    workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
+                  } finally { setAiExtractLoading(false); }
+                }}
+                className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 w-full sm:w-auto justify-center"
+              >
+                {aiExtractLoading
+                  ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</>
+                  : <><Icon name="Sparkles" size={12} /> Извлечь боли</>}
               </button>
             </div>
+
+            {/* Форма добавления боли */}
             {showPainForm && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новая боль / узкое место</p>
-                <textarea placeholder="Опишите конкретную боль" rows={2} value={painDraft.description} onChange={e => setPainDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none" />
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Тип</p>
-                    <select value={painDraft.pain_type} onChange={e => setPainDraft(d => ({ ...d, pain_type: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none">
-                      <option value="manual_work">Ручной труд</option>
-                      <option value="duplication">Дублирование</option>
-                      <option value="delay">Задержки</option>
-                      <option value="lack_of_visibility">Нет прозрачности</option>
-                      <option value="control_gap">Контрольный разрыв</option>
-                      <option value="data_quality">Качество данных</option>
-                      <option value="error_rate">Ошибки</option>
-                      <option value="compliance_burden">Регуляторная нагрузка</option>
-                    </select>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Влияние</p>
-                    <select value={painDraft.impact_level} onChange={e => setPainDraft(d => ({ ...d, impact_level: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none">
-                      <option value="critical">Критическое</option>
-                      <option value="high">Высокое</option>
-                      <option value="medium">Среднее</option>
-                      <option value="low">Низкое</option>
-                    </select>
-                  </div>
+                <textarea
+                  placeholder="Опишите конкретную боль *"
+                  rows={2}
+                  value={painDraft.description}
+                  onChange={e => setPainDraft(d => ({ ...d, description: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+                />
+                {/* Тип и влияние — вертикально на мобайле */}
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Тип боли</p>
+                  <select value={painDraft.pain_type} onChange={e => setPainDraft(d => ({ ...d, pain_type: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
+                    <option value="manual_work">Ручной труд</option>
+                    <option value="duplication">Дублирование</option>
+                    <option value="delay">Задержки</option>
+                    <option value="lack_of_visibility">Нет прозрачности</option>
+                    <option value="control_gap">Контрольный разрыв</option>
+                    <option value="data_quality">Качество данных</option>
+                    <option value="error_rate">Ошибки</option>
+                    <option value="compliance_burden">Регуляторная нагрузка</option>
+                  </select>
                 </div>
-                <input placeholder="Частота (ежедневно, еженедельно...)" value={painDraft.frequency} onChange={e => setPainDraft(d => ({ ...d, frequency: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                <input placeholder="Корневая причина (опционально)" value={painDraft.root_cause} onChange={e => setPainDraft(d => ({ ...d, root_cause: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                <div className="flex gap-2">
-                  <button onClick={() => setShowPainForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Влияние</p>
+                  <select value={painDraft.impact_level} onChange={e => setPainDraft(d => ({ ...d, impact_level: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
+                    <option value="critical">Критическое</option>
+                    <option value="high">Высокое</option>
+                    <option value="medium">Среднее</option>
+                    <option value="low">Низкое</option>
+                  </select>
+                </div>
+                <input placeholder="Частота (ежедневно, еженедельно...)" value={painDraft.frequency} onChange={e => setPainDraft(d => ({ ...d, frequency: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none" />
+                <input placeholder="Корневая причина (опционально)" value={painDraft.root_cause} onChange={e => setPainDraft(d => ({ ...d, root_cause: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none" />
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowPainForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!painDraft.description.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
                     await workspaceApi.createPainPoint({ project_id: projectId, ...painDraft });
@@ -1771,35 +1811,61 @@ export default function ProjectPage() {
                     setShowPainForm(false);
                     workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
                     setWbLoading(false);
-                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
                     {wbLoading ? "Сохраняю..." : "Добавить"}
                   </button>
                 </div>
               </div>
             )}
+
+            {/* Пустое состояние */}
             {painPoints.length === 0 && !showPainForm && (
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
-                <Icon name="Flame" size={32} className="text-slate-300 mx-auto mb-3" />
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Flame" size={28} className="text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-500 text-sm">Болей пока нет</p>
-                <p className="text-xs text-slate-400 mt-1">Добавьте вручную или используйте AI-экстракцию</p>
+                <p className="text-xs text-slate-400 mt-1">Добавьте вручную или используйте AI-экстракцию выше</p>
               </div>
             )}
+
+            {/* Список болей */}
             {painPoints.length > 0 && (
               <div className="space-y-2">
                 {painPoints.map(p => {
-                  const impactColor = p.impact_level === "critical" ? "bg-red-100 text-red-700 border-red-200" : p.impact_level === "high" ? "bg-orange-100 text-orange-700 border-orange-200" : p.impact_level === "medium" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-slate-100 text-slate-600 border-slate-200";
-                  const PAIN_LABELS: Record<string, string> = { manual_work: "Ручной труд", duplication: "Дублирование", delay: "Задержки", lack_of_visibility: "Нет прозрачности", control_gap: "Контрольный разрыв", data_quality: "Качество данных", error_rate: "Ошибки", compliance_burden: "Регуляторная нагрузка" };
+                  const IMPACT_COLOR: Record<string, string> = {
+                    critical: "bg-red-50 border-red-200",
+                    high: "bg-orange-50 border-orange-200",
+                    medium: "bg-amber-50 border-amber-200",
+                    low: "bg-slate-50 border-slate-200",
+                  };
+                  const IMPACT_BADGE: Record<string, string> = {
+                    critical: "bg-red-100 text-red-700",
+                    high: "bg-orange-100 text-orange-700",
+                    medium: "bg-amber-100 text-amber-700",
+                    low: "bg-slate-100 text-slate-600",
+                  };
+                  const IMPACT_LABEL: Record<string, string> = { critical: "Критично", high: "Высокое", medium: "Среднее", low: "Низкое" };
+                  const PAIN_LABELS: Record<string, string> = { manual_work: "Ручной труд", duplication: "Дублирование", delay: "Задержки", lack_of_visibility: "Нет прозрачности", control_gap: "Контрольный разрыв", data_quality: "Данные", error_rate: "Ошибки", compliance_burden: "Регуляторная нагрузка" };
                   return (
-                    <div key={p.id} className={`border rounded-xl p-3.5 ${impactColor}`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium flex-1">{p.description}</p>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/60 flex-shrink-0">{p.impact_level === "critical" ? "Критично" : p.impact_level === "high" ? "Высокое" : p.impact_level === "medium" ? "Среднее" : "Низкое"}</span>
+                    <div key={p.id} className={`border rounded-xl p-3 ${IMPACT_COLOR[p.impact_level] || "bg-slate-50 border-slate-200"}`}>
+                      {/* Строка 1: бейджи */}
+                      <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${IMPACT_BADGE[p.impact_level] || "bg-slate-100 text-slate-600"}`}>
+                          {IMPACT_LABEL[p.impact_level] || p.impact_level}
+                        </span>
+                        <span className="text-[10px] bg-white/70 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200">
+                          {PAIN_LABELS[p.pain_type] || p.pain_type}
+                        </span>
+                        {p.frequency && <span className="text-[10px] text-slate-500">📅 {p.frequency}</span>}
                       </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
-                        <span className="text-xs opacity-70">{PAIN_LABELS[p.pain_type] || p.pain_type}</span>
-                        {p.frequency && <span className="text-xs opacity-70">📅 {p.frequency}</span>}
-                        {p.root_cause && <span className="text-xs opacity-70">🔍 {p.root_cause}</span>}
-                      </div>
+                      {/* Строка 2: описание */}
+                      <p className="text-sm text-slate-800 leading-snug">{p.description}</p>
+                      {/* Строка 3: корневая причина */}
+                      {p.root_cause && (
+                        <p className="text-xs text-slate-500 mt-1.5 flex items-start gap-1">
+                          <span className="flex-shrink-0">🔍</span>
+                          <span className="line-clamp-2">{p.root_cause}</span>
+                        </p>
+                      )}
                     </div>
                   );
                 })}
