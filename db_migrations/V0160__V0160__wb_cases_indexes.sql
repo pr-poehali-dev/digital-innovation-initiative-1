@@ -1,0 +1,1 @@
+ALTER TABLE t_p61016064_digital_innovation_i.wb_cases ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(); CREATE INDEX IF NOT EXISTS idx_wb_cases_user ON t_p61016064_digital_innovation_i.wb_cases(user_id); CREATE INDEX IF NOT EXISTS idx_wb_cases_status ON t_p61016064_digital_innovation_i.wb_cases(status);

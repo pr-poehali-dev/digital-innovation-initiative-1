@@ -1,0 +1,1 @@
+CREATE TABLE t_p61016064_digital_innovation_i.wb_case_process_links (id SERIAL PRIMARY KEY, case_id INTEGER NOT NULL, process_id INTEGER NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (case_id, process_id));

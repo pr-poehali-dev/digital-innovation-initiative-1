@@ -1,0 +1,1 @@
+CREATE TABLE t_p61016064_digital_innovation_i.wb_attachments (id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, file_name TEXT NOT NULL, file_key TEXT, cdn_url TEXT, mime_type TEXT, file_size INTEGER, source_url TEXT, is_deleted BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());

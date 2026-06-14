@@ -1,0 +1,1 @@
+CREATE TABLE t_p61016064_digital_innovation_i.wb_decision_log (id SERIAL PRIMARY KEY, case_id INTEGER NOT NULL, user_id INTEGER NOT NULL, decision_type TEXT NOT NULL DEFAULT 'general', title TEXT NOT NULL, description TEXT, decided_by TEXT, next_action TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
