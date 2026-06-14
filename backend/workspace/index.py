@@ -49,6 +49,15 @@ def get_user(conn, session_id: str):
     return row[0] if row else None
 
 
+def bump_content_version(conn, project_id: int):
+    """Увеличивает content_version проекта — вызывается при любом изменении кейса."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {SCHEMA}.projects SET content_version = content_version + 1, ai_status = 'idle' WHERE id = %s",
+            (project_id,),
+        )
+
+
 def check_project_access(conn, project_id: int, user_id: int) -> bool:
     """Проверяем что пользователь является владельцем или участником проекта."""
     with conn.cursor() as cur:
@@ -307,6 +316,7 @@ def handler(event: dict, context) -> dict:
                               updated_at = NOW()""",
                         (project_id, goals, constraints, key_facts, stakeholders, user_id),
                     )
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
 
@@ -352,6 +362,7 @@ def handler(event: dict, context) -> dict:
                      body.get("success_criteria", ""), body.get("priority", "medium"), user_id),
                 )
                 h_id, created_at = cur.fetchone()
+            bump_content_version(conn, project_id)
             conn.commit()
             return cors({"ok": True, "hypothesis": {"id": h_id, "title": title, "created_at": str(created_at)}})
 
@@ -374,6 +385,7 @@ def handler(event: dict, context) -> dict:
             vals.append(h_id)
             with conn.cursor() as cur:
                 cur.execute(f"UPDATE {SCHEMA}.workspace_hypotheses SET {', '.join(fields)} WHERE id = %s", vals)
+            bump_content_version(conn, row[0])
             conn.commit()
             return cors({"ok": True})
 
@@ -557,6 +569,7 @@ def handler(event: dict, context) -> dict:
                          body.get("duration_minutes")),
                     )
                     step_id = cur.fetchone()[0]
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True, "id": step_id})
 
@@ -575,6 +588,7 @@ def handler(event: dict, context) -> dict:
                 vals.append(step_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_process_steps SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
 
@@ -649,6 +663,7 @@ def handler(event: dict, context) -> dict:
                             VALUES (%s, %s) ON CONFLICT DO NOTHING""",
                         (project_id, proc_id),
                     )
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True, "id": proc_id})
 
@@ -667,6 +682,7 @@ def handler(event: dict, context) -> dict:
                 vals.append(proc_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_processes SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
 
@@ -707,6 +723,7 @@ def handler(event: dict, context) -> dict:
                          body.get("frequency", ""), body.get("root_cause", "")),
                     )
                     pp_id = cur.fetchone()[0]
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True, "id": pp_id})
 
@@ -725,6 +742,7 @@ def handler(event: dict, context) -> dict:
                 vals.append(pp_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_pain_points SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
 
@@ -782,6 +800,7 @@ def handler(event: dict, context) -> dict:
                             VALUES (%s, %s, %s) ON CONFLICT (case_id, benchmark_id) DO NOTHING""",
                         (project_id, bm_id, body.get("relevance_note", "")),
                     )
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True, "id": bm_id})
 
@@ -800,6 +819,7 @@ def handler(event: dict, context) -> dict:
                 vals.append(bm_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_benchmarks SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
 
@@ -855,6 +875,7 @@ def handler(event: dict, context) -> dict:
                          body.get("recommendation", "assess")),
                     )
                     opp_id = cur.fetchone()[0]
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True, "id": opp_id})
 
@@ -875,6 +896,7 @@ def handler(event: dict, context) -> dict:
                 vals.append(opp_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_ai_opportunities SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
 
@@ -1000,6 +1022,7 @@ def handler(event: dict, context) -> dict:
                          body.get("status", "idea"), body.get("next_step", "")),
                     )
                     init_id = cur.fetchone()[0]
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True, "id": init_id})
 
@@ -1017,8 +1040,39 @@ def handler(event: dict, context) -> dict:
                 vals.append(init_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_initiatives SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
+
+        # ── AI Operator: статус анализа (GET) ────────────────────────
+        if method == "GET" and action == "ai_status":
+            project_id = int(qs.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT ai_status, content_version, ai_analyzed_version,
+                               ai_last_analysis_at, ai_last_result_json, ai_last_error
+                        FROM {SCHEMA}.projects WHERE id = %s""",
+                    (project_id,)
+                )
+                r = cur.fetchone()
+            if not r:
+                return cors({"ok": False, "error": {"message": "Проект не найден"}}, 404)
+            result_json = None
+            if r[4]:
+                try: result_json = json.loads(r[4])
+                except Exception: pass
+            return cors({
+                "ok": True,
+                "ai_status": r[0],
+                "content_version": r[1],
+                "ai_analyzed_version": r[2],
+                "is_stale": (r[1] or 1) > (r[2] or 0),
+                "last_analysis_at": str(r[3]) if r[3] else None,
+                "analysis": result_json,
+                "last_error": r[5],
+            })
 
         # ── AI Operator: автоанализ проекта без промптов ─────────────
         if method == "POST" and action == "ai_analyze":
@@ -1027,6 +1081,44 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужен project_id"}}, 400)
             if not check_project_access(conn, project_id, user_id):
                 return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            # Читаем текущий статус и версии
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT ai_status, content_version, ai_analyzed_version, ai_last_analysis_at FROM {SCHEMA}.projects WHERE id = %s",
+                    (project_id,)
+                )
+                proj = cur.fetchone()
+            curr_ai_status = proj[0] if proj else "idle"
+            content_v      = proj[1] if proj else 1
+            analyzed_v     = proj[2] if proj else 0
+            last_at        = proj[3] if proj else None
+
+            # Защита от дублей: если уже запущен — вернуть текущий статус
+            if curr_ai_status in ("running", "queued"):
+                return cors({"ok": True, "ai_status": curr_ai_status, "analysis": None})
+
+            # Cooldown 5 минут при отсутствии изменений
+            import datetime
+            if last_at and content_v == analyzed_v:
+                delta = datetime.datetime.utcnow() - last_at
+                if delta.total_seconds() < 300:
+                    with conn.cursor() as cur:
+                        cur.execute(f"SELECT ai_last_result_json FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
+                        cached = cur.fetchone()
+                    cached_result = None
+                    if cached and cached[0]:
+                        try: cached_result = json.loads(cached[0])
+                        except Exception: pass
+                    return cors({"ok": True, "ai_status": "ready", "analysis": cached_result})
+
+            # Помечаем как running
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.projects SET ai_status = 'running' WHERE id = %s",
+                    (project_id,)
+                )
+            conn.commit()
 
             pd = {}
             with conn.cursor() as cur:
@@ -1080,6 +1172,21 @@ def handler(event: dict, context) -> dict:
                 cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.documents WHERE project_id = %s", (project_id,))
                 pd["docs_count"] = cur.fetchone()[0]
 
+            # Проверка: кейс не пустой (есть хоть что-то для анализа)
+            has_content = bool(
+                pd.get("desc") or pd.get("goals") or pd.get("key_facts") or
+                pd.get("processes") or pd.get("pains") or pd.get("hypotheses") or
+                pd.get("ai_opps") or pd.get("initiatives") or pd.get("benchmarks")
+            )
+            if not has_content:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.projects SET ai_status = 'idle' WHERE id = %s",
+                        (project_id,)
+                    )
+                conn.commit()
+                return cors({"ok": False, "empty": True, "error": {"message": "Кейс пустой — добавьте описание, процессы или боли"}})
+
             lines = [f"ПРОЕКТ: «{pd['title']}»"]
             if pd.get("desc"): lines.append(f"Описание: {pd['desc']}")
             if pd.get("goals"): lines.append(f"\nЦЕЛИ:\n{pd['goals']}")
@@ -1117,18 +1224,32 @@ def handler(event: dict, context) -> dict:
 {{"summary":"3-4 предложения — суть кейса и главная проблема","readiness_score":число 1-10,"key_insight":"самый важный инсайт — 1-2 предложения","top_pains":["боль 1","боль 2","боль 3"],"ai_verdict":"AI рекомендован"/"AI возможен"/"Сначала процессы — AI потом","ai_verdict_reason":"1-2 предложения","quick_wins":["что сделать сейчас без AI"],"gaps":["чего не хватает в кейсе"],"next_action":"одно конкретное следующее действие","risks":["риск 1","риск 2"]}}
 ТОЛЬКО JSON."""
 
-            result_text = yandex_gpt(prompt, system, max_tokens=2000)
             try:
+                result_text = yandex_gpt(prompt, system, max_tokens=2000)
                 start, end = result_text.find("{"), result_text.rfind("}") + 1
                 analysis = json.loads(result_text[start:end])
-            except Exception:
-                analysis = {"summary": result_text[:400], "readiness_score": 5, "key_insight": "", "top_pains": [], "ai_verdict": "Требует оценки", "ai_verdict_reason": "", "quick_wins": [], "gaps": [], "next_action": "", "risks": []}
+            except Exception as e:
+                # Сохраняем ошибку и сбрасываем статус
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.projects SET ai_status = 'failed', ai_last_error = %s WHERE id = %s",
+                        (str(e)[:500], project_id)
+                    )
+                conn.commit()
+                return cors({"ok": False, "error": {"message": "Ошибка AI-анализа"}}, 500)
 
+            result_json = json.dumps(analysis, ensure_ascii=False)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""INSERT INTO {SCHEMA}.workspace_artifacts (project_id, title, artifact_type, content, summary, mode, created_by)
-                        VALUES (%s, 'AI Анализ кейса', 'analysis', %s, %s, 'analyst', %s) RETURNING id""",
-                    (project_id, json.dumps(analysis, ensure_ascii=False), analysis.get("summary", "")[:300], user_id))
+                    f"""UPDATE {SCHEMA}.projects
+                        SET ai_status = 'ready',
+                            ai_analyzed_version = content_version,
+                            ai_last_analysis_at = NOW(),
+                            ai_last_result_json = %s,
+                            ai_last_error = NULL
+                        WHERE id = %s""",
+                    (result_json, project_id)
+                )
             conn.commit()
             return cors({"ok": True, "analysis": analysis})
 

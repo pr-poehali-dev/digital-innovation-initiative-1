@@ -145,8 +145,10 @@ export default function ProjectPage() {
     top_pains: string[]; ai_verdict: string; ai_verdict_reason: string;
     quick_wins: string[]; gaps: string[]; next_action: string; risks: string[];
   };
+  type AiOperatorStatus = "idle" | "running" | "ready" | "failed" | "stale";
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
-  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
+  const [aiOpStatus, setAiOpStatus] = useState<AiOperatorStatus>("idle");
+  const [aiIsEmpty, setAiIsEmpty] = useState(false);
 
   const [wsContext, setWsContext] = useState<WsContext>(null);
   const [wsContextEdit, setWsContextEdit] = useState(false);
@@ -190,7 +192,51 @@ export default function ProjectPage() {
     workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
   };
 
-  useEffect(() => { load(); loadWorkbench(); analytics.workspaceOpened(projectId, "overview"); }, [projectId]);
+  // Умный автозапуск AI-анализа
+  const runAiAnalysis = async () => {
+    setAiOpStatus("running");
+    setAiIsEmpty(false);
+    try {
+      const res = await workspaceApi.aiAnalyze(projectId) as { analysis?: AiAnalysis; empty?: boolean; ok: boolean };
+      if (res.empty) {
+        setAiIsEmpty(true);
+        setAiOpStatus("idle");
+      } else if (res.analysis) {
+        setAiAnalysis(res.analysis);
+        setAiOpStatus("ready");
+      } else {
+        setAiOpStatus("failed");
+      }
+    } catch {
+      setAiOpStatus("failed");
+    }
+  };
+
+  useEffect(() => {
+    load();
+    loadWorkbench();
+    analytics.workspaceOpened(projectId, "overview");
+
+    // Проверяем статус AI и запускаем если нужно
+    workspaceApi.aiStatus(projectId)
+      .then((s: { ok: boolean; ai_status: string; is_stale: boolean; analysis?: AiAnalysis }) => {
+        if (!s.ok) return;
+        if (s.ai_status === "ready" && s.analysis) {
+          setAiAnalysis(s.analysis);
+          setAiOpStatus(s.is_stale ? "stale" : "ready");
+        } else if (s.ai_status === "running") {
+          setAiOpStatus("running");
+        } else if (s.ai_status === "failed") {
+          setAiOpStatus("failed");
+        } else {
+          // idle или stale — автозапуск
+          runAiAnalysis();
+        }
+      })
+      .catch(() => {
+        // Тихий фейл — кейс мог быть только что создан
+      });
+  }, [projectId]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -529,37 +575,73 @@ export default function ProjectPage() {
                     <Icon name="BrainCircuit" size={15} className="text-violet-300" />
                   </div>
                   <span className="font-semibold text-sm">AI Оператор</span>
-                  <span className="text-[10px] text-slate-400">сам читает кейс и анализирует</span>
+                  {aiOpStatus === "running" && (
+                    <span className="flex items-center gap-1 text-[10px] text-violet-300">
+                      <div className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-pulse" /> анализирует...
+                    </span>
+                  )}
+                  {aiOpStatus === "stale" && (
+                    <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">устарел</span>
+                  )}
+                  {aiOpStatus === "ready" && (
+                    <span className="text-[10px] text-green-400">готов</span>
+                  )}
                 </div>
                 <button
-                  disabled={aiAnalysisLoading}
-                  onClick={async () => {
-                    setAiAnalysisLoading(true);
-                    try {
-                      const res = await workspaceApi.aiAnalyze(projectId) as { analysis: AiAnalysis };
-                      setAiAnalysis(res.analysis);
-                    } catch {
-                      // silent
-                    } finally { setAiAnalysisLoading(false); }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded-lg text-xs font-semibold transition-colors"
+                  disabled={aiOpStatus === "running"}
+                  onClick={runAiAnalysis}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 rounded-lg text-xs font-semibold transition-colors"
                 >
-                  {aiAnalysisLoading
+                  {aiOpStatus === "running"
                     ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</>
-                    : <><Icon name="Sparkles" size={12} /> {aiAnalysis ? "Обновить анализ" : "Запустить анализ"}</>}
+                    : <><Icon name="Sparkles" size={12} /> {aiAnalysis ? "Обновить" : "Запустить анализ"}</>}
                 </button>
               </div>
 
-              {!aiAnalysis && !aiAnalysisLoading && (
-                <div className="text-center py-4">
-                  <p className="text-sm text-slate-400">Нажми «Запустить анализ» — AI сам прочитает кейс и выдаст структурированный разбор</p>
-                  <p className="text-xs text-slate-500 mt-1">Читает: процессы, боли, гипотезы, бенчмарки, AI-возможности, инициативы</p>
+              {/* Состояние 1: пустой кейс */}
+              {aiIsEmpty && aiOpStatus === "idle" && (
+                <div className="text-center py-5">
+                  <Icon name="PackageOpen" size={28} className="text-slate-600 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400">Добавьте описание, процесс или боли — и AI начнёт анализ автоматически</p>
                 </div>
               )}
 
+              {/* Состояние 2: анализируется (skeleton) */}
+              {aiOpStatus === "running" && !aiAnalysis && (
+                <div className="space-y-3 animate-pulse">
+                  <div className="flex gap-3">
+                    <div className="flex-1 bg-white/5 rounded-xl p-3 h-20" />
+                    <div className="w-20 bg-white/5 rounded-xl p-3 h-20" />
+                  </div>
+                  <div className="bg-white/5 rounded-xl p-3 h-12" />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white/5 rounded-xl p-3 h-24" />
+                    <div className="bg-white/5 rounded-xl p-3 h-24" />
+                  </div>
+                  <p className="text-xs text-slate-500 text-center pt-1">Читаю процессы, боли, гипотезы, бенчмарки и инициативы...</p>
+                </div>
+              )}
+
+              {/* Состояние 3: устаревший анализ (показываем старый + плашку) */}
+              {aiOpStatus === "stale" && aiAnalysis && (
+                <div className="mb-3 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
+                  <Icon name="RefreshCw" size={13} className="text-amber-400 flex-shrink-0" />
+                  <p className="text-xs text-amber-300">В кейсе появились новые данные — анализ обновляется</p>
+                </div>
+              )}
+
+              {/* Состояние 4: ошибка */}
+              {aiOpStatus === "failed" && !aiAnalysis && (
+                <div className="text-center py-4">
+                  <Icon name="AlertCircle" size={24} className="text-red-400 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400 mb-3">Не удалось получить AI-анализ</p>
+                  <button onClick={runAiAnalysis} className="text-xs text-violet-400 hover:text-violet-300 underline">Повторить</button>
+                </div>
+              )}
+
+              {/* Состояние 5: готов — показываем результат */}
               {aiAnalysis && (
                 <div className="space-y-3">
-                  {/* Summary + score */}
                   <div className="flex gap-3">
                     <div className="flex-1 bg-white/5 rounded-xl p-3">
                       <p className="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wide">Суть кейса</p>
@@ -567,11 +649,10 @@ export default function ProjectPage() {
                     </div>
                     <div className="flex-shrink-0 w-20 bg-white/5 rounded-xl p-3 flex flex-col items-center justify-center">
                       <p className="text-2xl font-bold text-white">{aiAnalysis.readiness_score}<span className="text-sm text-slate-400">/10</span></p>
-                      <p className="text-[10px] text-slate-400 text-center mt-0.5">готовность кейса</p>
+                      <p className="text-[10px] text-slate-400 text-center mt-0.5">готовность</p>
                     </div>
                   </div>
 
-                  {/* Key insight */}
                   {aiAnalysis.key_insight && (
                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
                       <p className="text-xs text-amber-400 font-semibold mb-1">💡 Ключевой инсайт</p>
@@ -579,7 +660,6 @@ export default function ProjectPage() {
                     </div>
                   )}
 
-                  {/* AI verdict */}
                   <div className={`rounded-xl p-3 ${aiAnalysis.ai_verdict === "AI рекомендован" ? "bg-green-500/10 border border-green-500/20" : aiAnalysis.ai_verdict?.includes("Сначала") ? "bg-orange-500/10 border border-orange-500/20" : "bg-blue-500/10 border border-blue-500/20"}`}>
                     <div className="flex items-center gap-2 mb-1">
                       <Icon name={aiAnalysis.ai_verdict === "AI рекомендован" ? "CheckCircle" : "Info"} size={13} className={aiAnalysis.ai_verdict === "AI рекомендован" ? "text-green-400" : "text-blue-400"} />
@@ -589,14 +669,12 @@ export default function ProjectPage() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    {/* Quick wins */}
                     {aiAnalysis.quick_wins?.length > 0 && (
                       <div className="bg-white/5 rounded-xl p-3">
                         <p className="text-[10px] text-green-400 font-bold uppercase tracking-wide mb-2">✓ Quick wins</p>
                         <ul className="space-y-1">{aiAnalysis.quick_wins.map((w, i) => <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className="text-green-400 flex-shrink-0">•</span>{w}</li>)}</ul>
                       </div>
                     )}
-                    {/* Gaps */}
                     {aiAnalysis.gaps?.length > 0 && (
                       <div className="bg-white/5 rounded-xl p-3">
                         <p className="text-[10px] text-orange-400 font-bold uppercase tracking-wide mb-2">⚠ Пробелы</p>
@@ -605,7 +683,6 @@ export default function ProjectPage() {
                     )}
                   </div>
 
-                  {/* Next action */}
                   {aiAnalysis.next_action && (
                     <div className="bg-violet-600/30 border border-violet-500/30 rounded-xl px-4 py-3">
                       <p className="text-[10px] text-violet-300 font-bold uppercase tracking-wide mb-1">→ Следующее действие</p>

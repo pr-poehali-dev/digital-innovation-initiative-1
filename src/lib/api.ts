@@ -669,6 +669,8 @@ export const workspaceApi = {
     request(URLS.workspace, "/?action=ai_opportunities", "PUT", data),
   aiAnalyze: (projectId: number) =>
     request(URLS.workspace, "/?action=ai_analyze", "POST", { project_id: projectId }),
+  aiStatus: (projectId: number) =>
+    request(URLS.workspace, `/?action=ai_status&project_id=${projectId}`, "GET"),
   aiAssess: (projectId: number, processDescription: string) =>
     request(URLS.workspace, "/?action=ai_assess", "POST", { project_id: projectId, process_description: processDescription }),
   aiExtractPains: (projectId: number, text: string) =>
