@@ -591,10 +591,11 @@ def handler(event: dict, context) -> dict:
                                    p.maturity_level, p.digital_maturity, p.ai_potential,
                                    COUNT(s.id) as step_count
                             FROM {SCHEMA}.wb_processes p
+                            JOIN {SCHEMA}.wb_case_process_links lnk ON lnk.process_id = p.id AND lnk.case_id = %s
                             LEFT JOIN {SCHEMA}.wb_process_steps s ON s.process_id = p.id AND s.is_archived = FALSE
-                            WHERE p.user_id = %s AND p.is_archived = FALSE
+                            WHERE p.is_archived = FALSE
                             GROUP BY p.id ORDER BY p.created_at DESC""",
-                        (user_id,),
+                        (project_id,),
                     )
                     rows = cur.fetchall()
 
