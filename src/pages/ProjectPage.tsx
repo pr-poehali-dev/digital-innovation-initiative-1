@@ -149,6 +149,7 @@ export default function ProjectPage() {
     ok: boolean; ai_status: string; ai_stage: string | null;
     content_version: number; ai_analyzed_version: number; ai_is_stale: boolean;
     ai_last_result_json: AiAnalysis | null; ai_last_error: string | null;
+    has_pending_files?: boolean; pending_files_count?: number;
     empty?: boolean;
   };
   const AI_STAGE_LABELS: Record<string, string> = {
@@ -236,14 +237,22 @@ export default function ProjectPage() {
       setAiData(next); setPollTimeout(false);
       const terminal = next.ai_status === "ready" || next.ai_status === "failed";
       if (terminal) {
-        stopPolling();
-        if (next.ai_status === "ready" && next.ai_is_stale && !staleRestarted.current) {
-          staleRestarted.current = true;
-          const queued = await workspaceApi.aiAnalyze(projectId) as AiStatusRaw;
-          setAiData(queued);
-          if (isActive(queued.ai_status)) { pollStartedAt.current = Date.now(); scheduleNext(pollOnce); }
+        if (next.has_pending_files) {
+          // Файлы ещё обрабатываются — продолжаем поллить, AI не запускаем
+          scheduleNext(pollOnce);
+        } else {
+          stopPolling();
+          if (next.ai_status === "ready" && next.ai_is_stale && !staleRestarted.current) {
+            staleRestarted.current = true;
+            const queued = await workspaceApi.aiAnalyze(projectId) as AiStatusRaw;
+            setAiData(queued);
+            if (isActive(queued.ai_status)) { pollStartedAt.current = Date.now(); scheduleNext(pollOnce); }
+          }
         }
       } else if (isActive(next.ai_status)) {
+        scheduleNext(pollOnce);
+      } else if (next.has_pending_files) {
+        // idle но файлы ещё в обработке — поллим
         scheduleNext(pollOnce);
       } else {
         stopPolling();
@@ -276,13 +285,18 @@ export default function ProjectPage() {
     workspaceApi.aiStatus(projectId)
       .then((s: AiStatusRaw) => {
         setAiData(s);
+        const hasPending = s.has_pending_files;
         if (isActive(s.ai_status)) {
+          // Уже запущен — просто поллим
           startPolling();
-        } else if (!s.ai_last_result_json && s.content_version > 0) {
-          // Нет результата и кейс не пустой — автозапуск
-          runAiAnalysis();
+        } else if (hasPending) {
+          // Файлы ещё обрабатываются — не запускаем AI, поллим статус файлов
+          startPolling();
         } else if (s.ai_is_stale && s.ai_status !== "failed") {
           // Устарел — автозапуск
+          runAiAnalysis();
+        } else if (!s.ai_last_result_json && s.content_version > 0) {
+          // Нет результата и кейс не пустой — автозапуск
           runAiAnalysis();
         }
       })
@@ -664,6 +678,16 @@ export default function ProjectPage() {
                         : <><Icon name="Sparkles" size={12} /> {result ? "Обновить" : "Запустить анализ"}</>}
                     </button>
                   </div>
+
+                  {/* Plashka: файлы ещё обрабатываются */}
+                  {aiData?.has_pending_files && !isRunning && (
+                    <div className="mb-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-3 py-2 flex items-center gap-2">
+                      <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                      <p className="text-xs text-blue-300">
+                        Обрабатываю {aiData.pending_files_count === 1 ? "документ" : `${aiData.pending_files_count} документа`} — AI запустится автоматически после извлечения текста
+                      </p>
+                    </div>
+                  )}
 
                   {/* Plashka: polling timeout */}
                   {pollTimeout && (

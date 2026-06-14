@@ -1065,18 +1065,31 @@ def handler(event: dict, context) -> dict:
                 try: result_json = json.loads(r[5])
                 except Exception: pass
             cv, av = (r[2] or 1), (r[3] or 0)
+
+            # Проверяем есть ли файлы в процессе обработки
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT COUNT(*) FROM {SCHEMA}.documents
+                        WHERE project_id = %s AND archived_at IS NULL
+                        AND status IN ('uploaded', 'queued', 'processing', 'ocr_running')""",
+                    (project_id,)
+                )
+                pending_count = cur.fetchone()[0]
+
             return cors({
                 "ok": True,
-                "ai_status":            r[0] or "idle",
-                "ai_stage":             r[1],
-                "content_version":      cv,
-                "ai_analyzed_version":  av,
-                "ai_is_stale":          cv > av,
-                "ai_last_analysis_at":  str(r[4]) if r[4] else None,
-                "ai_last_result_json":  result_json,
-                "ai_last_error":        r[6],
-                "run_started_at":       str(r[7]) if r[7] else None,
-                "run_updated_at":       str(r[8]) if r[8] else None,
+                "ai_status":              r[0] or "idle",
+                "ai_stage":               r[1],
+                "content_version":        cv,
+                "ai_analyzed_version":    av,
+                "ai_is_stale":            cv > av,
+                "ai_last_analysis_at":    str(r[4]) if r[4] else None,
+                "ai_last_result_json":    result_json,
+                "ai_last_error":          r[6],
+                "run_started_at":         str(r[7]) if r[7] else None,
+                "run_updated_at":         str(r[8]) if r[8] else None,
+                "has_pending_files":      pending_count > 0,
+                "pending_files_count":    pending_count,
             })
 
         # ── AI Operator: POST запуск анализа (отдаёт 202, LLM в фоне) ─

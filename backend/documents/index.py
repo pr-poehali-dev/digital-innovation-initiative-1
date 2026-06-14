@@ -25,6 +25,18 @@ def get_schema():
     return os.environ.get("MAIN_DB_SCHEMA", "public")
 
 
+def bump_project_content_version(conn, project_id: int):
+    """Увеличивает content_version — AI-оператор увидит что кейс изменился."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE {get_schema()}.projects SET content_version = content_version + 1, ai_status = 'idle' WHERE id = %s",
+                (project_id,),
+            )
+    except Exception:
+        pass  # не блокируем основную операцию
+
+
 def notify_indexer(action: str, entity_type: str = None, entity_id: int = None):
     if not INDEXER_URL:
         return
@@ -347,6 +359,7 @@ def handler(event: dict, context) -> dict:
                 )
 
             log_activity(cur, schema, project_id, user["id"], "uploaded_document", "document", doc_id, filename)
+            bump_project_content_version(conn, project_id)
             conn.commit()
             notify_indexer("upsert", "document", doc_id)
 
@@ -531,6 +544,7 @@ def handler(event: dict, context) -> dict:
                 (doc_id,),
             )
             log_activity(cur, schema, pid, user["id"], "archived_document", "document", doc_id, orig_name)
+            bump_project_content_version(conn, pid)
             conn.commit()
             notify_indexer("delete", "document", doc_id)
             return json_response({"ok": True, "archived": True, "can_restore": True}, origin=origin)
@@ -560,6 +574,7 @@ def handler(event: dict, context) -> dict:
                 (doc_id,),
             )
             log_activity(cur, schema, pid, user["id"], "restored_document", "document", doc_id, orig_name)
+            bump_project_content_version(conn, pid)
             conn.commit()
             notify_indexer("upsert", "document", doc_id)
             return json_response({"ok": True}, origin=origin)
@@ -713,7 +728,9 @@ def handler(event: dict, context) -> dict:
                     (doc_id, ch["index"], ch.get("page"), ch["content"], len(ch["content"])),
                 )
             log_activity(cur, schema, project_id, user["id"], "uploaded_document", "document", doc_id, filename)
+            bump_project_content_version(conn, project_id)
             conn.commit()
+            notify_indexer("upsert", "document", doc_id)
             return json_response({
                 "id": doc_id, "filename": filename, "file_type": file_type,
                 "file_size": len(file_bytes), "status": "ready", "category": category,
@@ -811,7 +828,9 @@ def handler(event: dict, context) -> dict:
                     (doc_id, ch["index"], ch.get("page"), ch["content"], len(ch["content"])),
                 )
             log_activity(cur, schema, project_id, user["id"], "uploaded_document", "document", doc_id, filename)
+            bump_project_content_version(conn, project_id)
             conn.commit()
+            notify_indexer("upsert", "document", doc_id)
             return json_response({
                 "id": doc_id, "filename": filename, "file_type": file_type,
                 "file_size": file_size, "status": "ready", "category": category,
