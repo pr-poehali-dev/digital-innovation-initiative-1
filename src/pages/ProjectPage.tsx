@@ -215,6 +215,25 @@ export default function ProjectPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
+  // ── Post-action hints ──────────────────────────────────────────────────────
+  type PostActionKind =
+    | "document_created" | "process_created" | "process_step_created"
+    | "pain_created" | "hypothesis_created" | "initiative_created"
+    | "benchmark_created" | "assessment_saved";
+
+  const POST_ACTION_CONFIG: Record<PostActionKind, { icon: string; title: string; desc: string; ctaLabel: string; ctaTab: string }> = {
+    document_created:     { icon: "CheckCircle", title: "Документ загружен",    desc: "Извлеките процессы или задайте вопрос AI.",          ctaLabel: "Открыть AI Copilot",   ctaTab: "copilot" },
+    process_created:      { icon: "CheckCircle", title: "Процесс создан",       desc: "Добавьте шаги, чтобы увидеть узкие места.",         ctaLabel: "Добавить шаг",         ctaTab: "process" },
+    process_step_created: { icon: "CheckCircle", title: "Шаг добавлен",         desc: "Можно добавить ещё шаг или перейти к болям.",       ctaLabel: "Зафиксировать боли",   ctaTab: "pains" },
+    pain_created:         { icon: "CheckCircle", title: "Боль зафиксирована",   desc: "Сформулируйте гипотезу улучшения.",                  ctaLabel: "Создать гипотезу",     ctaTab: "hypotheses" },
+    hypothesis_created:   { icon: "CheckCircle", title: "Гипотеза создана",     desc: "Следующий шаг — превратить её в инициативу.",        ctaLabel: "Создать инициативу",   ctaTab: "initiatives" },
+    initiative_created:   { icon: "CheckCircle", title: "Инициатива создана",   desc: "Назначьте владельца или запустите AI-оценку.",       ctaLabel: "Открыть AI-оценку",    ctaTab: "ai" },
+    benchmark_created:    { icon: "CheckCircle", title: "Бенчмарк добавлен",    desc: "Сопоставьте его с гипотезой или зафиксируйте вывод.",ctaLabel: "Перейти к гипотезам",  ctaTab: "hypotheses" },
+    assessment_saved:     { icon: "CheckCircle", title: "Оценка сохранена",     desc: "Выберите инициативу для реализации quick win.",      ctaLabel: "Перейти к инициативам",ctaTab: "initiatives" },
+  };
+
+  const [postActionHint, setPostActionHint] = useState<PostActionKind | null>(null);
+
   const load = () => {
     projectsApi.get(projectId).then((d) => setProject(d)).catch(() => {});
     documentsApi.list(projectId).then((d) => setDocs(d.documents || [])).catch(() => {});
@@ -322,6 +341,7 @@ export default function ProjectPage() {
     setUploadError("");
     try {
       await uploadDocumentChunked(projectId, file, uploadCategory, setUploadProgress);
+      setPostActionHint("document_created");
       load();
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : "Ошибка загрузки");
@@ -462,6 +482,7 @@ export default function ProjectPage() {
     analytics.workspaceHypothesisCreated(projectId, hypDraft.priority);
     setHypForm(false);
     setHypDraft({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
+    setPostActionHint("hypothesis_created");
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
   };
 
@@ -632,6 +653,33 @@ export default function ProjectPage() {
           {/* Тень-индикатор: есть ещё вкладки справа */}
           <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-background to-transparent pointer-events-none" />
         </div>
+
+        {/* ── Post-action banner — показывается поверх любой вкладки ── */}
+        {postActionHint && (() => {
+          const h = POST_ACTION_CONFIG[postActionHint];
+          return (
+            <div className="mb-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 flex items-start gap-2.5">
+              <Icon name="CheckCircle" size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-emerald-900 leading-snug">{h.title}</p>
+                <p className="text-xs text-emerald-700 mt-0.5 leading-snug">{h.desc}</p>
+                <button
+                  onClick={() => { setTab(h.ctaTab as Parameters<typeof setTab>[0]); setPostActionHint(null); }}
+                  className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  {h.ctaLabel} →
+                </button>
+              </div>
+              <button
+                onClick={() => setPostActionHint(null)}
+                className="flex-shrink-0 text-emerald-500 hover:text-emerald-700 p-1 rounded-lg hover:bg-emerald-100 transition-colors -mt-0.5"
+                aria-label="Скрыть"
+              >
+                <Icon name="X" size={14} />
+              </button>
+            </div>
+          );
+        })()}
 
         {/* ── Обзор ── */}
         {tab === "overview" && (
@@ -1736,6 +1784,7 @@ export default function ProjectPage() {
                     await workspaceApi.createProcess({ project_id: projectId, ...processDraft });
                     setProcessDraft({ title: "", description: "", owner_name: "", department: "" });
                     setShowProcessForm(false);
+                    setPostActionHint("process_created");
                     workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
                     setWbLoading(false);
                   }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
@@ -1836,6 +1885,7 @@ export default function ProjectPage() {
                             setWbLoading(true);
                             await workspaceApi.createProcessStep({ process_id: proc.id, project_id: projectId, ...s });
                             setShowStepForm(null);
+                            setPostActionHint("process_step_created");
                             workspaceApi.getProcesses(projectId).then((d: { processes: Process[] }) => setProcesses(d.processes || [])).catch(() => {});
                             setWbLoading(false);
                           }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
@@ -1940,6 +1990,7 @@ export default function ProjectPage() {
                     await workspaceApi.createPainPoint({ project_id: projectId, ...painDraft });
                     setPainDraft({ description: "", pain_type: "manual_work", impact_level: "medium", frequency: "", root_cause: "" });
                     setShowPainForm(false);
+                    setPostActionHint("pain_created");
                     workspaceApi.getPainPoints(projectId).then((d: { pain_points: PainPoint[] }) => setPainPoints(d.pain_points || [])).catch(() => {});
                     setWbLoading(false);
                   }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
@@ -2056,6 +2107,7 @@ export default function ProjectPage() {
                     await workspaceApi.createBenchmark({ project_id: projectId, ...benchmarkDraft });
                     setBenchmarkDraft({ title: "", source_name: "", source_url: "", industry: "", summary: "", observed_effect: "", applicability: "", notes: "" });
                     setShowBenchmarkForm(false);
+                    setPostActionHint("benchmark_created");
                     workspaceApi.getBenchmarks(projectId).then((d: { benchmarks: Benchmark[] }) => setBenchmarks(d.benchmarks || [])).catch(() => {});
                     setWbLoading(false);
                   }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
@@ -2238,6 +2290,7 @@ export default function ProjectPage() {
                       workspaceApi.getAiOpportunities(projectId).then((d: { opportunities: AiOpportunity[] }) => setAiOpportunities(d.opportunities || [])).catch(() => {});
                       setAiAssessResult(null);
                       setAiAssessText("");
+                      setPostActionHint("assessment_saved");
                     }}
                     className="flex items-center justify-center gap-1.5 w-full py-2.5 text-sm text-violet-700 border border-violet-200 rounded-xl hover:bg-violet-50 font-semibold transition-colors"
                   >
@@ -2463,6 +2516,7 @@ export default function ProjectPage() {
                     await workspaceApi.createInitiative({ project_id: projectId, ...initiativeDraft });
                     setInitiativeDraft({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "" });
                     setShowInitiativeForm(false);
+                    setPostActionHint("initiative_created");
                     workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
                     setWbLoading(false);
                   }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
