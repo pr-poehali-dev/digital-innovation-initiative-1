@@ -18,7 +18,7 @@ export type RouteKey = keyof typeof ROUTES;
 
 // ── Секции sidebar ─────────────────────────────────────────────────────────
 
-export type NavSectionKey = "overview" | "profile" | "growth" | "learning" | "practice";
+export type NavSectionKey = "overview" | "workbench" | "profile" | "growth" | "learning";
 
 export interface NavItem {
   id: string;
@@ -49,6 +49,15 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    key: "workbench",
+    label: "Рабочий кабинет",
+    icon: "Briefcase",
+    singleItem: true,
+    items: [
+      { id: "workbench", label: "Рабочий кабинет", icon: "Briefcase", href: ROUTES.workbench, active: true },
+    ],
+  },
+  {
     key: "profile",
     label: "Профиль",
     icon: "UserCircle",
@@ -74,14 +83,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "learning.main", label: "Учебный кабинет", icon: "GraduationCap", href: ROUTES.learning, active: true },
       { id: "learning.goals", label: "Мои цели", icon: "Target", href: ROUTES.goals, active: true },
       { id: "learning.diplomas", label: "Дипломы и сертификаты", icon: "Award", href: ROUTES.passport, active: true },
-    ],
-  },
-  {
-    key: "practice",
-    label: "Практика",
-    icon: "FolderOpen",
-    items: [
-      { id: "practice.projects", label: "Рабочий кабинет", icon: "Briefcase", href: ROUTES.projects, active: true },
     ],
   },
 ];

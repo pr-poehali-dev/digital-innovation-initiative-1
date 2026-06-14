@@ -214,6 +214,24 @@ export default function ProjectPage() {
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
+  const [tabsScroll, setTabsScroll] = useState({ atStart: true, atEnd: false });
+
+  const updateTabsScroll = () => {
+    const el = tabsRef.current;
+    if (!el) return;
+    setTabsScroll({
+      atStart: el.scrollLeft <= 4,
+      atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4,
+    });
+  };
+
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    updateTabsScroll();
+    el.addEventListener("scroll", updateTabsScroll, { passive: true });
+    return () => el.removeEventListener("scroll", updateTabsScroll);
+  }, []);
 
   // ── Post-action hints ──────────────────────────────────────────────────────
   type PostActionKind =
@@ -660,6 +678,7 @@ export default function ProjectPage() {
                   setTab(t.key);
                   const el = tabsRef.current?.querySelector(`[data-tab="${t.key}"]`) as HTMLElement;
                   el?.scrollIntoView({ block: "nearest", inline: "center" });
+                  setTimeout(updateTabsScroll, 150);
                 }}
                 className={`relative whitespace-nowrap px-3 sm:px-3.5 py-2.5 text-xs sm:text-sm font-medium transition-colors flex-shrink-0 ${
                   tab === t.key
@@ -676,9 +695,15 @@ export default function ProjectPage() {
             ))}
           </div>
 
-          {/* Тени-индикаторы слева и справа */}
-          <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-background to-transparent pointer-events-none" />
-          <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none" />
+          {/* Тени-индикаторы — показываются только когда есть скрытый контент */}
+          {!tabsScroll.atStart && (
+            <div className="absolute left-0 top-0 bottom-px w-8 bg-gradient-to-r from-background to-transparent pointer-events-none" />
+          )}
+          {!tabsScroll.atEnd && (
+            <div className="absolute right-0 top-0 bottom-px w-10 bg-gradient-to-l from-background to-transparent pointer-events-none flex items-center justify-end pr-1">
+              <Icon name="ChevronRight" size={14} className="text-slate-400 flex-shrink-0" />
+            </div>
+          )}
         </div>
 
         {/* ── Post-action banner — показывается поверх любой вкладки ── */}
