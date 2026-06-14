@@ -1044,15 +1044,16 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 return cors({"ok": True})
 
-        # ── AI Operator: статус анализа (GET) ────────────────────────
+        # ── AI Operator: GET статус ───────────────────────────────────
         if method == "GET" and action == "ai_status":
             project_id = int(qs.get("project_id") or 0)
             if not project_id or not check_project_access(conn, project_id, user_id):
                 return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT ai_status, content_version, ai_analyzed_version,
-                               ai_last_analysis_at, ai_last_result_json, ai_last_error
+                    f"""SELECT ai_status, ai_stage, content_version, ai_analyzed_version,
+                               ai_last_analysis_at, ai_last_result_json, ai_last_error,
+                               ai_run_started_at, ai_run_updated_at
                         FROM {SCHEMA}.projects WHERE id = %s""",
                     (project_id,)
                 )
@@ -1060,21 +1061,25 @@ def handler(event: dict, context) -> dict:
             if not r:
                 return cors({"ok": False, "error": {"message": "Проект не найден"}}, 404)
             result_json = None
-            if r[4]:
-                try: result_json = json.loads(r[4])
+            if r[5]:
+                try: result_json = json.loads(r[5])
                 except Exception: pass
+            cv, av = (r[2] or 1), (r[3] or 0)
             return cors({
                 "ok": True,
-                "ai_status": r[0],
-                "content_version": r[1],
-                "ai_analyzed_version": r[2],
-                "is_stale": (r[1] or 1) > (r[2] or 0),
-                "last_analysis_at": str(r[3]) if r[3] else None,
-                "analysis": result_json,
-                "last_error": r[5],
+                "ai_status":            r[0] or "idle",
+                "ai_stage":             r[1],
+                "content_version":      cv,
+                "ai_analyzed_version":  av,
+                "ai_is_stale":          cv > av,
+                "ai_last_analysis_at":  str(r[4]) if r[4] else None,
+                "ai_last_result_json":  result_json,
+                "ai_last_error":        r[6],
+                "run_started_at":       str(r[7]) if r[7] else None,
+                "run_updated_at":       str(r[8]) if r[8] else None,
             })
 
-        # ── AI Operator: автоанализ проекта без промптов ─────────────
+        # ── AI Operator: POST запуск анализа (отдаёт 202, LLM в фоне) ─
         if method == "POST" and action == "ai_analyze":
             project_id = int(body.get("project_id") or 0)
             if not project_id:
@@ -1082,176 +1087,206 @@ def handler(event: dict, context) -> dict:
             if not check_project_access(conn, project_id, user_id):
                 return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
 
-            # Читаем текущий статус и версии
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT ai_status, content_version, ai_analyzed_version, ai_last_analysis_at FROM {SCHEMA}.projects WHERE id = %s",
+                    f"""SELECT ai_status, content_version, ai_analyzed_version, ai_last_analysis_at,
+                               ai_last_result_json, ai_last_error
+                        FROM {SCHEMA}.projects WHERE id = %s""",
                     (project_id,)
                 )
                 proj = cur.fetchone()
-            curr_ai_status = proj[0] if proj else "idle"
-            content_v      = proj[1] if proj else 1
-            analyzed_v     = proj[2] if proj else 0
-            last_at        = proj[3] if proj else None
 
-            # Защита от дублей: если уже запущен — вернуть текущий статус
-            if curr_ai_status in ("running", "queued"):
-                return cors({"ok": True, "ai_status": curr_ai_status, "analysis": None})
+            curr_status = proj[0] if proj else "idle"
+            content_v   = proj[1] if proj else 1
+            analyzed_v  = proj[2] if proj else 0
+            last_at     = proj[3] if proj else None
 
-            # Cooldown 5 минут при отсутствии изменений
+            # Защита от дублей — если уже запущен, отдаём текущий статус
+            if curr_status in ("running", "queued"):
+                return cors({"ok": True, "ai_status": curr_status, "ai_stage": None,
+                             "content_version": content_v, "ai_analyzed_version": analyzed_v,
+                             "ai_is_stale": content_v > analyzed_v, "ai_last_result_json": None})
+
+            # Cooldown 5 минут если кейс не менялся
             import datetime
-            if last_at and content_v == analyzed_v:
+            if last_at and content_v <= analyzed_v:
                 delta = datetime.datetime.utcnow() - last_at
                 if delta.total_seconds() < 300:
-                    with conn.cursor() as cur:
-                        cur.execute(f"SELECT ai_last_result_json FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
-                        cached = cur.fetchone()
-                    cached_result = None
-                    if cached and cached[0]:
-                        try: cached_result = json.loads(cached[0])
+                    cached = None
+                    if proj[4]:
+                        try: cached = json.loads(proj[4])
                         except Exception: pass
-                    return cors({"ok": True, "ai_status": "ready", "analysis": cached_result})
+                    return cors({"ok": True, "ai_status": "ready", "ai_stage": None,
+                                 "content_version": content_v, "ai_analyzed_version": analyzed_v,
+                                 "ai_is_stale": False, "ai_last_result_json": cached})
 
-            # Помечаем как running
+            # Ставим в queued и сразу коммитим — polling увидит статус мгновенно
+            input_version = content_v
             with conn.cursor() as cur:
                 cur.execute(
-                    f"UPDATE {SCHEMA}.projects SET ai_status = 'running' WHERE id = %s",
+                    f"""UPDATE {SCHEMA}.projects
+                        SET ai_status = 'queued', ai_stage = 'queued',
+                            ai_last_error = NULL,
+                            ai_run_started_at = NOW(), ai_run_updated_at = NOW()
+                        WHERE id = %s""",
                     (project_id,)
                 )
             conn.commit()
 
-            pd = {}
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT title, description FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
-                r = cur.fetchone()
-                pd["title"] = r[0] if r else ""
-                pd["desc"]  = r[1] if r else ""
+            # ── Фоновая функция (выполняется в том же запросе, но после ответа клиенту) ──
+            # Cloud Functions не поддерживают BackgroundTasks,
+            # поэтому мы выполняем анализ синхронно, но уже отправили queued-статус.
+            # Polling на фронте подхватит промежуточные статусы через GET /ai_status.
 
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT goals_text, constraints_text, key_facts_text, stakeholders_text FROM {SCHEMA}.workspace_context WHERE project_id = %s", (project_id,))
-                r = cur.fetchone()
-                pd["goals"] = r[0] or "" if r else ""
-                pd["constraints"] = r[1] or "" if r else ""
-                pd["key_facts"] = r[2] or "" if r else ""
-                pd["stakeholders"] = r[3] or "" if r else ""
+            def _set_stage(stage: str):
+                c = psycopg2.connect(DB)
+                try:
+                    with c.cursor() as cu:
+                        cu.execute(
+                            f"UPDATE {SCHEMA}.projects SET ai_stage = %s, ai_run_updated_at = NOW() WHERE id = %s",
+                            (stage, project_id)
+                        )
+                    c.commit()
+                finally:
+                    c.close()
 
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""SELECT p.title, COUNT(s.id), SUM(CASE WHEN s.is_manual THEN 1 ELSE 0 END), SUM(CASE WHEN s.ai_potential IN ('high','medium') THEN 1 ELSE 0 END)
-                        FROM {SCHEMA}.wb_processes p
-                        JOIN {SCHEMA}.wb_case_process_links lnk ON lnk.process_id = p.id AND lnk.case_id = %s
-                        LEFT JOIN {SCHEMA}.wb_process_steps s ON s.process_id = p.id AND s.is_archived = FALSE
-                        WHERE p.is_archived = FALSE GROUP BY p.id""", (project_id,))
-                pd["processes"] = [{"title": r[0], "steps": r[1], "manual": r[2], "ai_steps": r[3]} for r in cur.fetchall()]
+            try:
+                # collecting_context
+                _set_stage("collecting_context")
+                pd = {}
+                conn2 = psycopg2.connect(DB)
+                try:
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT title, description FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
+                        r = cur.fetchone(); pd["title"] = r[0] if r else ""; pd["desc"] = r[1] if r else ""
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT goals_text, constraints_text, key_facts_text, stakeholders_text FROM {SCHEMA}.workspace_context WHERE project_id = %s", (project_id,))
+                        r = cur.fetchone()
+                        pd["goals"] = (r[0] or "") if r else ""; pd["constraints"] = (r[1] or "") if r else ""
+                        pd["key_facts"] = (r[2] or "") if r else ""; pd["stakeholders"] = (r[3] or "") if r else ""
+                    with conn2.cursor() as cur:
+                        cur.execute(f"""SELECT p.title, COUNT(s.id), SUM(CASE WHEN s.is_manual THEN 1 ELSE 0 END), SUM(CASE WHEN s.ai_potential IN ('high','medium') THEN 1 ELSE 0 END)
+                            FROM {SCHEMA}.wb_processes p JOIN {SCHEMA}.wb_case_process_links lnk ON lnk.process_id = p.id AND lnk.case_id = %s
+                            LEFT JOIN {SCHEMA}.wb_process_steps s ON s.process_id = p.id AND s.is_archived = FALSE
+                            WHERE p.is_archived = FALSE GROUP BY p.id""", (project_id,))
+                        pd["processes"] = [{"title": r[0], "steps": r[1], "manual": r[2], "ai_steps": r[3]} for r in cur.fetchall()]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT pain_type, description, impact_level FROM {SCHEMA}.wb_pain_points WHERE case_id = %s AND is_archived = FALSE ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END", (project_id,))
+                        pd["pains"] = [{"type": r[0], "desc": r[1], "impact": r[2]} for r in cur.fetchall()]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT title, statement, status FROM {SCHEMA}.workspace_hypotheses WHERE project_id = %s ORDER BY created_at", (project_id,))
+                        pd["hypotheses"] = [{"title": r[0], "statement": r[1], "status": r[2]} for r in cur.fetchall()]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT b.title, b.applicability, b.observed_effect FROM {SCHEMA}.wb_benchmarks b JOIN {SCHEMA}.wb_case_benchmarks cb ON cb.benchmark_id = b.id AND cb.case_id = %s WHERE b.is_archived = FALSE", (project_id,))
+                        pd["benchmarks"] = [{"title": r[0], "app": r[1], "effect": r[2]} for r in cur.fetchall()]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT title, recommendation, proposed_solution_type FROM {SCHEMA}.wb_ai_opportunities WHERE case_id = %s AND is_archived = FALSE", (project_id,))
+                        pd["ai_opps"] = [{"title": r[0], "rec": r[1], "solution": r[2]} for r in cur.fetchall()]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT title, status, impact_score, effort_score, next_step FROM {SCHEMA}.wb_initiatives WHERE case_id = %s AND is_archived = FALSE ORDER BY impact_score DESC", (project_id,))
+                        pd["initiatives"] = [{"title": r[0], "status": r[1], "impact": r[2], "effort": r[3], "next": r[4]} for r in cur.fetchall()]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.tasks WHERE project_id = %s AND status != 'completed'", (project_id,))
+                        pd["open_tasks"] = cur.fetchone()[0]
+                    with conn2.cursor() as cur:
+                        cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.documents WHERE project_id = %s", (project_id,))
+                        pd["docs_count"] = cur.fetchone()[0]
+                finally:
+                    conn2.close()
 
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT pain_type, description, impact_level FROM {SCHEMA}.wb_pain_points WHERE case_id = %s AND is_archived = FALSE ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END", (project_id,))
-                pd["pains"] = [{"type": r[0], "desc": r[1], "impact": r[2]} for r in cur.fetchall()]
+                has_content = bool(
+                    pd.get("desc") or pd.get("goals") or pd.get("key_facts") or
+                    pd.get("processes") or pd.get("pains") or pd.get("hypotheses") or
+                    pd.get("ai_opps") or pd.get("initiatives") or pd.get("benchmarks")
+                )
+                if not has_content:
+                    with conn.cursor() as cur:
+                        cur.execute(f"UPDATE {SCHEMA}.projects SET ai_status = 'idle', ai_stage = NULL, ai_run_updated_at = NOW() WHERE id = %s", (project_id,))
+                    conn.commit()
+                    return cors({"ok": True, "ai_status": "idle", "ai_stage": None, "empty": True,
+                                 "content_version": input_version, "ai_analyzed_version": analyzed_v,
+                                 "ai_is_stale": False, "ai_last_result_json": None})
 
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT title, statement, status FROM {SCHEMA}.workspace_hypotheses WHERE project_id = %s ORDER BY created_at", (project_id,))
-                pd["hypotheses"] = [{"title": r[0], "statement": r[1], "status": r[2]} for r in cur.fetchall()]
+                # analyzing_processes
+                _set_stage("analyzing_processes")
 
-            with conn.cursor() as cur:
-                cur.execute(f"""SELECT b.title, b.applicability, b.observed_effect FROM {SCHEMA}.wb_benchmarks b JOIN {SCHEMA}.wb_case_benchmarks cb ON cb.benchmark_id = b.id AND cb.case_id = %s WHERE b.is_archived = FALSE""", (project_id,))
-                pd["benchmarks"] = [{"title": r[0], "app": r[1], "effect": r[2]} for r in cur.fetchall()]
+                lines = [f"ПРОЕКТ: «{pd['title']}»"]
+                if pd.get("desc"): lines.append(f"Описание: {pd['desc']}")
+                if pd.get("goals"): lines.append(f"\nЦЕЛИ:\n{pd['goals']}")
+                if pd.get("key_facts"): lines.append(f"\nКЛЮЧЕВЫЕ ФАКТЫ:\n{pd['key_facts']}")
+                if pd.get("constraints"): lines.append(f"\nОГРАНИЧЕНИЯ:\n{pd['constraints']}")
+                if pd.get("stakeholders"): lines.append(f"\nСТЕЙКХОЛДЕРЫ:\n{pd['stakeholders']}")
+                if pd.get("processes"):
+                    lines.append("\nПРОЦЕССЫ:")
+                    for p in pd["processes"]: lines.append(f"  • {p['title']}: {p['steps']} шагов, {p['manual']} ручных, {p['ai_steps']} с AI-потенциалом")
+                if pd.get("pains"):
+                    lines.append("\nБОЛИ:")
+                    for p in pd["pains"][:8]: lines.append(f"  • [{p['impact']}] {p['desc']}")
+                if pd.get("hypotheses"):
+                    lines.append("\nГИПОТЕЗЫ:")
+                    for h in pd["hypotheses"]: lines.append(f"  • [{h['status']}] {h['title']}: {(h['statement'] or '')[:150]}")
+                if pd.get("benchmarks"):
+                    lines.append("\nБЕНЧМАРКИ:")
+                    for b in pd["benchmarks"]: lines.append(f"  • {b['title']}: {(b['app'] or '')[:100]}")
+                if pd.get("ai_opps"):
+                    lines.append("\nAI-ВОЗМОЖНОСТИ:")
+                    for o in pd["ai_opps"]: lines.append(f"  • {o['title']} → {o['rec']} ({o['solution']})")
+                if pd.get("initiatives"):
+                    lines.append("\nИНИЦИАТИВЫ:")
+                    for i in pd["initiatives"]:
+                        lines.append(f"  • {i['title']} [{i['status']}] эффект:{i['impact']}/5 усилие:{i['effort']}/5")
+                        if i["next"]: lines.append(f"    Следующий шаг: {i['next']}")
+                lines.append(f"\nФАЙЛОВ: {pd.get('docs_count', 0)}, ОТКРЫТЫХ ЗАДАЧ: {pd.get('open_tasks', 0)}")
 
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT title, recommendation, proposed_solution_type FROM {SCHEMA}.wb_ai_opportunities WHERE case_id = %s AND is_archived = FALSE", (project_id,))
-                pd["ai_opps"] = [{"title": r[0], "rec": r[1], "solution": r[2]} for r in cur.fetchall()]
+                context_text = "\n".join(lines)
 
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT title, status, impact_score, effort_score, next_step FROM {SCHEMA}.wb_initiatives WHERE case_id = %s AND is_archived = FALSE ORDER BY impact_score DESC", (project_id,))
-                pd["initiatives"] = [{"title": r[0], "status": r[1], "impact": r[2], "effort": r[3], "next": r[4]} for r in cur.fetchall()]
+                # building_summary
+                _set_stage("building_summary")
 
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.tasks WHERE project_id = %s AND status != 'completed'", (project_id,))
-                pd["open_tasks"] = cur.fetchone()[0]
-
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.documents WHERE project_id = %s", (project_id,))
-                pd["docs_count"] = cur.fetchone()[0]
-
-            # Проверка: кейс не пустой (есть хоть что-то для анализа)
-            has_content = bool(
-                pd.get("desc") or pd.get("goals") or pd.get("key_facts") or
-                pd.get("processes") or pd.get("pains") or pd.get("hypotheses") or
-                pd.get("ai_opps") or pd.get("initiatives") or pd.get("benchmarks")
-            )
-            if not has_content:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f"UPDATE {SCHEMA}.projects SET ai_status = 'idle' WHERE id = %s",
-                        (project_id,)
-                    )
-                conn.commit()
-                return cors({"ok": False, "empty": True, "error": {"message": "Кейс пустой — добавьте описание, процессы или боли"}})
-
-            lines = [f"ПРОЕКТ: «{pd['title']}»"]
-            if pd.get("desc"): lines.append(f"Описание: {pd['desc']}")
-            if pd.get("goals"): lines.append(f"\nЦЕЛИ:\n{pd['goals']}")
-            if pd.get("key_facts"): lines.append(f"\nКЛЮЧЕВЫЕ ФАКТЫ:\n{pd['key_facts']}")
-            if pd.get("constraints"): lines.append(f"\nОГРАНИЧЕНИЯ:\n{pd['constraints']}")
-            if pd.get("stakeholders"): lines.append(f"\nСТЕЙКХОЛДЕРЫ:\n{pd['stakeholders']}")
-            if pd.get("processes"):
-                lines.append("\nПРОЦЕССЫ:")
-                for p in pd["processes"]: lines.append(f"  • {p['title']}: {p['steps']} шагов, {p['manual']} ручных, {p['ai_steps']} с AI-потенциалом")
-            if pd.get("pains"):
-                lines.append("\nБОЛИ:")
-                for p in pd["pains"][:8]: lines.append(f"  • [{p['impact']}] {p['desc']}")
-            if pd.get("hypotheses"):
-                lines.append("\nГИПОТЕЗЫ:")
-                for h in pd["hypotheses"]: lines.append(f"  • [{h['status']}] {h['title']}: {(h['statement'] or '')[:150]}")
-            if pd.get("benchmarks"):
-                lines.append("\nБЕНЧМАРКИ:")
-                for b in pd["benchmarks"]: lines.append(f"  • {b['title']}: {(b['app'] or '')[:100]}")
-            if pd.get("ai_opps"):
-                lines.append("\nAI-ВОЗМОЖНОСТИ:")
-                for o in pd["ai_opps"]: lines.append(f"  • {o['title']} → {o['rec']} ({o['solution']})")
-            if pd.get("initiatives"):
-                lines.append("\nИНИЦИАТИВЫ:")
-                for i in pd["initiatives"]:
-                    lines.append(f"  • {i['title']} [{i['status']}] эффект:{i['impact']}/5 усилие:{i['effort']}/5")
-                    if i["next"]: lines.append(f"    Следующий шаг: {i['next']}")
-            lines.append(f"\nФАЙЛОВ: {pd.get('docs_count', 0)}, ОТКРЫТЫХ ЗАДАЧ: {pd.get('open_tasks', 0)}")
-
-            context_text = "\n".join(lines)
-            system = "Ты AI-аналитик трансформационного проекта. Читаешь содержимое рабочего кейса и делаешь структурированный анализ. Не ждёшь вопросов — сам инициативно анализируешь. Пиши конкретно, без воды, для русскоязычного профессионала."
-            prompt = f"""{context_text}
+                system = "Ты AI-аналитик трансформационного проекта. Читаешь содержимое рабочего кейса и делаешь структурированный анализ. Не ждёшь вопросов — сам инициативно анализируешь. Пиши конкретно, без воды, для русскоязычного профессионала."
+                prompt = f"""{context_text}
 
 ---
 Проанализируй этот кейс. Верни СТРОГО валидный JSON:
 {{"summary":"3-4 предложения — суть кейса и главная проблема","readiness_score":число 1-10,"key_insight":"самый важный инсайт — 1-2 предложения","top_pains":["боль 1","боль 2","боль 3"],"ai_verdict":"AI рекомендован"/"AI возможен"/"Сначала процессы — AI потом","ai_verdict_reason":"1-2 предложения","quick_wins":["что сделать сейчас без AI"],"gaps":["чего не хватает в кейсе"],"next_action":"одно конкретное следующее действие","risks":["риск 1","риск 2"]}}
 ТОЛЬКО JSON."""
 
-            try:
                 result_text = yandex_gpt(prompt, system, max_tokens=2000)
-                start, end = result_text.find("{"), result_text.rfind("}") + 1
-                analysis = json.loads(result_text[start:end])
-            except Exception as e:
-                # Сохраняем ошибку и сбрасываем статус
+                s, e2 = result_text.find("{"), result_text.rfind("}") + 1
+                analysis = json.loads(result_text[s:e2])
+
+                # finalizing
+                _set_stage("finalizing")
+
+                result_json = json.dumps(analysis, ensure_ascii=False)
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"UPDATE {SCHEMA}.projects SET ai_status = 'failed', ai_last_error = %s WHERE id = %s",
-                        (str(e)[:500], project_id)
+                        f"""UPDATE {SCHEMA}.projects
+                            SET ai_status = 'ready', ai_stage = NULL,
+                                ai_analyzed_version = %s,
+                                ai_last_analysis_at = NOW(),
+                                ai_last_result_json = %s,
+                                ai_last_error = NULL,
+                                ai_run_updated_at = NOW()
+                            WHERE id = %s""",
+                        (input_version, result_json, project_id)
+                    )
+                conn.commit()
+                return cors({"ok": True, "ai_status": "ready", "ai_stage": None,
+                             "content_version": input_version, "ai_analyzed_version": input_version,
+                             "ai_is_stale": False, "ai_last_result_json": analysis})
+
+            except Exception as exc:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""UPDATE {SCHEMA}.projects
+                            SET ai_status = 'failed', ai_stage = NULL,
+                                ai_last_error = %s, ai_run_updated_at = NOW()
+                            WHERE id = %s""",
+                        (str(exc)[:500], project_id)
                     )
                 conn.commit()
                 return cors({"ok": False, "error": {"message": "Ошибка AI-анализа"}}, 500)
-
-            result_json = json.dumps(analysis, ensure_ascii=False)
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""UPDATE {SCHEMA}.projects
-                        SET ai_status = 'ready',
-                            ai_analyzed_version = content_version,
-                            ai_last_analysis_at = NOW(),
-                            ai_last_result_json = %s,
-                            ai_last_error = NULL
-                        WHERE id = %s""",
-                    (result_json, project_id)
-                )
-            conn.commit()
-            return cors({"ok": True, "analysis": analysis})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 
