@@ -920,30 +920,34 @@ export default function ProjectPage() {
             })()}
 
             {/* Контекст пространства */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-xl bg-slate-800 flex items-center justify-center">
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2 mb-3 sm:mb-4">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-xl bg-slate-800 flex items-center justify-center flex-shrink-0">
                     <Icon name="Map" size={14} className="text-white" />
                   </div>
-                  <span className="font-semibold text-slate-900">Контекст пространства</span>
+                  <span className="font-semibold text-slate-900 text-sm sm:text-base">Контекст пространства</span>
                 </div>
-                <button onClick={() => setWsContextEdit(!wsContextEdit)} className="text-xs text-violet-600 hover:text-violet-800 font-medium">
+                <button
+                  onClick={() => setWsContextEdit(!wsContextEdit)}
+                  className="text-xs text-violet-600 hover:text-violet-800 font-medium flex-shrink-0 px-2 py-1 rounded-lg hover:bg-violet-50 transition-colors"
+                >
                   {wsContextEdit ? "Отмена" : "Редактировать"}
                 </button>
               </div>
+
               {wsContextEdit ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {[
-                    { key: "goals_text",        label: "Цели и задачи пространства",       placeholder: "Чего хотим достичь в этом проекте?" },
-                    { key: "constraints_text",   label: "Ограничения",                      placeholder: "Что нельзя, какие ресурсы, сроки..." },
-                    { key: "key_facts_text",     label: "Ключевые факты / контекст",        placeholder: "Важные вещи, которые AI должен знать..." },
-                    { key: "stakeholders_text",  label: "Стейкхолдеры",                     placeholder: "Кто вовлечён, кто принимает решения..." },
+                    { key: "goals_text",       label: "Цели и задачи",      placeholder: "Чего хотим достичь в этом проекте?" },
+                    { key: "constraints_text", label: "Ограничения",         placeholder: "Что нельзя, какие ресурсы, сроки..." },
+                    { key: "key_facts_text",   label: "Ключевые факты",      placeholder: "Важные вещи, которые AI должен знать..." },
+                    { key: "stakeholders_text",label: "Стейкхолдеры",        placeholder: "Кто вовлечён, кто принимает решения..." },
                   ].map(f => (
                     <div key={f.key}>
-                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{f.label}</label>
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{f.label}</label>
                       <textarea
-                        className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
+                        className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 resize-none"
                         rows={2}
                         placeholder={f.placeholder}
                         value={wsContextDraft[f.key as keyof typeof wsContextDraft]}
@@ -951,21 +955,54 @@ export default function ProjectPage() {
                       />
                     </div>
                   ))}
-                  <button onClick={handleSaveContext} className="w-full py-2 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 transition-colors">
+                  <button
+                    onClick={handleSaveContext}
+                    className="w-full py-2.5 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 active:bg-slate-900 transition-colors"
+                  >
                     Сохранить контекст
                   </button>
                 </div>
               ) : wsContext && (wsContext.goals_text || wsContext.key_facts_text || wsContext.constraints_text) ? (
                 <div className="space-y-3">
-                  {wsContext.goals_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Цели</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.goals_text}</p></div>}
-                  {wsContext.constraints_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Ограничения</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.constraints_text}</p></div>}
-                  {wsContext.key_facts_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Ключевые факты</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.key_facts_text}</p></div>}
-                  {wsContext.stakeholders_text && <div><p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Стейкхолдеры</p><p className="text-sm text-slate-700 leading-relaxed">{wsContext.stakeholders_text}</p></div>}
+                  {wsContext.goals_text && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Цели</p>
+                      <p className="text-sm text-slate-700 leading-relaxed">{wsContext.goals_text}</p>
+                    </div>
+                  )}
+                  {wsContext.constraints_text && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Ограничения</p>
+                      <p className="text-sm text-slate-700 leading-relaxed">{wsContext.constraints_text}</p>
+                    </div>
+                  )}
+                  {wsContext.key_facts_text && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Ключевые факты</p>
+                      <p className="text-sm text-slate-700 leading-relaxed">{wsContext.key_facts_text}</p>
+                    </div>
+                  )}
+                  {wsContext.stakeholders_text && (
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Стейкхолдеры</p>
+                      <p className="text-sm text-slate-700 leading-relaxed">{wsContext.stakeholders_text}</p>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="py-6 text-center">
-                  <p className="text-sm text-slate-400 mb-3">Добавь контекст — AI будет использовать его в каждом ответе</p>
-                  <button onClick={() => setWsContextEdit(true)} className="text-sm text-violet-600 font-medium hover:text-violet-800">Добавить контекст</button>
+                /* Empty state — объясняет зачем контекст и что нажать */
+                <div className="py-5 text-center">
+                  <Icon name="Map" size={24} className="text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm text-slate-600 font-medium mb-1">Контекст не заполнен</p>
+                  <p className="text-xs text-slate-400 mb-3 leading-snug">
+                    AI использует контекст в каждом ответе — цели, ограничения, ключевые факты
+                  </p>
+                  <button
+                    onClick={() => setWsContextEdit(true)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-violet-600 border border-violet-200 rounded-lg px-3 py-2 hover:bg-violet-50 active:bg-violet-100 transition-colors"
+                  >
+                    <Icon name="Plus" size={12} /> Добавить контекст
+                  </button>
                 </div>
               )}
             </div>
@@ -974,14 +1011,18 @@ export default function ProjectPage() {
             {hypotheses.filter(h => h.status === "open" || h.status === "testing").length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
                 <div className="flex items-center gap-2 mb-3">
-                  <Icon name="Lightbulb" size={15} className="text-amber-600" />
+                  <Icon name="Lightbulb" size={15} className="text-amber-600 flex-shrink-0" />
                   <span className="text-sm font-semibold text-slate-800">Активные гипотезы</span>
                 </div>
                 <div className="space-y-2">
                   {hypotheses.filter(h => h.status === "open" || h.status === "testing").slice(0, 3).map(h => (
-                    <div key={h.id} onClick={() => { setOpenHyp(h); setTab("hypotheses"); }} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-amber-100 cursor-pointer hover:border-amber-300 transition-colors">
-                      <span className="text-sm text-slate-700 font-medium leading-snug">{h.title}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ml-2 flex-shrink-0 ${h.status === "testing" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{h.status === "testing" ? "проверяется" : "открыта"}</span>
+                    <div key={h.id} onClick={() => { setOpenHyp(h); setTab("hypotheses"); }}
+                      className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-amber-100 cursor-pointer hover:border-amber-300 active:bg-amber-50 transition-colors">
+                      {/* min-w-0 чтобы truncate работал */}
+                      <span className="text-sm text-slate-700 font-medium leading-snug flex-1 min-w-0 truncate">{h.title}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${h.status === "testing" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                        {h.status === "testing" ? "проверяется" : "открыта"}
+                      </span>
                     </div>
                   ))}
                 </div>
