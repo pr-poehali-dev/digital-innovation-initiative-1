@@ -24,6 +24,41 @@ YANDEX_FOLDER_ID   = os.environ.get("YANDEX_FOLDER_ID", "")
 SEARCH_URL = os.environ.get("SEARCH_FUNCTION_URL", "")
 
 
+COPILOT_COST_KOPECKS = 1500  # 15 ₽ за один AI-запрос
+
+
+def debit_wallet(conn, user_id: int, amount_kopecks: int, description: str) -> bool:
+    """Списать с кошелька. Возвращает False если баланса не хватает."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id, balance_kopecks FROM {SCHEMA}.wallet_accounts WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.wallet_accounts (user_id) VALUES (%s) RETURNING id, balance_kopecks",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        wallet_id, balance = row
+        if balance < amount_kopecks:
+            return False
+        cur.execute(
+            f"""UPDATE {SCHEMA}.wallet_accounts
+                SET balance_kopecks = balance_kopecks - %s, updated_at = NOW()
+                WHERE id = %s""",
+            (amount_kopecks, wallet_id),
+        )
+        cur.execute(
+            f"""INSERT INTO {SCHEMA}.wallet_transactions
+                (user_id, wallet_id, amount_kopecks, type, status, source, description)
+                VALUES (%s, %s, %s, 'debit', 'completed', 'ai_copilot', %s)""",
+            (user_id, wallet_id, amount_kopecks, description),
+        )
+    return True
+
+
 def cors(body: dict, code: int = 200) -> dict:
     return {
         "statusCode": code,
@@ -467,6 +502,15 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужны project_id и message"}}, 400)
             if not check_project_access(conn, project_id, user_id):
                 return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            # Списываем с кошелька до запроса к AI
+            debited = debit_wallet(
+                conn, user_id, COPILOT_COST_KOPECKS,
+                f"AI Copilot — {mode}: {message[:80]}"
+            )
+            if not debited:
+                return cors({"ok": False, "error": {"message": "Недостаточно средств на кошельке. Пополните баланс."}}, 402)
+            conn.commit()
 
             # Собираем контекст
             ctx = build_context(conn, project_id, message, session_id)

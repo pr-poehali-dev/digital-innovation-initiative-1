@@ -462,8 +462,15 @@ export default function ProjectPage() {
         workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
       }
       setTimeout(() => copilotEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-    } catch {
-      setCopilotHistory(prev => [...prev, { q, a: "Не удалось получить ответ. Попробуй ещё раз." }]);
+    } catch (err: unknown) {
+      const msg = (err as { message?: string })?.message ?? "";
+      const isNoFunds = msg.includes("средств") || msg.includes("402");
+      setCopilotHistory(prev => [...prev, {
+        q,
+        a: isNoFunds
+          ? "❌ Недостаточно средств на кошельке. Пополни баланс в разделе «Кошелёк» и попробуй снова."
+          : "Не удалось получить ответ. Попробуй ещё раз.",
+      }]);
     } finally {
       setCopilotLoading(false);
     }
