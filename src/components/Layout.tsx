@@ -78,7 +78,7 @@ function SubItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
         className={`flex-shrink-0 ${active ? "text-white" : item.active ? "text-slate-400" : "text-slate-300"}`}
       />
       {!collapsed && (
-        <span className="flex-1 min-w-0 truncate text-[13px] leading-snug">{item.label}</span>
+        <span className="flex-1 min-w-0 text-[13px] leading-snug line-clamp-2">{item.label}</span>
       )}
       {!collapsed && item.badge && <Badge tone={item.badge.tone} text={item.badge.text} />}
       {!collapsed && !item.active && (
