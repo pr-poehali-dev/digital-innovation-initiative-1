@@ -440,16 +440,104 @@ def ai_build_assets(snapshot_text: str, ms_title: str, goal_title: str, mat_titl
         return {}
 
 
+# ── Readability gate ──────────────────────────────────────────────────────────
+
+# Паттерны мусора: CSS, JS-переменные, лендинговый boilerplate
+_JUNK_PATTERNS = re.compile(
+    r'(--[\w-]+:\s*rgba|:root\s*\{|\.css-|webkit-|@media\s+|'
+    r'padding:\s*\d|display:\s*flex|font-size:\s*\d|'
+    r'background-color:|border-radius:|margin:\s*\d|'
+    r'var\(--[\w-]+\)|0px\s+0px|rgba\(\d)',
+    re.IGNORECASE
+)
+
+def _readability_score(text: str) -> float:
+    """
+    Оценивает читабельность текста (0-1).
+    0 = CSS/JS мусор, 1 = нормальный человеческий текст.
+    """
+    if not text or len(text) < 100:
+        return 0.0
+    total_chars = len(text)
+    junk_matches = len(_JUNK_PATTERNS.findall(text[:5000]))
+    # Если больше 5 мусорных паттернов на 5000 символов — это мусор
+    if junk_matches > 5:
+        return 0.0
+    # Считаем слова vs символы
+    words = text.split()
+    if len(words) < MIN_CONTENT_WORDS:
+        return 0.2
+    # Средняя длина слова: у нормального текста 4-8 символов
+    avg_word_len = sum(len(w) for w in words[:200]) / max(len(words[:200]), 1)
+    if avg_word_len < 2 or avg_word_len > 15:
+        return 0.1
+    return 1.0
+
+
+# ── Corpus search ─────────────────────────────────────────────────────────────
+
+def search_corpus(conn, ms_title: str, ms_desc: str, goal_title: str, limit: int = 6) -> list:
+    """
+    Ищет релевантные материалы в curated corpus по ключевым словам из milestone.
+    Быстро и надёжно — без внешних запросов.
+    """
+    schema = get_schema()
+    cur = conn.cursor()
+    # Собираем поисковые слова из title milestone
+    search_words = [w.lower() for w in re.split(r'\W+', ms_title + " " + (ms_desc or "") + " " + goal_title) if len(w) > 3]
+    if not search_words:
+        return []
+    # Ищем по tags и title (простой поиск)
+    cur.execute(
+        f"""SELECT id, url, domain, title, description, source_type, trust_level, format, estimated_minutes
+            FROM {schema}.materials
+            WHERE availability_mode = 'in_app'
+              AND verification_status = 'verified'
+              AND is_active = true
+            ORDER BY last_verified_at DESC
+            LIMIT 100""",
+    )
+    all_mats = cur.fetchall()
+    cols = ["id", "url", "domain", "title", "description", "source_type", "trust_level", "format", "estimated_minutes"]
+
+    # Ранжируем по совпадению слов
+    scored = []
+    for row in all_mats:
+        m = dict(zip(cols, row))
+        mat_text = (m["title"] + " " + (m["description"] or "")).lower()
+        mat_tags = (m.get("tags") or [])
+        mat_text += " " + " ".join(mat_tags)
+        score = sum(1 for w in search_words if w in mat_text)
+        if score > 0:
+            scored.append((score, m))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    results = []
+    for score, m in scored[:limit]:
+        m["reason"] = f"Материал покрывает темы, необходимые для шага «{ms_title}»"
+        m["format"] = m.get("format") or "article"
+        results.append(m)
+
+    log.info("corpus search: found %d matches for '%s'", len(results), ms_title[:50])
+    return results
+
+
 # ── Main pipeline ─────────────────────────────────────────────────────────────
+
+# Белый список доменов где fetch реально работает
+FETCH_WHITELIST = {
+    "habr.com", "ru.wikipedia.org", "wikipedia.org",
+    "vc.ru", "tadviser.ru", "rbc.ru", "kommersant.ru",
+    "cbr.ru", "digital.gov.ru", "government.ru",
+}
+
 
 def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
     """
-    ADR-002 verified content-first pipeline:
-    1. AI подбирает кандидатов
-    2. Каждый URL верифицируется + контент извлекается
-    3. Сохраняем snapshot
-    4. AI строит assets по snapshot_text
-    5. Только verified/in_app попадают в milestone_materials
+    Corpus-first pipeline (ADR-002 v2):
+    1. Ищем в curated corpus — быстро и надёжно
+    2. Если corpus дал < 3 материала — дополняем из whitelist доменов с readability gate
+    3. Сохраняем в milestone_materials
     """
     schema = get_schema()
     cur = conn.cursor()
@@ -464,79 +552,113 @@ def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
     ms_title, ms_desc, goal_title, target_role = row
 
     trusted = get_trusted_sources(conn)
-    preferred = [d for d, info in trusted.items() if info["trust_level"] in ("A", "B")]
 
-    log.info("pipeline start: milestone=%s '%s'", milestone_id, ms_title)
+    log.info("pipeline start (corpus-first): milestone=%s '%s'", milestone_id, ms_title)
 
-    # 1. AI-кандидаты
-    candidates = ai_retrieve_candidates(ms_title, ms_desc or "", goal_title, target_role or "", preferred)
-    if not candidates:
-        log.warning("no candidates for milestone=%s", milestone_id)
-        return 0
+    # ── Шаг 1: Corpus search ──────────────────────────────────────────────────
+    corpus_hits = search_corpus(conn, ms_title, ms_desc or "", goal_title, limit=4)
 
-    # 2. Верификация + fetch — строго не более 4 URL, timeout 7 сек каждый
-    # Assets строим LAZY (по запросу lp.summarize), чтобы pipeline уложился в 25 сек
-    MAX_FETCH = 4
     verified = []
-    seen_urls = set()
-    for c in candidates[:8]:
-        if len(verified) >= MAX_FETCH:
-            break
-        url = c["url"]
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
+    for m in corpus_hits:
+        # Для corpus материалов уже есть snapshot или fetchим быстро
+        cur.execute(f"SELECT reader_markdown, plain_text, word_count FROM {schema}.material_snapshots WHERE material_id = %s", (m["id"],))
+        snap = cur.fetchone()
+        if snap and snap[1] and _readability_score(snap[1]) > 0.5:
+            # Уже есть хороший snapshot
+            m["availability_mode"] = "in_app"
+            m["has_snapshot"] = True
+            m["reader_markdown"] = snap[0] or ""
+            m["plain_text"] = snap[1] or ""
+            m["word_count"] = snap[2] or 0
+            m["http_status"] = 200
+            m["summary_basis"] = "content"
+        else:
+            # Нет snapshot — попробуем быстро fetch
+            if m["domain"] in FETCH_WHITELIST:
+                fetch = verify_and_fetch(m["url"])
+                if fetch["availability_mode"] == "in_app" and _readability_score(fetch.get("plain_text", "")) > 0.5:
+                    m["availability_mode"] = "in_app"
+                    m["reader_markdown"] = fetch.get("reader_markdown", "")
+                    m["plain_text"] = fetch.get("plain_text", "")
+                    m["word_count"] = fetch.get("word_count", 0)
+                    m["http_status"] = fetch.get("http_status", 200)
+                    m["summary_basis"] = "content"
+                else:
+                    m["availability_mode"] = "source_only"
+                    m["reader_markdown"] = ""
+                    m["plain_text"] = ""
+                    m["word_count"] = 0
+                    m["http_status"] = fetch.get("http_status", 0)
+                    m["summary_basis"] = "metadata"
+            else:
+                m["availability_mode"] = "source_only"
+                m["reader_markdown"] = ""
+                m["plain_text"] = ""
+                m["word_count"] = 0
+                m["http_status"] = 200
+                m["summary_basis"] = "metadata"
 
-        # Доверие по домену (до fetch — быстро)
-        domain = c.get("domain") or extract_domain(url)
-        trust_info = trusted.get(domain)
-        if not trust_info:
-            for td, ti in trusted.items():
-                if td in domain:
-                    trust_info = ti
-                    break
-        c["trust_level"] = trust_info["trust_level"] if trust_info else "C"
-        c["source_type"] = trust_info["source_type"] if trust_info else "article"
-        c["format"] = detect_format(url, c["title"], c.get("source_type", "article"))
+        m["assets"] = {}
+        m["reason"] = m.get("reason", "Материал по теме шага плана")
+        m["resolved_url"] = m["url"]
+        m["content_type"] = "text/html"
+        m["fetch_error"] = ""
+        verified.append(m)
 
-        log.info("verifying %d/%d: %s", len(verified)+1, MAX_FETCH, url)
-        fetch = verify_and_fetch(url)
-        c["http_status"] = fetch["http_status"]
-        c["resolved_url"] = fetch.get("resolved_url", url)
-        c["content_type"] = fetch.get("content_type", "")
-        c["availability_mode"] = fetch["availability_mode"]
-        c["plain_text"] = fetch.get("plain_text", "")
-        c["reader_markdown"] = fetch.get("reader_markdown", "")
-        c["word_count"] = fetch.get("word_count", 0)
-        c["fetch_error"] = fetch.get("error", "")
-        page_title = fetch.get("page_title", "")
+    log.info("corpus hits: %d", len(verified))
 
-        if c["availability_mode"] == "unavailable":
-            log.info("skip unavailable: %s [%s]", url, c.get("fetch_error",""))
-            continue
+    # ── Шаг 2: Если corpus дал < 3 — дополняем из whitelist с AI и readability gate ──
+    if len(verified) < 3:
+        preferred = list(FETCH_WHITELIST)
+        candidates = ai_retrieve_candidates(ms_title, ms_desc or "", goal_title, target_role or "", preferred)
+        log.info("ai candidates for supplement: %d", len(candidates))
+        seen_urls = {m["url"] for m in verified}
+        supplement_count = 0
+        for c in candidates[:6]:
+            if len(verified) >= 4 or supplement_count >= 2:
+                break
+            url = c["url"]
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            domain = c.get("domain") or extract_domain(url)
+            # Только whitelist домены
+            if domain not in FETCH_WHITELIST:
+                log.info("skip non-whitelist: %s", domain)
+                continue
+            trust_info = trusted.get(domain, {"trust_level": "B", "source_type": "media"})
+            c["trust_level"] = trust_info["trust_level"]
+            c["source_type"] = trust_info["source_type"]
+            c["format"] = detect_format(url, c["title"], c["source_type"])
 
-        # Проверяем: реальный title страницы ≈ AI-кандидат
-        # Если сильное расхождение — берём page_title, но проверяем релевантность milestone
-        if page_title:
-            title_ok = _title_matches_candidate(page_title, c["title"])
-            if not title_ok:
-                # Сильное расхождение: используем реальный title страницы для честности
-                log.warning("title mismatch: AI='%s' page='%s' url=%s — using page_title", c["title"][:60], page_title[:60], url)
-                # Проверяем: хотя бы page_title релевантен milestone?
-                milestone_words = set(w.lower() for w in re.split(r'\W+', ms_title) if len(w) > 3)
-                page_words = set(w.lower() for w in re.split(r'\W+', page_title) if len(w) > 3)
-                if not (milestone_words & page_words):
-                    log.info("skip: page_title '%s' not relevant to milestone '%s'", page_title[:50], ms_title[:50])
-                    continue
-            # В любом случае используем реальный title страницы
-            c["title"] = page_title
+            fetch = verify_and_fetch(url)
+            plain = fetch.get("plain_text", "")
+            score = _readability_score(plain)
+            if score < 0.5:
+                log.info("skip low readability (%.2f): %s", score, url)
+                continue
+            if fetch["availability_mode"] == "unavailable":
+                continue
 
-        c["assets"] = {}
-        c["summary_basis"] = "content" if c["availability_mode"] == "in_app" and c.get("plain_text") else "metadata"
+            page_title = fetch.get("page_title", "")
+            if page_title and not _title_matches_candidate(page_title, c["title"]):
+                log.warning("title mismatch, using page_title: %s", page_title[:60])
+                c["title"] = page_title
 
-        verified.append(c)
+            c["availability_mode"] = "in_app" if score > 0.5 else "source_only"
+            c["reader_markdown"] = fetch.get("reader_markdown", "")
+            c["plain_text"] = plain
+            c["word_count"] = fetch.get("word_count", 0)
+            c["http_status"] = fetch.get("http_status", 0)
+            c["resolved_url"] = fetch.get("resolved_url", url)
+            c["content_type"] = fetch.get("content_type", "")
+            c["assets"] = {}
+            c["summary_basis"] = "content"
+            c["fetch_error"] = ""
+            verified.append(c)
+            supplement_count += 1
 
-    log.info("verified: %d / %d candidates", len(verified), len(candidates))
+    log.info("verified total: %d", len(verified))
     if not verified:
         return 0
 
