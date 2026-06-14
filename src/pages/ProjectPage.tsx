@@ -1024,86 +1024,108 @@ export default function ProjectPage() {
 
         {/* ── Гипотезы ── */}
         {tab === "hypotheses" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="space-y-3">
+            {/* Заголовок */}
+            <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Гипотезы и эксперименты</p>
-              <button onClick={() => setHypForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-700 transition-colors">
-                <Icon name="Plus" size={12} />
-                Новая гипотеза
+              <button onClick={() => setHypForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-700 transition-colors flex-shrink-0">
+                <Icon name="Plus" size={12} /> Добавить
               </button>
             </div>
 
+            {/* Форма новой гипотезы */}
             {hypForm && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новая гипотеза</p>
                 {[
-                  { key: "title", label: "Формулировка *", placeholder: "Если мы сделаем X, то Y увеличится на Z%", required: true },
-                  { key: "statement", label: "Детальное описание", placeholder: "Почему мы так думаем?" },
-                  { key: "assumptions", label: "Предпосылки", placeholder: "Что должно быть верным для этой гипотезы?" },
-                  { key: "success_criteria", label: "Критерии успеха", placeholder: "Как поймём, что гипотеза подтвердилась?" },
+                  { key: "title",            label: "Формулировка *",   placeholder: "Если мы сделаем X, то Y вырастет на Z%", required: true },
+                  { key: "statement",        label: "Детальное описание", placeholder: "Почему мы так думаем?" },
+                  { key: "assumptions",      label: "Предпосылки",       placeholder: "Что должно быть верным?" },
+                  { key: "success_criteria", label: "Критерии успеха",   placeholder: "Как поймём, что подтвердилась?" },
                 ].map(f => (
                   <div key={f.key}>
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{f.label}</label>
-                    <input className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{f.label}</label>
+                    <input
+                      className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
                       placeholder={f.placeholder}
                       value={hypDraft[f.key as keyof typeof hypDraft]}
-                      onChange={e => setHypDraft(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                      onChange={e => setHypDraft(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    />
                   </div>
                 ))}
-                <div className="flex gap-2">
-                  <select className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm" value={hypDraft.priority} onChange={e => setHypDraft(prev => ({ ...prev, priority: e.target.value }))}>
-                    <option value="high">🔴 Высокий приоритет</option>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Приоритет</label>
+                  <select className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white" value={hypDraft.priority} onChange={e => setHypDraft(prev => ({ ...prev, priority: e.target.value }))}>
+                    <option value="high">🔴 Высокий</option>
                     <option value="medium">🟡 Средний</option>
                     <option value="low">🟢 Низкий</option>
                   </select>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setHypForm(false)} className="flex-1 py-2 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
-                  <button onClick={handleCreateHypothesis} disabled={!hypDraft.title.trim()} className="flex-1 py-2 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">Создать</button>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setHypForm(false)} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
+                  <button onClick={handleCreateHypothesis} disabled={!hypDraft.title.trim()} className="flex-1 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">Создать</button>
                 </div>
               </div>
             )}
 
+            {/* Пустое состояние */}
             {hypotheses.length === 0 && !hypForm ? (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                <Icon name="Lightbulb" size={28} className="text-amber-400 mx-auto mb-3" />
+                <Icon name="Lightbulb" size={28} className="text-amber-400 mx-auto mb-2" />
                 <p className="font-semibold text-slate-700 mb-1">Нет гипотез</p>
-                <p className="text-sm text-slate-400 mb-4">Добавь гипотезы для проверки — AI поможет их проанализировать</p>
-                <button onClick={() => setHypForm(true)} className="text-sm text-violet-600 font-medium hover:text-violet-800">Добавить первую гипотезу</button>
+                <p className="text-xs text-slate-400 mb-3">Добавь гипотезы для проверки — AI поможет проанализировать</p>
+                <button onClick={() => setHypForm(true)} className="text-xs text-violet-600 font-medium border border-violet-200 rounded-lg px-3 py-2 hover:bg-violet-50">
+                  + Добавить первую гипотезу
+                </button>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {[
-                  { status: "open",      label: "Открытые",       color: "border-amber-200 bg-amber-50" },
-                  { status: "testing",   label: "Проверяются",    color: "border-blue-200 bg-blue-50" },
-                  { status: "confirmed", label: "Подтверждены",   color: "border-emerald-200 bg-emerald-50" },
-                  { status: "rejected",  label: "Отклонены",      color: "border-slate-200 bg-slate-50" },
+                  { status: "open",      label: "Открытые",     color: "border-amber-200 bg-amber-50" },
+                  { status: "testing",   label: "Проверяются",  color: "border-blue-200 bg-blue-50" },
+                  { status: "confirmed", label: "Подтверждены", color: "border-emerald-200 bg-emerald-50" },
+                  { status: "rejected",  label: "Отклонены",    color: "border-slate-200 bg-slate-50" },
                 ].map(group => {
                   const grouped = hypotheses.filter(h => h.status === group.status);
                   if (!grouped.length) return null;
                   return (
                     <div key={group.status}>
-                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{group.label} ({grouped.length})</p>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">{group.label} ({grouped.length})</p>
                       <div className="space-y-2">
                         {grouped.map(h => (
-                          <div key={h.id} className={`rounded-2xl border p-4 space-y-2 ${group.color}`}>
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-sm font-semibold text-slate-800 leading-snug flex-1">{h.title}</p>
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${h.priority === "high" ? "bg-red-100 text-red-700" : h.priority === "low" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
+                          <div key={h.id} className={`rounded-2xl border p-3 sm:p-4 space-y-2 ${group.color}`}>
+                            {/* Строка 1: заголовок + бейдж приоритета */}
+                            <div className="flex items-start gap-2">
+                              <p className="text-sm font-semibold text-slate-800 leading-snug flex-1 min-w-0">{h.title}</p>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${h.priority === "high" ? "bg-red-100 text-red-700" : h.priority === "low" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
                                 {h.priority === "high" ? "HIGH" : h.priority === "low" ? "LOW" : "MED"}
                               </span>
                             </div>
-                            {h.statement && <p className="text-xs text-slate-600 leading-snug">{h.statement}</p>}
-                            {h.success_criteria && <p className="text-[11px] text-slate-500"><span className="font-semibold">Критерий:</span> {h.success_criteria}</p>}
-                            {h.conclusion && <p className="text-[11px] text-emerald-700 font-medium"><span className="font-semibold">Вывод:</span> {h.conclusion}</p>}
-                            {/* Статусные кнопки */}
-                            <div className="flex gap-1 pt-1 flex-wrap">
-                              {h.status !== "open"      && <button onClick={() => handleHypStatus(h.id, "open")}      className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded-full hover:bg-slate-50 text-slate-600">→ открыта</button>}
-                              {h.status !== "testing"   && <button onClick={() => handleHypStatus(h.id, "testing")}   className="text-[10px] px-2 py-0.5 bg-white border border-blue-200 rounded-full hover:bg-blue-50 text-blue-600">→ проверяется</button>}
-                              {h.status !== "confirmed" && <button onClick={() => handleHypStatus(h.id, "confirmed")} className="text-[10px] px-2 py-0.5 bg-white border border-emerald-200 rounded-full hover:bg-emerald-50 text-emerald-600">→ подтверждена</button>}
-                              {h.status !== "rejected"  && <button onClick={() => handleHypStatus(h.id, "rejected")}  className="text-[10px] px-2 py-0.5 bg-white border border-red-200 rounded-full hover:bg-red-50 text-red-600">→ отклонена</button>}
-                              <button onClick={() => { setCopilotMsg(`Проанализируй гипотезу: "${h.title}". ${h.statement}`); setTab("copilot"); }}
-                                className="text-[10px] px-2 py-0.5 bg-violet-600 text-white rounded-full hover:bg-violet-700">🤖 спросить AI</button>
+                            {/* Строка 2: детальное описание */}
+                            {h.statement && <p className="text-xs text-slate-600 leading-snug line-clamp-3">{h.statement}</p>}
+                            {/* Строка 3: критерий и вывод */}
+                            {h.success_criteria && (
+                              <p className="text-[11px] text-slate-500 leading-snug">
+                                <span className="font-semibold">Критерий:</span> {h.success_criteria}
+                              </p>
+                            )}
+                            {h.conclusion && (
+                              <p className="text-[11px] text-emerald-700 font-medium leading-snug">
+                                <span className="font-semibold">Вывод:</span> {h.conclusion}
+                              </p>
+                            )}
+                            {/* Строка 4: статусные кнопки — flex-wrap с нормальным py */}
+                            <div className="flex gap-1.5 pt-0.5 flex-wrap">
+                              {h.status !== "open"      && <button onClick={() => handleHypStatus(h.id, "open")}      className="text-[10px] px-2.5 py-1 bg-white border border-slate-200 rounded-full hover:bg-slate-50 text-slate-600 active:bg-slate-100">открыта</button>}
+                              {h.status !== "testing"   && <button onClick={() => handleHypStatus(h.id, "testing")}   className="text-[10px] px-2.5 py-1 bg-white border border-blue-200 rounded-full hover:bg-blue-50 text-blue-600 active:bg-blue-100">проверяется</button>}
+                              {h.status !== "confirmed" && <button onClick={() => handleHypStatus(h.id, "confirmed")} className="text-[10px] px-2.5 py-1 bg-white border border-emerald-200 rounded-full hover:bg-emerald-50 text-emerald-600 active:bg-emerald-100">подтверждена</button>}
+                              {h.status !== "rejected"  && <button onClick={() => handleHypStatus(h.id, "rejected")}  className="text-[10px] px-2.5 py-1 bg-white border border-red-200 rounded-full hover:bg-red-50 text-red-600 active:bg-red-100">отклонена</button>}
+                              <button
+                                onClick={() => { setCopilotMsg(`Проанализируй гипотезу: "${h.title}". ${h.statement}`); setTab("copilot"); }}
+                                className="text-[10px] px-2.5 py-1 bg-violet-600 text-white rounded-full hover:bg-violet-700 active:bg-violet-800"
+                              >
+                                🤖 спросить AI
+                              </button>
                             </div>
                           </div>
                         ))}
@@ -2086,51 +2108,87 @@ export default function ProjectPage() {
 
         {/* ── Инициативы ── */}
         {tab === "initiatives" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-slate-500">Решения готовые к реализации — с приоритетом и ответственным</p>
-              <button onClick={() => setShowInitiativeForm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">
-                <Icon name="Plus" size={13} /> Добавить инициативу
+          <div className="space-y-3">
+            {/* Заголовок */}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs sm:text-sm text-slate-500 leading-snug">Решения готовые к реализации — с приоритетом и ответственным</p>
+              <button onClick={() => setShowInitiativeForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 flex-shrink-0">
+                <Icon name="Plus" size={13} /> Добавить
               </button>
             </div>
+
+            {/* Форма новой инициативы */}
             {showInitiativeForm && (
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новая инициатива</p>
-                <input placeholder="Название инициативы" value={initiativeDraft.title} onChange={e => setInitiativeDraft(d => ({ ...d, title: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
-                <textarea placeholder="Описание — что планируем сделать" rows={2} value={initiativeDraft.description} onChange={e => setInitiativeDraft(d => ({ ...d, description: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none" />
-                <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Владелец" value={initiativeDraft.owner_name} onChange={e => setInitiativeDraft(d => ({ ...d, owner_name: e.target.value }))} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                  <select value={initiativeDraft.priority} onChange={e => setInitiativeDraft(d => ({ ...d, priority: e.target.value }))} className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                <input
+                  placeholder="Название инициативы *"
+                  value={initiativeDraft.title}
+                  onChange={e => setInitiativeDraft(d => ({ ...d, title: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+                <textarea
+                  placeholder="Описание — что планируем сделать"
+                  rows={2}
+                  value={initiativeDraft.description}
+                  onChange={e => setInitiativeDraft(d => ({ ...d, description: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none resize-none"
+                />
+                {/* Владелец — полная ширина */}
+                <input
+                  placeholder="Владелец"
+                  value={initiativeDraft.owner_name}
+                  onChange={e => setInitiativeDraft(d => ({ ...d, owner_name: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                />
+                {/* Приоритет — полная ширина */}
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Приоритет</label>
+                  <select value={initiativeDraft.priority} onChange={e => setInitiativeDraft(d => ({ ...d, priority: e.target.value }))} className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
                     <option value="critical">Критический</option>
                     <option value="high">Высокий</option>
                     <option value="medium">Средний</option>
                     <option value="low">Низкий</option>
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Эффект (1–5)</p>
-                    <input type="range" min={1} max={5} value={initiativeDraft.impact_score} onChange={e => setInitiativeDraft(d => ({ ...d, impact_score: Number(e.target.value) }))} className="w-full" />
-                    <p className="text-xs text-center font-bold text-slate-700">{initiativeDraft.impact_score}</p>
+                {/* Эффект и усилие — вертикально с ползунками */}
+                <div className="space-y-2">
+                  <div className="bg-slate-50 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-slate-500">📈 Эффект</p>
+                      <span className="text-sm font-bold text-slate-700">{initiativeDraft.impact_score}/5</span>
+                    </div>
+                    <input type="range" min={1} max={5} value={initiativeDraft.impact_score} onChange={e => setInitiativeDraft(d => ({ ...d, impact_score: Number(e.target.value) }))} className="w-full accent-slate-700" />
                   </div>
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Усилие (1–5)</p>
-                    <input type="range" min={1} max={5} value={initiativeDraft.effort_score} onChange={e => setInitiativeDraft(d => ({ ...d, effort_score: Number(e.target.value) }))} className="w-full" />
-                    <p className="text-xs text-center font-bold text-slate-700">{initiativeDraft.effort_score}</p>
+                  <div className="bg-slate-50 rounded-xl px-3 py-2.5">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-slate-500">💪 Усилие</p>
+                      <span className="text-sm font-bold text-slate-700">{initiativeDraft.effort_score}/5</span>
+                    </div>
+                    <input type="range" min={1} max={5} value={initiativeDraft.effort_score} onChange={e => setInitiativeDraft(d => ({ ...d, effort_score: Number(e.target.value) }))} className="w-full accent-slate-700" />
                   </div>
                 </div>
-                <select value={initiativeDraft.status} onChange={e => setInitiativeDraft(d => ({ ...d, status: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none">
-                  <option value="idea">Идея</option>
-                  <option value="preparation">Подготовка</option>
-                  <option value="approval">Согласование</option>
-                  <option value="in_plan">В плане</option>
-                  <option value="pilot">Пилот</option>
-                  <option value="implementation">Реализация</option>
-                  <option value="done">Завершена</option>
-                </select>
-                <input placeholder="Следующий шаг" value={initiativeDraft.next_step} onChange={e => setInitiativeDraft(d => ({ ...d, next_step: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                <div className="flex gap-2">
-                  <button onClick={() => setShowInitiativeForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2 text-sm hover:bg-slate-50">Отмена</button>
+                {/* Статус */}
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Статус</label>
+                  <select value={initiativeDraft.status} onChange={e => setInitiativeDraft(d => ({ ...d, status: e.target.value }))} className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
+                    <option value="idea">Идея</option>
+                    <option value="preparation">Подготовка</option>
+                    <option value="approval">Согласование</option>
+                    <option value="in_plan">В плане</option>
+                    <option value="pilot">Пилот</option>
+                    <option value="implementation">Реализация</option>
+                    <option value="done">Завершена</option>
+                  </select>
+                </div>
+                <input
+                  placeholder="Следующий шаг"
+                  value={initiativeDraft.next_step}
+                  onChange={e => setInitiativeDraft(d => ({ ...d, next_step: e.target.value }))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                />
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowInitiativeForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!initiativeDraft.title.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
                     await workspaceApi.createInitiative({ project_id: projectId, ...initiativeDraft });
@@ -2138,45 +2196,70 @@ export default function ProjectPage() {
                     setShowInitiativeForm(false);
                     workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
                     setWbLoading(false);
-                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold disabled:opacity-50">
+                  }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
                     {wbLoading ? "Сохраняю..." : "Сохранить"}
                   </button>
                 </div>
               </div>
             )}
+
+            {/* Пустое состояние */}
             {initiatives.length === 0 && !showInitiativeForm && (
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
-                <Icon name="Rocket" size={32} className="text-slate-300 mx-auto mb-3" />
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Rocket" size={28} className="text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-500 text-sm">Инициатив пока нет</p>
-                <p className="text-xs text-slate-400 mt-1">Создайте инициативу из кейса — с эффектом, усилием и статусом</p>
+                <p className="text-xs text-slate-400 mt-1">Создайте инициативу — с эффектом, усилием и статусом</p>
+                <button onClick={() => setShowInitiativeForm(true)} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
+                  + Добавить первую инициативу
+                </button>
               </div>
             )}
-            <div className="space-y-3">
+
+            {/* Список инициатив */}
+            <div className="space-y-2.5">
               {initiatives.map(init => {
                 const STATUS_MAP: Record<string, { label: string; color: string }> = {
-                  idea: { label: "Идея", color: "bg-slate-100 text-slate-600" },
-                  preparation: { label: "Подготовка", color: "bg-amber-100 text-amber-700" },
-                  approval: { label: "Согласование", color: "bg-blue-100 text-blue-700" },
-                  in_plan: { label: "В плане", color: "bg-indigo-100 text-indigo-700" },
-                  pilot: { label: "Пилот", color: "bg-violet-100 text-violet-700" },
-                  implementation: { label: "Реализация", color: "bg-green-100 text-green-700" },
-                  done: { label: "Завершена", color: "bg-emerald-100 text-emerald-700" },
+                  idea:           { label: "Идея",        color: "bg-slate-100 text-slate-600" },
+                  preparation:    { label: "Подготовка",  color: "bg-amber-100 text-amber-700" },
+                  approval:       { label: "Согласование",color: "bg-blue-100 text-blue-700" },
+                  in_plan:        { label: "В плане",     color: "bg-indigo-100 text-indigo-700" },
+                  pilot:          { label: "Пилот",       color: "bg-violet-100 text-violet-700" },
+                  implementation: { label: "Реализация",  color: "bg-green-100 text-green-700" },
+                  done:           { label: "Завершена",   color: "bg-emerald-100 text-emerald-700" },
+                };
+                const PRIORITY_MAP: Record<string, { label: string; color: string; border: string }> = {
+                  critical: { label: "Критический", color: "bg-red-100 text-red-700",    border: "border-red-200" },
+                  high:     { label: "Высокий",     color: "bg-orange-100 text-orange-700", border: "border-orange-200" },
+                  medium:   { label: "Средний",     color: "bg-slate-100 text-slate-600",   border: "border-slate-200" },
+                  low:      { label: "Низкий",      color: "bg-slate-100 text-slate-500",   border: "border-slate-200" },
                 };
                 const s = STATUS_MAP[init.status] || { label: init.status, color: "bg-slate-100 text-slate-600" };
-                const priorityBorder = init.priority === "critical" ? "border-red-300" : init.priority === "high" ? "border-orange-300" : "border-slate-200";
+                const pr = PRIORITY_MAP[init.priority] || PRIORITY_MAP.medium;
                 return (
-                  <div key={init.id} className={`bg-white border rounded-2xl p-4 ${priorityBorder}`}>
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <p className="font-semibold text-slate-900 text-sm">{init.title}</p>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${s.color}`}>{s.label}</span>
+                  <div key={init.id} className={`bg-white border rounded-2xl p-3 sm:p-4 ${pr.border}`}>
+                    {/* Строка 1: название */}
+                    <p className="font-semibold text-slate-900 text-sm leading-snug mb-2">{init.title}</p>
+                    {/* Строка 2: бейджи — flex-wrap */}
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.color}`}>{s.label}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pr.color}`}>{pr.label}</span>
+                      {init.owner_name && <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">👤 {init.owner_name}</span>}
                     </div>
-                    {init.description && <p className="text-xs text-slate-600 mb-2">{init.description}</p>}
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                    {/* Строка 3: описание */}
+                    {init.description && <p className="text-xs text-slate-600 mb-2 line-clamp-2">{init.description}</p>}
+                    {/* Строка 4: метрики эффект/усилие */}
+                    <div className="flex gap-3 text-xs text-slate-500 mb-1">
                       <span>📈 Эффект: <b className="text-slate-700">{init.impact_score}/5</b></span>
                       <span>💪 Усилие: <b className="text-slate-700">{init.effort_score}/5</b></span>
-                      {init.owner_name && <span>👤 {init.owner_name}</span>}
                     </div>
-                    {init.next_step && <div className="mt-2 bg-amber-50 rounded-lg px-3 py-2"><p className="text-xs text-amber-800">→ <span className="font-medium">Следующий шаг:</span> {init.next_step}</p></div>}
+                    {/* Следующий шаг */}
+                    {init.next_step && (
+                      <div className="mt-2 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                        <p className="text-xs text-amber-800 leading-snug">
+                          <span className="font-semibold">→ Следующий шаг:</span> {init.next_step}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 );
               })}
