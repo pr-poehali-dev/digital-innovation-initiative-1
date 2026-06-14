@@ -323,7 +323,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* ── Main content ── */}
-      <div className={`flex-1 flex flex-col min-h-screen transition-all duration-200 ${collapsed ? "lg:ml-16" : "lg:ml-60"}`}>
+      <div className={`flex-1 flex flex-col min-h-screen min-w-0 overflow-x-hidden transition-all duration-200 ${collapsed ? "lg:ml-16" : "lg:ml-60"}`}>
 
         {/* Top bar */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10 h-14">
@@ -377,7 +377,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 pb-20 lg:pb-6">{children}</main>
+        <main className="flex-1 pb-20 lg:pb-6 min-w-0 overflow-x-hidden">{children}</main>
       </div>
 
       {/* ── Mobile bottom nav ── */}
