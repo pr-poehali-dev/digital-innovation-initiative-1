@@ -453,20 +453,20 @@ export default function LearningPage() {
 
   return (
     <Layout>
-      <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Учебный кабинет</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Изучай новые сферы с AI-наставником</p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 truncate">Учебный кабинет</h1>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">Изучай новые сферы с AI-наставником</p>
           </div>
           <button
             onClick={() => setShowNewGoal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-medium hover:bg-violet-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-violet-600 text-white rounded-xl text-sm font-medium hover:bg-violet-700 active:bg-violet-800 transition-colors flex-shrink-0"
           >
             <Icon name="Plus" size={15} />
-            Новая цель
+            <span className="hidden xs:inline">Новая</span> цель
           </button>
         </div>
 
@@ -640,10 +640,10 @@ export default function LearningPage() {
 
                 {/* Прогресс-шапка */}
                 {progress && (
-                  <div className="bg-white border border-slate-200 rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-lg font-bold text-slate-900">{activeGoal.title}</h2>
-                      <span className="text-2xl font-bold text-violet-600">{progress.percent}%</span>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-snug min-w-0 line-clamp-2">{activeGoal.title}</h2>
+                      <span className="text-xl sm:text-2xl font-bold text-violet-600 flex-shrink-0">{progress.percent}%</span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div
@@ -651,7 +651,7 @@ export default function LearningPage() {
                         style={{ width: `${progress.percent}%` }}
                       />
                     </div>
-                    <div className="flex gap-4 mt-3 text-xs text-slate-500">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-xs text-slate-500">
                       <span className="flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
                         Готово: {progress.done}
@@ -664,7 +664,7 @@ export default function LearningPage() {
                         <span className="w-2 h-2 rounded-full bg-slate-300 inline-block" />
                         Осталось: {progress.not_started}
                       </span>
-                      <span className="flex items-center gap-1 ml-auto">
+                      <span className="flex items-center gap-1">
                         <Icon name="StickyNote" size={12} />
                         Находок: {progress.notes_count}
                       </span>
@@ -673,16 +673,16 @@ export default function LearningPage() {
                 )}
 
                 {/* Вкладки */}
-                <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit flex-wrap">
+                <div className="flex gap-1 bg-slate-100 rounded-xl p-1 overflow-x-auto scrollbar-hide">
                   {(["plan", "notes", "ai", "roadmap"] as const).map(t => (
                     <button
                       key={t}
                       onClick={() => setTab(t)}
-                      className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                      className={`px-3 sm:px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${
                         tab === t ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
                       }`}
                     >
-                      {t === "plan" ? "📋 План" : t === "notes" ? "📌 Находки" : t === "ai" ? "🤖 Наставник" : "🗓 30/60/90"}
+                      {t === "plan" ? "📋 План" : t === "notes" ? "📌 Находки" : t === "ai" ? "🤖 Ментор" : "🗓 30/60/90"}
                     </button>
                   ))}
                 </div>
@@ -745,15 +745,15 @@ export default function LearningPage() {
                           : 0;
                         return (
                           <div key={phase.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center">
+                            <div className="px-3 sm:px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
                                   <Icon name="BookOpen" size={13} className="text-white" />
                                 </div>
-                                <span className="text-sm font-semibold text-slate-800">{phase.title}</span>
+                                <span className="text-sm font-semibold text-slate-800 truncate">{phase.title}</span>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <div className="w-12 sm:w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                   <div className="h-full bg-violet-500 rounded-full" style={{ width: `${donePct}%` }} />
                                 </div>
                                 <span className="text-xs text-slate-400">{donePct}%</span>
@@ -1349,12 +1349,12 @@ export default function LearningPage() {
                         )}
 
                         {/* Кнопка обновить статус */}
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           {TOPIC_STATUSES.filter(s => s.value !== "not_started").map(s => (
                             <button
                               key={s.value}
                               onClick={() => handleTopicStatus(activeTopic, s.value)}
-                              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${
+                              className={`flex-1 min-w-[60px] py-2 rounded-xl text-xs font-semibold transition-all ${
                                 activeTopic.status === s.value
                                   ? `${s.bg} ${s.color} ring-1 ring-current`
                                   : "bg-slate-100 text-slate-500 hover:bg-slate-200"
