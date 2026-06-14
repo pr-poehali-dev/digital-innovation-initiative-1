@@ -2,6 +2,7 @@
 
 export const ROUTES = {
   home:           "/cabinet",
+  workbench:      "/cabinet/projects",
   projects:       "/cabinet/projects",
   learning:       "/cabinet/learning",
   passport:       "/cabinet/passport",
@@ -17,7 +18,7 @@ export type RouteKey = keyof typeof ROUTES;
 
 // ── Секции sidebar ─────────────────────────────────────────────────────────
 
-export type NavSectionKey = "overview" | "profile" | "growth" | "learning" | "practice";
+export type NavSectionKey = "overview" | "workbench" | "profile" | "growth" | "learning" | "practice";
 
 export interface NavItem {
   id: string;
@@ -45,6 +46,15 @@ export const NAV_SECTIONS: NavSection[] = [
     singleItem: true,
     items: [
       { id: "overview", label: "Обзор", icon: "LayoutDashboard", href: ROUTES.home, exact: true, active: true },
+    ],
+  },
+  {
+    key: "workbench",
+    label: "Рабочий кабинет",
+    icon: "Briefcase",
+    singleItem: true,
+    items: [
+      { id: "workbench", label: "Рабочий кабинет", icon: "Briefcase", href: ROUTES.workbench, active: true },
     ],
   },
   {
@@ -80,7 +90,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Практика",
     icon: "FolderOpen",
     items: [
-      { id: "practice.projects", label: "Проекты и презентации", icon: "FolderOpen", href: ROUTES.projects, active: true },
+      { id: "practice.projects", label: "Проекты и задания", icon: "FolderOpen", href: ROUTES.projects, active: true },
     ],
   },
 ];
@@ -93,9 +103,9 @@ export const NAV_SECONDARY: NavItem[] = [
 
 // Нижнее мобильное меню — только самые важные, max 5
 export const MOBILE_NAV = [
-  { label: "Обзор",    icon: "LayoutDashboard", href: ROUTES.home     },
-  { label: "Профиль",  icon: "UserCircle",      href: ROUTES.profile  },
-  { label: "Рост",     icon: "TrendingUp",      href: ROUTES.growth   },
-  { label: "Обучение", icon: "GraduationCap",   href: ROUTES.learning },
-  { label: "Кошелёк",  icon: "Wallet",          href: ROUTES.wallet   },
+  { label: "Обзор",    icon: "LayoutDashboard", href: ROUTES.home      },
+  { label: "Кабинет",  icon: "Briefcase",       href: ROUTES.workbench },
+  { label: "Рост",     icon: "TrendingUp",      href: ROUTES.growth    },
+  { label: "Обучение", icon: "GraduationCap",   href: ROUTES.learning  },
+  { label: "Кошелёк",  icon: "Wallet",          href: ROUTES.wallet    },
 ] as const;

@@ -139,6 +139,15 @@ export default function ProjectPage() {
     workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
   };
 
+  // AI Operator state
+  type AiAnalysis = {
+    summary: string; readiness_score: number; key_insight: string;
+    top_pains: string[]; ai_verdict: string; ai_verdict_reason: string;
+    quick_wins: string[]; gaps: string[]; next_action: string; risks: string[];
+  };
+  const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
+
   const [wsContext, setWsContext] = useState<WsContext>(null);
   const [wsContextEdit, setWsContextEdit] = useState(false);
   const [wsContextDraft, setWsContextDraft] = useState({ goals_text: "", constraints_text: "", key_facts_text: "", stakeholders_text: "" });
@@ -515,6 +524,101 @@ export default function ProjectPage() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* ── AI Operator ── */}
+            <div className="bg-gradient-to-br from-slate-900 to-violet-950 rounded-2xl p-5 text-white">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl bg-violet-500/30 flex items-center justify-center">
+                    <Icon name="BrainCircuit" size={15} className="text-violet-300" />
+                  </div>
+                  <span className="font-semibold text-sm">AI Оператор</span>
+                  <span className="text-[10px] text-slate-400">сам читает кейс и анализирует</span>
+                </div>
+                <button
+                  disabled={aiAnalysisLoading}
+                  onClick={async () => {
+                    setAiAnalysisLoading(true);
+                    try {
+                      const res = await workspaceApi.aiAnalyze(projectId) as { analysis: AiAnalysis };
+                      setAiAnalysis(res.analysis);
+                    } catch {
+                      // silent
+                    } finally { setAiAnalysisLoading(false); }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  {aiAnalysisLoading
+                    ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> Анализирую...</>
+                    : <><Icon name="Sparkles" size={12} /> {aiAnalysis ? "Обновить анализ" : "Запустить анализ"}</>}
+                </button>
+              </div>
+
+              {!aiAnalysis && !aiAnalysisLoading && (
+                <div className="text-center py-4">
+                  <p className="text-sm text-slate-400">Нажми «Запустить анализ» — AI сам прочитает кейс и выдаст структурированный разбор</p>
+                  <p className="text-xs text-slate-500 mt-1">Читает: процессы, боли, гипотезы, бенчмарки, AI-возможности, инициативы</p>
+                </div>
+              )}
+
+              {aiAnalysis && (
+                <div className="space-y-3">
+                  {/* Summary + score */}
+                  <div className="flex gap-3">
+                    <div className="flex-1 bg-white/5 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-1 font-semibold uppercase tracking-wide">Суть кейса</p>
+                      <p className="text-sm text-slate-200 leading-relaxed">{aiAnalysis.summary}</p>
+                    </div>
+                    <div className="flex-shrink-0 w-20 bg-white/5 rounded-xl p-3 flex flex-col items-center justify-center">
+                      <p className="text-2xl font-bold text-white">{aiAnalysis.readiness_score}<span className="text-sm text-slate-400">/10</span></p>
+                      <p className="text-[10px] text-slate-400 text-center mt-0.5">готовность кейса</p>
+                    </div>
+                  </div>
+
+                  {/* Key insight */}
+                  {aiAnalysis.key_insight && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3">
+                      <p className="text-xs text-amber-400 font-semibold mb-1">💡 Ключевой инсайт</p>
+                      <p className="text-sm text-amber-100">{aiAnalysis.key_insight}</p>
+                    </div>
+                  )}
+
+                  {/* AI verdict */}
+                  <div className={`rounded-xl p-3 ${aiAnalysis.ai_verdict === "AI рекомендован" ? "bg-green-500/10 border border-green-500/20" : aiAnalysis.ai_verdict?.includes("Сначала") ? "bg-orange-500/10 border border-orange-500/20" : "bg-blue-500/10 border border-blue-500/20"}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Icon name={aiAnalysis.ai_verdict === "AI рекомендован" ? "CheckCircle" : "Info"} size={13} className={aiAnalysis.ai_verdict === "AI рекомендован" ? "text-green-400" : "text-blue-400"} />
+                      <p className="text-xs font-bold text-white">{aiAnalysis.ai_verdict}</p>
+                    </div>
+                    {aiAnalysis.ai_verdict_reason && <p className="text-xs text-slate-300">{aiAnalysis.ai_verdict_reason}</p>}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Quick wins */}
+                    {aiAnalysis.quick_wins?.length > 0 && (
+                      <div className="bg-white/5 rounded-xl p-3">
+                        <p className="text-[10px] text-green-400 font-bold uppercase tracking-wide mb-2">✓ Quick wins</p>
+                        <ul className="space-y-1">{aiAnalysis.quick_wins.map((w, i) => <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className="text-green-400 flex-shrink-0">•</span>{w}</li>)}</ul>
+                      </div>
+                    )}
+                    {/* Gaps */}
+                    {aiAnalysis.gaps?.length > 0 && (
+                      <div className="bg-white/5 rounded-xl p-3">
+                        <p className="text-[10px] text-orange-400 font-bold uppercase tracking-wide mb-2">⚠ Пробелы</p>
+                        <ul className="space-y-1">{aiAnalysis.gaps.map((g, i) => <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className="text-orange-400 flex-shrink-0">•</span>{g}</li>)}</ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Next action */}
+                  {aiAnalysis.next_action && (
+                    <div className="bg-violet-600/30 border border-violet-500/30 rounded-xl px-4 py-3">
+                      <p className="text-[10px] text-violet-300 font-bold uppercase tracking-wide mb-1">→ Следующее действие</p>
+                      <p className="text-sm text-white font-medium">{aiAnalysis.next_action}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Контекст пространства */}

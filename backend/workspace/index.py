@@ -1020,6 +1020,118 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 return cors({"ok": True})
 
+        # ── AI Operator: автоанализ проекта без промптов ─────────────
+        if method == "POST" and action == "ai_analyze":
+            project_id = int(body.get("project_id") or 0)
+            if not project_id:
+                return cors({"ok": False, "error": {"message": "Нужен project_id"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            pd = {}
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT title, description FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
+                r = cur.fetchone()
+                pd["title"] = r[0] if r else ""
+                pd["desc"]  = r[1] if r else ""
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT goals_text, constraints_text, key_facts_text, stakeholders_text FROM {SCHEMA}.workspace_context WHERE project_id = %s", (project_id,))
+                r = cur.fetchone()
+                pd["goals"] = r[0] or "" if r else ""
+                pd["constraints"] = r[1] or "" if r else ""
+                pd["key_facts"] = r[2] or "" if r else ""
+                pd["stakeholders"] = r[3] or "" if r else ""
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT p.title, COUNT(s.id), SUM(CASE WHEN s.is_manual THEN 1 ELSE 0 END), SUM(CASE WHEN s.ai_potential IN ('high','medium') THEN 1 ELSE 0 END)
+                        FROM {SCHEMA}.wb_processes p
+                        JOIN {SCHEMA}.wb_case_process_links lnk ON lnk.process_id = p.id AND lnk.case_id = %s
+                        LEFT JOIN {SCHEMA}.wb_process_steps s ON s.process_id = p.id AND s.is_archived = FALSE
+                        WHERE p.is_archived = FALSE GROUP BY p.id""", (project_id,))
+                pd["processes"] = [{"title": r[0], "steps": r[1], "manual": r[2], "ai_steps": r[3]} for r in cur.fetchall()]
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT pain_type, description, impact_level FROM {SCHEMA}.wb_pain_points WHERE case_id = %s AND is_archived = FALSE ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END", (project_id,))
+                pd["pains"] = [{"type": r[0], "desc": r[1], "impact": r[2]} for r in cur.fetchall()]
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT title, statement, status FROM {SCHEMA}.workspace_hypotheses WHERE project_id = %s ORDER BY created_at", (project_id,))
+                pd["hypotheses"] = [{"title": r[0], "statement": r[1], "status": r[2]} for r in cur.fetchall()]
+
+            with conn.cursor() as cur:
+                cur.execute(f"""SELECT b.title, b.applicability, b.observed_effect FROM {SCHEMA}.wb_benchmarks b JOIN {SCHEMA}.wb_case_benchmarks cb ON cb.benchmark_id = b.id AND cb.case_id = %s WHERE b.is_archived = FALSE""", (project_id,))
+                pd["benchmarks"] = [{"title": r[0], "app": r[1], "effect": r[2]} for r in cur.fetchall()]
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT title, recommendation, proposed_solution_type FROM {SCHEMA}.wb_ai_opportunities WHERE case_id = %s AND is_archived = FALSE", (project_id,))
+                pd["ai_opps"] = [{"title": r[0], "rec": r[1], "solution": r[2]} for r in cur.fetchall()]
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT title, status, impact_score, effort_score, next_step FROM {SCHEMA}.wb_initiatives WHERE case_id = %s AND is_archived = FALSE ORDER BY impact_score DESC", (project_id,))
+                pd["initiatives"] = [{"title": r[0], "status": r[1], "impact": r[2], "effort": r[3], "next": r[4]} for r in cur.fetchall()]
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.tasks WHERE project_id = %s AND status != 'completed'", (project_id,))
+                pd["open_tasks"] = cur.fetchone()[0]
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.documents WHERE project_id = %s", (project_id,))
+                pd["docs_count"] = cur.fetchone()[0]
+
+            lines = [f"ПРОЕКТ: «{pd['title']}»"]
+            if pd.get("desc"): lines.append(f"Описание: {pd['desc']}")
+            if pd.get("goals"): lines.append(f"\nЦЕЛИ:\n{pd['goals']}")
+            if pd.get("key_facts"): lines.append(f"\nКЛЮЧЕВЫЕ ФАКТЫ:\n{pd['key_facts']}")
+            if pd.get("constraints"): lines.append(f"\nОГРАНИЧЕНИЯ:\n{pd['constraints']}")
+            if pd.get("stakeholders"): lines.append(f"\nСТЕЙКХОЛДЕРЫ:\n{pd['stakeholders']}")
+            if pd.get("processes"):
+                lines.append("\nПРОЦЕССЫ:")
+                for p in pd["processes"]: lines.append(f"  • {p['title']}: {p['steps']} шагов, {p['manual']} ручных, {p['ai_steps']} с AI-потенциалом")
+            if pd.get("pains"):
+                lines.append("\nБОЛИ:")
+                for p in pd["pains"][:8]: lines.append(f"  • [{p['impact']}] {p['desc']}")
+            if pd.get("hypotheses"):
+                lines.append("\nГИПОТЕЗЫ:")
+                for h in pd["hypotheses"]: lines.append(f"  • [{h['status']}] {h['title']}: {(h['statement'] or '')[:150]}")
+            if pd.get("benchmarks"):
+                lines.append("\nБЕНЧМАРКИ:")
+                for b in pd["benchmarks"]: lines.append(f"  • {b['title']}: {(b['app'] or '')[:100]}")
+            if pd.get("ai_opps"):
+                lines.append("\nAI-ВОЗМОЖНОСТИ:")
+                for o in pd["ai_opps"]: lines.append(f"  • {o['title']} → {o['rec']} ({o['solution']})")
+            if pd.get("initiatives"):
+                lines.append("\nИНИЦИАТИВЫ:")
+                for i in pd["initiatives"]:
+                    lines.append(f"  • {i['title']} [{i['status']}] эффект:{i['impact']}/5 усилие:{i['effort']}/5")
+                    if i["next"]: lines.append(f"    Следующий шаг: {i['next']}")
+            lines.append(f"\nФАЙЛОВ: {pd.get('docs_count', 0)}, ОТКРЫТЫХ ЗАДАЧ: {pd.get('open_tasks', 0)}")
+
+            context_text = "\n".join(lines)
+            system = "Ты AI-аналитик трансформационного проекта. Читаешь содержимое рабочего кейса и делаешь структурированный анализ. Не ждёшь вопросов — сам инициативно анализируешь. Пиши конкретно, без воды, для русскоязычного профессионала."
+            prompt = f"""{context_text}
+
+---
+Проанализируй этот кейс. Верни СТРОГО валидный JSON:
+{{"summary":"3-4 предложения — суть кейса и главная проблема","readiness_score":число 1-10,"key_insight":"самый важный инсайт — 1-2 предложения","top_pains":["боль 1","боль 2","боль 3"],"ai_verdict":"AI рекомендован"/"AI возможен"/"Сначала процессы — AI потом","ai_verdict_reason":"1-2 предложения","quick_wins":["что сделать сейчас без AI"],"gaps":["чего не хватает в кейсе"],"next_action":"одно конкретное следующее действие","risks":["риск 1","риск 2"]}}
+ТОЛЬКО JSON."""
+
+            result_text = yandex_gpt(prompt, system, max_tokens=2000)
+            try:
+                start, end = result_text.find("{"), result_text.rfind("}") + 1
+                analysis = json.loads(result_text[start:end])
+            except Exception:
+                analysis = {"summary": result_text[:400], "readiness_score": 5, "key_insight": "", "top_pains": [], "ai_verdict": "Требует оценки", "ai_verdict_reason": "", "quick_wins": [], "gaps": [], "next_action": "", "risks": []}
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.workspace_artifacts (project_id, title, artifact_type, content, summary, mode, created_by)
+                        VALUES (%s, 'AI Анализ кейса', 'analysis', %s, %s, 'analyst', %s) RETURNING id""",
+                    (project_id, json.dumps(analysis, ensure_ascii=False), analysis.get("summary", "")[:300], user_id))
+            conn.commit()
+            return cors({"ok": True, "analysis": analysis})
+
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 
     finally:
