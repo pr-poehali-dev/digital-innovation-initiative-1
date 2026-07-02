@@ -1,22 +1,10 @@
 {
   "tests": [
     {
-      "name": "OPTIONS preflight",
-      "method": "OPTIONS",
+      "name": "Returns 503 frozen",
+      "method": "GET",
       "path": "/",
-      "expectedStatus": 200
-    },
-    {
-      "name": "Unauth functions",
-      "method": "GET",
-      "path": "/?action=functions&project_id=1",
-      "expectedStatus": 401
-    },
-    {
-      "name": "Unauth automation",
-      "method": "GET",
-      "path": "/?action=automation&project_id=1",
-      "expectedStatus": 401
+      "expectedStatus": 503
     }
   ]
 }

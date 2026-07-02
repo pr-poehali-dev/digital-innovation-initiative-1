@@ -1,10 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, deptFunctionsApi, fileToBase64 } from "@/lib/api";
-import DeptFunctionsTab from "@/components/dept/DeptFunctionsTab";
-import DeptAutomationTab from "@/components/dept/DeptAutomationTab";
-import DeptProcessMapTab from "@/components/dept/DeptProcessMapTab";
-import DeptPresentationTab from "@/components/dept/DeptPresentationTab";
+import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
 import { analytics } from "@/lib/analytics";
 import { passportApi } from "@/lib/passportApi";
 import Layout from "@/components/Layout";
@@ -89,7 +85,7 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "dept_functions" | "dept_automation" | "dept_map" | "dept_presentation">("overview");
+  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives">("overview");
 
   // Workspace state
   type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string };
@@ -103,12 +99,6 @@ export default function ProjectPage() {
   type Benchmark = { id: number; title: string; source_name: string; source_url: string; industry: string; organization_name: string; benchmark_type: string; summary: string; observed_effect: string; applicability: string; confidence_level: string; notes: string; relevance_note: string };
   type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
   type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string };
-
-  // Dept functions state
-  type DeptFunction = { id: number; dept_name: string; title: string; description: string; goals: string; category: string; priority: number; source_image_url: string | null; created_at: string };
-  type DeptAutomation = { id: number; function_id: number; function_title: string; dept_name: string; category: string; current_tools: string; current_status: string; planned_tools: string; ai_potential_score: number; ai_recommendation: string; ai_recommendation_generated: boolean; implementation_horizon: string; notes: string };
-  const [deptFunctions, setDeptFunctions] = useState<DeptFunction[]>([]);
-  const [deptAutomation, setDeptAutomation] = useState<DeptAutomation[]>([]);
 
   // Transformation Workbench state
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -149,10 +139,7 @@ export default function ProjectPage() {
     workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
   };
 
-  const loadDeptData = () => {
-    deptFunctionsApi.getFunctions(projectId).then((d: { functions: DeptFunction[] }) => setDeptFunctions(d.functions || [])).catch(() => {});
-    deptFunctionsApi.getAutomation(projectId).then((d: { automation: DeptAutomation[] }) => setDeptAutomation(d.automation || [])).catch(() => {});
-  };
+
 
   // ── AI Operator ───────────────────────────────────────────────
   type AiAnalysis = {
@@ -314,7 +301,7 @@ export default function ProjectPage() {
   };
 
   useEffect(() => {
-    load(); loadWorkbench(); loadDeptData(); analytics.workspaceOpened(projectId, "overview");
+    load(); loadWorkbench(); analytics.workspaceOpened(projectId, "overview");
     // Получаем статус при открытии
     setAiLoading(true);
     workspaceApi.aiStatus(projectId)
@@ -658,11 +645,7 @@ export default function ProjectPage() {
               { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
               { key: "benchmarks",  label: `📌 Бенчмарки${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
               { key: "ai",          label: `🧠 AI-оценка${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
-              { key: "initiatives",       label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
-              { key: "dept_functions",    label: `🏛️ Функции${deptFunctions.length ? ` (${deptFunctions.length})` : ""}` },
-              { key: "dept_automation",   label: "⚡ Автоматизация" },
-              { key: "dept_map",          label: "🗺️ Карта процессов" },
-              { key: "dept_presentation", label: "📊 Презентация" },
+              { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
               { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
               { key: "tasks",       label: `📋 Задания (${tasks.length})` },
               { key: "docs",        label: `📄 Файлы (${docs.length})` },
@@ -2666,55 +2649,6 @@ export default function ProjectPage() {
                 );
               })}
             </div>
-          </div>
-        )}
-
-        {/* ── Функции подразделения ─────────────────────────────── */}
-        {tab === "dept_functions" && (
-          <div>
-            <h2 className="text-xl font-bold text-slate-800 mb-1">Функции подразделения</h2>
-            <p className="text-sm text-muted-foreground mb-5">Загрузи скрин положения — AI извлечёт функции и цели автоматически</p>
-            <DeptFunctionsTab
-              projectId={projectId}
-              functions={deptFunctions}
-              onReload={loadDeptData}
-            />
-          </div>
-        )}
-
-        {/* ── Автоматизация ─────────────────────────────────────── */}
-        {tab === "dept_automation" && (
-          <div>
-            <h2 className="text-xl font-bold text-slate-800 mb-1">Автоматизация функций</h2>
-            <p className="text-sm text-muted-foreground mb-5">Текущий статус, инструменты и AI-рекомендации по каждой функции</p>
-            <DeptAutomationTab
-              projectId={projectId}
-              automation={deptAutomation}
-              onReload={loadDeptData}
-            />
-          </div>
-        )}
-
-        {/* ── Карта процессов ───────────────────────────────────── */}
-        {tab === "dept_map" && (
-          <div>
-            <h2 className="text-xl font-bold text-slate-800 mb-1">Карта процессов</h2>
-            <p className="text-sm text-muted-foreground mb-5">Визуализация функций по категориям, статусу автоматизации и приоритетам</p>
-            <DeptProcessMapTab
-              functions={deptFunctions}
-              automation={deptAutomation}
-            />
-          </div>
-        )}
-
-        {/* ── Презентация ───────────────────────────────────────── */}
-        {tab === "dept_presentation" && (
-          <div>
-            <DeptPresentationTab
-              projectTitle={project?.title || "Проект"}
-              functions={deptFunctions}
-              automation={deptAutomation}
-            />
           </div>
         )}
 
