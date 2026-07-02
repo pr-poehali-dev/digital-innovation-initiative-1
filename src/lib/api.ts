@@ -22,6 +22,7 @@ const URLS = {
   workspace: "https://functions.poehali.dev/6524fd83-ede7-4d1c-9424-8e67293d2495",
   goals: "https://functions.poehali.dev/97ab26dc-af56-4172-abc5-579979e30b01",
   learningPack: "https://functions.poehali.dev/8ad151d1-d688-49c2-822a-5f5d366a8b3b",
+  deptFunctions: "https://functions.poehali.dev/7e9accad-43d6-44e2-b388-14d15b7a8153",
 };
 
 function getSession(): string {
@@ -681,4 +682,21 @@ export const workspaceApi = {
     request(URLS.workspace, "/?action=initiatives", "POST", data),
   updateInitiative: (data: Record<string, unknown>) =>
     request(URLS.workspace, "/?action=initiatives", "PUT", data),
+};
+
+export const deptFunctionsApi = {
+  getFunctions: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=functions&project_id=${projectId}`, "GET"),
+  createFunction: (data: Record<string, unknown>) =>
+    request(URLS.deptFunctions, "/?action=create_function", "POST", data),
+  updateFunction: (data: Record<string, unknown>) =>
+    request(URLS.deptFunctions, "/?action=update_function", "PUT", data),
+  extractFunctions: (data: { project_id: number; image_b64: string; dept_name?: string }) =>
+    request(URLS.deptFunctions, "/?action=extract_functions", "POST", data),
+  getAutomation: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=automation&project_id=${projectId}`, "GET"),
+  updateAutomation: (data: Record<string, unknown>) =>
+    request(URLS.deptFunctions, "/?action=update_automation", "PUT", data),
+  aiRecommend: (data: { project_id: number; function_id: number }) =>
+    request(URLS.deptFunctions, "/?action=ai_recommend", "POST", data),
 };
