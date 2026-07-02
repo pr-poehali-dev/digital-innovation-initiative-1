@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
+import SolutionsTab from "@/components/workspace/SolutionsTab";
 import { analytics } from "@/lib/analytics";
 import { passportApi } from "@/lib/passportApi";
 import Layout from "@/components/Layout";
@@ -54,6 +55,7 @@ interface Project {
   id: number;
   title: string;
   description?: string;
+  workspace_mode?: string;
   members: { id: number; name: string; email: string; role: string }[];
   activity: ActivityItem[];
   my_role: string;
@@ -85,7 +87,7 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives">("overview");
+  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions">("overview");
 
   // Workspace state
   type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string };
@@ -99,6 +101,7 @@ export default function ProjectPage() {
   type Benchmark = { id: number; title: string; source_name: string; source_url: string; industry: string; organization_name: string; benchmark_type: string; summary: string; observed_effect: string; applicability: string; confidence_level: string; notes: string; relevance_note: string };
   type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
   type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string };
+  type Solution = { id: number; title: string; solution_type: string; covers_text: string; status: string; limitations: string; alternatives: string; notes: string; created_at: string; updated_at: string };
 
   // Transformation Workbench state
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -106,6 +109,7 @@ export default function ProjectPage() {
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [aiOpportunities, setAiOpportunities] = useState<AiOpportunity[]>([]);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
+  const [solutions, setSolutions] = useState<Solution[]>([]);
   // Process forms
   const [showProcessForm, setShowProcessForm] = useState(false);
   const [processDraft, setProcessDraft] = useState({ title: "", description: "", owner_name: "", department: "" });
@@ -246,6 +250,11 @@ export default function ProjectPage() {
     }).catch(() => {});
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
     workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
+    workspaceApi.getSolutions(projectId).then((d: { solutions: Solution[] }) => setSolutions(d.solutions || [])).catch(() => {});
+  };
+
+  const loadSolutions = () => {
+    workspaceApi.getSolutions(projectId).then((d: { solutions: Solution[] }) => setSolutions(d.solutions || [])).catch(() => {});
   };
 
   const pollOnce = async () => {
@@ -637,20 +646,35 @@ export default function ProjectPage() {
         {/* Вкладки — flex-wrap, без скролла */}
         <div className="mb-4 sm:mb-6 border-b border-slate-200">
           <div className="flex flex-wrap gap-x-0 gap-y-0">
-            {([
-              { key: "overview",    label: "🏠 Обзор" },
-              { key: "copilot",     label: "🤖 AI Copilot" },
-              { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
-              { key: "pains",       label: `🔥 Боли${painPoints.length ? ` (${painPoints.length})` : ""}` },
-              { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
-              { key: "benchmarks",  label: `📌 Бенчмарки${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
-              { key: "ai",          label: `🧠 AI-оценка${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
-              { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
-              { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
-              { key: "tasks",       label: `📋 Задания (${tasks.length})` },
-              { key: "docs",        label: `📄 Файлы (${docs.length})` },
-              { key: "team",        label: "👥 Команда" },
-            ] as const).map((t) => (
+            {((() => {
+              const isPolygon = project?.workspace_mode === "polygon";
+              return isPolygon ? [
+                { key: "overview",    label: "🏠 Обзор полигона" },
+                { key: "process",     label: `⚙️ Функции и процессы${processes.length ? ` (${processes.length})` : ""}` },
+                { key: "solutions",   label: `🗃️ Решения и системы${solutions.length ? ` (${solutions.length})` : ""}` },
+                { key: "pains",       label: `🔧 Проблемы${painPoints.length ? ` (${painPoints.length})` : ""}` },
+                { key: "ai",          label: `💡 Автоматизация и ИИ${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
+                { key: "hypotheses",  label: `🔬 Гипотезы и идеи${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
+                { key: "benchmarks",  label: `📌 Альтернативы${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
+                { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
+                { key: "copilot",     label: "🤖 AI Copilot" },
+                { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
+                { key: "docs",        label: `📄 Файлы (${docs.length})` },
+              ] : [
+                { key: "overview",    label: "🏠 Обзор" },
+                { key: "copilot",     label: "🤖 AI Copilot" },
+                { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
+                { key: "pains",       label: `🔥 Боли${painPoints.length ? ` (${painPoints.length})` : ""}` },
+                { key: "hypotheses",  label: `💡 Гипотезы${hypotheses.length ? ` (${hypotheses.length})` : ""}` },
+                { key: "benchmarks",  label: `📌 Бенчмарки${benchmarks.length ? ` (${benchmarks.length})` : ""}` },
+                { key: "ai",          label: `🧠 AI-оценка${aiOpportunities.length ? ` (${aiOpportunities.length})` : ""}` },
+                { key: "initiatives", label: `🚀 Инициативы${initiatives.length ? ` (${initiatives.length})` : ""}` },
+                { key: "artifacts",   label: `📦 Артефакты${artifacts.length ? ` (${artifacts.length})` : ""}` },
+                { key: "tasks",       label: `📋 Задания (${tasks.length})` },
+                { key: "docs",        label: `📄 Файлы (${docs.length})` },
+                { key: "team",        label: "👥 Команда" },
+              ];
+            })()).map((t) => (
               <button
                 key={t.key}
                 data-tab={t.key}
@@ -699,12 +723,17 @@ export default function ProjectPage() {
           <div className="space-y-5">
             {/* Карточки-счётчики */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-              {[
+              {(project?.workspace_mode === "polygon" ? [
+                { label: "Функций/процессов", count: processes.length, icon: "Workflow", color: "text-blue-600 bg-blue-50" },
+                { label: "Решений/систем", count: solutions.length, icon: "Server", color: "text-slate-600 bg-slate-100" },
+                { label: "Гипотез и идей", count: hypotheses.length, icon: "Lightbulb", color: "text-amber-600 bg-amber-50" },
+                { label: "Инициатив", count: initiatives.length, icon: "Rocket", color: "text-violet-600 bg-violet-50" },
+              ] : [
                 { label: "Гипотез", count: hypotheses.length, icon: "Lightbulb", color: "text-amber-600 bg-amber-50" },
                 { label: "Болей", count: painPoints.length, icon: "Flame", color: "text-red-600 bg-red-50" },
                 { label: "Инициатив", count: initiatives.length, icon: "Rocket", color: "text-violet-600 bg-violet-50" },
                 { label: "Файлов", count: docs.length, icon: "FileText", color: "text-blue-600 bg-blue-50" },
-              ].map(c => (
+              ]).map(c => (
                 <div key={c.label} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3 sm:p-4 flex items-center gap-2 sm:gap-3">
                   <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0 ${c.color}`}>
                     <Icon name={c.icon} size={16} />
@@ -2650,6 +2679,15 @@ export default function ProjectPage() {
               })}
             </div>
           </div>
+        )}
+
+        {/* ── Решения и системы (полигон) ── */}
+        {tab === "solutions" && (
+          <SolutionsTab
+            projectId={projectId}
+            solutions={solutions}
+            onReload={loadSolutions}
+          />
         )}
 
       </div>

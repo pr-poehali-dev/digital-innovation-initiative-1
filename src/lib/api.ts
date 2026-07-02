@@ -682,6 +682,12 @@ export const workspaceApi = {
     request(URLS.workspace, "/?action=initiatives", "POST", data),
   updateInitiative: (data: Record<string, unknown>) =>
     request(URLS.workspace, "/?action=initiatives", "PUT", data),
+  getSolutions: (projectId: number) =>
+    request(URLS.workspace, `/?action=solutions&project_id=${projectId}`, "GET"),
+  createSolution: (data: { project_id: number; title: string; solution_type?: string; covers_text?: string; status?: string; limitations?: string; alternatives?: string; notes?: string }) =>
+    request(URLS.workspace, "/?action=create_solution", "POST", data),
+  updateSolution: (data: { id: number; title?: string; solution_type?: string; covers_text?: string; status?: string; limitations?: string; alternatives?: string; notes?: string }) =>
+    request(URLS.workspace, "/?action=update_solution", "PUT", data),
 };
 
 export const deptFunctionsApi = {

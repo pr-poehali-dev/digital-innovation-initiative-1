@@ -1345,6 +1345,84 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 return cors({"ok": False, "error": {"message": "Ошибка AI-анализа"}}, 500)
 
+        # ── Реестр решений/систем (полигон) ──────────────────────────
+        if action == "solutions":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id or not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, title, solution_type, covers_text, status,
+                               limitations, alternatives, notes, created_at, updated_at
+                        FROM {SCHEMA}.wb_solutions
+                        WHERE project_id = %s
+                        ORDER BY created_at DESC""",
+                    (project_id,),
+                )
+                rows = cur.fetchall()
+            return cors({"ok": True, "solutions": [
+                {"id": r[0], "title": r[1], "solution_type": r[2], "covers_text": r[3],
+                 "status": r[4], "limitations": r[5], "alternatives": r[6],
+                 "notes": r[7], "created_at": str(r[8]), "updated_at": str(r[9])}
+                for r in rows
+            ]})
+
+        if method == "POST" and action == "create_solution":
+            project_id = int(body.get("project_id") or 0)
+            title = (body.get("title") or "").strip()
+            if not project_id or not title:
+                return cors({"ok": False, "error": {"message": "Нужны project_id и title"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+            status = body.get("status", "keep")
+            if status not in ("keep", "improve", "replace", "retire"):
+                status = "keep"
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.wb_solutions
+                        (project_id, title, solution_type, covers_text, status,
+                         limitations, alternatives, notes, created_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at""",
+                    (project_id, title,
+                     body.get("solution_type", ""),
+                     body.get("covers_text", ""),
+                     status,
+                     body.get("limitations", ""),
+                     body.get("alternatives", ""),
+                     body.get("notes", ""),
+                     user_id),
+                )
+                sol_id, created_at = cur.fetchone()
+            conn.commit()
+            return cors({"ok": True, "id": sol_id, "created_at": str(created_at)})
+
+        if method == "PUT" and action == "update_solution":
+            sol_id = int(body.get("id") or 0)
+            if not sol_id:
+                return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT project_id FROM {SCHEMA}.wb_solutions WHERE id = %s", (sol_id,))
+                row = cur.fetchone()
+            if not row or not check_project_access(conn, row[0], user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+            fields = ["updated_at = NOW()"]
+            vals   = []
+            for f in ("title", "solution_type", "covers_text", "limitations", "alternatives", "notes"):
+                if f in body:
+                    fields.append(f"{f} = %s")
+                    vals.append(body[f])
+            if "status" in body:
+                s = body["status"]
+                if s in ("keep", "improve", "replace", "retire"):
+                    fields.append("status = %s")
+                    vals.append(s)
+            vals.append(sol_id)
+            with conn.cursor() as cur:
+                cur.execute(f"UPDATE {SCHEMA}.wb_solutions SET {', '.join(fields)} WHERE id = %s", vals)
+            conn.commit()
+            return cors({"ok": True})
+
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 
     finally:
