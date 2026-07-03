@@ -9,9 +9,18 @@ type PainPoint = {
   impact_level: string;
   frequency: string;
   root_cause: string;
+  linked_process_id: number | null;
+  linked_process_title?: string | null;
+  linked_process_department?: string | null;
+  linked_solution_id: number | null;
+  linked_solution_title?: string | null;
+  linked_solution_type?: string | null;
 };
 
-const EMPTY_PAIN = { description: "", pain_type: "manual_work", impact_level: "medium", frequency: "", root_cause: "" };
+type ProcessOption = { id: number; title: string; department?: string };
+type SolutionOption = { id: number; title: string; solution_type?: string };
+
+const EMPTY_PAIN = { description: "", pain_type: "manual_work", impact_level: "medium", frequency: "", root_cause: "", linked_process_id: "", linked_solution_id: "" };
 
 const IMPACT_COLOR: Record<string, string> = {
   critical: "bg-red-50 border-red-200",
@@ -27,15 +36,18 @@ const IMPACT_BADGE: Record<string, string> = {
 };
 const IMPACT_LABEL: Record<string, string> = { critical: "Критично", high: "Высокое", medium: "Среднее", low: "Низкое" };
 const PAIN_LABELS: Record<string, string> = { manual_work: "Ручной труд", duplication: "Дублирование", delay: "Задержки", lack_of_visibility: "Нет прозрачности", control_gap: "Контрольный разрыв", data_quality: "Данные", error_rate: "Ошибки", compliance_burden: "Регуляторная нагрузка" };
+const SOLUTION_TYPE_LABELS: Record<string, string> = { erp: "ERP / учётная система", bi: "BI / аналитика", rpa: "RPA / автоматизация", ocr: "OCR / распознавание", workflow: "Workflow / согласования", crm: "CRM", custom: "Самописное решение", saas: "SaaS-сервис", other: "Другое" };
 
 interface Props {
   projectId: number;
   painPoints: PainPoint[];
+  processes?: ProcessOption[];
+  solutions?: SolutionOption[];
   loading?: boolean;
   onReload: () => void;
 }
 
-export default function PainsTab({ projectId, painPoints, loading = false, onReload }: Props) {
+export default function PainsTab({ projectId, painPoints, processes = [], solutions = [], loading = false, onReload }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState(EMPTY_PAIN);
   const [saving, setSaving] = useState(false);
@@ -43,12 +55,24 @@ export default function PainsTab({ projectId, painPoints, loading = false, onRel
   const [aiExtractLoading, setAiExtractLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; description: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [editingLinksId, setEditingLinksId] = useState<number | null>(null);
+  const [linksDraft, setLinksDraft] = useState({ linked_process_id: "", linked_solution_id: "" });
+  const [savingLinks, setSavingLinks] = useState(false);
 
   const handleCreate = async () => {
     if (!draft.description.trim()) return;
     setSaving(true);
     try {
-      await workspaceApi.createPainPoint({ project_id: projectId, ...draft });
+      await workspaceApi.createPainPoint({
+        project_id: projectId,
+        description: draft.description,
+        pain_type: draft.pain_type,
+        impact_level: draft.impact_level,
+        frequency: draft.frequency,
+        root_cause: draft.root_cause,
+        linked_process_id: draft.linked_process_id ? Number(draft.linked_process_id) : null,
+        linked_solution_id: draft.linked_solution_id ? Number(draft.linked_solution_id) : null,
+      });
       setDraft(EMPTY_PAIN);
       setShowForm(false);
       onReload();
@@ -78,6 +102,28 @@ export default function PainsTab({ projectId, painPoints, loading = false, onRel
     } catch (e) {
       alert(e instanceof Error ? e.message : "Не удалось удалить запись");
     } finally { setDeleting(false); }
+  };
+
+  const startEditLinks = (p: PainPoint) => {
+    setEditingLinksId(p.id);
+    setLinksDraft({
+      linked_process_id: p.linked_process_id ? String(p.linked_process_id) : "",
+      linked_solution_id: p.linked_solution_id ? String(p.linked_solution_id) : "",
+    });
+  };
+
+  const handleSaveLinks = async () => {
+    if (!editingLinksId) return;
+    setSavingLinks(true);
+    try {
+      await workspaceApi.updatePainPoint({
+        id: editingLinksId,
+        linked_process_id: linksDraft.linked_process_id ? Number(linksDraft.linked_process_id) : null,
+        linked_solution_id: linksDraft.linked_solution_id ? Number(linksDraft.linked_solution_id) : null,
+      });
+      setEditingLinksId(null);
+      onReload();
+    } finally { setSavingLinks(false); }
   };
 
   return (
@@ -157,6 +203,25 @@ export default function PainsTab({ projectId, painPoints, loading = false, onRel
           </div>
           <input placeholder="Частота (ежедневно, еженедельно...)" value={draft.frequency} onChange={e => setDraft(d => ({ ...d, frequency: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none" />
           <input placeholder="Корневая причина (опционально)" value={draft.root_cause} onChange={e => setDraft(d => ({ ...d, root_cause: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none" />
+
+          {(processes.length > 0 || solutions.length > 0) && (
+            <div className="border-t border-slate-100 pt-2.5 space-y-2">
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Привязать к (опционально)</p>
+              {processes.length > 0 && (
+                <select value={draft.linked_process_id} onChange={e => setDraft(d => ({ ...d, linked_process_id: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
+                  <option value="">— Функция / процесс не выбраны —</option>
+                  {processes.map(pr => <option key={pr.id} value={pr.id}>{pr.title}{pr.department ? ` (${pr.department})` : ""}</option>)}
+                </select>
+              )}
+              {solutions.length > 0 && (
+                <select value={draft.linked_solution_id} onChange={e => setDraft(d => ({ ...d, linked_solution_id: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-white">
+                  <option value="">— Решение / система не выбраны —</option>
+                  {solutions.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                </select>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2 pt-1">
             <button onClick={() => { setShowForm(false); setDraft(EMPTY_PAIN); }} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
             <button disabled={!draft.description.trim() || saving} onClick={handleCreate} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
@@ -199,6 +264,66 @@ export default function PainsTab({ projectId, painPoints, loading = false, onRel
                   <span className="flex-shrink-0">🔍</span>
                   <span className="line-clamp-2">{p.root_cause}</span>
                 </p>
+              )}
+
+              {/* Привязанные функция/процесс и решение — подробный блок */}
+              {(p.linked_process_id || p.linked_solution_id) && (
+                <div className="mt-2 space-y-1.5">
+                  {p.linked_process_id && (
+                    <div className="bg-white/70 border border-blue-200 rounded-lg p-2 flex items-start gap-2">
+                      <Icon name="Workflow" size={13} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Связанная функция / процесс</p>
+                        <p className="text-xs text-slate-800 font-medium truncate">{p.linked_process_title || `#${p.linked_process_id}`}</p>
+                        {p.linked_process_department && <p className="text-[10px] text-slate-500">{p.linked_process_department}</p>}
+                      </div>
+                    </div>
+                  )}
+                  {p.linked_solution_id && (
+                    <div className="bg-white/70 border border-violet-200 rounded-lg p-2 flex items-start gap-2">
+                      <Icon name="Server" size={13} className="text-violet-600 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">Связанное решение / система</p>
+                        <p className="text-xs text-slate-800 font-medium truncate">{p.linked_solution_title || `#${p.linked_solution_id}`}</p>
+                        {p.linked_solution_type && <p className="text-[10px] text-slate-500">{SOLUTION_TYPE_LABELS[p.linked_solution_type] || p.linked_solution_type}</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Редактор привязки */}
+              {editingLinksId === p.id ? (
+                <div className="mt-2 bg-white border border-slate-200 rounded-lg p-2.5 space-y-2">
+                  {processes.length > 0 && (
+                    <select value={linksDraft.linked_process_id} onChange={e => setLinksDraft(d => ({ ...d, linked_process_id: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-xs focus:outline-none bg-white">
+                      <option value="">— Функция / процесс не выбраны —</option>
+                      {processes.map(pr => <option key={pr.id} value={pr.id}>{pr.title}{pr.department ? ` (${pr.department})` : ""}</option>)}
+                    </select>
+                  )}
+                  {solutions.length > 0 && (
+                    <select value={linksDraft.linked_solution_id} onChange={e => setLinksDraft(d => ({ ...d, linked_solution_id: e.target.value }))} className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-xs focus:outline-none bg-white">
+                      <option value="">— Решение / система не выбраны —</option>
+                      {solutions.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                    </select>
+                  )}
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditingLinksId(null)} className="flex-1 border border-slate-200 rounded-lg py-1.5 text-xs hover:bg-slate-50">Отмена</button>
+                    <button disabled={savingLinks} onClick={handleSaveLinks} className="flex-1 bg-slate-800 text-white rounded-lg py-1.5 text-xs font-semibold disabled:opacity-50">
+                      {savingLinks ? "..." : "Сохранить"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                (processes.length > 0 || solutions.length > 0) && (
+                  <button
+                    onClick={() => startEditLinks(p)}
+                    className="mt-2 flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 transition-colors"
+                  >
+                    <Icon name="Link" size={11} />
+                    {p.linked_process_id || p.linked_solution_id ? "Изменить привязку" : "Привязать к функции / решению"}
+                  </button>
+                )
               )}
             </div>
           ))}

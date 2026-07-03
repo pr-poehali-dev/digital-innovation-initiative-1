@@ -99,7 +99,7 @@ export default function ProjectPage() {
   // Transformation Workbench types
   type ProcessStep = { id: number; step_order: number; title: string; role_name: string; description: string; system_name: string; is_manual: boolean; pain_point: string; control_point: string; automation_potential: string; ai_potential: string; duration_minutes: number | null };
   type Process = { id: number; title: string; description: string; owner_name: string; department: string; maturity_level: string; digital_maturity: string; ai_potential: string; step_count: number; steps: ProcessStep[] };
-  type PainPoint = { id: number; pain_type: string; description: string; impact_level: string; frequency: string; root_cause: string };
+  type PainPoint = { id: number; pain_type: string; description: string; impact_level: string; frequency: string; root_cause: string; linked_process_id: number | null; linked_process_title?: string | null; linked_process_department?: string | null; linked_solution_id: number | null; linked_solution_title?: string | null; linked_solution_type?: string | null };
   type Benchmark = { id: number; title: string; source_name: string; source_url: string; industry: string; organization_name: string; benchmark_type: string; summary: string; observed_effect: string; applicability: string; confidence_level: string; notes: string; relevance_note: string };
   type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
   type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string };
@@ -1883,6 +1883,8 @@ export default function ProjectPage() {
           <PainsTab
             projectId={projectId}
             painPoints={painPoints}
+            processes={processes}
+            solutions={solutions}
             loading={painPointsLoading}
             onReload={loadPainPoints}
           />

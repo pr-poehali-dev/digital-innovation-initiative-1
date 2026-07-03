@@ -760,17 +760,25 @@ def handler(event: dict, context) -> dict:
             if method == "GET":
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"""SELECT id, pain_type, description, impact_level, frequency, root_cause
-                            FROM {SCHEMA}.wb_pain_points
-                            WHERE case_id = %s AND is_archived = FALSE
-                            ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                                     created_at DESC""",
+                        f"""SELECT p.id, p.pain_type, p.description, p.impact_level, p.frequency, p.root_cause,
+                                   p.linked_process_id, proc.title, proc.department,
+                                   p.linked_solution_id, sol.title, sol.solution_type
+                            FROM {SCHEMA}.wb_pain_points p
+                            LEFT JOIN {SCHEMA}.wb_processes proc ON proc.id = p.linked_process_id
+                            LEFT JOIN {SCHEMA}.wb_solutions sol ON sol.id = p.linked_solution_id
+                            WHERE p.case_id = %s AND p.is_archived = FALSE
+                            ORDER BY CASE p.impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                                     p.created_at DESC""",
                         (project_id,),
                     )
                     rows = cur.fetchall()
                 return cors({"ok": True, "pain_points": [
                     {"id": r[0], "pain_type": r[1], "description": r[2],
-                     "impact_level": r[3], "frequency": r[4], "root_cause": r[5]}
+                     "impact_level": r[3], "frequency": r[4], "root_cause": r[5],
+                     "linked_process_id": r[6],
+                     "linked_process_title": r[7], "linked_process_department": r[8],
+                     "linked_solution_id": r[9],
+                     "linked_solution_title": r[10], "linked_solution_type": r[11]}
                     for r in rows
                 ]})
 
@@ -778,14 +786,18 @@ def handler(event: dict, context) -> dict:
                 desc = (body.get("description") or "").strip()
                 if not desc:
                     return cors({"ok": False, "error": {"message": "Нужно description"}}, 400)
+                linked_process_id = body.get("linked_process_id") or None
+                linked_solution_id = body.get("linked_solution_id") or None
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.wb_pain_points
-                            (case_id, pain_type, description, impact_level, frequency, root_cause)
-                            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                            (case_id, pain_type, description, impact_level, frequency, root_cause,
+                             linked_process_id, linked_solution_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                         (project_id, body.get("pain_type", "manual_work"), desc,
                          body.get("impact_level", "medium"),
-                         body.get("frequency", ""), body.get("root_cause", "")),
+                         body.get("frequency", ""), body.get("root_cause", ""),
+                         linked_process_id, linked_solution_id),
                     )
                     pp_id = cur.fetchone()[0]
                 bump_content_version(conn, project_id)
@@ -802,6 +814,12 @@ def handler(event: dict, context) -> dict:
                     if f in body:
                         fields.append(f"{f} = %s")
                         vals.append(body[f])
+                if "linked_process_id" in body:
+                    fields.append("linked_process_id = %s")
+                    vals.append(body["linked_process_id"] or None)
+                if "linked_solution_id" in body:
+                    fields.append("linked_solution_id = %s")
+                    vals.append(body["linked_solution_id"] or None)
                 if body.get("archive"):
                     fields.append("is_archived = TRUE")
                 vals.append(pp_id)
