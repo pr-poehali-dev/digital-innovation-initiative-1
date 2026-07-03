@@ -1423,6 +1423,20 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True})
 
+        if method == "DELETE" and action == "delete_solution":
+            sol_id = int(qs.get("id") or body.get("id") or 0)
+            if not sol_id:
+                return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT project_id FROM {SCHEMA}.wb_solutions WHERE id = %s", (sol_id,))
+                row = cur.fetchone()
+            if not row or not check_project_access(conn, row[0], user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+            with conn.cursor() as cur:
+                cur.execute(f"DELETE FROM {SCHEMA}.wb_solutions WHERE id = %s", (sol_id,))
+            conn.commit()
+            return cors({"ok": True})
+
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
 
     finally:

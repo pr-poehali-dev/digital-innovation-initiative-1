@@ -688,6 +688,8 @@ export const workspaceApi = {
     request(URLS.workspace, "/?action=create_solution", "POST", data),
   updateSolution: (data: { id: number; title?: string; solution_type?: string; covers_text?: string; status?: string; limitations?: string; alternatives?: string; notes?: string }) =>
     request(URLS.workspace, "/?action=update_solution", "PUT", data),
+  deleteSolution: (id: number) =>
+    request(URLS.workspace, `/?action=delete_solution&id=${id}`, "DELETE"),
 };
 
 export const deptFunctionsApi = {

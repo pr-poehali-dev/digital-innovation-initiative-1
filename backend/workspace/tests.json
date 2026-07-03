@@ -6,6 +6,7 @@
     {"name": "Unauth pain_points", "method": "GET", "path": "/?action=pain_points&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
     {"name": "Unauth benchmarks", "method": "GET", "path": "/?action=benchmarks&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
     {"name": "Unauth solutions", "method": "GET", "path": "/?action=solutions&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth delete_solution", "method": "DELETE", "path": "/?action=delete_solution&id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
     {"name": "Unknown action", "method": "GET", "path": "/?action=unknown_xyz", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"}
   ]
 }

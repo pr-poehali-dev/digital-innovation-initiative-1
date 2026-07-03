@@ -60,6 +60,8 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
   const [editForm, setEditForm] = useState(EMPTY_FORM);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleCreate = async () => {
     if (!form.title.trim()) { setError("Введите название решения"); return; }
@@ -95,6 +97,18 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
       onReload();
     } catch { setError("Ошибка сохранения"); }
     finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      await workspaceApi.deleteSolution(confirmDelete.id);
+      setConfirmDelete(null);
+      setExpandedId(null);
+      onReload();
+    } catch { setError("Ошибка удаления"); }
+    finally { setDeleting(false); }
   };
 
   const statusCounts = Object.fromEntries(
@@ -329,13 +343,20 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
                         <p className="text-sm text-slate-700">{s.notes}</p>
                       </div>
                     )}
-                    <div className="pt-1">
+                    <div className="pt-1 flex items-center gap-4">
                       <button
                         onClick={() => startEdit(s)}
                         className="text-xs text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1"
                       >
                         <Icon name="Pencil" size={11} />
                         Редактировать
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete({ id: s.id, title: s.title })}
+                        className="text-xs text-red-600 hover:text-red-800 font-medium flex items-center gap-1"
+                      >
+                        <Icon name="Trash2" size={11} />
+                        Удалить
                       </button>
                     </div>
                   </div>
@@ -411,6 +432,35 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Модалка подтверждения удаления */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white border rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center mx-auto mb-3">
+              <Icon name="AlertTriangle" size={24} className="text-red-600" />
+            </div>
+            <h2 className="text-lg font-semibold mb-2 text-center text-slate-800">Удалить решение?</h2>
+            <p className="text-sm text-slate-600 mb-1 text-center">«{confirmDelete.title}»</p>
+            <p className="text-xs text-slate-500 mb-5 text-center">Это действие необратимо.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 border border-slate-300 rounded-lg py-2.5 text-sm font-medium hover:bg-slate-50"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg py-2.5 text-sm font-medium"
+              >
+                {deleting ? "Удаляю..." : "Удалить"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
