@@ -48,10 +48,11 @@ const EMPTY_FORM = {
 interface Props {
   projectId: number;
   solutions: Solution[];
+  loading?: boolean;
   onReload: () => void;
 }
 
-export default function SolutionsTab({ projectId, solutions, onReload }: Props) {
+export default function SolutionsTab({ projectId, solutions, loading = false, onReload }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -111,15 +112,30 @@ export default function SolutionsTab({ projectId, solutions, onReload }: Props) 
         </div>
         <button
           onClick={() => { setShowForm(!showForm); setError(""); }}
-          className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+          disabled={loading}
+          className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors"
         >
           <Icon name="Plus" size={14} />
           Добавить
         </button>
       </div>
 
+      {/* Loading state */}
+      {loading && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-4 gap-2">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="bg-white border border-slate-200 rounded-xl p-3 h-14 animate-pulse" />
+            ))}
+          </div>
+          {[0, 1, 2].map(i => (
+            <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4 h-16 animate-pulse" />
+          ))}
+        </div>
+      )}
+
       {/* Сводка по статусам */}
-      {solutions.length > 0 && (
+      {!loading && solutions.length > 0 && (
         <div className="grid grid-cols-4 gap-2">
           {Object.entries(STATUS_CONFIG).map(([k, cfg]) => (
             <div key={k} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
@@ -133,7 +149,7 @@ export default function SolutionsTab({ projectId, solutions, onReload }: Props) 
       )}
 
       {/* Форма добавления */}
-      {showForm && (
+      {!loading && showForm && (
         <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
           <p className="text-sm font-semibold text-slate-800">Новое решение / система</p>
 
@@ -235,7 +251,7 @@ export default function SolutionsTab({ projectId, solutions, onReload }: Props) 
       )}
 
       {/* Пустое состояние */}
-      {solutions.length === 0 && !showForm && (
+      {!loading && solutions.length === 0 && !showForm && (
         <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-8 text-center">
           <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
             <Icon name="Server" size={20} className="text-slate-400" />
@@ -253,7 +269,7 @@ export default function SolutionsTab({ projectId, solutions, onReload }: Props) 
       )}
 
       {/* Список решений */}
-      {solutions.length > 0 && (
+      {!loading && solutions.length > 0 && (
         <div className="space-y-2">
           {solutions.map(s => {
             const cfg = STATUS_CONFIG[s.status] || STATUS_CONFIG.keep;

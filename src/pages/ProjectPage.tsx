@@ -110,6 +110,7 @@ export default function ProjectPage() {
   const [aiOpportunities, setAiOpportunities] = useState<AiOpportunity[]>([]);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [solutions, setSolutions] = useState<Solution[]>([]);
+  const [solutionsLoading, setSolutionsLoading] = useState(true);
   // Process forms
   const [showProcessForm, setShowProcessForm] = useState(false);
   const [processDraft, setProcessDraft] = useState({ title: "", description: "", owner_name: "", department: "" });
@@ -250,11 +251,19 @@ export default function ProjectPage() {
     }).catch(() => {});
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
     workspaceApi.getArtifacts(projectId).then((d: { artifacts: Artifact[] }) => setArtifacts(d.artifacts || [])).catch(() => {});
-    workspaceApi.getSolutions(projectId).then((d: { solutions: Solution[] }) => setSolutions(d.solutions || [])).catch(() => {});
+    setSolutionsLoading(true);
+    workspaceApi.getSolutions(projectId)
+      .then((d: { solutions: Solution[] }) => setSolutions(d.solutions || []))
+      .catch(() => {})
+      .finally(() => setSolutionsLoading(false));
   };
 
   const loadSolutions = () => {
-    workspaceApi.getSolutions(projectId).then((d: { solutions: Solution[] }) => setSolutions(d.solutions || [])).catch(() => {});
+    setSolutionsLoading(true);
+    workspaceApi.getSolutions(projectId)
+      .then((d: { solutions: Solution[] }) => setSolutions(d.solutions || []))
+      .catch(() => {})
+      .finally(() => setSolutionsLoading(false));
   };
 
   const pollOnce = async () => {
@@ -2686,6 +2695,7 @@ export default function ProjectPage() {
           <SolutionsTab
             projectId={projectId}
             solutions={solutions}
+            loading={solutionsLoading}
             onReload={loadSolutions}
           />
         )}
