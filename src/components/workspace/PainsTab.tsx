@@ -72,9 +72,11 @@ export default function PainsTab({ projectId, painPoints, loading = false, onRel
     if (!confirmDelete) return;
     setDeleting(true);
     try {
-      await workspaceApi.deletePainPoint(confirmDelete.id);
+      await workspaceApi.deletePainPoint(confirmDelete.id, projectId);
       setConfirmDelete(null);
       onReload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Не удалось удалить запись");
     } finally { setDeleting(false); }
   };
 

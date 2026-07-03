@@ -77,10 +77,12 @@ export default function ProcessesTab({ projectId, processes, loading = false, on
     if (!confirmDeleteProcess) return;
     setDeleting(true);
     try {
-      await workspaceApi.deleteProcess(confirmDeleteProcess.id);
+      await workspaceApi.deleteProcess(confirmDeleteProcess.id, projectId);
       setConfirmDeleteProcess(null);
       setExpandedId(null);
       onReload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Не удалось удалить процесс");
     } finally { setDeleting(false); }
   };
 
@@ -88,9 +90,11 @@ export default function ProcessesTab({ projectId, processes, loading = false, on
     if (!confirmDeleteStep) return;
     setDeleting(true);
     try {
-      await workspaceApi.deleteProcessStep(confirmDeleteStep.id);
+      await workspaceApi.deleteProcessStep(confirmDeleteStep.id, projectId);
       setConfirmDeleteStep(null);
       onReload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Не удалось удалить шаг");
     } finally { setDeleting(false); }
   };
 
