@@ -210,7 +210,7 @@ def handle_get(conn, user, body, request_id, origin=None):
         return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
 
     cur.execute(
-        f"SELECT id, title, description, owner_id, created_at, updated_at, archived_at FROM {schema}.projects WHERE id = %s",
+        f"SELECT id, title, description, owner_id, created_at, updated_at, archived_at, workspace_mode FROM {schema}.projects WHERE id = %s",
         (project_id,),
     )
     p = cur.fetchone()
@@ -234,6 +234,7 @@ def handle_get(conn, user, body, request_id, origin=None):
     return ok_response({
         "id": p[0], "title": p[1], "description": p[2],
         "owner_id": p[3], "created_at": str(p[4]), "updated_at": str(p[5]),
+        "workspace_mode": p[7],
         "members": members, "activity": activity, "my_role": role,
     }, request_id, origin=origin)
 
