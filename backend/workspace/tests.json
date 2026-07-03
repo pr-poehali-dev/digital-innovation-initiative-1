@@ -7,6 +7,9 @@
     {"name": "Unauth benchmarks", "method": "GET", "path": "/?action=benchmarks&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
     {"name": "Unauth solutions", "method": "GET", "path": "/?action=solutions&project_id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
     {"name": "Unauth delete_solution", "method": "DELETE", "path": "/?action=delete_solution&id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth delete process", "method": "DELETE", "path": "/?action=processes&id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth delete process_step", "method": "DELETE", "path": "/?action=process_steps&id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
+    {"name": "Unauth delete pain_point", "method": "DELETE", "path": "/?action=pain_points&id=1", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"},
     {"name": "Unknown action", "method": "GET", "path": "/?action=unknown_xyz", "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial"}
   ]
 }

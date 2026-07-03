@@ -650,12 +650,18 @@ export const workspaceApi = {
     request(URLS.workspace, "/?action=process_steps", "POST", data),
   updateProcessStep: (data: Record<string, unknown>) =>
     request(URLS.workspace, "/?action=process_steps", "PUT", data),
+  deleteProcessStep: (id: number) =>
+    request(URLS.workspace, `/?action=process_steps&id=${id}`, "DELETE"),
+  deleteProcess: (id: number) =>
+    request(URLS.workspace, `/?action=processes&id=${id}`, "DELETE"),
   getPainPoints: (projectId: number) =>
     request(URLS.workspace, `/?action=pain_points&project_id=${projectId}`, "GET"),
   createPainPoint: (data: Record<string, unknown>) =>
     request(URLS.workspace, "/?action=pain_points", "POST", data),
   updatePainPoint: (data: Record<string, unknown>) =>
     request(URLS.workspace, "/?action=pain_points", "PUT", data),
+  deletePainPoint: (id: number) =>
+    request(URLS.workspace, `/?action=pain_points&id=${id}`, "DELETE"),
   getBenchmarks: (projectId: number) =>
     request(URLS.workspace, `/?action=benchmarks&project_id=${projectId}`, "GET"),
   createBenchmark: (data: Record<string, unknown>) =>

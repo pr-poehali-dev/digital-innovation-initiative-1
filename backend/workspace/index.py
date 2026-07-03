@@ -636,6 +636,16 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 return cors({"ok": True})
 
+            if method == "DELETE":
+                step_id = int(qs.get("id") or body.get("id") or 0)
+                if not step_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_process_steps SET is_archived = TRUE WHERE id = %s", (step_id,))
+                bump_content_version(conn, project_id)
+                conn.commit()
+                return cors({"ok": True})
+
         # ── Процессы ──────────────────────────────────────────────────
         if action == "processes":
             project_id = int(qs.get("project_id") or body.get("project_id") or 0)
@@ -730,6 +740,17 @@ def handler(event: dict, context) -> dict:
                 conn.commit()
                 return cors({"ok": True})
 
+            if method == "DELETE":
+                proc_id = int(qs.get("id") or body.get("id") or 0)
+                if not proc_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_processes SET is_archived = TRUE WHERE id = %s", (proc_id,))
+                    cur.execute(f"UPDATE {SCHEMA}.wb_process_steps SET is_archived = TRUE WHERE process_id = %s", (proc_id,))
+                bump_content_version(conn, project_id)
+                conn.commit()
+                return cors({"ok": True})
+
         # ── Боли / узкие места ────────────────────────────────────────
         if action == "pain_points":
             project_id = int(qs.get("project_id") or body.get("project_id") or 0)
@@ -786,6 +807,16 @@ def handler(event: dict, context) -> dict:
                 vals.append(pp_id)
                 with conn.cursor() as cur:
                     cur.execute(f"UPDATE {SCHEMA}.wb_pain_points SET {', '.join(fields)} WHERE id = %s", vals)
+                bump_content_version(conn, project_id)
+                conn.commit()
+                return cors({"ok": True})
+
+            if method == "DELETE":
+                pp_id = int(qs.get("id") or body.get("id") or 0)
+                if not pp_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(f"UPDATE {SCHEMA}.wb_pain_points SET is_archived = TRUE WHERE id = %s", (pp_id,))
                 bump_content_version(conn, project_id)
                 conn.commit()
                 return cors({"ok": True})
