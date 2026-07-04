@@ -849,11 +849,19 @@ export default function ProjectPage() {
               const statusCounts = initiatives.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc; }, {} as Record<string, number>);
               const statusBreakdown = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
 
+              // Правила Stage 6: пустым считаем null / '' / строку из пробелов после trim().
+              const isEmpty = (v?: string | null) => !v || !v.trim();
+              const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
+              const stuckInitiatives = initiatives.filter(i => i.status !== "idea" && i.status !== "done" && (isEmpty(i.owner_name) || isEmpty(i.next_step)));
+              const readyToLaunch = initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmpty(i.owner_name) && !isEmpty(i.next_step));
+
               const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: typeof tab }[] = [
                 { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains" },
                 { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains" },
                 { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
                 { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses" },
+                { key: "ready_launch",  icon: "Rocket",       title: "Готовы к запуску",       color: "text-emerald-600 bg-emerald-50", count: readyToLaunch.length,      emptyText: "Нет проработанных инициатив",     tab: "initiatives" },
+                { key: "stuck",         icon: "AlertTriangle", title: "Зависшие инициативы",   color: "text-orange-600 bg-orange-50", count: stuckInitiatives.length,   emptyText: "Зависших инициатив нет",          tab: "initiatives" },
               ];
 
               return (
@@ -861,13 +869,13 @@ export default function ProjectPage() {
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Управленческий обзор</p>
 
                   {overviewLoading ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-3">
-                      {[0, 1, 2, 3].map(i => (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                      {[0, 1, 2, 3, 4, 5].map(i => (
                         <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4 h-20 animate-pulse" />
                       ))}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                       {WIDGETS.map(w => (
                         <button
                           key={w.key}
