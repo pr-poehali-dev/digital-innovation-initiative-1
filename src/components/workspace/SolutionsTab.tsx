@@ -2,6 +2,8 @@ import { useState } from "react";
 import { workspaceApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 
+type LinkedPain = { id: number; description: string; impact_level: string; frequency: string };
+
 type Solution = {
   id: number;
   title: string;
@@ -13,7 +15,16 @@ type Solution = {
   notes: string;
   created_at: string;
   updated_at: string;
+  linked_pains?: LinkedPain[];
 };
+
+const IMPACT_BADGE: Record<string, string> = {
+  critical: "bg-red-100 text-red-700",
+  high: "bg-orange-100 text-orange-700",
+  medium: "bg-amber-100 text-amber-700",
+  low: "bg-slate-100 text-slate-600",
+};
+const IMPACT_LABEL: Record<string, string> = { critical: "Критично", high: "Высокое", medium: "Среднее", low: "Низкое" };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
   keep:    { label: "Оставить",   color: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
@@ -343,6 +354,34 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
                         <p className="text-sm text-slate-700">{s.notes}</p>
                       </div>
                     )}
+
+                    {/* Связанные проблемы */}
+                    <div>
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                        Связанные проблемы {s.linked_pains?.length ? `(${s.linked_pains.length})` : ""}
+                      </p>
+                      {!s.linked_pains || s.linked_pains.length === 0 ? (
+                        <p className="text-xs text-slate-400">Проблемы пока не привязаны</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {s.linked_pains.map(pp => (
+                            <div key={pp.id} className="bg-red-50 border border-red-100 rounded-lg p-2 flex items-start gap-2">
+                              <Icon name="Flame" size={12} className="text-red-500 mt-0.5 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs text-slate-800 leading-snug">{pp.description}</p>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${IMPACT_BADGE[pp.impact_level] || "bg-slate-100 text-slate-600"}`}>
+                                    {IMPACT_LABEL[pp.impact_level] || pp.impact_level}
+                                  </span>
+                                  {pp.frequency && <span className="text-[10px] text-slate-500">📅 {pp.frequency}</span>}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="pt-1 flex items-center gap-4">
                       <button
                         onClick={() => startEdit(s)}

@@ -92,18 +92,19 @@ export default function ProjectPage() {
   const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions">("overview");
 
   // Workspace state
-  type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string };
+  type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string; process_id: number | null; process_title?: string | null; pain_point_id: number | null; pain_point_description?: string | null; solution_id: number | null; solution_title?: string | null };
   type Artifact = { id: number; title: string; artifact_type: string; summary: string; mode: string; created_at: string; content?: string };
   type WsContext = { goals_text: string; constraints_text: string; key_facts_text: string; stakeholders_text: string; updated_at?: string } | null;
 
   // Transformation Workbench types
   type ProcessStep = { id: number; step_order: number; title: string; role_name: string; description: string; system_name: string; is_manual: boolean; pain_point: string; control_point: string; automation_potential: string; ai_potential: string; duration_minutes: number | null };
-  type Process = { id: number; title: string; description: string; owner_name: string; department: string; maturity_level: string; digital_maturity: string; ai_potential: string; step_count: number; steps: ProcessStep[] };
+  type LinkedPain = { id: number; description: string; impact_level: string; frequency: string };
+  type Process = { id: number; title: string; description: string; owner_name: string; department: string; maturity_level: string; digital_maturity: string; ai_potential: string; step_count: number; steps: ProcessStep[]; linked_pains?: LinkedPain[] };
   type PainPoint = { id: number; pain_type: string; description: string; impact_level: string; frequency: string; root_cause: string; linked_process_id: number | null; linked_process_title?: string | null; linked_process_department?: string | null; linked_solution_id: number | null; linked_solution_title?: string | null; linked_solution_type?: string | null };
   type Benchmark = { id: number; title: string; source_name: string; source_url: string; industry: string; organization_name: string; benchmark_type: string; summary: string; observed_effect: string; applicability: string; confidence_level: string; notes: string; relevance_note: string };
   type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
   type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string };
-  type Solution = { id: number; title: string; solution_type: string; covers_text: string; status: string; limitations: string; alternatives: string; notes: string; created_at: string; updated_at: string };
+  type Solution = { id: number; title: string; solution_type: string; covers_text: string; status: string; limitations: string; alternatives: string; notes: string; created_at: string; updated_at: string; linked_pains?: LinkedPain[] };
 
   // Transformation Workbench state
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -212,7 +213,8 @@ export default function ProjectPage() {
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [copilotHistory, setCopilotHistory] = useState<{ q: string; a: string; artifact_id?: number }[]>([]);
   const [hypForm, setHypForm] = useState(false);
-  const [hypDraft, setHypDraft] = useState({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
+  const [hypDraft, setHypDraft] = useState<{ title: string; statement: string; assumptions: string; success_criteria: string; priority: string; process_id: number | null; pain_point_id: number | null; solution_id: number | null }>({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium", process_id: null, pain_point_id: null, solution_id: null });
+  const [hypSourcePain, setHypSourcePain] = useState<{ description: string } | null>(null);
   const [openHyp, setOpenHyp] = useState<Hypothesis | null>(null);
   const copilotEndRef = useRef<HTMLDivElement>(null);
   const [evidenceSending, setEvidenceSending] = useState<number | null>(null);
@@ -517,9 +519,26 @@ export default function ProjectPage() {
     await workspaceApi.createHypothesis({ project_id: projectId, ...hypDraft });
     analytics.workspaceHypothesisCreated(projectId, hypDraft.priority);
     setHypForm(false);
-    setHypDraft({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium" });
+    setHypDraft({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium", process_id: null, pain_point_id: null, solution_id: null });
+    setHypSourcePain(null);
     setPostActionHint("hypothesis_created");
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+  };
+
+  const handleCreateHypothesisFromPain = (pain: PainPoint) => {
+    setHypDraft({
+      title: pain.description.slice(0, 120),
+      statement: pain.root_cause ? `Причина: ${pain.root_cause}` : "",
+      assumptions: "",
+      success_criteria: "",
+      priority: pain.impact_level === "critical" || pain.impact_level === "high" ? "high" : "medium",
+      process_id: pain.linked_process_id,
+      pain_point_id: pain.id,
+      solution_id: pain.linked_solution_id,
+    });
+    setHypSourcePain({ description: pain.description });
+    setHypForm(true);
+    setTab("hypotheses");
   };
 
   const handleHypStatus = async (id: number, status: string) => {
@@ -1245,6 +1264,15 @@ export default function ProjectPage() {
             {hypForm && (
               <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новая гипотеза</p>
+                {hypSourcePain && (
+                  <div className="bg-violet-50 border border-violet-100 rounded-lg p-2 flex items-start gap-2">
+                    <Icon name="Flame" size={13} className="text-violet-600 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">Создано из проблемы</p>
+                      <p className="text-xs text-slate-700 line-clamp-2">{hypSourcePain.description}</p>
+                    </div>
+                  </div>
+                )}
                 {[
                   { key: "title",            label: "Формулировка *",   placeholder: "Если мы сделаем X, то Y вырастет на Z%", required: true },
                   { key: "statement",        label: "Детальное описание", placeholder: "Почему мы так думаем?" },
@@ -1270,7 +1298,7 @@ export default function ProjectPage() {
                   </select>
                 </div>
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => setHypForm(false)} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
+                  <button onClick={() => { setHypForm(false); setHypSourcePain(null); }} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
                   <button onClick={handleCreateHypothesis} disabled={!hypDraft.title.trim()} className="flex-1 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">Создать</button>
                 </div>
               </div>
@@ -1321,6 +1349,26 @@ export default function ProjectPage() {
                               <p className="text-[11px] text-emerald-700 font-medium leading-snug">
                                 <span className="font-semibold">Вывод:</span> {h.conclusion}
                               </p>
+                            )}
+                            {/* Происхождение — из какой проблемы/процесса/решения создана */}
+                            {(h.pain_point_id || h.process_id || h.solution_id) && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {h.pain_point_id && (
+                                  <span className="text-[10px] bg-white/70 text-red-600 border border-red-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Icon name="Flame" size={10} /> из проблемы{h.pain_point_description ? `: ${h.pain_point_description.slice(0, 40)}${h.pain_point_description.length > 40 ? "…" : ""}` : ""}
+                                  </span>
+                                )}
+                                {h.process_id && (
+                                  <span className="text-[10px] bg-white/70 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Icon name="Workflow" size={10} /> {h.process_title || "процесс"}
+                                  </span>
+                                )}
+                                {h.solution_id && (
+                                  <span className="text-[10px] bg-white/70 text-violet-600 border border-violet-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Icon name="Server" size={10} /> {h.solution_title || "решение"}
+                                  </span>
+                                )}
+                              </div>
                             )}
                             {/* Строка 4: статусные кнопки — flex-wrap с нормальным py */}
                             <div className="flex gap-1.5 pt-0.5 flex-wrap">
@@ -1887,6 +1935,7 @@ export default function ProjectPage() {
             solutions={solutions}
             loading={painPointsLoading}
             onReload={loadPainPoints}
+            onCreateHypothesis={handleCreateHypothesisFromPain}
           />
         )}
 

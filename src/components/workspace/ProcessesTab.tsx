@@ -17,6 +17,8 @@ type ProcessStep = {
   duration_minutes: number | null;
 };
 
+type LinkedPain = { id: number; description: string; impact_level: string; frequency: string };
+
 type Process = {
   id: number;
   title: string;
@@ -28,7 +30,16 @@ type Process = {
   ai_potential: string;
   step_count: number;
   steps: ProcessStep[];
+  linked_pains?: LinkedPain[];
 };
+
+const IMPACT_BADGE: Record<string, string> = {
+  critical: "bg-red-100 text-red-700",
+  high: "bg-orange-100 text-orange-700",
+  medium: "bg-amber-100 text-amber-700",
+  low: "bg-slate-100 text-slate-600",
+};
+const IMPACT_LABEL: Record<string, string> = { critical: "Критично", high: "Высокое", medium: "Среднее", low: "Низкое" };
 
 const EMPTY_PROCESS = { title: "", description: "", owner_name: "", department: "" };
 const EMPTY_STEP = { title: "", role_name: "", system_name: "", is_manual: true, pain_point: "", ai_potential: "none" };
@@ -196,6 +207,33 @@ export default function ProcessesTab({ projectId, processes, loading = false, on
                   </div>
                 </div>
               ))}
+
+              {/* Связанные проблемы */}
+              <div className="ml-7">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                  Связанные проблемы {proc.linked_pains?.length ? `(${proc.linked_pains.length})` : ""}
+                </p>
+                {!proc.linked_pains || proc.linked_pains.length === 0 ? (
+                  <p className="text-xs text-slate-400 mb-2">Проблемы пока не привязаны</p>
+                ) : (
+                  <div className="space-y-1.5 mb-2">
+                    {proc.linked_pains.map(pp => (
+                      <div key={pp.id} className="bg-red-50 border border-red-100 rounded-lg p-2 flex items-start gap-2">
+                        <Icon name="Flame" size={12} className="text-red-500 mt-0.5 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-slate-800 leading-snug">{pp.description}</p>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${IMPACT_BADGE[pp.impact_level] || "bg-slate-100 text-slate-600"}`}>
+                              {IMPACT_LABEL[pp.impact_level] || pp.impact_level}
+                            </span>
+                            {pp.frequency && <span className="text-[10px] text-slate-500">📅 {pp.frequency}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {showStepForm === proc.id ? (
                 <div className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-200 ml-7">

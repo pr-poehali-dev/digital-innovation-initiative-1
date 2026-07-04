@@ -45,9 +45,10 @@ interface Props {
   solutions?: SolutionOption[];
   loading?: boolean;
   onReload: () => void;
+  onCreateHypothesis?: (pain: PainPoint) => void;
 }
 
-export default function PainsTab({ projectId, painPoints, processes = [], solutions = [], loading = false, onReload }: Props) {
+export default function PainsTab({ projectId, painPoints, processes = [], solutions = [], loading = false, onReload, onCreateHypothesis }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState(EMPTY_PAIN);
   const [saving, setSaving] = useState(false);
@@ -329,6 +330,16 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
                     {p.linked_process_id || p.linked_solution_id ? "Изменить привязку" : "Привязать к функции / решению"}
                   </button>
                 )
+              )}
+
+              {onCreateHypothesis && (
+                <button
+                  onClick={() => onCreateHypothesis(p)}
+                  className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 hover:text-violet-800 transition-colors bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg px-2.5 py-1.5"
+                >
+                  <Icon name="Lightbulb" size={12} />
+                  Создать гипотезу
+                </button>
               )}
             </div>
           ))}

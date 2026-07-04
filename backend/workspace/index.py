@@ -365,18 +365,27 @@ def handler(event: dict, context) -> dict:
 
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT id, title, statement, assumptions, success_criteria,
-                               status, conclusion, priority, created_at, updated_at
-                        FROM {SCHEMA}.workspace_hypotheses
-                        WHERE project_id = %s
-                        ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'testing' THEN 1 ELSE 2 END, created_at DESC""",
+                    f"""SELECT h.id, h.title, h.statement, h.assumptions, h.success_criteria,
+                               h.status, h.conclusion, h.priority, h.created_at, h.updated_at,
+                               h.process_id, proc.title,
+                               h.pain_point_id, pp.description,
+                               h.solution_id, sol.title
+                        FROM {SCHEMA}.workspace_hypotheses h
+                        LEFT JOIN {SCHEMA}.wb_processes proc ON proc.id = h.process_id
+                        LEFT JOIN {SCHEMA}.wb_pain_points pp ON pp.id = h.pain_point_id
+                        LEFT JOIN {SCHEMA}.wb_solutions sol ON sol.id = h.solution_id
+                        WHERE h.project_id = %s
+                        ORDER BY CASE h.status WHEN 'open' THEN 0 WHEN 'testing' THEN 1 ELSE 2 END, h.created_at DESC""",
                     (project_id,),
                 )
                 rows = cur.fetchall()
             return cors({"ok": True, "hypotheses": [
                 {"id": r[0], "title": r[1], "statement": r[2], "assumptions": r[3],
                  "success_criteria": r[4], "status": r[5], "conclusion": r[6],
-                 "priority": r[7], "created_at": str(r[8]), "updated_at": str(r[9])}
+                 "priority": r[7], "created_at": str(r[8]), "updated_at": str(r[9]),
+                 "process_id": r[10], "process_title": r[11],
+                 "pain_point_id": r[12], "pain_point_description": r[13],
+                 "solution_id": r[14], "solution_title": r[15]}
                 for r in rows
             ]})
 
@@ -390,11 +399,13 @@ def handler(event: dict, context) -> dict:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""INSERT INTO {SCHEMA}.workspace_hypotheses
-                        (project_id, title, statement, assumptions, success_criteria, priority, created_by)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at""",
+                        (project_id, title, statement, assumptions, success_criteria, priority, created_by,
+                         process_id, pain_point_id, solution_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at""",
                     (project_id, title,
                      body.get("statement", ""), body.get("assumptions", ""),
-                     body.get("success_criteria", ""), body.get("priority", "medium"), user_id),
+                     body.get("success_criteria", ""), body.get("priority", "medium"), user_id,
+                     body.get("process_id") or None, body.get("pain_point_id") or None, body.get("solution_id") or None),
                 )
                 h_id, created_at = cur.fetchone()
             bump_content_version(conn, project_id)
@@ -683,11 +694,22 @@ def handler(event: dict, context) -> dict:
                                   "automation_potential": s[7], "ai_potential": s[8],
                                   "duration_minutes": s[9], "description": s[10], "control_point": s[11]}
                                  for s in cur.fetchall()]
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""SELECT id, description, impact_level, frequency
+                                FROM {SCHEMA}.wb_pain_points
+                                WHERE linked_process_id = %s AND is_archived = FALSE
+                                ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END""",
+                            (r[0],),
+                        )
+                        linked_pains = [{"id": pp[0], "description": pp[1], "impact_level": pp[2], "frequency": pp[3]}
+                                        for pp in cur.fetchall()]
                     processes.append({
                         "id": r[0], "title": r[1], "description": r[2],
                         "owner_name": r[3], "department": r[4],
                         "maturity_level": r[5], "digital_maturity": r[6],
                         "ai_potential": r[7], "step_count": r[8], "steps": steps,
+                        "linked_pains": linked_pains,
                     })
                 return cors({"ok": True, "processes": processes})
 
@@ -1410,12 +1432,26 @@ def handler(event: dict, context) -> dict:
                     (project_id,),
                 )
                 rows = cur.fetchall()
-            return cors({"ok": True, "solutions": [
-                {"id": r[0], "title": r[1], "solution_type": r[2], "covers_text": r[3],
-                 "status": r[4], "limitations": r[5], "alternatives": r[6],
-                 "notes": r[7], "created_at": str(r[8]), "updated_at": str(r[9])}
-                for r in rows
-            ]})
+
+            solutions = []
+            for r in rows:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT id, description, impact_level, frequency
+                            FROM {SCHEMA}.wb_pain_points
+                            WHERE linked_solution_id = %s AND is_archived = FALSE
+                            ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END""",
+                        (r[0],),
+                    )
+                    linked_pains = [{"id": pp[0], "description": pp[1], "impact_level": pp[2], "frequency": pp[3]}
+                                    for pp in cur.fetchall()]
+                solutions.append({
+                    "id": r[0], "title": r[1], "solution_type": r[2], "covers_text": r[3],
+                    "status": r[4], "limitations": r[5], "alternatives": r[6],
+                    "notes": r[7], "created_at": str(r[8]), "updated_at": str(r[9]),
+                    "linked_pains": linked_pains,
+                })
+            return cors({"ok": True, "solutions": solutions})
 
         if method == "POST" and action == "create_solution":
             project_id = int(body.get("project_id") or 0)
