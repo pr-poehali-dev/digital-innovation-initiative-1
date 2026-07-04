@@ -658,7 +658,7 @@ export const workspaceApi = {
     request(URLS.workspace, `/?action=pain_points&project_id=${projectId}`, "GET"),
   createPainPoint: (data: Record<string, unknown>) =>
     request(URLS.workspace, "/?action=pain_points", "POST", data),
-  updatePainPoint: (data: Record<string, unknown>) =>
+  updatePainPoint: (data: Record<string, unknown> & { project_id: number }) =>
     request(URLS.workspace, "/?action=pain_points", "PUT", data),
   deletePainPoint: (id: number, projectId: number) =>
     request(URLS.workspace, `/?action=pain_points&id=${id}&project_id=${projectId}`, "DELETE"),

@@ -76,6 +76,8 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
       setDraft(EMPTY_PAIN);
       setShowForm(false);
       onReload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Не удалось сохранить запись");
     } finally { setSaving(false); }
   };
 
@@ -118,11 +120,14 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
     try {
       await workspaceApi.updatePainPoint({
         id: editingLinksId,
+        project_id: projectId,
         linked_process_id: linksDraft.linked_process_id ? Number(linksDraft.linked_process_id) : null,
         linked_solution_id: linksDraft.linked_solution_id ? Number(linksDraft.linked_solution_id) : null,
       });
       setEditingLinksId(null);
       onReload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Не удалось сохранить привязку");
     } finally { setSavingLinks(false); }
   };
 
