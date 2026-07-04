@@ -1102,12 +1102,20 @@ def handler(event: dict, context) -> dict:
             if method == "GET":
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"""SELECT id, title, description, owner_name, priority,
-                                   impact_score, effort_score, status, next_step,
-                                   target_start_date, target_end_date
-                            FROM {SCHEMA}.wb_initiatives
-                            WHERE case_id = %s AND is_archived = FALSE
-                            ORDER BY impact_score DESC, created_at DESC""",
+                        f"""SELECT i.id, i.title, i.description, i.owner_name, i.priority,
+                                   i.impact_score, i.effort_score, i.status, i.next_step,
+                                   i.target_start_date, i.target_end_date,
+                                   i.hypothesis_id, h.title,
+                                   i.pain_point_id, pp.description,
+                                   i.process_id, proc.title,
+                                   i.solution_id, sol.title
+                            FROM {SCHEMA}.wb_initiatives i
+                            LEFT JOIN {SCHEMA}.workspace_hypotheses h ON h.id = i.hypothesis_id
+                            LEFT JOIN {SCHEMA}.wb_pain_points pp ON pp.id = i.pain_point_id
+                            LEFT JOIN {SCHEMA}.wb_processes proc ON proc.id = i.process_id
+                            LEFT JOIN {SCHEMA}.wb_solutions sol ON sol.id = i.solution_id
+                            WHERE i.case_id = %s AND i.is_archived = FALSE
+                            ORDER BY i.impact_score DESC, i.created_at DESC""",
                         (project_id,),
                     )
                     rows = cur.fetchall()
@@ -1116,7 +1124,11 @@ def handler(event: dict, context) -> dict:
                      "priority": r[4], "impact_score": r[5], "effort_score": r[6],
                      "status": r[7], "next_step": r[8],
                      "target_start_date": str(r[9]) if r[9] else None,
-                     "target_end_date": str(r[10]) if r[10] else None}
+                     "target_end_date": str(r[10]) if r[10] else None,
+                     "hypothesis_id": r[11], "hypothesis_title": r[12],
+                     "pain_point_id": r[13], "pain_point_description": r[14],
+                     "process_id": r[15], "process_title": r[16],
+                     "solution_id": r[17], "solution_title": r[18]}
                     for r in rows
                 ]})
 
@@ -1124,17 +1136,63 @@ def handler(event: dict, context) -> dict:
                 title = (body.get("title") or "").strip()
                 if not title:
                     return cors({"ok": False, "error": {"message": "Нужен title"}}, 400)
+
+                hypothesis_id = body.get("hypothesis_id") or None
+                pain_point_id = body.get("pain_point_id") or None
+                process_id    = body.get("process_id") or None
+                solution_id   = body.get("solution_id") or None
+
+                # Если передана гипотеза — она источник истины: подтягиваем связи из неё
+                # и проверяем, что она принадлежит тому же проекту.
+                if hypothesis_id:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""SELECT project_id, pain_point_id, process_id, solution_id
+                                FROM {SCHEMA}.workspace_hypotheses WHERE id = %s""",
+                            (hypothesis_id,),
+                        )
+                        hyp_row = cur.fetchone()
+                    if not hyp_row or hyp_row[0] != project_id:
+                        return cors({"ok": False, "error": {"message": "Гипотеза не принадлежит этому проекту"}}, 400)
+                    pain_point_id = hyp_row[1]
+                    process_id    = hyp_row[2]
+                    solution_id   = hyp_row[3]
+                else:
+                    # Без гипотезы — валидируем каждую переданную связь отдельно
+                    if pain_point_id:
+                        with conn.cursor() as cur:
+                            cur.execute(f"SELECT case_id FROM {SCHEMA}.wb_pain_points WHERE id = %s", (pain_point_id,))
+                            row = cur.fetchone()
+                        if not row or row[0] != project_id:
+                            return cors({"ok": False, "error": {"message": "Проблема не принадлежит этому проекту"}}, 400)
+                    if process_id:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                f"""SELECT 1 FROM {SCHEMA}.wb_case_process_links WHERE process_id = %s AND case_id = %s""",
+                                (process_id, project_id),
+                            )
+                            if not cur.fetchone():
+                                return cors({"ok": False, "error": {"message": "Процесс не принадлежит этому проекту"}}, 400)
+                    if solution_id:
+                        with conn.cursor() as cur:
+                            cur.execute(f"SELECT project_id FROM {SCHEMA}.wb_solutions WHERE id = %s", (solution_id,))
+                            row = cur.fetchone()
+                        if not row or row[0] != project_id:
+                            return cors({"ok": False, "error": {"message": "Решение не принадлежит этому проекту"}}, 400)
+
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.wb_initiatives
                             (case_id, user_id, title, description, owner_name, priority,
-                             impact_score, effort_score, status, next_step)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                             impact_score, effort_score, status, next_step,
+                             hypothesis_id, pain_point_id, process_id, solution_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                         (project_id, user_id, title,
                          body.get("description", ""), body.get("owner_name", ""),
                          body.get("priority", "medium"),
                          body.get("impact_score", 3), body.get("effort_score", 3),
-                         body.get("status", "idea"), body.get("next_step", "")),
+                         body.get("status", "idea"), body.get("next_step", ""),
+                         hypothesis_id, pain_point_id, process_id, solution_id),
                     )
                     init_id = cur.fetchone()[0]
                 bump_content_version(conn, project_id)

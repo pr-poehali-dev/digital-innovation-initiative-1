@@ -103,7 +103,7 @@ export default function ProjectPage() {
   type PainPoint = { id: number; pain_type: string; description: string; impact_level: string; frequency: string; root_cause: string; linked_process_id: number | null; linked_process_title?: string | null; linked_process_department?: string | null; linked_solution_id: number | null; linked_solution_title?: string | null; linked_solution_type?: string | null };
   type Benchmark = { id: number; title: string; source_name: string; source_url: string; industry: string; organization_name: string; benchmark_type: string; summary: string; observed_effect: string; applicability: string; confidence_level: string; notes: string; relevance_note: string };
   type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
-  type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string };
+  type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string; hypothesis_id: number | null; hypothesis_title?: string | null; pain_point_id: number | null; pain_point_description?: string | null; process_id: number | null; process_title?: string | null; solution_id: number | null; solution_title?: string | null };
   type Solution = { id: number; title: string; solution_type: string; covers_text: string; status: string; limitations: string; alternatives: string; notes: string; created_at: string; updated_at: string; linked_pains?: LinkedPain[] };
 
   // Transformation Workbench state
@@ -127,7 +127,8 @@ export default function ProjectPage() {
   const [aiAssessResult, setAiAssessResult] = useState<Record<string, unknown> | null>(null);
   // Initiative form
   const [showInitiativeForm, setShowInitiativeForm] = useState(false);
-  const [initiativeDraft, setInitiativeDraft] = useState({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "" });
+  const [initiativeDraft, setInitiativeDraft] = useState<{ title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string; hypothesis_id: number | null; pain_point_id: number | null; process_id: number | null; solution_id: number | null }>({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "", hypothesis_id: null, pain_point_id: null, process_id: null, solution_id: null });
+  const [initiativeSourceHyp, setInitiativeSourceHyp] = useState<{ title: string } | null>(null);
   const [wbLoading, setWbLoading] = useState(false);
 
   const loadProcesses = () => {
@@ -541,6 +542,26 @@ export default function ProjectPage() {
     setTab("hypotheses");
   };
 
+  const handleCreateInitiativeFromHypothesis = (hyp: Hypothesis) => {
+    setInitiativeDraft({
+      title: hyp.title,
+      description: hyp.statement || "",
+      owner_name: "",
+      priority: hyp.priority === "high" ? "high" : hyp.priority === "low" ? "low" : "medium",
+      impact_score: 3,
+      effort_score: 3,
+      status: "idea",
+      next_step: hyp.success_criteria || "",
+      hypothesis_id: hyp.id,
+      pain_point_id: hyp.pain_point_id,
+      process_id: hyp.process_id,
+      solution_id: hyp.solution_id,
+    });
+    setInitiativeSourceHyp({ title: hyp.title });
+    setShowInitiativeForm(true);
+    setTab("initiatives");
+  };
+
   const handleHypStatus = async (id: number, status: string) => {
     await workspaceApi.updateHypothesis({ id, status });
     analytics.workspaceHypothesisUpdated(projectId, id, status);
@@ -731,6 +752,22 @@ export default function ProjectPage() {
         {/* ── Post-action banner — показывается поверх любой вкладки ── */}
         {postActionHint && (() => {
           const h = POST_ACTION_CONFIG[postActionHint];
+          // Для «Гипотеза создана» — CTA сразу открывает создание инициативы
+          // из самой новой гипотезы без инициативы (детерминированное правило).
+          const handleCta = () => {
+            if (postActionHint === "hypothesis_created") {
+              const target = [...hypotheses]
+                .filter(hh => !initiatives.some(i => i.hypothesis_id === hh.id))
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+              if (target) {
+                handleCreateInitiativeFromHypothesis(target);
+                setPostActionHint(null);
+                return;
+              }
+            }
+            setTab(h.ctaTab as Parameters<typeof setTab>[0]);
+            setPostActionHint(null);
+          };
           return (
             <div className="mb-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 flex items-start gap-2.5">
               <Icon name="CheckCircle" size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
@@ -738,7 +775,7 @@ export default function ProjectPage() {
                 <p className="text-sm font-semibold text-emerald-900 leading-snug">{h.title}</p>
                 <p className="text-xs text-emerald-700 mt-0.5 leading-snug">{h.desc}</p>
                 <button
-                  onClick={() => { setTab(h.ctaTab as Parameters<typeof setTab>[0]); setPostActionHint(null); }}
+                  onClick={handleCta}
                   className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3 py-1.5 rounded-lg transition-colors"
                 >
                   {h.ctaLabel} →
@@ -789,16 +826,34 @@ export default function ProjectPage() {
               const painsWithoutSolution = painPoints.filter(p => !p.linked_solution_id);
               const painsWithoutHypothesis = painPoints.filter(p => !hypotheses.some(h => h.pain_point_id === p.id));
               const candidates = painPoints.filter(p => (p.linked_process_id || p.linked_solution_id) && !hypotheses.some(h => h.pain_point_id === p.id));
+              const hypothesesWithoutInitiative = hypotheses.filter(h => !initiatives.some(i => i.hypothesis_id === h.id));
               const topProcesses = [...processes]
                 .map(pr => ({ ...pr, painCount: pr.linked_pains?.length || 0 }))
                 .filter(pr => pr.painCount > 0)
                 .sort((a, b) => b.painCount - a.painCount)
                 .slice(0, 5);
 
+              // Топ-проблемы, дошедшие до инициатив: группировка по pain_point_id,
+              // сортировка по максимальному impact_score среди связанных инициатив.
+              const painsWithInitiatives = painPoints
+                .map(p => {
+                  const linkedInitiatives = initiatives.filter(i => i.pain_point_id === p.id);
+                  return { ...p, initiativeCount: linkedInitiatives.length, maxImpact: linkedInitiatives.reduce((m, i) => Math.max(m, i.impact_score), 0) };
+                })
+                .filter(p => p.initiativeCount > 0)
+                .sort((a, b) => b.maxImpact - a.maxImpact)
+                .slice(0, 5);
+
+              // Разбивка инициатив по статусам — берём реальные статусы, которые встречаются в данных.
+              const STATUS_LABELS: Record<string, string> = { idea: "Идея", preparation: "Подготовка", approval: "Согласование", in_plan: "В плане", pilot: "Пилот", implementation: "Реализация", done: "Завершена" };
+              const statusCounts = initiatives.reduce((acc, i) => { acc[i.status] = (acc[i.status] || 0) + 1; return acc; }, {} as Record<string, number>);
+              const statusBreakdown = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
+
               const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: typeof tab }[] = [
                 { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains" },
                 { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains" },
                 { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
+                { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses" },
               ];
 
               return (
@@ -806,13 +861,13 @@ export default function ProjectPage() {
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Управленческий обзор</p>
 
                   {overviewLoading ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-                      {[0, 1, 2].map(i => (
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-3">
+                      {[0, 1, 2, 3].map(i => (
                         <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4 h-20 animate-pulse" />
                       ))}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-3">
                       {WIDGETS.map(w => (
                         <button
                           key={w.key}
@@ -857,13 +912,62 @@ export default function ProjectPage() {
                       )}
                     </div>
                   )}
+
+                  {/* Инициативы по статусам + топ-проблемы, дошедшие до инициатив */}
+                  {!overviewLoading && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                      <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Инициативы по статусам</p>
+                        {statusBreakdown.length === 0 ? (
+                          <p className="text-xs text-slate-400">Инициатив пока нет</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {statusBreakdown.map(([status, count]) => (
+                              <button
+                                key={status}
+                                onClick={() => setTab("initiatives")}
+                                className="w-full flex items-center justify-between gap-2 p-2 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                              >
+                                <span className="text-xs text-slate-700 font-medium truncate flex-1 min-w-0">{STATUS_LABELS[status] || status}</span>
+                                <span className="text-[10px] font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full flex-shrink-0">{count}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Топ-проблемы, дошедшие до инициатив</p>
+                        {painsWithInitiatives.length === 0 ? (
+                          <p className="text-xs text-slate-400">Пока ни одна проблема не дошла до инициативы</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {painsWithInitiatives.map(p => (
+                              <button
+                                key={p.id}
+                                onClick={() => setTab("initiatives")}
+                                className="w-full flex items-center justify-between gap-2 p-2 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                              >
+                                <span className="text-xs text-slate-700 font-medium truncate flex-1 min-w-0">{p.description}</span>
+                                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex-shrink-0">эффект {p.maxImpact}/5</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
 
             {/* ── Динамическая подсказка следующего шага — скрывается если показан post-action hint ── */}
             {!postActionHint && (() => {
-              type Step = { icon: string; text: string; tab: string; cta: string; color: string };
+              type Step = { icon: string; text: string; tab: string; cta: string; color: string; onCta?: () => void };
+              // Правило для CTA «Создать инициативу»: берём самую новую гипотезу без инициативы.
+              const hypWithoutInitiative = [...hypotheses]
+                .filter(hh => !initiatives.some(i => i.hypothesis_id === hh.id))
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
               const step: Step | null =
                 docs.length === 0 && processes.length === 0 && painPoints.length === 0
                   ? { icon: "Upload", text: "Загрузите документ или опишите первый процесс — это даст AI нужный контекст.", tab: "docs", cta: "Загрузить документ", color: "border-blue-200 bg-blue-50 text-blue-800" }
@@ -873,8 +977,8 @@ export default function ProjectPage() {
                   ? { icon: "Flame", text: "Зафиксируйте боли в процессе — ручной труд, дублирование, задержки.", tab: "pains", cta: "Добавить боль", color: "border-orange-200 bg-orange-50 text-orange-800" }
                   : hypotheses.length === 0
                   ? { icon: "Lightbulb", text: "Сформулируйте гипотезу улучшения на основе зафиксированных болей.", tab: "hypotheses", cta: "Создать гипотезу", color: "border-amber-200 bg-amber-50 text-amber-800" }
-                  : initiatives.length === 0
-                  ? { icon: "Rocket", text: "Превратите гипотезу в инициативу — с владельцем, эффектом и статусом.", tab: "initiatives", cta: "Создать инициативу", color: "border-violet-200 bg-violet-50 text-violet-800" }
+                  : hypWithoutInitiative
+                  ? { icon: "Rocket", text: "Превратите гипотезу в инициативу — с владельцем, эффектом и статусом.", tab: "initiatives", cta: "Создать инициативу", color: "border-violet-200 bg-violet-50 text-violet-800", onCta: () => handleCreateInitiativeFromHypothesis(hypWithoutInitiative) }
                   : null;
               if (!step) return null;
               return (
@@ -882,7 +986,7 @@ export default function ProjectPage() {
                   <Icon name={step.icon} size={15} className="flex-shrink-0 opacity-70" />
                   <p className="text-xs leading-snug flex-1">{step.text}</p>
                   <button
-                    onClick={() => setTab(step.tab as Parameters<typeof setTab>[0])}
+                    onClick={() => step.onCta ? step.onCta() : setTab(step.tab as Parameters<typeof setTab>[0])}
                     className="text-xs font-semibold whitespace-nowrap underline underline-offset-2 flex-shrink-0 opacity-80 hover:opacity-100"
                   >
                     {step.cta} →
@@ -1460,6 +1564,14 @@ export default function ProjectPage() {
                               >
                                 🤖 спросить AI
                               </button>
+                              {!initiatives.some(i => i.hypothesis_id === h.id) && (
+                                <button
+                                  onClick={() => handleCreateInitiativeFromHypothesis(h)}
+                                  className="text-[10px] font-semibold px-2.5 py-1 bg-slate-800 text-white rounded-full hover:bg-slate-700 active:bg-slate-900 flex items-center gap-1"
+                                >
+                                  <Icon name="Rocket" size={10} /> Создать инициативу
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2404,6 +2516,15 @@ export default function ProjectPage() {
             {showInitiativeForm && (
               <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-2.5">
                 <p className="text-sm font-semibold text-slate-800">Новая инициатива</p>
+                {initiativeSourceHyp && (
+                  <div className="bg-violet-50 border border-violet-100 rounded-lg p-2 flex items-start gap-2">
+                    <Icon name="Lightbulb" size={13} className="text-violet-600 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">Создано из гипотезы</p>
+                      <p className="text-xs text-slate-700 line-clamp-2">{initiativeSourceHyp.title}</p>
+                    </div>
+                  </div>
+                )}
                 <input
                   placeholder="Название инициативы *"
                   value={initiativeDraft.title}
@@ -2471,11 +2592,12 @@ export default function ProjectPage() {
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
                 />
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => setShowInitiativeForm(false)} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
+                  <button onClick={() => { setShowInitiativeForm(false); setInitiativeSourceHyp(null); }} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!initiativeDraft.title.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
                     await workspaceApi.createInitiative({ project_id: projectId, ...initiativeDraft });
-                    setInitiativeDraft({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "" });
+                    setInitiativeDraft({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "", hypothesis_id: null, pain_point_id: null, process_id: null, solution_id: null });
+                    setInitiativeSourceHyp(null);
                     setShowInitiativeForm(false);
                     setPostActionHint("initiative_created");
                     workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
@@ -2542,6 +2664,31 @@ export default function ProjectPage() {
                         <p className="text-xs text-amber-800 leading-snug">
                           <span className="font-semibold">→ Следующий шаг:</span> {init.next_step}
                         </p>
+                      </div>
+                    )}
+                    {/* Происхождение — из какой гипотезы/проблемы/процесса/решения создана */}
+                    {(init.hypothesis_id || init.pain_point_id || init.process_id || init.solution_id) && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {init.hypothesis_id && (
+                          <span className="text-[10px] bg-violet-50 text-violet-700 border border-violet-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Icon name="Lightbulb" size={10} /> из гипотезы{init.hypothesis_title ? `: ${init.hypothesis_title.slice(0, 40)}${init.hypothesis_title.length > 40 ? "…" : ""}` : ""}
+                          </span>
+                        )}
+                        {init.pain_point_id && (
+                          <span className="text-[10px] bg-red-50 text-red-600 border border-red-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Icon name="Flame" size={10} /> из проблемы{init.pain_point_description ? `: ${init.pain_point_description.slice(0, 40)}${init.pain_point_description.length > 40 ? "…" : ""}` : ""}
+                          </span>
+                        )}
+                        {init.process_id && (
+                          <span className="text-[10px] bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Icon name="Workflow" size={10} /> {init.process_title || "процесс"}
+                          </span>
+                        )}
+                        {init.solution_id && (
+                          <span className="text-[10px] bg-slate-50 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Icon name="Server" size={10} /> {init.solution_title || "решение"}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
