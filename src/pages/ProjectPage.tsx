@@ -783,6 +783,84 @@ export default function ProjectPage() {
               ))}
             </div>
 
+            {/* ── Управленческий обзор (только для полигона) ── */}
+            {project?.workspace_mode === "polygon" && (() => {
+              const overviewLoading = processesLoading || painPointsLoading || solutionsLoading;
+              const painsWithoutSolution = painPoints.filter(p => !p.linked_solution_id);
+              const painsWithoutHypothesis = painPoints.filter(p => !hypotheses.some(h => h.pain_point_id === p.id));
+              const candidates = painPoints.filter(p => (p.linked_process_id || p.linked_solution_id) && !hypotheses.some(h => h.pain_point_id === p.id));
+              const topProcesses = [...processes]
+                .map(pr => ({ ...pr, painCount: pr.linked_pains?.length || 0 }))
+                .filter(pr => pr.painCount > 0)
+                .sort((a, b) => b.painCount - a.painCount)
+                .slice(0, 5);
+
+              const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: typeof tab }[] = [
+                { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains" },
+                { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains" },
+                { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
+              ];
+
+              return (
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Управленческий обзор</p>
+
+                  {overviewLoading ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                      {[0, 1, 2].map(i => (
+                        <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4 h-20 animate-pulse" />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                      {WIDGETS.map(w => (
+                        <button
+                          key={w.key}
+                          onClick={() => setTab(w.tab)}
+                          className="text-left bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 hover:border-slate-300 hover:shadow-sm transition-all"
+                        >
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${w.color}`}>
+                              <Icon name={w.icon} size={14} fallback="AlertCircle" />
+                            </div>
+                            <p className="text-xs font-medium text-slate-600 flex-1">{w.title}</p>
+                          </div>
+                          {w.count > 0 ? (
+                            <p className="text-2xl font-bold text-slate-900">{w.count}</p>
+                          ) : (
+                            <p className="text-xs text-emerald-600 font-medium">✓ {w.emptyText}</p>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Топ-процессы по числу проблем */}
+                  {!overviewLoading && (
+                    <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Топ-процессы по числу проблем</p>
+                      {topProcesses.length === 0 ? (
+                        <p className="text-xs text-slate-400">Проблемы пока не привязаны ни к одному процессу</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {topProcesses.map(pr => (
+                            <button
+                              key={pr.id}
+                              onClick={() => setTab("process")}
+                              className="w-full flex items-center justify-between gap-2 p-2 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors text-left"
+                            >
+                              <span className="text-xs text-slate-700 font-medium truncate flex-1 min-w-0">{pr.title}</span>
+                              <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full flex-shrink-0">{pr.painCount}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* ── Динамическая подсказка следующего шага — скрывается если показан post-action hint ── */}
             {!postActionHint && (() => {
               type Step = { icon: string; text: string; tab: string; cta: string; color: string };
