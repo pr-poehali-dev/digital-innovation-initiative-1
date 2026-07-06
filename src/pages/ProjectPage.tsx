@@ -1565,7 +1565,9 @@ export default function ProjectPage() {
             ) : visibleHypotheses.length === 0 ? (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
                 <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm">По этому фильтру ничего не найдено</p>
+                <p className="text-slate-500 text-sm">
+                  {preset === "without_initiative" ? "Нет гипотез без инициатив" : "По этому фильтру ничего не найдено"}
+                </p>
                 <button onClick={clearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
                   Показать все гипотезы
                 </button>
@@ -1589,6 +1591,12 @@ export default function ProjectPage() {
                             {/* Строка 1: заголовок + бейдж приоритета */}
                             <div className="flex items-start gap-2">
                               <p className="text-sm font-semibold text-slate-800 leading-snug flex-1 min-w-0">{h.title}</p>
+                              {/* Stage 8: объяснение, почему гипотеза попала в отфильтрованный список */}
+                              {preset === "without_initiative" && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5 bg-blue-100 text-blue-700 flex items-center gap-1">
+                                  <Icon name="RocketOff" size={10} /> Без инициативы
+                                </span>
+                              )}
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${h.priority === "high" ? "bg-red-100 text-red-700" : h.priority === "low" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
                                 {h.priority === "high" ? "HIGH" : h.priority === "low" ? "LOW" : "MED"}
                               </span>
@@ -1641,7 +1649,11 @@ export default function ProjectPage() {
                               {!initiatives.some(i => i.hypothesis_id === h.id) && (
                                 <button
                                   onClick={() => handleCreateInitiativeFromHypothesis(h)}
-                                  className="text-[10px] font-semibold px-2.5 py-1 bg-slate-800 text-white rounded-full hover:bg-slate-700 active:bg-slate-900 flex items-center gap-1"
+                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 ${
+                                    preset === "without_initiative"
+                                      ? "bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 ring-2 ring-blue-200"
+                                      : "bg-slate-800 text-white hover:bg-slate-700 active:bg-slate-900"
+                                  }`}
                                 >
                                   <Icon name="Rocket" size={10} /> Создать инициативу
                                 </button>
@@ -2716,11 +2728,13 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {/* Пустое состояние — preset ничего не нашёл */}
+            {/* Пустое состояние — preset ничего не нашёл (Stage 8: текст зависит от preset) */}
             {initiatives.length > 0 && visibleInitiatives.length === 0 && (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
                 <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm">По этому фильтру ничего не найдено</p>
+                <p className="text-slate-500 text-sm">
+                  {preset === "stalled" ? "Нет зависших инициатив" : preset === "launch_ready" ? "Нет инициатив, готовых к запуску" : "По этому фильтру ничего не найдено"}
+                </p>
                 <button onClick={clearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
                   Показать все инициативы
                 </button>
@@ -2756,6 +2770,22 @@ export default function ProjectPage() {
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.color}`}>{s.label}</span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${pr.color}`}>{pr.label}</span>
                       {init.owner_name && <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">👤 {init.owner_name}</span>}
+                      {/* Stage 8: объяснение, почему карточка попала в отфильтрованный список */}
+                      {preset === "stalled" && isEmptyField(init.owner_name) && (
+                        <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Icon name="UserX" size={10} /> Нет владельца
+                        </span>
+                      )}
+                      {preset === "stalled" && isEmptyField(init.next_step) && (
+                        <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Icon name="SignpostOff" size={10} fallback="AlertCircle" /> Нет следующего шага
+                        </span>
+                      )}
+                      {preset === "launch_ready" && (
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Icon name="Rocket" size={10} /> Готово к запуску
+                        </span>
+                      )}
                     </div>
                     {/* Строка 3: описание */}
                     {init.description && <p className="text-xs text-slate-600 mb-2 line-clamp-2">{init.description}</p>}
