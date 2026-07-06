@@ -95,6 +95,45 @@ const PRESET_LABELS: Record<OverviewPreset, string> = {
   without_initiative: "Гипотезы без инициатив",
 };
 
+// Stage 10: детерминированный порядок карточек внутри preset-режимов ("очередь обработки").
+// Сортировка применяется ТОЛЬКО когда активен preset — обычные списки порядок не меняют.
+const INITIATIVE_PRIORITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+const HYPOTHESIS_PRIORITY_RANK: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+const stableInitiativeCompare = (a: { title: string; id: number }, b: { title: string; id: number }) =>
+  a.title.localeCompare(b.title) || a.id - b.id;
+
+function sortInitiativesForQueue<T extends { priority: string; owner_name: string; next_step: string; title: string; id: number }>(list: T[], activePreset: OverviewPreset | null): T[] {
+  if (activePreset === "stalled") {
+    // Сначала самые проблемные: нет и владельца, и шага → нет владельца → нет шага.
+    const severity = (i: T) => (isEmptyField(i.owner_name) && isEmptyField(i.next_step) ? 0 : isEmptyField(i.owner_name) ? 1 : isEmptyField(i.next_step) ? 2 : 3);
+    return [...list].sort((a, b) => {
+      const sevDiff = severity(a) - severity(b);
+      if (sevDiff !== 0) return sevDiff;
+      const prDiff = (INITIATIVE_PRIORITY_RANK[b.priority] || 0) - (INITIATIVE_PRIORITY_RANK[a.priority] || 0);
+      if (prDiff !== 0) return prDiff;
+      return stableInitiativeCompare(a, b);
+    });
+  }
+  if (activePreset === "launch_ready") {
+    return [...list].sort((a, b) => {
+      const prDiff = (INITIATIVE_PRIORITY_RANK[b.priority] || 0) - (INITIATIVE_PRIORITY_RANK[a.priority] || 0);
+      if (prDiff !== 0) return prDiff;
+      return stableInitiativeCompare(a, b);
+    });
+  }
+  return list;
+}
+
+function sortHypothesesForQueue<T extends { priority: string; title: string; id: number }>(list: T[], activePreset: OverviewPreset | null): T[] {
+  if (activePreset !== "without_initiative") return list;
+  return [...list].sort((a, b) => {
+    const prDiff = (HYPOTHESIS_PRIORITY_RANK[b.priority] || 0) - (HYPOTHESIS_PRIORITY_RANK[a.priority] || 0);
+    if (prDiff !== 0) return prDiff;
+    return stableInitiativeCompare(a, b);
+  });
+}
+
 type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
 const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
 const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative"];
@@ -1504,9 +1543,11 @@ export default function ProjectPage() {
         {/* ── Гипотезы ── */}
         {tab === "hypotheses" && (() => {
           // Stage 7: preset "гипотезы без инициатив" — то же правило, что и в виджете обзора.
-          const visibleHypotheses = preset === "without_initiative"
+          const filteredHypotheses = preset === "without_initiative"
             ? hypotheses.filter(h => !initiatives.some(i => i.hypothesis_id === h.id))
             : hypotheses;
+          // Stage 10: детерминированный порядок внутри preset-режима — превращает список в очередь обработки.
+          const visibleHypotheses = sortHypothesesForQueue(filteredHypotheses, preset);
           return (
           <div className="space-y-3">
             {/* Заголовок */}
@@ -1517,11 +1558,16 @@ export default function ProjectPage() {
               </button>
             </div>
 
-            {/* Активный preset-чип */}
+            {/* Активный preset-чип + индикатор очереди (Stage 10) */}
             {preset === "without_initiative" && (
               <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
                 <Icon name="Filter" size={12} className="text-slate-500" />
                 <span className="text-xs font-medium text-slate-700">{PRESET_LABELS.without_initiative}</span>
+                {visibleHypotheses.length > 0 && (
+                  <span className="text-[10px] font-bold bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded-full">
+                    Осталось: {visibleHypotheses.length}
+                  </span>
+                )}
                 <button onClick={clearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
                   <Icon name="X" size={12} />
                 </button>
@@ -1584,10 +1630,17 @@ export default function ProjectPage() {
               </div>
             ) : visibleHypotheses.length === 0 ? (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm">
-                  {preset === "without_initiative" ? "Нет гипотез без инициатив" : "По этому фильтру ничего не найдено"}
-                </p>
+                {preset === "without_initiative" ? (
+                  <>
+                    <Icon name="CheckCircle2" size={28} className="text-emerald-500 mx-auto mb-2" />
+                    <p className="text-slate-700 text-sm font-semibold">Все гипотезы доведены до инициатив</p>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
+                    <p className="text-slate-500 text-sm">По этому фильтру ничего не найдено</p>
+                  </>
+                )}
                 <button onClick={clearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
                   Показать все гипотезы
                 </button>
@@ -2613,11 +2666,13 @@ export default function ProjectPage() {
           // Stage 7: preset-фильтр из виджетов управленческого обзора.
           // Правила идентичны тем, что считают счётчики на вкладке "Обзор полигона" —
           // числа в чипе и в виджете всегда совпадают.
-          const visibleInitiatives = preset === "stalled"
+          const filteredInitiatives = preset === "stalled"
             ? initiatives.filter(i => i.status !== "idea" && i.status !== "done" && (isEmptyField(i.owner_name) || isEmptyField(i.next_step)))
             : preset === "launch_ready"
             ? initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmptyField(i.owner_name) && !isEmptyField(i.next_step))
             : initiatives;
+          // Stage 10: детерминированный порядок внутри preset-режима — превращает список в очередь обработки.
+          const visibleInitiatives = sortInitiativesForQueue(filteredInitiatives, preset);
           return (
           <div className="space-y-3">
             {/* Заголовок */}
@@ -2628,11 +2683,16 @@ export default function ProjectPage() {
               </button>
             </div>
 
-            {/* Активный preset-чип */}
+            {/* Активный preset-чип + индикатор очереди (Stage 10) */}
             {(preset === "stalled" || preset === "launch_ready") && (
               <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
                 <Icon name="Filter" size={12} className="text-slate-500" />
                 <span className="text-xs font-medium text-slate-700">{PRESET_LABELS[preset]}</span>
+                {visibleInitiatives.length > 0 && (
+                  <span className="text-[10px] font-bold bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded-full">
+                    Осталось: {visibleInitiatives.length}
+                  </span>
+                )}
                 <button onClick={clearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
                   <Icon name="X" size={12} />
                 </button>
@@ -2748,13 +2808,25 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {/* Пустое состояние — preset ничего не нашёл (Stage 8: текст зависит от preset) */}
+            {/* Пустое состояние — preset ничего не нашёл (Stage 10: completion-state для очередей) */}
             {initiatives.length > 0 && visibleInitiatives.length === 0 && (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
-                <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm">
-                  {preset === "stalled" ? "Нет зависших инициатив" : preset === "launch_ready" ? "Нет инициатив, готовых к запуску" : "По этому фильтру ничего не найдено"}
-                </p>
+                {preset === "stalled" ? (
+                  <>
+                    <Icon name="CheckCircle2" size={28} className="text-emerald-500 mx-auto mb-2" />
+                    <p className="text-slate-700 text-sm font-semibold">Все зависшие инициативы обработаны</p>
+                  </>
+                ) : preset === "launch_ready" ? (
+                  <>
+                    <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
+                    <p className="text-slate-500 text-sm">Нет инициатив, готовых к запуску</p>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
+                    <p className="text-slate-500 text-sm">По этому фильтру ничего не найдено</p>
+                  </>
+                )}
                 <button onClick={clearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
                   Показать все инициативы
                 </button>
