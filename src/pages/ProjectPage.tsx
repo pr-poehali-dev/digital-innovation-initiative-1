@@ -88,12 +88,14 @@ const ACTION_LABELS: Record<string, string> = {
 const isEmptyField = (v?: string | null) => !v || !v.trim();
 const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
 
-type OverviewPreset = "stalled" | "launch_ready" | "without_initiative";
+type OverviewPreset = "stalled" | "launch_ready" | "without_initiative" | "without_hypothesis";
 const PRESET_LABELS: Record<OverviewPreset, string> = {
   stalled: "Зависшие инициативы",
   launch_ready: "Готовы к запуску",
   without_initiative: "Гипотезы без инициатив",
+  without_hypothesis: "Проблемы без гипотезы",
 };
+const PAIN_PRIORITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 
 // Stage 10: детерминированный порядок карточек внутри preset-режимов ("очередь обработки").
 // Сортировка применяется ТОЛЬКО когда активен preset — обычные списки порядок не меняют.
@@ -134,6 +136,16 @@ function sortHypothesesForQueue<T extends { priority: string; title: string; id:
   });
 }
 
+// Stage 13: та же схема очереди для начала воронки — проблемы без гипотезы.
+function sortPainsForQueue<T extends { impact_level: string; title?: string; description: string; id: number }>(list: T[], activePreset: OverviewPreset | null): T[] {
+  if (activePreset !== "without_hypothesis") return list;
+  return [...list].sort((a, b) => {
+    const prDiff = (PAIN_PRIORITY_RANK[b.impact_level] || 0) - (PAIN_PRIORITY_RANK[a.impact_level] || 0);
+    if (prDiff !== 0) return prDiff;
+    return a.description.localeCompare(b.description) || a.id - b.id;
+  });
+}
+
 // Stage 7/11: единое место фильтрации по preset — переиспользуется и в рендере списков,
 // и в обработчиках действий (Stage 11), чтобы вычислить "следующую карточку в очереди".
 function filterInitiativesForPreset<T extends { status: string; owner_name: string; next_step: string }>(list: T[], activePreset: OverviewPreset | null): T[] {
@@ -147,9 +159,15 @@ function filterHypothesesForPreset<T extends { id: number }>(list: T[], activePr
   return list.filter(h => !initiativesList.some(i => i.hypothesis_id === h.id));
 }
 
+// Stage 13: единое место фильтрации проблем по preset — переиспользуется в рендере списка и в обработчике действия.
+function filterPainsForPreset<T extends { id: number }>(list: T[], activePreset: OverviewPreset | null, hypothesesList: { pain_point_id: number | null }[]): T[] {
+  if (activePreset !== "without_hypothesis") return list;
+  return list.filter(p => !hypothesesList.some(h => h.pain_point_id === p.id));
+}
+
 type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
 const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
-const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative"];
+const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis"];
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -239,6 +257,7 @@ export default function ProjectPage() {
   const [queueHighlightId, setQueueHighlightId] = useState<number | null>(null);
   const initiativeCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const hypothesisCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const painCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   // Показываем короткий success-текст на 2.5с — лёгкий, не блокирующий, без глобального toast.
   const showQueueFeedback = (text: string) => {
@@ -339,6 +358,9 @@ export default function ProjectPage() {
   const [hypForm, setHypForm] = useState(false);
   const [hypDraft, setHypDraft] = useState<{ title: string; statement: string; assumptions: string; success_criteria: string; priority: string; process_id: number | null; pain_point_id: number | null; solution_id: number | null }>({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium", process_id: null, pain_point_id: null, solution_id: null });
   const [hypSourcePain, setHypSourcePain] = useState<{ description: string } | null>(null);
+  // Stage 13: если гипотеза создаётся из очереди "Проблемы без гипотезы" — после сохранения
+  // нужно вернуть внимание туда, а не оставаться на "Гипотезах" (тот же паттерн, что Stage 11).
+  const [hypothesisReturnTo, setHypothesisReturnTo] = useState<{ tab: TabKey; preset: OverviewPreset | null } | null>(null);
   const [openHyp, setOpenHyp] = useState<Hypothesis | null>(null);
   const copilotEndRef = useRef<HTMLDivElement>(null);
   const [evidenceSending, setEvidenceSending] = useState<number | null>(null);
@@ -640,16 +662,41 @@ export default function ProjectPage() {
 
   const handleCreateHypothesis = async () => {
     if (!hypDraft.title.trim()) return;
+    const returnTo = hypothesisReturnTo;
     await workspaceApi.createHypothesis({ project_id: projectId, ...hypDraft });
     analytics.workspaceHypothesisCreated(projectId, hypDraft.priority);
     setHypForm(false);
     setHypDraft({ title: "", statement: "", assumptions: "", success_criteria: "", priority: "medium", process_id: null, pain_point_id: null, solution_id: null });
     setHypSourcePain(null);
-    setPostActionHint("hypothesis_created");
-    workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+    setHypothesisReturnTo(null);
+    const res = await workspaceApi.getHypotheses(projectId).catch(() => null) as { hypotheses: Hypothesis[] } | null;
+    const freshHypotheses = res?.hypotheses || [];
+    setHypotheses(freshHypotheses);
+
+    // Stage 13: если пришли из очереди "Проблемы без гипотезы" — возвращаем внимание туда
+    // с success-feedback и фокусом на следующей проблеме в очереди.
+    if (returnTo && returnTo.tab === "pains" && returnTo.preset === "without_hypothesis") {
+      showQueueFeedback("Гипотеза создана");
+      setTab("pains", "without_hypothesis");
+      const queue = sortPainsForQueue(filterPainsForPreset(painPoints, "without_hypothesis", freshHypotheses), "without_hypothesis");
+      if (queue.length > 0) {
+        setTimeout(() => focusQueueCard(painCardRefs, queue[0].id), 50);
+      } else {
+        setTimeout(() => showQueueFeedback("Все проблемы получили гипотезы"), 2600);
+      }
+    } else {
+      setPostActionHint("hypothesis_created");
+    }
   };
 
   const handleCreateHypothesisFromPain = (pain: PainPoint) => {
+    // Stage 13: если запускаем создание прямо из очереди "Проблемы без гипотезы" —
+    // запоминаем, куда вернуть внимание после сохранения.
+    if (tab === "pains" && preset === "without_hypothesis") {
+      setHypothesisReturnTo({ tab: "pains", preset: "without_hypothesis" });
+    } else {
+      setHypothesisReturnTo(null);
+    }
     setHypDraft({
       title: pain.description.slice(0, 120),
       statement: pain.root_cause ? `Причина: ${pain.root_cause}` : "",
@@ -850,7 +897,7 @@ export default function ProjectPage() {
                 title: "Работа с отфильтрованным списком",
                 icon: "ListChecks",
                 subsections: [
-                  { title: "Бейджи-причины", content: "На карточке сразу видно, почему она попала в список: «Нет владельца», «Нет следующего шага», «Готово к запуску», «Без инициативы»." },
+                  { title: "Бейджи-причины", content: "На карточке сразу видно, почему она попала в список: «Нет владельца», «Нет следующего шага», «Готово к запуску», «Без инициативы», «Нет гипотез»." },
                   { title: "Кнопка действия", content: "На карточке — точная кнопка под причину («Указать владельца», «Заполнить владельца и следующий шаг»). Открывает компактную форму на 1–2 поля." },
                   { title: "После сохранения", content: "Список обновляется сам: карточка исчезает или подсвечивается следующая. Когда список пуст — видно завершающее сообщение, например «Все зависшие инициативы обработаны»." },
                 ],
@@ -1074,7 +1121,7 @@ export default function ProjectPage() {
 
               const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: TabKey; preset?: OverviewPreset }[] = [
                 { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains" },
-                { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains" },
+                { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains", preset: "without_hypothesis" },
                 { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
                 { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses", preset: "without_initiative" },
                 { key: "ready_launch",  icon: "Rocket",       title: "Готовы к запуску",       color: "text-emerald-600 bg-emerald-50", count: readyToLaunch.length,      emptyText: "Нет проработанных инициатив",     tab: "initiatives", preset: "launch_ready" },
@@ -1733,7 +1780,7 @@ export default function ProjectPage() {
                   </select>
                 </div>
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => { setHypForm(false); setHypSourcePain(null); }} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
+                  <button onClick={() => { setHypForm(false); setHypSourcePain(null); setHypothesisReturnTo(null); }} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">Отмена</button>
                   <button onClick={handleCreateHypothesis} disabled={!hypDraft.title.trim()} className="flex-1 py-2.5 bg-slate-800 text-white rounded-xl text-sm font-semibold hover:bg-slate-700 disabled:opacity-50">Создать</button>
                 </div>
               </div>
@@ -2411,6 +2458,13 @@ export default function ProjectPage() {
             loading={painPointsLoading}
             onReload={loadPainPoints}
             onCreateHypothesis={handleCreateHypothesisFromPain}
+            preset={preset === "without_hypothesis" ? "without_hypothesis" : null}
+            presetLabel={PRESET_LABELS.without_hypothesis}
+            visiblePainPoints={sortPainsForQueue(filterPainsForPreset(painPoints, preset, hypotheses), preset)}
+            queueFeedback={queueFeedback}
+            onClearPreset={clearPreset}
+            highlightId={queueHighlightId}
+            cardRefs={painCardRefs}
           />
         )}
 

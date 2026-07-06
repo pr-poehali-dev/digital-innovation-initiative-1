@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { MutableRefObject } from "react";
 import { workspaceApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 
@@ -46,9 +47,21 @@ interface Props {
   loading?: boolean;
   onReload: () => void;
   onCreateHypothesis?: (pain: PainPoint) => void;
+  // Stage 13: preset-очередь "Проблемы без гипотезы" — та же схема, что у инициатив/гипотез.
+  preset?: "without_hypothesis" | null;
+  presetLabel?: string;
+  visiblePainPoints?: PainPoint[];
+  queueFeedback?: string | null;
+  onClearPreset?: () => void;
+  highlightId?: number | null;
+  cardRefs?: MutableRefObject<Record<number, HTMLDivElement | null>>;
 }
 
-export default function PainsTab({ projectId, painPoints, processes = [], solutions = [], loading = false, onReload, onCreateHypothesis }: Props) {
+export default function PainsTab({
+  projectId, painPoints, processes = [], solutions = [], loading = false, onReload, onCreateHypothesis,
+  preset = null, presetLabel, visiblePainPoints, queueFeedback, onClearPreset, highlightId, cardRefs,
+}: Props) {
+  const displayList = preset === "without_hypothesis" && visiblePainPoints ? visiblePainPoints : painPoints;
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState(EMPTY_PAIN);
   const [saving, setSaving] = useState(false);
@@ -144,6 +157,31 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
           <Icon name="Plus" size={13} /> Добавить
         </button>
       </div>
+
+      {/* Активный preset-чип + индикатор очереди (Stage 13) */}
+      {preset === "without_hypothesis" && (
+        <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
+          <Icon name="Filter" size={12} className="text-slate-500" />
+          <span className="text-xs font-medium text-slate-700">{presetLabel || "Проблемы без гипотезы"}</span>
+          {displayList.length > 0 && (
+            <span className="text-[10px] font-bold bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded-full">
+              Осталось: {displayList.length}
+            </span>
+          )}
+          {onClearPreset && (
+            <button onClick={onClearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
+              <Icon name="X" size={12} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Stage 13: короткий success-feedback после действия в очереди */}
+      {preset === "without_hypothesis" && queueFeedback && (
+        <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 w-fit">
+          <Icon name="CheckCircle2" size={12} /> {queueFeedback}
+        </div>
+      )}
 
       {loading && (
         <div className="space-y-2">
@@ -245,10 +283,27 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
         </div>
       )}
 
-      {!loading && painPoints.length > 0 && (
+      {/* Пустое состояние — preset ничего не нашёл (Stage 13: completion-state для очереди) */}
+      {!loading && painPoints.length > 0 && preset === "without_hypothesis" && displayList.length === 0 && (
+        <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+          <Icon name="CheckCircle2" size={28} className="text-emerald-500 mx-auto mb-2" />
+          <p className="text-slate-700 text-sm font-semibold">Все проблемы получили гипотезы</p>
+          {onClearPreset && (
+            <button onClick={onClearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
+              Показать все проблемы
+            </button>
+          )}
+        </div>
+      )}
+
+      {!loading && displayList.length > 0 && (
         <div className="space-y-2">
-          {painPoints.map(p => (
-            <div key={p.id} className={`border rounded-xl p-3 group ${IMPACT_COLOR[p.impact_level] || "bg-slate-50 border-slate-200"}`}>
+          {displayList.map(p => (
+            <div
+              key={p.id}
+              ref={cardRefs ? (el => { cardRefs.current[p.id] = el; }) : undefined}
+              className={`border rounded-xl p-3 group transition-colors duration-700 ${highlightId === p.id ? "border-blue-400 bg-blue-50" : (IMPACT_COLOR[p.impact_level] || "bg-slate-50 border-slate-200")}`}
+            >
               <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${IMPACT_BADGE[p.impact_level] || "bg-slate-100 text-slate-600"}`}>
                   {IMPACT_LABEL[p.impact_level] || p.impact_level}
@@ -257,6 +312,12 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
                   {PAIN_LABELS[p.pain_type] || p.pain_type}
                 </span>
                 {p.frequency && <span className="text-[10px] text-slate-500">📅 {p.frequency}</span>}
+                {/* Stage 13: объяснение, почему проблема попала в отфильтрованный список */}
+                {preset === "without_hypothesis" && (
+                  <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Icon name="LightbulbOff" size={10} /> Нет гипотез
+                  </span>
+                )}
                 <button
                   onClick={() => setConfirmDelete({ id: p.id, description: p.description })}
                   className="ml-auto text-slate-300 hover:text-red-600 transition-colors"
@@ -335,9 +396,11 @@ export default function PainsTab({ projectId, painPoints, processes = [], soluti
               {onCreateHypothesis && (
                 <button
                   onClick={() => onCreateHypothesis(p)}
-                  className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 hover:text-violet-800 transition-colors bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg px-2.5 py-1.5"
+                  className={preset === "without_hypothesis"
+                    ? "mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 active:bg-amber-800"
+                    : "mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 hover:text-violet-800 transition-colors bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg px-2.5 py-1.5"}
                 >
-                  <Icon name="Lightbulb" size={12} />
+                  <Icon name="Lightbulb" size={preset === "without_hypothesis" ? 13 : 12} />
                   Создать гипотезу
                 </button>
               )}
