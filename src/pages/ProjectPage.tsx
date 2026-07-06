@@ -134,6 +134,19 @@ function sortHypothesesForQueue<T extends { priority: string; title: string; id:
   });
 }
 
+// Stage 7/11: единое место фильтрации по preset — переиспользуется и в рендере списков,
+// и в обработчиках действий (Stage 11), чтобы вычислить "следующую карточку в очереди".
+function filterInitiativesForPreset<T extends { status: string; owner_name: string; next_step: string }>(list: T[], activePreset: OverviewPreset | null): T[] {
+  if (activePreset === "stalled") return list.filter(i => i.status !== "idea" && i.status !== "done" && (isEmptyField(i.owner_name) || isEmptyField(i.next_step)));
+  if (activePreset === "launch_ready") return list.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmptyField(i.owner_name) && !isEmptyField(i.next_step));
+  return list;
+}
+
+function filterHypothesesForPreset<T extends { id: number }>(list: T[], activePreset: OverviewPreset | null, initiativesList: { hypothesis_id: number | null }[]): T[] {
+  if (activePreset !== "without_initiative") return list;
+  return list.filter(h => !initiativesList.some(i => i.hypothesis_id === h.id));
+}
+
 type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
 const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
 const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative"];
@@ -213,11 +226,33 @@ export default function ProjectPage() {
   const [initiativeDraft, setInitiativeDraft] = useState<{ title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string; hypothesis_id: number | null; pain_point_id: number | null; process_id: number | null; solution_id: number | null }>({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "", hypothesis_id: null, pain_point_id: null, process_id: null, solution_id: null });
   const [initiativeSourceHyp, setInitiativeSourceHyp] = useState<{ title: string } | null>(null);
   const [wbLoading, setWbLoading] = useState(false);
+  // Stage 11: если инициатива создаётся из гипотезы прямо в очереди without_initiative,
+  // после сохранения нужно вернуть внимание на список гипотез, а не оставаться на "Инициативах".
+  const [initiativeReturnTo, setInitiativeReturnTo] = useState<{ tab: TabKey; preset: OverviewPreset | null } | null>(null);
   // Stage 9: контекстное дозаполнение инициативы (владелец / следующий шаг) из preset=stalled.
   // Переиспользует существующий workspaceApi.updateInitiative — без inline-редактирования карточки.
   const [fixInitiativeId, setFixInitiativeId] = useState<number | null>(null);
   const [fixInitiativeDraft, setFixInitiativeDraft] = useState({ owner_name: "", next_step: "" });
   const [fixInitiativeLoading, setFixInitiativeLoading] = useState(false);
+  // Stage 11: плавная передача внимания к следующей карточке очереди + короткий success-feedback.
+  const [queueFeedback, setQueueFeedback] = useState<string | null>(null);
+  const [queueHighlightId, setQueueHighlightId] = useState<number | null>(null);
+  const initiativeCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const hypothesisCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  // Показываем короткий success-текст на 2.5с — лёгкий, не блокирующий, без глобального toast.
+  const showQueueFeedback = (text: string) => {
+    setQueueFeedback(text);
+    setTimeout(() => setQueueFeedback(prev => (prev === text ? null : prev)), 2500);
+  };
+
+  // Подсвечиваем карточку на ~1.5с и мягко скроллим её в область видимости.
+  const focusQueueCard = (refs: React.MutableRefObject<Record<number, HTMLDivElement | null>>, id: number) => {
+    setQueueHighlightId(id);
+    const el = refs.current[id];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => setQueueHighlightId(prev => (prev === id ? null : prev)), 1500);
+  };
 
   const loadProcesses = () => {
     setProcessesLoading(true);
@@ -631,6 +666,13 @@ export default function ProjectPage() {
   };
 
   const handleCreateInitiativeFromHypothesis = (hyp: Hypothesis) => {
+    // Stage 11: если запускаем создание прямо из очереди "Гипотезы без инициатив" —
+    // запоминаем, куда вернуть внимание после сохранения.
+    if (tab === "hypotheses" && preset === "without_initiative") {
+      setInitiativeReturnTo({ tab: "hypotheses", preset: "without_initiative" });
+    } else {
+      setInitiativeReturnTo(null);
+    }
     setInitiativeDraft({
       title: hyp.title,
       description: hyp.statement || "",
@@ -664,11 +706,34 @@ export default function ProjectPage() {
 
   const handleFixInitiativeSave = async () => {
     if (!fixInitiativeId) return;
+    const savedId = fixInitiativeId;
     setFixInitiativeLoading(true);
-    await workspaceApi.updateInitiative({ id: fixInitiativeId, owner_name: fixInitiativeDraft.owner_name, next_step: fixInitiativeDraft.next_step });
+    await workspaceApi.updateInitiative({ id: savedId, owner_name: fixInitiativeDraft.owner_name, next_step: fixInitiativeDraft.next_step });
     setFixInitiativeId(null);
-    workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
+    const res = await workspaceApi.getInitiatives(projectId).catch(() => null) as { initiatives: Initiative[] } | null;
+    const freshList = res?.initiatives || [];
+    setInitiatives(freshList);
     setFixInitiativeLoading(false);
+
+    // Stage 11: success-feedback + плавная передача внимания к следующей карточке в очереди stalled.
+    if (preset === "stalled") {
+      const stillStuck = filterInitiativesForPreset(freshList, "stalled").some(i => i.id === savedId);
+      if (stillStuck) {
+        showQueueFeedback("Инициатива обновлена");
+      } else {
+        const ownerFilled = !isEmptyField(fixInitiativeDraft.owner_name);
+        const stepFilled = !isEmptyField(fixInitiativeDraft.next_step);
+        showQueueFeedback(ownerFilled && stepFilled ? "Владелец и следующий шаг обновлены" : ownerFilled ? "Владелец обновлён" : "Следующий шаг обновлён");
+        const queue = sortInitiativesForQueue(filterInitiativesForPreset(freshList, "stalled"), "stalled");
+        if (queue.length > 0) {
+          setTimeout(() => focusQueueCard(initiativeCardRefs, queue[0].id), 50);
+        } else {
+          showQueueFeedback("Все зависшие инициативы обработаны");
+        }
+      }
+    } else {
+      showQueueFeedback("Инициатива обновлена");
+    }
   };
 
   const handleOpenArtifact = async (id: number) => {
@@ -1543,9 +1608,7 @@ export default function ProjectPage() {
         {/* ── Гипотезы ── */}
         {tab === "hypotheses" && (() => {
           // Stage 7: preset "гипотезы без инициатив" — то же правило, что и в виджете обзора.
-          const filteredHypotheses = preset === "without_initiative"
-            ? hypotheses.filter(h => !initiatives.some(i => i.hypothesis_id === h.id))
-            : hypotheses;
+          const filteredHypotheses = filterHypothesesForPreset(hypotheses, preset, initiatives);
           // Stage 10: детерминированный порядок внутри preset-режима — превращает список в очередь обработки.
           const visibleHypotheses = sortHypothesesForQueue(filteredHypotheses, preset);
           return (
@@ -1571,6 +1634,13 @@ export default function ProjectPage() {
                 <button onClick={clearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
                   <Icon name="X" size={12} />
                 </button>
+              </div>
+            )}
+
+            {/* Stage 11: короткий success-feedback после действия в очереди */}
+            {preset === "without_initiative" && queueFeedback && (
+              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 w-fit">
+                <Icon name="CheckCircle2" size={12} /> {queueFeedback}
               </div>
             )}
 
@@ -1660,7 +1730,11 @@ export default function ProjectPage() {
                       <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">{group.label} ({grouped.length})</p>
                       <div className="space-y-2">
                         {grouped.map(h => (
-                          <div key={h.id} className={`rounded-2xl border p-3 sm:p-4 space-y-2 ${group.color}`}>
+                          <div
+                            key={h.id}
+                            ref={el => { hypothesisCardRefs.current[h.id] = el; }}
+                            className={`rounded-2xl border p-3 sm:p-4 space-y-2 transition-colors duration-700 ${queueHighlightId === h.id ? "border-blue-400 bg-blue-50" : group.color}`}
+                          >
                             {/* Строка 1: заголовок + бейдж приоритета */}
                             <div className="flex items-start gap-2">
                               <p className="text-sm font-semibold text-slate-800 leading-snug flex-1 min-w-0">{h.title}</p>
@@ -2666,11 +2740,7 @@ export default function ProjectPage() {
           // Stage 7: preset-фильтр из виджетов управленческого обзора.
           // Правила идентичны тем, что считают счётчики на вкладке "Обзор полигона" —
           // числа в чипе и в виджете всегда совпадают.
-          const filteredInitiatives = preset === "stalled"
-            ? initiatives.filter(i => i.status !== "idea" && i.status !== "done" && (isEmptyField(i.owner_name) || isEmptyField(i.next_step)))
-            : preset === "launch_ready"
-            ? initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmptyField(i.owner_name) && !isEmptyField(i.next_step))
-            : initiatives;
+          const filteredInitiatives = filterInitiativesForPreset(initiatives, preset);
           // Stage 10: детерминированный порядок внутри preset-режима — превращает список в очередь обработки.
           const visibleInitiatives = sortInitiativesForQueue(filteredInitiatives, preset);
           return (
@@ -2696,6 +2766,13 @@ export default function ProjectPage() {
                 <button onClick={clearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
                   <Icon name="X" size={12} />
                 </button>
+              </div>
+            )}
+
+            {/* Stage 11: короткий success-feedback после действия в очереди */}
+            {preset === "stalled" && queueFeedback && (
+              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 w-fit">
+                <Icon name="CheckCircle2" size={12} /> {queueFeedback}
               </div>
             )}
 
@@ -2779,16 +2856,39 @@ export default function ProjectPage() {
                   className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none"
                 />
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => { setShowInitiativeForm(false); setInitiativeSourceHyp(null); }} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
+                  <button onClick={() => { setShowInitiativeForm(false); setInitiativeSourceHyp(null); setInitiativeReturnTo(null); }} className="flex-1 border border-slate-200 rounded-lg py-2.5 text-sm hover:bg-slate-50">Отмена</button>
                   <button disabled={!initiativeDraft.title.trim() || wbLoading} onClick={async () => {
                     setWbLoading(true);
+                    const returnTo = initiativeReturnTo;
                     await workspaceApi.createInitiative({ project_id: projectId, ...initiativeDraft });
                     setInitiativeDraft({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "", hypothesis_id: null, pain_point_id: null, process_id: null, solution_id: null });
                     setInitiativeSourceHyp(null);
+                    setInitiativeReturnTo(null);
                     setShowInitiativeForm(false);
-                    setPostActionHint("initiative_created");
-                    workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
+                    const [initRes, hypRes] = await Promise.all([
+                      workspaceApi.getInitiatives(projectId).catch(() => null) as Promise<{ initiatives: Initiative[] } | null>,
+                      workspaceApi.getHypotheses(projectId).catch(() => null) as Promise<{ hypotheses: Hypothesis[] } | null>,
+                    ]);
+                    const freshInitiatives = initRes?.initiatives || [];
+                    const freshHypotheses = hypRes?.hypotheses || [];
+                    setInitiatives(freshInitiatives);
+                    setHypotheses(freshHypotheses);
                     setWbLoading(false);
+
+                    // Stage 11: если пришли из очереди "Гипотезы без инициатив" — возвращаем внимание туда
+                    // с success-feedback и фокусом на следующей гипотезе в очереди.
+                    if (returnTo && returnTo.tab === "hypotheses" && returnTo.preset === "without_initiative") {
+                      showQueueFeedback("Инициатива создана");
+                      setTab("hypotheses", "without_initiative");
+                      const queue = sortHypothesesForQueue(filterHypothesesForPreset(freshHypotheses, "without_initiative", freshInitiatives), "without_initiative");
+                      if (queue.length > 0) {
+                        setTimeout(() => focusQueueCard(hypothesisCardRefs, queue[0].id), 50);
+                      } else {
+                        setTimeout(() => showQueueFeedback("Все гипотезы доведены до инициатив"), 2600);
+                      }
+                    } else {
+                      setPostActionHint("initiative_created");
+                    }
                   }} className="flex-1 bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
                     {wbLoading ? "Сохраняю..." : "Сохранить"}
                   </button>
@@ -2853,8 +2953,13 @@ export default function ProjectPage() {
                 };
                 const s = STATUS_MAP[init.status] || { label: init.status, color: "bg-slate-100 text-slate-600" };
                 const pr = PRIORITY_MAP[init.priority] || PRIORITY_MAP.medium;
+                const isHighlighted = queueHighlightId === init.id;
                 return (
-                  <div key={init.id} className={`bg-white border rounded-2xl p-3 sm:p-4 ${pr.border}`}>
+                  <div
+                    key={init.id}
+                    ref={el => { initiativeCardRefs.current[init.id] = el; }}
+                    className={`bg-white border rounded-2xl p-3 sm:p-4 transition-colors duration-700 ${isHighlighted ? "border-blue-400 bg-blue-50" : pr.border}`}
+                  >
                     {/* Строка 1: название */}
                     <p className="font-semibold text-slate-900 text-sm leading-snug mb-2">{init.title}</p>
                     {/* Строка 2: бейджи — flex-wrap */}
