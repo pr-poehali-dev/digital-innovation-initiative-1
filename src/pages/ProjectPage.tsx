@@ -174,6 +174,11 @@ export default function ProjectPage() {
   const [initiativeDraft, setInitiativeDraft] = useState<{ title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string; hypothesis_id: number | null; pain_point_id: number | null; process_id: number | null; solution_id: number | null }>({ title: "", description: "", owner_name: "", priority: "medium", impact_score: 3, effort_score: 3, status: "idea", next_step: "", hypothesis_id: null, pain_point_id: null, process_id: null, solution_id: null });
   const [initiativeSourceHyp, setInitiativeSourceHyp] = useState<{ title: string } | null>(null);
   const [wbLoading, setWbLoading] = useState(false);
+  // Stage 9: контекстное дозаполнение инициативы (владелец / следующий шаг) из preset=stalled.
+  // Переиспользует существующий workspaceApi.updateInitiative — без inline-редактирования карточки.
+  const [fixInitiativeId, setFixInitiativeId] = useState<number | null>(null);
+  const [fixInitiativeDraft, setFixInitiativeDraft] = useState({ owner_name: "", next_step: "" });
+  const [fixInitiativeLoading, setFixInitiativeLoading] = useState(false);
 
   const loadProcesses = () => {
     setProcessesLoading(true);
@@ -610,6 +615,21 @@ export default function ProjectPage() {
     await workspaceApi.updateHypothesis({ id, status });
     analytics.workspaceHypothesisUpdated(projectId, id, status);
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+  };
+
+  // Stage 9: открыть мини-форму дозаполнения инициативы из preset=stalled.
+  const openFixInitiative = (init: Initiative) => {
+    setFixInitiativeId(init.id);
+    setFixInitiativeDraft({ owner_name: init.owner_name || "", next_step: init.next_step || "" });
+  };
+
+  const handleFixInitiativeSave = async () => {
+    if (!fixInitiativeId) return;
+    setFixInitiativeLoading(true);
+    await workspaceApi.updateInitiative({ id: fixInitiativeId, owner_name: fixInitiativeDraft.owner_name, next_step: fixInitiativeDraft.next_step });
+    setFixInitiativeId(null);
+    workspaceApi.getInitiatives(projectId).then((d: { initiatives: Initiative[] }) => setInitiatives(d.initiatives || [])).catch(() => {});
+    setFixInitiativeLoading(false);
   };
 
   const handleOpenArtifact = async (id: number) => {
@@ -1649,13 +1669,13 @@ export default function ProjectPage() {
                               {!initiatives.some(i => i.hypothesis_id === h.id) && (
                                 <button
                                   onClick={() => handleCreateInitiativeFromHypothesis(h)}
-                                  className={`text-[10px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 ${
+                                  className={`font-semibold rounded-full flex items-center gap-1 ${
                                     preset === "without_initiative"
-                                      ? "bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 ring-2 ring-blue-200"
-                                      : "bg-slate-800 text-white hover:bg-slate-700 active:bg-slate-900"
+                                      ? "text-xs px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800"
+                                      : "text-[10px] px-2.5 py-1 bg-slate-800 text-white hover:bg-slate-700 active:bg-slate-900"
                                   }`}
                                 >
-                                  <Icon name="Rocket" size={10} /> Создать инициативу
+                                  <Icon name="Rocket" size={preset === "without_initiative" ? 12 : 10} /> Создать инициативу
                                 </button>
                               )}
                             </div>
@@ -2827,6 +2847,20 @@ export default function ProjectPage() {
                         )}
                       </div>
                     )}
+                    {/* Stage 9: контекстное действие для preset=stalled — ведёт в существующую форму дозаполнения */}
+                    {preset === "stalled" && (isEmptyField(init.owner_name) || isEmptyField(init.next_step)) && (
+                      <button
+                        onClick={() => openFixInitiative(init)}
+                        className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 active:bg-orange-800"
+                      >
+                        <Icon name="Wrench" size={12} />
+                        {isEmptyField(init.owner_name) && isEmptyField(init.next_step)
+                          ? "Заполнить владельца и следующий шаг"
+                          : isEmptyField(init.owner_name)
+                          ? "Указать владельца"
+                          : "Указать следующий шаг"}
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -2846,6 +2880,38 @@ export default function ProjectPage() {
         )}
 
       </div>
+
+      {/* Stage 9: модалка дозаполнения инициативы (владелец / следующий шаг) из preset=stalled */}
+      {fixInitiativeId !== null && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+          <div className="bg-white border rounded-2xl p-6 w-full max-w-md shadow-xl">
+            <h2 className="text-lg font-semibold mb-4 text-slate-800">Дозаполнить инициативу</h2>
+            <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Владелец</label>
+            <input
+              autoFocus
+              placeholder="Кто отвечает за инициативу"
+              value={fixInitiativeDraft.owner_name}
+              onChange={e => setFixInitiativeDraft(d => ({ ...d, owner_name: e.target.value }))}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500 mb-4"
+            />
+            <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Следующий шаг</label>
+            <input
+              placeholder="Что нужно сделать дальше"
+              value={fixInitiativeDraft.next_step}
+              onChange={e => setFixInitiativeDraft(d => ({ ...d, next_step: e.target.value }))}
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-500 mb-4"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setFixInitiativeId(null)} className="flex-1 border border-slate-300 rounded-lg py-2.5 text-sm font-medium hover:bg-slate-50">
+                Отмена
+              </button>
+              <button onClick={handleFixInitiativeSave} disabled={fixInitiativeLoading} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50">
+                {fixInitiativeLoading ? "Сохраняю..." : "Сохранить"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Модалка переименования */}
       {renamingDoc && (
