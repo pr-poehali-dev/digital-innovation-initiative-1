@@ -47,21 +47,29 @@ interface Props {
   loading?: boolean;
   onReload: () => void;
   onCreateHypothesis?: (pain: PainPoint) => void;
-  // Stage 13: preset-очередь "Проблемы без гипотезы" — та же схема, что у инициатив/гипотез.
-  preset?: "without_hypothesis" | null;
+  // Stage 13/14: preset-очередь "Проблемы без гипотезы" / "Проблемы без решения" — та же схема, что у инициатив/гипотез.
+  preset?: "without_hypothesis" | "without_solution" | null;
   presetLabel?: string;
   visiblePainPoints?: PainPoint[];
   queueFeedback?: string | null;
   onClearPreset?: () => void;
   highlightId?: number | null;
   cardRefs?: MutableRefObject<Record<number, HTMLDivElement | null>>;
+  // Stage 14: если решений в проекте ещё нет ни одного, кнопка на карточке ведёт на вкладку
+  // "Решения и системы" для создания нового (fallback) — иначе используется существующий startEditLinks.
+  onGoToSolutions?: () => void;
+  // Stage 14: вызывается после успешного сохранения привязки решения — родитель решает,
+  // нужно ли вернуть внимание в очередь (success-feedback + фокус на следующей карточке).
+  onAfterLinkSolution?: (painId: number) => void;
 }
 
 export default function PainsTab({
   projectId, painPoints, processes = [], solutions = [], loading = false, onReload, onCreateHypothesis,
   preset = null, presetLabel, visiblePainPoints, queueFeedback, onClearPreset, highlightId, cardRefs,
+  onGoToSolutions, onAfterLinkSolution,
 }: Props) {
-  const displayList = preset === "without_hypothesis" && visiblePainPoints ? visiblePainPoints : painPoints;
+  const isQueuePreset = preset === "without_hypothesis" || preset === "without_solution";
+  const displayList = isQueuePreset && visiblePainPoints ? visiblePainPoints : painPoints;
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState(EMPTY_PAIN);
   const [saving, setSaving] = useState(false);
@@ -130,6 +138,8 @@ export default function PainsTab({
 
   const handleSaveLinks = async () => {
     if (!editingLinksId) return;
+    const savedId = editingLinksId;
+    const wasQueueAction = preset === "without_solution" && !!linksDraft.linked_solution_id;
     setSavingLinks(true);
     try {
       await workspaceApi.updatePainPoint({
@@ -140,6 +150,8 @@ export default function PainsTab({
       });
       setEditingLinksId(null);
       onReload();
+      // Stage 14: если решение привязано прямо из очереди without_solution — возвращаем внимание в очередь.
+      if (wasQueueAction) onAfterLinkSolution?.(savedId);
     } catch (e) {
       alert(e instanceof Error ? e.message : "Не удалось сохранить привязку");
     } finally { setSavingLinks(false); }
@@ -158,11 +170,11 @@ export default function PainsTab({
         </button>
       </div>
 
-      {/* Активный preset-чип + индикатор очереди (Stage 13) */}
-      {preset === "without_hypothesis" && (
+      {/* Активный preset-чип + индикатор очереди (Stage 13/14) */}
+      {isQueuePreset && (
         <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
           <Icon name="Filter" size={12} className="text-slate-500" />
-          <span className="text-xs font-medium text-slate-700">{presetLabel || "Проблемы без гипотезы"}</span>
+          <span className="text-xs font-medium text-slate-700">{presetLabel || (preset === "without_solution" ? "Проблемы без решения" : "Проблемы без гипотезы")}</span>
           {displayList.length > 0 && (
             <span className="text-[10px] font-bold bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded-full">
               Осталось: {displayList.length}
@@ -176,8 +188,8 @@ export default function PainsTab({
         </div>
       )}
 
-      {/* Stage 13: короткий success-feedback после действия в очереди */}
-      {preset === "without_hypothesis" && queueFeedback && (
+      {/* Stage 13/14: короткий success-feedback после действия в очереди */}
+      {isQueuePreset && queueFeedback && (
         <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 w-fit">
           <Icon name="CheckCircle2" size={12} /> {queueFeedback}
         </div>
@@ -283,11 +295,13 @@ export default function PainsTab({
         </div>
       )}
 
-      {/* Пустое состояние — preset ничего не нашёл (Stage 13: completion-state для очереди) */}
-      {!loading && painPoints.length > 0 && preset === "without_hypothesis" && displayList.length === 0 && (
+      {/* Пустое состояние — preset ничего не нашёл (Stage 13/14: completion-state для очереди) */}
+      {!loading && painPoints.length > 0 && isQueuePreset && displayList.length === 0 && (
         <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
           <Icon name="CheckCircle2" size={28} className="text-emerald-500 mx-auto mb-2" />
-          <p className="text-slate-700 text-sm font-semibold">Все проблемы получили гипотезы</p>
+          <p className="text-slate-700 text-sm font-semibold">
+            {preset === "without_solution" ? "Все проблемы привязаны к решению" : "Все проблемы получили гипотезы"}
+          </p>
           {onClearPreset && (
             <button onClick={onClearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
               Показать все проблемы
@@ -312,10 +326,15 @@ export default function PainsTab({
                   {PAIN_LABELS[p.pain_type] || p.pain_type}
                 </span>
                 {p.frequency && <span className="text-[10px] text-slate-500">📅 {p.frequency}</span>}
-                {/* Stage 13: объяснение, почему проблема попала в отфильтрованный список */}
+                {/* Stage 13/14: объяснение, почему проблема попала в отфильтрованный список */}
                 {preset === "without_hypothesis" && (
                   <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                     <Icon name="LightbulbOff" size={10} /> Нет гипотез
+                  </span>
+                )}
+                {preset === "without_solution" && (
+                  <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Icon name="ServerOff" size={10} /> Нет решения
                   </span>
                 )}
                 <button
@@ -382,7 +401,7 @@ export default function PainsTab({
                   </div>
                 </div>
               ) : (
-                (processes.length > 0 || solutions.length > 0) && (
+                preset !== "without_solution" && (processes.length > 0 || solutions.length > 0) && (
                   <button
                     onClick={() => startEditLinks(p)}
                     className="mt-2 flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 transition-colors"
@@ -393,7 +412,32 @@ export default function PainsTab({
                 )
               )}
 
-              {onCreateHypothesis && (
+              {/* Stage 14: контекстное действие в очереди "Проблемы без решения" —
+                  если в проекте есть решения, открываем существующий редактор привязки (startEditLinks);
+                  если решений нет ни одного — ведём создавать решение (fallback). */}
+              {preset === "without_solution" && editingLinksId !== p.id && (
+                solutions.length > 0 ? (
+                  <button
+                    onClick={() => startEditLinks(p)}
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 active:bg-red-800"
+                  >
+                    <Icon name="Link" size={13} />
+                    Привязать к решению
+                  </button>
+                ) : (
+                  onGoToSolutions && (
+                    <button
+                      onClick={onGoToSolutions}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 active:bg-red-800"
+                    >
+                      <Icon name="Plus" size={13} />
+                      Создать решение
+                    </button>
+                  )
+                )
+              )}
+
+              {preset !== "without_solution" && onCreateHypothesis && (
                 <button
                   onClick={() => onCreateHypothesis(p)}
                   className={preset === "without_hypothesis"

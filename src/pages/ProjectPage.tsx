@@ -88,12 +88,13 @@ const ACTION_LABELS: Record<string, string> = {
 const isEmptyField = (v?: string | null) => !v || !v.trim();
 const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
 
-type OverviewPreset = "stalled" | "launch_ready" | "without_initiative" | "without_hypothesis";
+type OverviewPreset = "stalled" | "launch_ready" | "without_initiative" | "without_hypothesis" | "without_solution";
 const PRESET_LABELS: Record<OverviewPreset, string> = {
   stalled: "Зависшие инициативы",
   launch_ready: "Готовы к запуску",
   without_initiative: "Гипотезы без инициатив",
   without_hypothesis: "Проблемы без гипотезы",
+  without_solution: "Проблемы с гипотезой, но без решения",
 };
 const PAIN_PRIORITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 
@@ -136,9 +137,9 @@ function sortHypothesesForQueue<T extends { priority: string; title: string; id:
   });
 }
 
-// Stage 13: та же схема очереди для начала воронки — проблемы без гипотезы.
+// Stage 13/14: та же схема очереди для начала воронки — проблемы без гипотезы / без решения.
 function sortPainsForQueue<T extends { impact_level: string; title?: string; description: string; id: number }>(list: T[], activePreset: OverviewPreset | null): T[] {
-  if (activePreset !== "without_hypothesis") return list;
+  if (activePreset !== "without_hypothesis" && activePreset !== "without_solution") return list;
   return [...list].sort((a, b) => {
     const prDiff = (PAIN_PRIORITY_RANK[b.impact_level] || 0) - (PAIN_PRIORITY_RANK[a.impact_level] || 0);
     if (prDiff !== 0) return prDiff;
@@ -159,15 +160,18 @@ function filterHypothesesForPreset<T extends { id: number }>(list: T[], activePr
   return list.filter(h => !initiativesList.some(i => i.hypothesis_id === h.id));
 }
 
-// Stage 13: единое место фильтрации проблем по preset — переиспользуется в рендере списка и в обработчике действия.
-function filterPainsForPreset<T extends { id: number }>(list: T[], activePreset: OverviewPreset | null, hypothesesList: { pain_point_id: number | null }[]): T[] {
-  if (activePreset !== "without_hypothesis") return list;
-  return list.filter(p => !hypothesesList.some(h => h.pain_point_id === p.id));
+// Stage 13/14: единое место фильтрации проблем по preset — переиспользуется в рендере списка и в обработчике действия.
+// without_hypothesis: проблема ещё не осмыслена — нет ни одной гипотезы.
+// without_solution: проблема уже осмыслена (гипотеза есть), но не привязана к решению — следующий шаг другой.
+function filterPainsForPreset<T extends { id: number; linked_solution_id: number | null }>(list: T[], activePreset: OverviewPreset | null, hypothesesList: { pain_point_id: number | null }[]): T[] {
+  if (activePreset === "without_hypothesis") return list.filter(p => !hypothesesList.some(h => h.pain_point_id === p.id));
+  if (activePreset === "without_solution") return list.filter(p => !p.linked_solution_id && hypothesesList.some(h => h.pain_point_id === p.id));
+  return list;
 }
 
 type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
 const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
-const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis"];
+const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution"];
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -361,6 +365,9 @@ export default function ProjectPage() {
   // Stage 13: если гипотеза создаётся из очереди "Проблемы без гипотезы" — после сохранения
   // нужно вернуть внимание туда, а не оставаться на "Гипотезах" (тот же паттерн, что Stage 11).
   const [hypothesisReturnTo, setHypothesisReturnTo] = useState<{ tab: TabKey; preset: OverviewPreset | null } | null>(null);
+  // Stage 14: если решение создаётся из fallback-перехода очереди "Проблемы без решения" —
+  // после сохранения нужно вернуть внимание туда, а не оставаться на "Решениях и системах".
+  const [solutionsReturnTo, setSolutionsReturnTo] = useState<{ tab: TabKey; preset: OverviewPreset | null } | null>(null);
   const [openHyp, setOpenHyp] = useState<Hypothesis | null>(null);
   const copilotEndRef = useRef<HTMLDivElement>(null);
   const [evidenceSending, setEvidenceSending] = useState<number | null>(null);
@@ -745,6 +752,34 @@ export default function ProjectPage() {
     workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
   };
 
+  // Stage 14: fallback — если в проекте нет ни одного решения, ведём создавать его на вкладке
+  // "Решения и системы", запомнив, что нужно вернуться в очередь without_solution после этого.
+  const handleGoToSolutionsFromPain = () => {
+    setSolutionsReturnTo({ tab: "pains", preset: "without_solution" });
+    setPostActionHint(null);
+    setTab("solutions");
+  };
+
+  // Stage 14: после успешной привязки решения к проблеме прямо из очереди —
+  // success-feedback + плавная передача внимания к следующей карточке (тот же паттерн Stage 11).
+  const handleAfterLinkSolution = async (painId: number) => {
+    const res = await workspaceApi.getPainPoints(projectId).catch(() => null) as { pain_points: PainPoint[] } | null;
+    const freshPains = res?.pain_points || [];
+    setPainPoints(freshPains);
+    const stillMissing = filterPainsForPreset(freshPains, "without_solution", hypotheses).some(p => p.id === painId);
+    if (stillMissing) {
+      showQueueFeedback("Проблема обновлена");
+      return;
+    }
+    showQueueFeedback("Решение привязано");
+    const queue = sortPainsForQueue(filterPainsForPreset(freshPains, "without_solution", hypotheses), "without_solution");
+    if (queue.length > 0) {
+      setTimeout(() => focusQueueCard(painCardRefs, queue[0].id), 50);
+    } else {
+      setTimeout(() => showQueueFeedback("Все проблемы привязаны к решению"), 2600);
+    }
+  };
+
   // Stage 9: открыть мини-форму дозаполнения инициативы из preset=stalled.
   const openFixInitiative = (init: Initiative) => {
     setFixInitiativeId(init.id);
@@ -897,7 +932,7 @@ export default function ProjectPage() {
                 title: "Работа с отфильтрованным списком",
                 icon: "ListChecks",
                 subsections: [
-                  { title: "Бейджи-причины", content: "На карточке сразу видно, почему она попала в список: «Нет владельца», «Нет следующего шага», «Готово к запуску», «Без инициативы», «Нет гипотез»." },
+                  { title: "Бейджи-причины", content: "На карточке сразу видно, почему она попала в список: «Нет владельца», «Нет следующего шага», «Готово к запуску», «Без инициативы», «Нет гипотез», «Нет решения»." },
                   { title: "Кнопка действия", content: "На карточке — точная кнопка под причину («Указать владельца», «Заполнить владельца и следующий шаг»). Открывает компактную форму на 1–2 поля." },
                   { title: "После сохранения", content: "Список обновляется сам: карточка исчезает или подсвечивается следующая. Когда список пуст — видно завершающее сообщение, например «Все зависшие инициативы обработаны»." },
                 ],
@@ -1089,7 +1124,9 @@ export default function ProjectPage() {
             {/* ── Управленческий обзор (только для полигона) ── */}
             {project?.workspace_mode === "polygon" && (() => {
               const overviewLoading = processesLoading || painPointsLoading || solutionsLoading;
-              const painsWithoutSolution = painPoints.filter(p => !p.linked_solution_id);
+              // Stage 14: считаем по той же формуле, что и preset without_solution —
+              // проблема уже осмыслена гипотезой, но ещё не привязана к решению.
+              const painsWithoutSolution = painPoints.filter(p => !p.linked_solution_id && hypotheses.some(h => h.pain_point_id === p.id));
               const painsWithoutHypothesis = painPoints.filter(p => !hypotheses.some(h => h.pain_point_id === p.id));
               const candidates = painPoints.filter(p => (p.linked_process_id || p.linked_solution_id) && !hypotheses.some(h => h.pain_point_id === p.id));
               const hypothesesWithoutInitiative = hypotheses.filter(h => !initiatives.some(i => i.hypothesis_id === h.id));
@@ -1120,7 +1157,7 @@ export default function ProjectPage() {
               const readyToLaunch = initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmptyField(i.owner_name) && !isEmptyField(i.next_step));
 
               const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: TabKey; preset?: OverviewPreset }[] = [
-                { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains" },
+                { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains", preset: "without_solution" },
                 { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains", preset: "without_hypothesis" },
                 { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
                 { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses", preset: "without_initiative" },
@@ -2458,13 +2495,15 @@ export default function ProjectPage() {
             loading={painPointsLoading}
             onReload={loadPainPoints}
             onCreateHypothesis={handleCreateHypothesisFromPain}
-            preset={preset === "without_hypothesis" ? "without_hypothesis" : null}
-            presetLabel={PRESET_LABELS.without_hypothesis}
+            preset={preset === "without_hypothesis" || preset === "without_solution" ? preset : null}
+            presetLabel={preset ? PRESET_LABELS[preset] : undefined}
             visiblePainPoints={sortPainsForQueue(filterPainsForPreset(painPoints, preset, hypotheses), preset)}
             queueFeedback={queueFeedback}
             onClearPreset={clearPreset}
             highlightId={queueHighlightId}
             cardRefs={painCardRefs}
+            onGoToSolutions={handleGoToSolutionsFromPain}
+            onAfterLinkSolution={handleAfterLinkSolution}
           />
         )}
 
@@ -3153,12 +3192,29 @@ export default function ProjectPage() {
 
         {/* ── Решения и системы (полигон) ── */}
         {tab === "solutions" && (
-          <SolutionsTab
-            projectId={projectId}
-            solutions={solutions}
-            loading={solutionsLoading}
-            onReload={loadSolutions}
-          />
+          <div className="space-y-3">
+            {/* Stage 14: пришли сюда из fallback-перехода очереди "Проблемы без решения" —
+                напоминаем, куда вернуться после создания решения. */}
+            {solutionsReturnTo && (
+              <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                <p className="text-xs text-red-800 leading-snug">
+                  Создайте решение, затем вернитесь к проблеме, чтобы привязать его
+                </p>
+                <button
+                  onClick={() => { setTab(solutionsReturnTo.tab, solutionsReturnTo.preset); setSolutionsReturnTo(null); }}
+                  className="flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-900 flex-shrink-0"
+                >
+                  <Icon name="ArrowLeft" size={12} /> Вернуться к очереди
+                </button>
+              </div>
+            )}
+            <SolutionsTab
+              projectId={projectId}
+              solutions={solutions}
+              loading={solutionsLoading}
+              onReload={loadSolutions}
+            />
+          </div>
         )}
 
       </div>
