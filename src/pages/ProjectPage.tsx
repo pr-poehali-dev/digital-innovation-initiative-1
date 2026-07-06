@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
 import SolutionsTab from "@/components/workspace/SolutionsTab";
 import ProcessesTab from "@/components/workspace/ProcessesTab";
@@ -82,14 +82,58 @@ const ACTION_LABELS: Record<string, string> = {
   updated_project: "обновил проект",
 };
 
+// Правила Stage 6/7: пустым считаем null / '' / строку из пробелов после trim().
+// Вынесено на уровень модуля, чтобы одна и та же логика использовалась и в счётчиках
+// управленческого обзора, и в preset-фильтрах списков — числа всегда совпадают.
+const isEmptyField = (v?: string | null) => !v || !v.trim();
+const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
+
+type OverviewPreset = "stalled" | "launch_ready" | "without_initiative";
+const PRESET_LABELS: Record<OverviewPreset, string> = {
+  stalled: "Зависшие инициативы",
+  launch_ready: "Готовы к запуску",
+  without_initiative: "Гипотезы без инициатив",
+};
+
+type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
+const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
+const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative"];
+
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const projectId = Number(id);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get("tab");
+  const urlPreset = searchParams.get("preset");
+
   const [project, setProject] = useState<Project | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [tab, setTab] = useState<"overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions">("overview");
+  const [tab, setTabState] = useState<TabKey>(
+    (urlTab && (VALID_TABS as string[]).includes(urlTab) ? urlTab : "overview") as TabKey
+  );
+  const [preset, setPresetState] = useState<OverviewPreset | null>(
+    urlPreset && (VALID_PRESETS as string[]).includes(urlPreset) ? (urlPreset as OverviewPreset) : null
+  );
+
+  // Preset применяется только вместе со сменой вкладки (Stage 7).
+  // Обычный переход по вкладкам без preset — сбрасывает активный фильтр.
+  const setTab = (next: TabKey, nextPreset: OverviewPreset | null = null) => {
+    setTabState(next);
+    setPresetState(nextPreset);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", next);
+    if (nextPreset) params.set("preset", nextPreset); else params.delete("preset");
+    setSearchParams(params, { replace: false });
+  };
+
+  const clearPreset = () => {
+    setPresetState(null);
+    const params = new URLSearchParams(searchParams);
+    params.delete("preset");
+    setSearchParams(params, { replace: false });
+  };
 
   // Workspace state
   type Hypothesis = { id: number; title: string; statement: string; assumptions: string; success_criteria: string; status: string; conclusion: string; priority: string; created_at: string; updated_at: string; process_id: number | null; process_title?: string | null; pain_point_id: number | null; pain_point_description?: string | null; solution_id: number | null; solution_title?: string | null };
@@ -736,7 +780,7 @@ export default function ProjectPage() {
               <button
                 key={t.key}
                 data-tab={t.key}
-                onClick={() => setTab(t.key)}
+                onClick={() => setTab(t.key as TabKey)}
                 className={`whitespace-nowrap px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px ${
                   tab === t.key
                     ? "text-slate-900 border-slate-800"
@@ -850,18 +894,16 @@ export default function ProjectPage() {
               const statusBreakdown = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
 
               // Правила Stage 6: пустым считаем null / '' / строку из пробелов после trim().
-              const isEmpty = (v?: string | null) => !v || !v.trim();
-              const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
-              const stuckInitiatives = initiatives.filter(i => i.status !== "idea" && i.status !== "done" && (isEmpty(i.owner_name) || isEmpty(i.next_step)));
-              const readyToLaunch = initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmpty(i.owner_name) && !isEmpty(i.next_step));
+              const stuckInitiatives = initiatives.filter(i => i.status !== "idea" && i.status !== "done" && (isEmptyField(i.owner_name) || isEmptyField(i.next_step)));
+              const readyToLaunch = initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmptyField(i.owner_name) && !isEmptyField(i.next_step));
 
-              const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: typeof tab }[] = [
+              const WIDGETS: { key: string; icon: string; title: string; color: string; count: number; emptyText: string; tab: TabKey; preset?: OverviewPreset }[] = [
                 { key: "no_solution",   icon: "ServerOff",    title: "Проблемы без решения",  color: "text-red-600 bg-red-50",    count: painsWithoutSolution.length,   emptyText: "Все проблемы привязаны к решению", tab: "pains" },
                 { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains" },
                 { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
-                { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses" },
-                { key: "ready_launch",  icon: "Rocket",       title: "Готовы к запуску",       color: "text-emerald-600 bg-emerald-50", count: readyToLaunch.length,      emptyText: "Нет проработанных инициатив",     tab: "initiatives" },
-                { key: "stuck",         icon: "AlertTriangle", title: "Зависшие инициативы",   color: "text-orange-600 bg-orange-50", count: stuckInitiatives.length,   emptyText: "Зависших инициатив нет",          tab: "initiatives" },
+                { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses", preset: "without_initiative" },
+                { key: "ready_launch",  icon: "Rocket",       title: "Готовы к запуску",       color: "text-emerald-600 bg-emerald-50", count: readyToLaunch.length,      emptyText: "Нет проработанных инициатив",     tab: "initiatives", preset: "launch_ready" },
+                { key: "stuck",         icon: "AlertTriangle", title: "Зависшие инициативы",   color: "text-orange-600 bg-orange-50", count: stuckInitiatives.length,   emptyText: "Зависших инициатив нет",          tab: "initiatives", preset: "stalled" },
               ];
 
               return (
@@ -879,7 +921,7 @@ export default function ProjectPage() {
                       {WIDGETS.map(w => (
                         <button
                           key={w.key}
-                          onClick={() => setTab(w.tab)}
+                          onClick={() => setTab(w.tab, w.preset || null)}
                           className="text-left bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 hover:border-slate-300 hover:shadow-sm transition-all"
                         >
                           <div className="flex items-center gap-2 mb-1.5">
@@ -1440,7 +1482,12 @@ export default function ProjectPage() {
         )}
 
         {/* ── Гипотезы ── */}
-        {tab === "hypotheses" && (
+        {tab === "hypotheses" && (() => {
+          // Stage 7: preset "гипотезы без инициатив" — то же правило, что и в виджете обзора.
+          const visibleHypotheses = preset === "without_initiative"
+            ? hypotheses.filter(h => !initiatives.some(i => i.hypothesis_id === h.id))
+            : hypotheses;
+          return (
           <div className="space-y-3">
             {/* Заголовок */}
             <div className="flex items-center justify-between gap-2">
@@ -1449,6 +1496,17 @@ export default function ProjectPage() {
                 <Icon name="Plus" size={12} /> Добавить
               </button>
             </div>
+
+            {/* Активный preset-чип */}
+            {preset === "without_initiative" && (
+              <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
+                <Icon name="Filter" size={12} className="text-slate-500" />
+                <span className="text-xs font-medium text-slate-700">{PRESET_LABELS.without_initiative}</span>
+                <button onClick={clearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
+                  <Icon name="X" size={12} />
+                </button>
+              </div>
+            )}
 
             {/* Форма новой гипотезы */}
             {hypForm && (
@@ -1494,7 +1552,7 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {/* Пустое состояние */}
+            {/* Пустое состояние — гипотез вообще нет */}
             {hypotheses.length === 0 && !hypForm ? (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
                 <Icon name="Lightbulb" size={28} className="text-amber-400 mx-auto mb-2" />
@@ -1502,6 +1560,14 @@ export default function ProjectPage() {
                 <p className="text-xs text-slate-400 mb-3">Добавь гипотезы для проверки — AI поможет проанализировать</p>
                 <button onClick={() => setHypForm(true)} className="text-xs text-violet-600 font-medium border border-violet-200 rounded-lg px-3 py-2 hover:bg-violet-50">
                   + Добавить первую гипотезу
+                </button>
+              </div>
+            ) : visibleHypotheses.length === 0 ? (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm">По этому фильтру ничего не найдено</p>
+                <button onClick={clearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
+                  Показать все гипотезы
                 </button>
               </div>
             ) : (
@@ -1512,7 +1578,7 @@ export default function ProjectPage() {
                   { status: "confirmed", label: "Подтверждены", color: "border-emerald-200 bg-emerald-50" },
                   { status: "rejected",  label: "Отклонены",    color: "border-slate-200 bg-slate-50" },
                 ].map(group => {
-                  const grouped = hypotheses.filter(h => h.status === group.status);
+                  const grouped = visibleHypotheses.filter(h => h.status === group.status);
                   if (!grouped.length) return null;
                   return (
                     <div key={group.status}>
@@ -1590,7 +1656,8 @@ export default function ProjectPage() {
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {/* ── Артефакты ── */}
         {tab === "artifacts" && (
@@ -2510,7 +2577,16 @@ export default function ProjectPage() {
         )}
 
         {/* ── Инициативы ── */}
-        {tab === "initiatives" && (
+        {tab === "initiatives" && (() => {
+          // Stage 7: preset-фильтр из виджетов управленческого обзора.
+          // Правила идентичны тем, что считают счётчики на вкладке "Обзор полигона" —
+          // числа в чипе и в виджете всегда совпадают.
+          const visibleInitiatives = preset === "stalled"
+            ? initiatives.filter(i => i.status !== "idea" && i.status !== "done" && (isEmptyField(i.owner_name) || isEmptyField(i.next_step)))
+            : preset === "launch_ready"
+            ? initiatives.filter(i => PRE_LAUNCH_STATUSES.includes(i.status) && !isEmptyField(i.owner_name) && !isEmptyField(i.next_step))
+            : initiatives;
+          return (
           <div className="space-y-3">
             {/* Заголовок */}
             <div className="flex items-center justify-between gap-2">
@@ -2519,6 +2595,17 @@ export default function ProjectPage() {
                 <Icon name="Plus" size={13} /> Добавить
               </button>
             </div>
+
+            {/* Активный preset-чип */}
+            {(preset === "stalled" || preset === "launch_ready") && (
+              <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
+                <Icon name="Filter" size={12} className="text-slate-500" />
+                <span className="text-xs font-medium text-slate-700">{PRESET_LABELS[preset]}</span>
+                <button onClick={clearPreset} className="text-slate-400 hover:text-slate-700" aria-label="Сбросить фильтр">
+                  <Icon name="X" size={12} />
+                </button>
+              </div>
+            )}
 
             {/* Форма новой инициативы */}
             {showInitiativeForm && (
@@ -2617,7 +2704,7 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {/* Пустое состояние */}
+            {/* Пустое состояние — нет инициатив вообще */}
             {initiatives.length === 0 && !showInitiativeForm && (
               <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
                 <Icon name="Rocket" size={28} className="text-slate-300 mx-auto mb-2" />
@@ -2629,9 +2716,20 @@ export default function ProjectPage() {
               </div>
             )}
 
+            {/* Пустое состояние — preset ничего не нашёл */}
+            {initiatives.length > 0 && visibleInitiatives.length === 0 && (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-8 text-center">
+                <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 text-sm">По этому фильтру ничего не найдено</p>
+                <button onClick={clearPreset} className="mt-3 text-xs text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50">
+                  Показать все инициативы
+                </button>
+              </div>
+            )}
+
             {/* Список инициатив */}
             <div className="space-y-2.5">
-              {initiatives.map(init => {
+              {visibleInitiatives.map(init => {
                 const STATUS_MAP: Record<string, { label: string; color: string }> = {
                   idea:           { label: "Идея",        color: "bg-slate-100 text-slate-600" },
                   preparation:    { label: "Подготовка",  color: "bg-amber-100 text-amber-700" },
@@ -2704,7 +2802,8 @@ export default function ProjectPage() {
               })}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* ── Решения и системы (полигон) ── */}
         {tab === "solutions" && (
