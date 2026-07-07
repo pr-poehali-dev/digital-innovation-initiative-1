@@ -28,7 +28,20 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean; source_file?: string };
 
 type QueueFileStatus = "queued" | "processing" | "done" | "error";
-type QueueFile = { id: string; file: File; status: QueueFileStatus; error?: string; foundCount?: number };
+type QueueFile = { id: string; file: File; status: QueueFileStatus; error?: string; foundCount?: number; extractedFunctions?: DraftFunction[] };
+
+// Пересобирает draft в порядке файлов очереди (по имени файла), сохраняя стабильный
+// относительный порядок функций внутри одного файла. Нужно, чтобы retry ошибочных файлов
+// не ломал порядок и не терял правки пользователя в уже готовых функциях.
+function buildOrderedDraft(items: DraftFunction[], queueSnapshot: QueueFile[]): DraftFunction[] {
+  const orderIndex = new Map<string, number>();
+  queueSnapshot.forEach((item, idx) => orderIndex.set(item.file.name, idx));
+  return [...items].sort((a, b) => {
+    const ia = a.source_file !== undefined ? orderIndex.get(a.source_file) ?? 9999 : 9999;
+    const ib = b.source_file !== undefined ? orderIndex.get(b.source_file) ?? 9999 : 9999;
+    return ia - ib;
+  });
+}
 
 type LinkedProcess = {
   id: number;
@@ -199,40 +212,79 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       reader.readAsDataURL(file);
     });
 
+  // Добавляет/заменяет функции конкретного файла в общем draft: сначала убирает старые
+  // функции этого же файла (если они там были — например, после повторного retry), затем
+  // добавляет свежие и пересобирает список в порядке файлов очереди. Так retry никогда
+  // не создаёт дублей и не трогает функции, найденные в других файлах (в т.ч. правки пользователя).
+  const addFunctionsToDraft = (sourceFileName: string, newFunctions: DraftFunction[], orderSnapshot: QueueFile[]) => {
+    setDraft(d => {
+      const base = d || [];
+      const withoutSource = base.filter(f => f.source_file !== sourceFileName);
+      const merged = [...withoutSource, ...newFunctions];
+      return buildOrderedDraft(merged, orderSnapshot);
+    });
+  };
+
+  // Обрабатывает один файл очереди: запрашивает OCR/AI, обновляет статус в queue и,
+  // при успехе, кладёт результат в draft. Используется и первым проходом, и retry.
+  // Возвращает true, если файл дал хотя бы одну функцию — нужно для итогового сообщения об ошибке.
+  const processQueueFile = async (item: QueueFile, orderSnapshot: QueueFile[]): Promise<boolean> => {
+    setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "processing" } : f) : q);
+    try {
+      const b64 = await fileToBase64(item.file);
+      const res = await deptFunctionsApi.extractFunctions({
+        project_id: projectId, image_b64: b64, dept_name: deptName,
+      }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+
+      if (res.ok && res.functions) {
+        const extracted = res.functions.map(f => ({ ...f, dept_name: deptName, checked: true, source_file: item.file.name }));
+        setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "done", foundCount: extracted.length, extractedFunctions: extracted, error: undefined } : f) : q);
+        addFunctionsToDraft(item.file.name, extracted, orderSnapshot);
+        return extracted.length > 0;
+      } else {
+        setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Не удалось распознать" } : f) : q);
+        return false;
+      }
+    } catch {
+      setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: "Ошибка обработки файла" } : f) : q);
+      return false;
+    }
+  };
+
   const runQueue = async () => {
     if (!queue || queue.length === 0) return;
     setQueueRunning(true);
-    const collected: DraftFunction[] = [];
+    const orderSnapshot = queue;
+    let anyFound = false;
 
-    for (let i = 0; i < queue.length; i++) {
-      const item = queue[i];
-      setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "processing" } : f) : q);
-      try {
-        const b64 = await fileToBase64(item.file);
-        const res = await deptFunctionsApi.extractFunctions({
-          project_id: projectId, image_b64: b64, dept_name: deptName,
-        }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
-
-        if (res.ok && res.functions) {
-          res.functions.forEach(f => collected.push({ ...f, dept_name: deptName, checked: true, source_file: item.file.name }));
-          setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "done", foundCount: res.functions!.length } : f) : q);
-        } else {
-          setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Не удалось распознать" } : f) : q);
-        }
-      } catch {
-        setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: "Ошибка обработки файла" } : f) : q);
-      }
+    for (const item of orderSnapshot) {
+      const found = await processQueueFile(item, orderSnapshot);
+      anyFound = anyFound || found;
     }
 
     setQueueRunning(false);
-    if (collected.length > 0) {
-      setDraft(collected);
-    } else {
+    if (!anyFound) {
       setOcrError("AI не нашёл ни одной функции ни в одном из файлов. Попробуйте другие файлы или добавьте функции вручную.");
     }
   };
 
-  const clearQueue = () => setQueue(null);
+  // Повторная обработка только файлов со статусом "error" — успешные файлы не трогаются,
+  // их функции в draft остаются как есть (в т.ч. правки пользователя).
+  const retryFailedFiles = async () => {
+    if (!queue || queueRunning) return;
+    const failed = queue.filter(f => f.status === "error");
+    if (failed.length === 0) return;
+    setQueueRunning(true);
+    const orderSnapshot = queue;
+
+    for (const item of failed) {
+      await processQueueFile(item, orderSnapshot);
+    }
+
+    setQueueRunning(false);
+  };
+
+  const clearQueue = () => { setQueue(null); setDraft(null); };
 
   const updateDraftItem = (idx: number, patch: Partial<DraftFunction>) => {
     setDraft(d => d ? d.map((item, i) => i === idx ? { ...item, ...patch } : item) : d);
@@ -383,11 +435,27 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
             ))}
           </div>
 
-          <div className="flex justify-end">
-            <Button size="sm" onClick={runQueue} disabled={queueRunning || queue.length === 0} className="gap-1.5">
-              {queueRunning ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Play" size={14} />}
-              {queueRunning ? "Распознаю..." : `Распознать все (${queue.length})`}
-            </Button>
+          <div className="flex justify-end gap-2">
+            {(() => {
+              const failedCount = queue.filter(f => f.status === "error").length;
+              const hasQueued = queue.some(f => f.status === "queued");
+              return (
+                <>
+                  {failedCount > 0 && (
+                    <Button size="sm" variant="outline" onClick={retryFailedFiles} disabled={queueRunning} className="gap-1.5">
+                      {queueRunning ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="RotateCw" size={14} />}
+                      {queueRunning ? "Повторяю..." : `Повторить ошибки (${failedCount})`}
+                    </Button>
+                  )}
+                  {hasQueued && (
+                    <Button size="sm" onClick={runQueue} disabled={queueRunning || queue.length === 0} className="gap-1.5">
+                      {queueRunning ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Play" size={14} />}
+                      {queueRunning ? "Распознаю..." : `Распознать все (${queue.length})`}
+                    </Button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
