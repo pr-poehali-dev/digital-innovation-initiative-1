@@ -10,6 +10,10 @@ Actions:
   GET  automation         — список записей автоматизации
   PUT  update_automation  — обновить запись автоматизации
   POST ai_recommend       — AI генерирует рекомендации по автоматизации функции
+  GET  function_processes — список процессов, связанных с функцией
+  POST link_process       — привязать существующий процесс к функции
+  DELETE unlink_process    — отвязать процесс от функции
+  POST create_and_link_process — создать новый процесс (в wb_processes) и сразу связать с функцией
 """
 import base64
 import io
@@ -455,6 +459,125 @@ def handler(event: dict, context) -> dict:
                 "implementation_horizon": horizon,
                 "quick_wins": quick_wins,
             })
+
+        # ── Список процессов, связанных с функцией ───────────────
+        if method == "GET" and action == "function_processes":
+            func_id = int(qs.get("function_id") or 0)
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT 1 FROM {SCHEMA}.dept_functions WHERE id = %s AND project_id = %s""",
+                    (func_id, project_id),
+                )
+                if not cur.fetchone():
+                    return cors({"ok": False, "error": "Функция не найдена"}, 404)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT p.id, p.title, p.description, p.department, p.maturity_level,
+                               p.digital_maturity, p.ai_potential,
+                               COUNT(s.id) as step_count
+                        FROM {SCHEMA}.dept_function_process_links lnk
+                        JOIN {SCHEMA}.wb_processes p ON p.id = lnk.process_id
+                        LEFT JOIN {SCHEMA}.wb_process_steps s ON s.process_id = p.id AND s.is_archived = FALSE
+                        WHERE lnk.function_id = %s AND p.is_archived = FALSE
+                        GROUP BY p.id ORDER BY p.created_at DESC""",
+                    (func_id,),
+                )
+                rows = cur.fetchall()
+            linked = [
+                {"id": r[0], "title": r[1], "description": r[2], "department": r[3],
+                 "maturity_level": r[4], "digital_maturity": r[5], "ai_potential": r[6], "step_count": r[7]}
+                for r in rows
+            ]
+            return cors({"ok": True, "processes": linked})
+
+        # ── Привязать существующий процесс к функции ─────────────
+        if method == "POST" and action == "link_process":
+            func_id = int(body.get("function_id") or 0)
+            proc_id = int(body.get("process_id") or 0)
+            if not func_id or not proc_id:
+                return cors({"ok": False, "error": "function_id и process_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.dept_functions WHERE id = %s AND project_id = %s",
+                    (func_id, project_id),
+                )
+                if not cur.fetchone():
+                    return cors({"ok": False, "error": "Функция не найдена"}, 404)
+                cur.execute(
+                    f"""SELECT 1 FROM {SCHEMA}.wb_processes p
+                        JOIN {SCHEMA}.wb_case_process_links lnk ON lnk.process_id = p.id AND lnk.case_id = %s
+                        WHERE p.id = %s AND p.is_archived = FALSE""",
+                    (project_id, proc_id),
+                )
+                if not cur.fetchone():
+                    return cors({"ok": False, "error": "Процесс не найден в этом проекте"}, 404)
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.dept_function_process_links (function_id, process_id, created_by)
+                        VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+                    (func_id, proc_id, user_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Отвязать процесс от функции ───────────────────────────
+        if method == "DELETE" and action == "unlink_process":
+            func_id = int(qs.get("function_id") or body.get("function_id") or 0)
+            proc_id = int(qs.get("process_id") or body.get("process_id") or 0)
+            if not func_id or not proc_id:
+                return cors({"ok": False, "error": "function_id и process_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.dept_functions WHERE id = %s AND project_id = %s",
+                    (func_id, project_id),
+                )
+                if not cur.fetchone():
+                    return cors({"ok": False, "error": "Функция не найдена"}, 404)
+                cur.execute(
+                    f"""DELETE FROM {SCHEMA}.dept_function_process_links
+                        WHERE function_id = %s AND process_id = %s""",
+                    (func_id, proc_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Создать новый процесс и сразу связать с функцией ─────
+        if method == "POST" and action == "create_and_link_process":
+            func_id = int(body.get("function_id") or 0)
+            title = (body.get("title") or "").strip()
+            if not func_id or not title:
+                return cors({"ok": False, "error": "function_id и title required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT dept_name FROM {SCHEMA}.dept_functions WHERE id = %s AND project_id = %s",
+                    (func_id, project_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return cors({"ok": False, "error": "Функция не найдена"}, 404)
+                dept_name = row[0]
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.wb_processes
+                        (user_id, title, description, department, maturity_level, digital_maturity, ai_potential)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (user_id, title, body.get("description", ""), dept_name,
+                     body.get("maturity_level", "initial"), body.get("digital_maturity", "paper"),
+                     body.get("ai_potential", "unknown")),
+                )
+                proc_id = cur.fetchone()[0]
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.wb_case_process_links (case_id, process_id)
+                        VALUES (%s, %s) ON CONFLICT DO NOTHING""",
+                    (project_id, proc_id),
+                )
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.dept_function_process_links (function_id, process_id, created_by)
+                        VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+                    (func_id, proc_id, user_id),
+                )
+            conn.commit()
+            return cors({"ok": True, "id": proc_id})
 
         return cors({"ok": False, "error": f"Unknown action: {action}"}, 400)
 

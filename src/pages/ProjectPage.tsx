@@ -2562,6 +2562,8 @@ export default function ProjectPage() {
             functions={deptFunctions}
             loading={deptFunctionsLoading}
             onReload={loadDeptFunctions}
+            allProcesses={processes}
+            onNavigateToProcess={() => setTab("process")}
           />
         )}
 

@@ -715,4 +715,12 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=update_automation", "PUT", data),
   aiRecommend: (data: { project_id: number; function_id: number }) =>
     request(URLS.deptFunctions, "/?action=ai_recommend", "POST", data),
+  getFunctionProcesses: (projectId: number, functionId: number) =>
+    request(URLS.deptFunctions, `/?action=function_processes&project_id=${projectId}&function_id=${functionId}`, "GET"),
+  linkProcess: (data: { project_id: number; function_id: number; process_id: number }) =>
+    request(URLS.deptFunctions, "/?action=link_process", "POST", data),
+  unlinkProcess: (data: { project_id: number; function_id: number; process_id: number }) =>
+    request(URLS.deptFunctions, `/?action=unlink_process&project_id=${data.project_id}&function_id=${data.function_id}&process_id=${data.process_id}`, "DELETE"),
+  createAndLinkProcess: (data: { project_id: number; function_id: number; title: string; description?: string }) =>
+    request(URLS.deptFunctions, "/?action=create_and_link_process", "POST", data),
 };

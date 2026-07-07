@@ -31,6 +31,32 @@
       "path": "/?action=extract_functions",
       "body": {"project_id": 1, "image_b64": "abc"},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_processes",
+      "method": "GET",
+      "path": "/?action=function_processes&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth link_process",
+      "method": "POST",
+      "path": "/?action=link_process",
+      "body": {"project_id": 1, "function_id": 1, "process_id": 1},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth unlink_process",
+      "method": "DELETE",
+      "path": "/?action=unlink_process&project_id=1&function_id=1&process_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth create_and_link_process",
+      "method": "POST",
+      "path": "/?action=create_and_link_process",
+      "body": {"project_id": 1, "function_id": 1, "title": "Test"},
+      "expectedStatus": 401
     }
   ]
 }

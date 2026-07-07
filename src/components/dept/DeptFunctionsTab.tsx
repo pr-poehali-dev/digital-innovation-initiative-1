@@ -27,14 +27,29 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
 
 type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean };
 
+type LinkedProcess = {
+  id: number;
+  title: string;
+  description: string;
+  department: string;
+  maturity_level: string;
+  digital_maturity: string;
+  ai_potential: string;
+  step_count: number;
+};
+
+type ProcessOption = { id: number; title: string; department?: string };
+
 type Props = {
   projectId: number;
   functions: DeptFunction[];
   loading?: boolean;
   onReload: () => void;
+  allProcesses?: ProcessOption[];
+  onNavigateToProcess?: (processId: number) => void;
 };
 
-export default function DeptFunctionsTab({ projectId, functions, loading = false, onReload }: Props) {
+export default function DeptFunctionsTab({ projectId, functions, loading = false, onReload, allProcesses = [], onNavigateToProcess }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deptName, setDeptName] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -47,6 +62,64 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   const [confirming, setConfirming] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
+
+  // Связанные процессы: кэш по function_id + состояния формы привязки/создания
+  const [processesByFunction, setProcessesByFunction] = useState<Record<number, LinkedProcess[] | undefined>>({});
+  const [processesLoading, setProcessesLoading] = useState<Record<number, boolean>>({});
+  const [linkFormOpen, setLinkFormOpen] = useState<number | null>(null);
+  const [linkMode, setLinkMode] = useState<"existing" | "new">("existing");
+  const [selectedProcessId, setSelectedProcessId] = useState("");
+  const [newProcessTitle, setNewProcessTitle] = useState("");
+  const [linking, setLinking] = useState(false);
+
+  const loadFunctionProcesses = async (functionId: number) => {
+    setProcessesLoading(p => ({ ...p, [functionId]: true }));
+    try {
+      const res = await deptFunctionsApi.getFunctionProcesses(projectId, functionId) as { ok: boolean; processes?: LinkedProcess[] };
+      if (res.ok) setProcessesByFunction(p => ({ ...p, [functionId]: res.processes || [] }));
+    } finally {
+      setProcessesLoading(p => ({ ...p, [functionId]: false }));
+    }
+  };
+
+  const toggleExpand = (functionId: number) => {
+    const next = expanded === functionId ? null : functionId;
+    setExpanded(next);
+    if (next !== null && processesByFunction[next] === undefined) {
+      loadFunctionProcesses(next);
+    }
+  };
+
+  const handleLinkExisting = async (functionId: number) => {
+    if (!selectedProcessId) return;
+    setLinking(true);
+    try {
+      await deptFunctionsApi.linkProcess({ project_id: projectId, function_id: functionId, process_id: Number(selectedProcessId) });
+      setSelectedProcessId("");
+      setLinkFormOpen(null);
+      loadFunctionProcesses(functionId);
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleCreateAndLink = async (functionId: number) => {
+    if (!newProcessTitle.trim()) return;
+    setLinking(true);
+    try {
+      await deptFunctionsApi.createAndLinkProcess({ project_id: projectId, function_id: functionId, title: newProcessTitle.trim() });
+      setNewProcessTitle("");
+      setLinkFormOpen(null);
+      loadFunctionProcesses(functionId);
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleUnlink = async (functionId: number, processId: number) => {
+    await deptFunctionsApi.unlinkProcess({ project_id: projectId, function_id: functionId, process_id: processId });
+    loadFunctionProcesses(functionId);
+  };
 
   const handleUpload = async (file: File, kind: "image" | "pdf" | "docx") => {
     setUploading(true);
@@ -330,7 +403,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                     <div key={fn.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                       <button
                         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-                        onClick={() => setExpanded(isOpen ? null : fn.id)}
+                        onClick={() => toggleExpand(fn.id)}
                       >
                         <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={14} className="text-slate-400 flex-shrink-0" />
                         <span className="flex-1 font-medium text-sm text-slate-800">{fn.title}</span>
@@ -350,6 +423,105 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                               <p className="text-sm text-slate-700 leading-relaxed">{fn.goals}</p>
                             </div>
                           )}
+
+                          {/* Связанные процессы */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Связанные процессы {processesByFunction[fn.id]?.length ? `(${processesByFunction[fn.id]!.length})` : ""}
+                              </p>
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm" variant="ghost"
+                                  className="h-6 px-2 text-xs gap-1"
+                                  onClick={() => { setLinkFormOpen(linkFormOpen === fn.id ? null : fn.id); setLinkMode("existing"); setSelectedProcessId(""); setNewProcessTitle(""); }}
+                                >
+                                  <Icon name="Link2" size={12} /> Привязать
+                                </Button>
+                              </div>
+                            </div>
+
+                            {processesLoading[fn.id] ? (
+                              <div className="h-8 bg-slate-50 rounded-lg animate-pulse" />
+                            ) : !processesByFunction[fn.id] || processesByFunction[fn.id]!.length === 0 ? (
+                              <p className="text-xs text-slate-400">Процессы пока не привязаны</p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {processesByFunction[fn.id]!.map(proc => (
+                                  <div key={proc.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                                    <Icon name="Workflow" size={12} className="text-slate-400 flex-shrink-0" />
+                                    <button
+                                      className="flex-1 text-left text-xs text-slate-700 hover:text-slate-900 hover:underline truncate"
+                                      onClick={() => onNavigateToProcess?.(proc.id)}
+                                    >
+                                      {proc.title}
+                                    </button>
+                                    <span className="text-[10px] text-slate-400 flex-shrink-0">{proc.step_count} шагов</span>
+                                    <button
+                                      className="text-slate-300 hover:text-red-600 transition-colors flex-shrink-0"
+                                      onClick={() => handleUnlink(fn.id, proc.id)}
+                                      title="Отвязать процесс"
+                                    >
+                                      <Icon name="X" size={12} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {linkFormOpen === fn.id && (
+                              <div className="mt-2 border border-slate-200 rounded-lg p-2.5 bg-white space-y-2">
+                                <div className="flex gap-1.5">
+                                  <button
+                                    className={`flex-1 text-xs rounded-md py-1.5 font-medium transition-colors ${linkMode === "existing" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}
+                                    onClick={() => setLinkMode("existing")}
+                                  >
+                                    Существующий
+                                  </button>
+                                  <button
+                                    className={`flex-1 text-xs rounded-md py-1.5 font-medium transition-colors ${linkMode === "new" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}
+                                    onClick={() => setLinkMode("new")}
+                                  >
+                                    Создать новый
+                                  </button>
+                                </div>
+
+                                {linkMode === "existing" ? (
+                                  allProcesses.length === 0 ? (
+                                    <p className="text-xs text-slate-400 py-1">В проекте пока нет ни одного процесса — создайте новый</p>
+                                  ) : (
+                                    <div className="flex gap-1.5">
+                                      <select
+                                        className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white min-w-0"
+                                        value={selectedProcessId}
+                                        onChange={e => setSelectedProcessId(e.target.value)}
+                                      >
+                                        <option value="">Выберите процесс...</option>
+                                        {allProcesses
+                                          .filter(p => !processesByFunction[fn.id]?.some(lp => lp.id === p.id))
+                                          .map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                      </select>
+                                      <Button size="sm" disabled={!selectedProcessId || linking} onClick={() => handleLinkExisting(fn.id)} className="flex-shrink-0">
+                                        {linking ? "..." : "Привязать"}
+                                      </Button>
+                                    </div>
+                                  )
+                                ) : (
+                                  <div className="flex gap-1.5">
+                                    <input
+                                      className="flex-1 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs min-w-0"
+                                      placeholder="Название нового процесса"
+                                      value={newProcessTitle}
+                                      onChange={e => setNewProcessTitle(e.target.value)}
+                                    />
+                                    <Button size="sm" disabled={!newProcessTitle.trim() || linking} onClick={() => handleCreateAndLink(fn.id)} className="flex-shrink-0">
+                                      {linking ? "..." : "Создать"}
+                                    </Button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
