@@ -88,13 +88,14 @@ const ACTION_LABELS: Record<string, string> = {
 const isEmptyField = (v?: string | null) => !v || !v.trim();
 const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
 
-type OverviewPreset = "stalled" | "launch_ready" | "without_initiative" | "without_hypothesis" | "without_solution";
+type OverviewPreset = "stalled" | "launch_ready" | "without_initiative" | "without_hypothesis" | "without_solution" | "without_validation";
 const PRESET_LABELS: Record<OverviewPreset, string> = {
   stalled: "Зависшие инициативы",
   launch_ready: "Готовы к запуску",
   without_initiative: "Гипотезы без инициатив",
   without_hypothesis: "Проблемы без гипотезы",
   without_solution: "Проблемы с гипотезой, но без решения",
+  without_validation: "Гипотезы без проверки",
 };
 const PAIN_PRIORITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 
@@ -128,8 +129,9 @@ function sortInitiativesForQueue<T extends { priority: string; owner_name: strin
   return list;
 }
 
+// Stage 15: та же схема очереди — гипотезы, которые ещё не начали проверяться (status === "open").
 function sortHypothesesForQueue<T extends { priority: string; title: string; id: number }>(list: T[], activePreset: OverviewPreset | null): T[] {
-  if (activePreset !== "without_initiative") return list;
+  if (activePreset !== "without_initiative" && activePreset !== "without_validation") return list;
   return [...list].sort((a, b) => {
     const prDiff = (HYPOTHESIS_PRIORITY_RANK[b.priority] || 0) - (HYPOTHESIS_PRIORITY_RANK[a.priority] || 0);
     if (prDiff !== 0) return prDiff;
@@ -155,9 +157,13 @@ function filterInitiativesForPreset<T extends { status: string; owner_name: stri
   return list;
 }
 
-function filterHypothesesForPreset<T extends { id: number }>(list: T[], activePreset: OverviewPreset | null, initiativesList: { hypothesis_id: number | null }[]): T[] {
-  if (activePreset !== "without_initiative") return list;
-  return list.filter(h => !initiativesList.some(i => i.hypothesis_id === h.id));
+// Stage 15: without_validation — гипотеза ещё не начала проверяться, статус остался в "open".
+// Отдельная причина/действие от without_initiative — не пересекается: гипотеза может быть
+// одновременно open и без инициативы, но виджеты и preset ведут в разные, не дублирующие очереди.
+function filterHypothesesForPreset<T extends { id: number; status: string }>(list: T[], activePreset: OverviewPreset | null, initiativesList: { hypothesis_id: number | null }[]): T[] {
+  if (activePreset === "without_initiative") return list.filter(h => !initiativesList.some(i => i.hypothesis_id === h.id));
+  if (activePreset === "without_validation") return list.filter(h => h.status === "open");
+  return list;
 }
 
 // Stage 13/14: единое место фильтрации проблем по preset — переиспользуется в рендере списка и в обработчике действия.
@@ -171,7 +177,7 @@ function filterPainsForPreset<T extends { id: number; linked_solution_id: number
 
 type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
 const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
-const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution"];
+const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution", "without_validation"];
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
@@ -747,9 +753,23 @@ export default function ProjectPage() {
   };
 
   const handleHypStatus = async (id: number, status: string) => {
+    // Stage 15: если статус меняется прямо из очереди "Гипотезы без проверки" —
+    // после сохранения возвращаем внимание туда (success-feedback + фокус на следующей).
+    const wasQueueAction = tab === "hypotheses" && preset === "without_validation" && status !== "open";
     await workspaceApi.updateHypothesis({ id, status });
     analytics.workspaceHypothesisUpdated(projectId, id, status);
-    workspaceApi.getHypotheses(projectId).then((d: { hypotheses: Hypothesis[] }) => setHypotheses(d.hypotheses || [])).catch(() => {});
+    const res = await workspaceApi.getHypotheses(projectId).catch(() => null) as { hypotheses: Hypothesis[] } | null;
+    const freshHypotheses = res?.hypotheses || [];
+    setHypotheses(freshHypotheses);
+    if (wasQueueAction) {
+      showQueueFeedback("Статус обновлён");
+      const queue = sortHypothesesForQueue(filterHypothesesForPreset(freshHypotheses, "without_validation", initiatives), "without_validation");
+      if (queue.length > 0) {
+        setTimeout(() => focusQueueCard(hypothesisCardRefs, queue[0].id), 50);
+      } else {
+        setTimeout(() => showQueueFeedback("Все гипотезы взяты в проверку"), 2600);
+      }
+    }
   };
 
   // Stage 14: fallback — если в проекте нет ни одного решения, ведём создавать его на вкладке
@@ -923,7 +943,7 @@ export default function ProjectPage() {
                 title: "Управленческий обзор",
                 icon: "LayoutDashboard",
                 subsections: [
-                  { title: "6 виджетов", content: "Проблемы без решения, проблемы без гипотезы, кандидаты в проработку, гипотезы без инициатив, готовы к запуску, зависшие инициативы — считаются автоматически." },
+                  { title: "7 виджетов", content: "Проблемы без решения, проблемы без гипотезы, кандидаты в проработку, гипотезы без инициатив, гипотезы без проверки, готовы к запуску, зависшие инициативы — считаются автоматически." },
                   { title: "Клик по виджету", content: "Открывает нужную вкладку сразу с применённым фильтром (preset) — не нужно искать и включать фильтр вручную." },
                   { title: "Чип фильтра", content: "Показывает активный preset и счётчик «Осталось: N». Крестик на чипе сбрасывает фильтр и возвращает полный список." },
                 ],
@@ -932,7 +952,7 @@ export default function ProjectPage() {
                 title: "Работа с отфильтрованным списком",
                 icon: "ListChecks",
                 subsections: [
-                  { title: "Бейджи-причины", content: "На карточке сразу видно, почему она попала в список: «Нет владельца», «Нет следующего шага», «Готово к запуску», «Без инициативы», «Нет гипотез», «Нет решения»." },
+                  { title: "Бейджи-причины", content: "На карточке сразу видно, почему она попала в список: «Нет владельца», «Нет следующего шага», «Готово к запуску», «Без инициативы», «Нет гипотез», «Нет решения», «Не проверена»." },
                   { title: "Кнопка действия", content: "На карточке — точная кнопка под причину («Указать владельца», «Заполнить владельца и следующий шаг»). Открывает компактную форму на 1–2 поля." },
                   { title: "После сохранения", content: "Список обновляется сам: карточка исчезает или подсвечивается следующая. Когда список пуст — видно завершающее сообщение, например «Все зависшие инициативы обработаны»." },
                 ],
@@ -1130,6 +1150,8 @@ export default function ProjectPage() {
               const painsWithoutHypothesis = painPoints.filter(p => !hypotheses.some(h => h.pain_point_id === p.id));
               const candidates = painPoints.filter(p => (p.linked_process_id || p.linked_solution_id) && !hypotheses.some(h => h.pain_point_id === p.id));
               const hypothesesWithoutInitiative = hypotheses.filter(h => !initiatives.some(i => i.hypothesis_id === h.id));
+              // Stage 15: гипотезы, которые ещё не начали проверяться — статус остался в "open".
+              const hypothesesWithoutValidation = hypotheses.filter(h => h.status === "open");
               const topProcesses = [...processes]
                 .map(pr => ({ ...pr, painCount: pr.linked_pains?.length || 0 }))
                 .filter(pr => pr.painCount > 0)
@@ -1161,6 +1183,7 @@ export default function ProjectPage() {
                 { key: "no_hypothesis", icon: "LightbulbOff", title: "Проблемы без гипотезы", color: "text-amber-600 bg-amber-50", count: painsWithoutHypothesis.length, emptyText: "На все проблемы есть гипотезы",     tab: "pains", preset: "without_hypothesis" },
                 { key: "candidates",    icon: "Target",       title: "Кандидаты в проработку", color: "text-violet-600 bg-violet-50", count: candidates.length,          emptyText: "Нет готовых кандидатов",           tab: "pains" },
                 { key: "hyp_no_init",   icon: "RocketOff",    title: "Гипотезы без инициатив", color: "text-blue-600 bg-blue-50",  count: hypothesesWithoutInitiative.length, emptyText: "На все гипотезы есть инициативы", tab: "hypotheses", preset: "without_initiative" },
+                { key: "hyp_no_valid",  icon: "FlaskConical", title: "Гипотезы без проверки",  color: "text-cyan-600 bg-cyan-50",  count: hypothesesWithoutValidation.length, emptyText: "Все гипотезы взяты в проверку",    tab: "hypotheses", preset: "without_validation" },
                 { key: "ready_launch",  icon: "Rocket",       title: "Готовы к запуску",       color: "text-emerald-600 bg-emerald-50", count: readyToLaunch.length,      emptyText: "Нет проработанных инициатив",     tab: "initiatives", preset: "launch_ready" },
                 { key: "stuck",         icon: "AlertTriangle", title: "Зависшие инициативы",   color: "text-orange-600 bg-orange-50", count: stuckInitiatives.length,   emptyText: "Зависших инициатив нет",          tab: "initiatives", preset: "stalled" },
               ];
@@ -1171,7 +1194,7 @@ export default function ProjectPage() {
 
                   {overviewLoading ? (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-                      {[0, 1, 2, 3, 4, 5].map(i => (
+                      {[0, 1, 2, 3, 4, 5, 6].map(i => (
                         <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4 h-20 animate-pulse" />
                       ))}
                     </div>
@@ -1742,10 +1765,11 @@ export default function ProjectPage() {
 
         {/* ── Гипотезы ── */}
         {tab === "hypotheses" && (() => {
-          // Stage 7: preset "гипотезы без инициатив" — то же правило, что и в виджете обзора.
+          // Stage 7/15: preset "гипотезы без инициатив" / "гипотезы без проверки" — то же правило, что и в виджете обзора.
           const filteredHypotheses = filterHypothesesForPreset(hypotheses, preset, initiatives);
           // Stage 10: детерминированный порядок внутри preset-режима — превращает список в очередь обработки.
           const visibleHypotheses = sortHypothesesForQueue(filteredHypotheses, preset);
+          const isHypQueuePreset = preset === "without_initiative" || preset === "without_validation";
           return (
           <div className="space-y-3">
             {/* Заголовок */}
@@ -1756,11 +1780,11 @@ export default function ProjectPage() {
               </button>
             </div>
 
-            {/* Активный preset-чип + индикатор очереди (Stage 10) */}
-            {preset === "without_initiative" && (
+            {/* Активный preset-чип + индикатор очереди (Stage 10/15) */}
+            {isHypQueuePreset && (
               <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 w-fit">
                 <Icon name="Filter" size={12} className="text-slate-500" />
-                <span className="text-xs font-medium text-slate-700">{PRESET_LABELS.without_initiative}</span>
+                <span className="text-xs font-medium text-slate-700">{preset ? PRESET_LABELS[preset] : ""}</span>
                 {visibleHypotheses.length > 0 && (
                   <span className="text-[10px] font-bold bg-white text-slate-600 border border-slate-200 px-1.5 py-0.5 rounded-full">
                     Осталось: {visibleHypotheses.length}
@@ -1772,8 +1796,8 @@ export default function ProjectPage() {
               </div>
             )}
 
-            {/* Stage 11: короткий success-feedback после действия в очереди */}
-            {preset === "without_initiative" && queueFeedback && (
+            {/* Stage 11/15: короткий success-feedback после действия в очереди */}
+            {isHypQueuePreset && queueFeedback && (
               <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 w-fit">
                 <Icon name="CheckCircle2" size={12} /> {queueFeedback}
               </div>
@@ -1840,6 +1864,11 @@ export default function ProjectPage() {
                     <Icon name="CheckCircle2" size={28} className="text-emerald-500 mx-auto mb-2" />
                     <p className="text-slate-700 text-sm font-semibold">Все гипотезы доведены до инициатив</p>
                   </>
+                ) : preset === "without_validation" ? (
+                  <>
+                    <Icon name="CheckCircle2" size={28} className="text-emerald-500 mx-auto mb-2" />
+                    <p className="text-slate-700 text-sm font-semibold">Все гипотезы взяты в проверку</p>
+                  </>
                 ) : (
                   <>
                     <Icon name="Filter" size={28} className="text-slate-300 mx-auto mb-2" />
@@ -1873,10 +1902,15 @@ export default function ProjectPage() {
                             {/* Строка 1: заголовок + бейдж приоритета */}
                             <div className="flex items-start gap-2">
                               <p className="text-sm font-semibold text-slate-800 leading-snug flex-1 min-w-0">{h.title}</p>
-                              {/* Stage 8: объяснение, почему гипотеза попала в отфильтрованный список */}
+                              {/* Stage 8/15: объяснение, почему гипотеза попала в отфильтрованный список */}
                               {preset === "without_initiative" && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5 bg-blue-100 text-blue-700 flex items-center gap-1">
                                   <Icon name="RocketOff" size={10} /> Без инициативы
+                                </span>
+                              )}
+                              {preset === "without_validation" && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5 bg-cyan-100 text-cyan-700 flex items-center gap-1">
+                                  <Icon name="FlaskConical" size={10} /> Не проверена
                                 </span>
                               )}
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${h.priority === "high" ? "bg-red-100 text-red-700" : h.priority === "low" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
@@ -1916,10 +1950,20 @@ export default function ProjectPage() {
                                 )}
                               </div>
                             )}
-                            {/* Строка 4: статусные кнопки — flex-wrap с нормальным py */}
+                            {/* Строка 4: статусные кнопки — flex-wrap с нормальным py.
+                                Stage 15: в preset without_validation кнопка "проверяется" — усиленный CTA очереди. */}
                             <div className="flex gap-1.5 pt-0.5 flex-wrap">
+                              {preset === "without_validation" && h.status === "open" ? (
+                                <button
+                                  onClick={() => handleHypStatus(h.id, "testing")}
+                                  className="text-xs font-semibold px-3 py-1.5 bg-cyan-600 text-white rounded-full flex items-center gap-1 hover:bg-cyan-700 active:bg-cyan-800"
+                                >
+                                  <Icon name="FlaskConical" size={12} /> Начать проверку
+                                </button>
+                              ) : (
+                                h.status !== "testing" && <button onClick={() => handleHypStatus(h.id, "testing")} className="text-[10px] px-2.5 py-1 bg-white border border-blue-200 rounded-full hover:bg-blue-50 text-blue-600 active:bg-blue-100">проверяется</button>
+                              )}
                               {h.status !== "open"      && <button onClick={() => handleHypStatus(h.id, "open")}      className="text-[10px] px-2.5 py-1 bg-white border border-slate-200 rounded-full hover:bg-slate-50 text-slate-600 active:bg-slate-100">открыта</button>}
-                              {h.status !== "testing"   && <button onClick={() => handleHypStatus(h.id, "testing")}   className="text-[10px] px-2.5 py-1 bg-white border border-blue-200 rounded-full hover:bg-blue-50 text-blue-600 active:bg-blue-100">проверяется</button>}
                               {h.status !== "confirmed" && <button onClick={() => handleHypStatus(h.id, "confirmed")} className="text-[10px] px-2.5 py-1 bg-white border border-emerald-200 rounded-full hover:bg-emerald-50 text-emerald-600 active:bg-emerald-100">подтверждена</button>}
                               {h.status !== "rejected"  && <button onClick={() => handleHypStatus(h.id, "rejected")}  className="text-[10px] px-2.5 py-1 bg-white border border-red-200 rounded-full hover:bg-red-50 text-red-600 active:bg-red-100">отклонена</button>}
                               <button
