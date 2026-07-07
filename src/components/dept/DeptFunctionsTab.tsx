@@ -135,12 +135,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
 
   return (
     <div className="space-y-6">
-      {/* Загрузка положения о подразделении — скрин или PDF/DOCX */}
+      {/* Загрузка положения о подразделении — DOCX или PDF с текстовым слоем */}
       <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 bg-slate-50">
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="flex-1">
             <p className="font-medium text-slate-800">Загрузить положение о подразделении</p>
-            <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели — PDF или DOCX</p>
+            <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели — DOCX или PDF с текстовым слоем</p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <input
@@ -153,7 +153,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               size="sm"
               variant="outline"
               disabled
-              title="Временно недоступно — распознавание изображений будет включено после настройки прав в Yandex Cloud"
+              title="Временно недоступно — распознавание изображений включим после настройки прав в Yandex Cloud"
               className="gap-2 cursor-not-allowed"
             >
               <Icon name="Image" size={14} />
@@ -166,10 +166,14 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               className="gap-2"
             >
               {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="FileText" size={14} />}
-              {uploading ? "Распознаю..." : "Загрузить PDF / DOCX"}
+              {uploading ? "Распознаю..." : "Загрузить DOCX / PDF"}
             </Button>
           </div>
         </div>
+        <p className="mt-3 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          <Icon name="Info" size={13} className="flex-shrink-0" />
+          Сканированные PDF (без текстового слоя) и изображения временно недоступны для распознавания
+        </p>
         {confirmResult && (
           <div className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
             <Icon name="CheckCircle" size={14} />
@@ -307,7 +311,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         <div className="text-center py-12 text-muted-foreground">
           <Icon name="ListTodo" size={40} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">Функции не добавлены</p>
-          <p className="text-sm mt-1">Загрузи положение в PDF или DOCX — AI сам извлечёт все функции</p>
+          <p className="text-sm mt-1">Загрузи положение в DOCX или PDF с текстовым слоем — AI сам извлечёт все функции</p>
         </div>
       ) : (
         <div className="space-y-6">

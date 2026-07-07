@@ -263,7 +263,7 @@ def handler(event: dict, context) -> dict:
             # ai.vision.user в Yandex Cloud). Включить обратно: вернуть вызовы yandex_vision_ocr
             # для image_b64 и для PDF-скана ниже.
             if image_b64:
-                return cors({"ok": False, "error": "Распознавание изображений временно недоступно. Загрузите положение в формате PDF или DOCX."}, 400)
+                return cors({"ok": False, "error": "Распознавание изображений временно недоступно. Загрузите положение в формате DOCX или PDF с текстовым слоем."}, 400)
 
             file_bytes = base64.b64decode(file_b64)
             if file_type == "pdf":
