@@ -5,8 +5,7 @@ Actions:
   GET  functions          — список функций проекта
   POST create_function    — создать функцию вручную
   PUT  update_function    — обновить функцию
-  POST extract_functions  — AI извлекает функции из PDF (текстовый слой) или DOCX. Возвращает черновик, ничего не сохраняет.
-                            Распознавание изображений (скрины, PDF-сканы) временно отключено — нет прав на Yandex Vision API.
+  POST extract_functions  — AI извлекает функции из base64-изображения (скрин), PDF (текстовый слой или скан ≤1 стр. через OCR) или DOCX. Возвращает черновик, ничего не сохраняет.
   POST confirm_functions  — сохраняет подтверждённый/отредактированный пользователем список функций из черновика
   GET  automation         — список записей автоматизации
   PUT  update_automation  — обновить запись автоматизации
@@ -259,9 +258,9 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": "image_b64 или file_b64 required"}, 400)
 
             # Распознавание изображений (скрины и PDF-сканы без текстового слоя) временно
-            # отключено — у сервисного аккаунта нет прав на Yandex Vision API (нужна роль
-            # ai.vision.user в Yandex Cloud). Включить обратно: вернуть вызовы yandex_vision_ocr
-            # для image_b64 и для PDF-скана ниже.
+            # отключено — API-ключ имеет scope только yc.ai.languageModels.execute, для Vision
+            # нужен ключ с областью действия yc.ai.vision.execute. Включить обратно: вернуть
+            # вызовы yandex_vision_ocr для image_b64 и для PDF-скана ниже (см. историю правок).
             if image_b64:
                 return cors({"ok": False, "error": "Распознавание изображений временно недоступно. Загрузите положение в формате DOCX или PDF с текстовым слоем."}, 400)
 
