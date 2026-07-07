@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, fileToBase64 } from "@/lib/api";
+import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, deptFunctionsApi, fileToBase64 } from "@/lib/api";
 import SolutionsTab from "@/components/workspace/SolutionsTab";
 import ProcessesTab from "@/components/workspace/ProcessesTab";
 import PainsTab from "@/components/workspace/PainsTab";
+import DeptFunctionsTab from "@/components/dept/DeptFunctionsTab";
+import DeptAutomationTab from "@/components/dept/DeptAutomationTab";
 import { analytics } from "@/lib/analytics";
 import { passportApi } from "@/lib/passportApi";
 import Layout from "@/components/Layout";
@@ -175,8 +177,8 @@ function filterPainsForPreset<T extends { id: number; linked_solution_id: number
   return list;
 }
 
-type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions";
-const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions"];
+type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation";
+const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation"];
 const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution", "without_validation"];
 
 export default function ProjectPage() {
@@ -229,6 +231,8 @@ export default function ProjectPage() {
   type AiOpportunity = { id: number; title: string; current_manual_operation: string; data_type: string; proposed_solution_type: string; use_case_type: string; expected_effect: string; risks: string; security_notes: string; human_in_loop: boolean; recommendation: string };
   type Initiative = { id: number; title: string; description: string; owner_name: string; priority: string; impact_score: number; effort_score: number; status: string; next_step: string; hypothesis_id: number | null; hypothesis_title?: string | null; pain_point_id: number | null; pain_point_description?: string | null; process_id: number | null; process_title?: string | null; solution_id: number | null; solution_title?: string | null };
   type Solution = { id: number; title: string; solution_type: string; covers_text: string; status: string; limitations: string; alternatives: string; notes: string; created_at: string; updated_at: string; linked_pains?: LinkedPain[] };
+  type DeptFunction = { id: number; dept_name: string; title: string; description: string; goals: string; category: string; priority: number; source_image_url: string | null; created_at: string };
+  type DeptAutomation = { id: number; function_id: number; function_title: string; dept_name: string; category: string; current_tools: string; current_status: string; planned_tools: string; ai_potential_score: number; ai_recommendation: string; ai_recommendation_generated: boolean; implementation_horizon: string; notes: string };
 
   // Transformation Workbench state
   const [processes, setProcesses] = useState<Process[]>([]);
@@ -240,6 +244,10 @@ export default function ProjectPage() {
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [solutions, setSolutions] = useState<Solution[]>([]);
   const [solutionsLoading, setSolutionsLoading] = useState(true);
+  const [deptFunctions, setDeptFunctions] = useState<DeptFunction[]>([]);
+  const [deptFunctionsLoading, setDeptFunctionsLoading] = useState(true);
+  const [deptAutomation, setDeptAutomation] = useState<DeptAutomation[]>([]);
+  const [deptAutomationLoading, setDeptAutomationLoading] = useState(true);
   // Benchmark form
   const [showBenchmarkForm, setShowBenchmarkForm] = useState(false);
   const [benchmarkDraft, setBenchmarkDraft] = useState({ title: "", source_name: "", source_url: "", industry: "", summary: "", observed_effect: "", applicability: "", notes: "" });
@@ -426,6 +434,16 @@ export default function ProjectPage() {
       .then((d: { solutions: Solution[] }) => setSolutions(d.solutions || []))
       .catch(() => {})
       .finally(() => setSolutionsLoading(false));
+    setDeptFunctionsLoading(true);
+    deptFunctionsApi.getFunctions(projectId)
+      .then((d: { functions: DeptFunction[] }) => setDeptFunctions(d.functions || []))
+      .catch(() => {})
+      .finally(() => setDeptFunctionsLoading(false));
+    setDeptAutomationLoading(true);
+    deptFunctionsApi.getAutomation(projectId)
+      .then((d: { automation: DeptAutomation[] }) => setDeptAutomation(d.automation || []))
+      .catch(() => {})
+      .finally(() => setDeptAutomationLoading(false));
   };
 
   const loadSolutions = () => {
@@ -434,6 +452,22 @@ export default function ProjectPage() {
       .then((d: { solutions: Solution[] }) => setSolutions(d.solutions || []))
       .catch(() => {})
       .finally(() => setSolutionsLoading(false));
+  };
+
+  const loadDeptFunctions = () => {
+    setDeptFunctionsLoading(true);
+    deptFunctionsApi.getFunctions(projectId)
+      .then((d: { functions: DeptFunction[] }) => setDeptFunctions(d.functions || []))
+      .catch(() => {})
+      .finally(() => setDeptFunctionsLoading(false));
+  };
+
+  const loadDeptAutomation = () => {
+    setDeptAutomationLoading(true);
+    deptFunctionsApi.getAutomation(projectId)
+      .then((d: { automation: DeptAutomation[] }) => setDeptAutomation(d.automation || []))
+      .catch(() => {})
+      .finally(() => setDeptAutomationLoading(false));
   };
 
   const pollOnce = async () => {
@@ -1029,6 +1063,8 @@ export default function ProjectPage() {
               const isPolygon = project?.workspace_mode === "polygon";
               return isPolygon ? [
                 { key: "overview",    label: "🏠 Обзор полигона" },
+                { key: "dept-functions", label: `🏢 Функции подразделения${deptFunctions.length ? ` (${deptFunctions.length})` : ""}` },
+                { key: "dept-automation", label: `🤖 Автоматизация функций${deptAutomation.length ? ` (${deptAutomation.length})` : ""}` },
                 { key: "process",     label: `⚙️ Функции и процессы${processes.length ? ` (${processes.length})` : ""}` },
                 { key: "solutions",   label: `🗃️ Решения и системы${solutions.length ? ` (${solutions.length})` : ""}` },
                 { key: "pains",       label: `🔧 Проблемы${painPoints.length ? ` (${painPoints.length})` : ""}` },
@@ -2517,6 +2553,26 @@ export default function ProjectPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── Функции подразделения (контур "Оргструктура и цифровизация Блока") ── */}
+        {tab === "dept-functions" && (
+          <DeptFunctionsTab
+            projectId={projectId}
+            functions={deptFunctions}
+            loading={deptFunctionsLoading}
+            onReload={loadDeptFunctions}
+          />
+        )}
+
+        {/* ── Автоматизация функций подразделения ── */}
+        {tab === "dept-automation" && (
+          <DeptAutomationTab
+            projectId={projectId}
+            automation={deptAutomation}
+            loading={deptAutomationLoading}
+            onReload={loadDeptAutomation}
+          />
         )}
 
         {/* ── Процессы ── */}

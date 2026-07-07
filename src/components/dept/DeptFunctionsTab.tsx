@@ -25,43 +25,91 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
   planning:      { label: "Планирование",   color: "bg-indigo-100 text-indigo-700" },
 };
 
+type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean };
+
 type Props = {
   projectId: number;
   functions: DeptFunction[];
+  loading?: boolean;
   onReload: () => void;
 };
 
-export default function DeptFunctionsTab({ projectId, functions, onReload }: Props) {
+export default function DeptFunctionsTab({ projectId, functions, loading = false, onReload }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deptName, setDeptName] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [newFunc, setNewFunc] = useState({ title: "", description: "", goals: "", category: "operational", dept_name: "" });
   const [saving, setSaving] = useState(false);
-  const [ocrResult, setOcrResult] = useState<string | null>(null);
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [confirmResult, setConfirmResult] = useState<string | null>(null);
+  const [draft, setDraft] = useState<DraftFunction[] | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const docRef = useRef<HTMLInputElement>(null);
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (file: File, kind: "image" | "pdf" | "docx") => {
     setUploading(true);
-    setOcrResult(null);
+    setOcrError(null);
+    setConfirmResult(null);
     try {
       const reader = new FileReader();
       reader.onload = async (e) => {
         const b64 = (e.target?.result as string).split(",")[1];
-        const res = await deptFunctionsApi.extractFunctions({
-          project_id: projectId,
-          image_b64: b64,
-          dept_name: deptName,
-        }) as { ok: boolean; created: number; ocr_text?: string };
-        if (res.ok) {
-          setOcrResult(`Распознано и добавлено функций: ${res.created}`);
-          onReload();
+        try {
+          const res = await deptFunctionsApi.extractFunctions(
+            kind === "image"
+              ? { project_id: projectId, image_b64: b64, dept_name: deptName }
+              : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
+          ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+          if (res.ok && res.functions) {
+            if (res.functions.length === 0) {
+              setOcrError("AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
+            } else {
+              setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
+            }
+          } else {
+            setOcrError(res.error || "Не удалось распознать документ");
+          }
+        } catch {
+          setOcrError("Не удалось распознать документ. Попробуйте ещё раз.");
         }
         setUploading(false);
       };
       reader.readAsDataURL(file);
     } catch {
       setUploading(false);
+    }
+  };
+
+  const handleDocSelect = (file: File) => {
+    const ext = file.name.toLowerCase().split(".").pop();
+    if (ext === "pdf") handleUpload(file, "pdf");
+    else if (ext === "docx") handleUpload(file, "docx");
+    else setOcrError("Поддерживаются только PDF и DOCX");
+  };
+
+  const updateDraftItem = (idx: number, patch: Partial<DraftFunction>) => {
+    setDraft(d => d ? d.map((item, i) => i === idx ? { ...item, ...patch } : item) : d);
+  };
+
+  const handleConfirmDraft = async () => {
+    if (!draft) return;
+    const selected = draft.filter(f => f.checked && f.title.trim());
+    if (selected.length === 0) return;
+    setConfirming(true);
+    try {
+      const res = await deptFunctionsApi.confirmFunctions({
+        project_id: projectId,
+        functions: selected.map(({ title, description, goals, category, dept_name }) => ({ title, description, goals, category, dept_name })),
+      }) as { ok: boolean; created: number };
+      if (res.ok) {
+        setConfirmResult(`Добавлено функций: ${res.created}`);
+        setDraft(null);
+        onReload();
+      }
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -87,12 +135,12 @@ export default function DeptFunctionsTab({ projectId, functions, onReload }: Pro
 
   return (
     <div className="space-y-6">
-      {/* Загрузка скрина */}
+      {/* Загрузка положения о подразделении — скрин или PDF/DOCX */}
       <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 bg-slate-50">
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="flex-1">
-            <p className="font-medium text-slate-800">Загрузить скрин положения о подразделении</p>
-            <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели</p>
+            <p className="font-medium text-slate-800">Загрузить положение о подразделении</p>
+            <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели — скрин, PDF или DOCX</p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <input
@@ -103,24 +151,112 @@ export default function DeptFunctionsTab({ projectId, functions, onReload }: Pro
             />
             <Button
               size="sm"
+              variant="outline"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
               className="gap-2"
             >
-              {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Upload" size={14} />}
-              {uploading ? "Распознаю..." : "Загрузить скрин"}
+              {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Image" size={14} />}
+              Загрузить скрин
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => docRef.current?.click()}
+              disabled={uploading}
+              className="gap-2"
+            >
+              {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="FileText" size={14} />}
+              {uploading ? "Распознаю..." : "Загрузить PDF / DOCX"}
             </Button>
           </div>
         </div>
-        {ocrResult && (
+        {confirmResult && (
           <div className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
             <Icon name="CheckCircle" size={14} />
-            {ocrResult}
+            {confirmResult}
+          </div>
+        )}
+        {ocrError && (
+          <div className="mt-3 text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2 flex items-center gap-2">
+            <Icon name="AlertTriangle" size={14} />
+            {ocrError}
           </div>
         )}
         <input ref={fileRef} type="file" accept="image/*" className="hidden"
-          onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }} />
+          onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], "image"); e.target.value = ""; }} />
+        <input ref={docRef} type="file" accept=".pdf,.docx" className="hidden"
+          onChange={e => { if (e.target.files?.[0]) handleDocSelect(e.target.files[0]); e.target.value = ""; }} />
       </div>
+
+      {/* Экран подтверждения распознанных функций перед сохранением */}
+      {draft && (
+        <div className="border border-violet-200 rounded-xl bg-violet-50/50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-slate-800">AI нашёл {draft.length} функций — проверьте перед сохранением</p>
+              <p className="text-sm text-muted-foreground mt-0.5">Снимите галочку, чтобы не создавать функцию, или отредактируйте текст</p>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => setDraft(null)} className="gap-1.5 flex-shrink-0">
+              <Icon name="X" size={14} /> Отменить всё
+            </Button>
+          </div>
+
+          <div className="space-y-2 max-h-[480px] overflow-y-auto">
+            {draft.map((item, idx) => (
+              <div key={idx} className={`border rounded-lg p-3 bg-white space-y-2 transition-opacity ${item.checked ? "border-slate-200" : "border-slate-100 opacity-50"}`}>
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1.5 flex-shrink-0"
+                    checked={item.checked}
+                    onChange={e => updateDraftItem(idx, { checked: e.target.checked })}
+                  />
+                  <div className="flex-1 space-y-2 min-w-0">
+                    <div className="flex gap-2">
+                      <input
+                        className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-medium flex-1"
+                        value={item.title}
+                        onChange={e => updateDraftItem(idx, { title: e.target.value })}
+                        placeholder="Название функции"
+                      />
+                      <select
+                        className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white flex-shrink-0"
+                        value={item.category}
+                        onChange={e => updateDraftItem(idx, { category: e.target.value })}
+                      >
+                        {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                    </div>
+                    {item.description && (
+                      <textarea
+                        className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 w-full resize-none"
+                        rows={2}
+                        value={item.description}
+                        onChange={e => updateDraftItem(idx, { description: e.target.value })}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2 justify-end pt-1">
+            <Button size="sm" variant="outline" onClick={() => setDraft(null)} disabled={confirming}>
+              Отмена
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleConfirmDraft}
+              disabled={confirming || draft.every(f => !f.checked || !f.title.trim())}
+              className="gap-1.5"
+            >
+              {confirming ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Check" size={14} />}
+              {confirming ? "Сохраняю..." : `Подтвердить и создать (${draft.filter(f => f.checked && f.title.trim()).length})`}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Кнопка добавить вручную */}
       <div className="flex justify-between items-center">
@@ -161,7 +297,13 @@ export default function DeptFunctionsTab({ projectId, functions, onReload }: Pro
       )}
 
       {/* Список функций по подразделениям */}
-      {functions.length === 0 ? (
+      {loading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="border border-slate-200 rounded-xl p-3 h-14 animate-pulse bg-slate-50" />
+          ))}
+        </div>
+      ) : functions.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <Icon name="ListTodo" size={40} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">Функции не добавлены</p>

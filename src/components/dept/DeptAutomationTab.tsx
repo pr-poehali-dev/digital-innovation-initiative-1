@@ -48,10 +48,11 @@ function ScoreBar({ score }: { score: number }) {
 type Props = {
   projectId: number;
   automation: AutomationRecord[];
+  loading?: boolean;
   onReload: () => void;
 };
 
-export default function DeptAutomationTab({ projectId, automation, onReload }: Props) {
+export default function DeptAutomationTab({ projectId, automation, loading = false, onReload }: Props) {
   const [editing, setEditing] = useState<number | null>(null);
   const [editData, setEditData] = useState<Partial<AutomationRecord>>({});
   const [recommending, setRecommending] = useState<number | null>(null);
@@ -126,7 +127,13 @@ export default function DeptAutomationTab({ projectId, automation, onReload }: P
       )}
 
       {/* Список */}
-      {automation.length === 0 ? (
+      {loading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="border border-slate-200 rounded-xl p-3 h-14 animate-pulse bg-slate-50" />
+          ))}
+        </div>
+      ) : automation.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <Icon name="Bot" size={40} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">Нет данных по автоматизации</p>

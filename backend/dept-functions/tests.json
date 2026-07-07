@@ -17,6 +17,20 @@
       "method": "GET",
       "path": "/?action=automation&project_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth confirm_functions",
+      "method": "POST",
+      "path": "/?action=confirm_functions",
+      "body": {"project_id": 1, "functions": [{"title": "Test"}]},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth extract_functions",
+      "method": "POST",
+      "path": "/?action=extract_functions",
+      "body": {"project_id": 1, "image_b64": "abc"},
+      "expectedStatus": 401
     }
   ]
 }

@@ -5,12 +5,14 @@ Actions:
   GET  functions          — список функций проекта
   POST create_function    — создать функцию вручную
   PUT  update_function    — обновить функцию
-  POST extract_functions  — AI извлекает функции из base64-изображения (скрин положения)
+  POST extract_functions  — AI извлекает функции из base64-изображения (скрин), PDF (текстовый слой или скан ≤1 стр. через OCR) или DOCX. Возвращает черновик, ничего не сохраняет.
+  POST confirm_functions  — сохраняет подтверждённый/отредактированный пользователем список функций из черновика
   GET  automation         — список записей автоматизации
   PUT  update_automation  — обновить запись автоматизации
   POST ai_recommend       — AI генерирует рекомендации по автоматизации функции
 """
 import base64
+import io
 import json
 import os
 import urllib.request
@@ -88,13 +90,14 @@ def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 3000) -> str:
     return data["result"]["alternatives"][0]["message"]["text"]
 
 
-def yandex_vision_ocr(image_b64: str) -> str:
-    """OCR изображения через Yandex Vision API."""
+def yandex_vision_ocr(content_b64: str, mime_type: str = "image/png") -> str:
+    """OCR через Yandex Vision API. Поддерживает изображения (JPEG/PNG) и PDF (до 1 страницы —
+    ограничение самого Yandex Vision API для формата PDF)."""
     url = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
     payload = json.dumps({
-        "mimeType": "image/png",
+        "mimeType": mime_type,
         "languageCodes": ["ru", "en"],
-        "content": image_b64,
+        "content": content_b64,
     }).encode()
     req = urllib.request.Request(
         url,
@@ -117,6 +120,30 @@ def yandex_vision_ocr(image_b64: str) -> str:
             if text.strip():
                 lines.append(text.strip())
     return "\n".join(lines)
+
+
+MAX_TEXT_LEN = 60000
+
+
+def pdf_page_count(data: bytes) -> int:
+    import PyPDF2
+    reader = PyPDF2.PdfReader(io.BytesIO(data))
+    return len(reader.pages)
+
+
+def extract_text_from_pdf(data: bytes) -> str:
+    """Извлекает текст из PDF с текстовым слоем."""
+    import PyPDF2
+    reader = PyPDF2.PdfReader(io.BytesIO(data))
+    parts = [page.extract_text() or "" for page in reader.pages]
+    return "\n".join(parts)[:MAX_TEXT_LEN]
+
+
+def extract_text_from_docx(data: bytes) -> str:
+    import docx
+    doc = docx.Document(io.BytesIO(data))
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+    return "\n".join(paragraphs)[:MAX_TEXT_LEN]
 
 
 def get_or_create_automation(conn, function_id: int, project_id: int) -> dict:
@@ -221,14 +248,36 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True})
 
-        # ── AI извлечение функций из скрина ──────────────────────
+        # ── AI извлечение функций из скрина / документа (PDF, DOCX) ─
         if method == "POST" and action == "extract_functions":
             image_b64 = body.get("image_b64", "")
+            file_b64 = body.get("file_b64", "")
+            file_type = (body.get("file_type") or "").lower()
             dept_name = (body.get("dept_name") or "").strip()
-            if not image_b64:
-                return cors({"ok": False, "error": "image_b64 required"}, 400)
+            if not image_b64 and not file_b64:
+                return cors({"ok": False, "error": "image_b64 или file_b64 required"}, 400)
 
-            ocr_text = yandex_vision_ocr(image_b64)
+            if image_b64:
+                ocr_text = yandex_vision_ocr(image_b64, "image/png")
+            else:
+                file_bytes = base64.b64decode(file_b64)
+                if file_type == "pdf":
+                    ocr_text = extract_text_from_pdf(file_bytes)
+                    if not ocr_text.strip():
+                        # Похоже на скан без текстового слоя — пробуем распознать через Vision OCR.
+                        # Ограничение самого Yandex Vision API: PDF поддерживается только на 1 страницу.
+                        pages = pdf_page_count(file_bytes)
+                        if pages > 1:
+                            return cors({"ok": False, "error": f"Это скан без текстового слоя на {pages} страниц. Распознавание сканов поддерживает только 1 страницу за раз — загрузите документ постранично как отдельные изображения (скрины)."}, 400)
+                        ocr_text = yandex_vision_ocr(file_b64, "application/pdf")
+                        if not ocr_text.strip():
+                            return cors({"ok": False, "error": "Не удалось распознать текст в PDF."}, 400)
+                elif file_type == "docx":
+                    ocr_text = extract_text_from_docx(file_bytes)
+                    if not ocr_text.strip():
+                        return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
+                else:
+                    return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
 
             system = """Ты эксперт по организационному анализу. 
 Твоя задача — извлечь из текста положения о подразделении структурированный список функций и целей.
@@ -254,22 +303,41 @@ def handler(event: dict, context) -> dict:
             end = raw.rfind("]") + 1
             extracted = json.loads(raw[start:end]) if start >= 0 else []
 
+            # Ничего не сохраняем в БД — только возвращаем черновик для проверки пользователем.
+            # Сохранение происходит через action=confirm_functions после подтверждения.
+            draft = [
+                {"title": f.get("title", ""), "description": f.get("description", ""),
+                 "goals": f.get("goals", ""), "category": f.get("category", "operational")}
+                for f in extracted
+            ]
+            return cors({"ok": True, "functions": draft, "dept_name": dept_name, "ocr_text": ocr_text})
+
+        # ── Подтверждение черновика функций после проверки пользователем ─
+        if method == "POST" and action == "confirm_functions":
+            items = body.get("functions") or []
+            if not isinstance(items, list) or not items:
+                return cors({"ok": False, "error": "functions (непустой список) required"}, 400)
+
             created_ids = []
-            for i, f in enumerate(extracted):
+            for i, f in enumerate(items):
+                title = (f.get("title") or "").strip()
+                if not title:
+                    continue
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.dept_functions
                             (project_id, dept_name, title, description, goals, category, priority, created_by)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                        (project_id, dept_name, f.get("title", ""), f.get("description", ""),
-                         f.get("goals", ""), f.get("category", "operational"), i, user_id),
+                        (project_id, (f.get("dept_name") or "").strip(), title,
+                         f.get("description", ""), f.get("goals", ""),
+                         f.get("category", "operational"), i, user_id),
                     )
                     func_id = cur.fetchone()[0]
                 get_or_create_automation(conn, func_id, project_id)
                 created_ids.append(func_id)
 
             conn.commit()
-            return cors({"ok": True, "created": len(created_ids), "ids": created_ids, "ocr_text": ocr_text})
+            return cors({"ok": True, "created": len(created_ids), "ids": created_ids})
 
         # ── Список автоматизации ──────────────────────────────────
         if method == "GET" and action == "automation":

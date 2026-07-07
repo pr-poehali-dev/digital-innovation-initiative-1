@@ -705,8 +705,10 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=create_function", "POST", data),
   updateFunction: (data: Record<string, unknown>) =>
     request(URLS.deptFunctions, "/?action=update_function", "PUT", data),
-  extractFunctions: (data: { project_id: number; image_b64: string; dept_name?: string }) =>
+  extractFunctions: (data: { project_id: number; image_b64?: string; file_b64?: string; file_type?: "pdf" | "docx"; dept_name?: string }) =>
     request(URLS.deptFunctions, "/?action=extract_functions", "POST", data),
+  confirmFunctions: (data: { project_id: number; functions: Array<{ title: string; description?: string; goals?: string; category?: string; dept_name?: string }> }) =>
+    request(URLS.deptFunctions, "/?action=confirm_functions", "POST", data),
   getAutomation: (projectId: number) =>
     request(URLS.deptFunctions, `/?action=automation&project_id=${projectId}`, "GET"),
   updateAutomation: (data: Record<string, unknown>) =>
