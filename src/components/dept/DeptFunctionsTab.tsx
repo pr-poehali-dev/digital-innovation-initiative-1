@@ -140,7 +140,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="flex-1">
             <p className="font-medium text-slate-800">Загрузить положение о подразделении</p>
-            <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели — скрин, PDF или DOCX</p>
+            <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели — PDF или DOCX</p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <input
@@ -152,12 +152,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
             <Button
               size="sm"
               variant="outline"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="gap-2"
+              disabled
+              title="Временно недоступно — распознавание изображений будет включено после настройки прав в Yandex Cloud"
+              className="gap-2 cursor-not-allowed"
             >
-              {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Image" size={14} />}
-              Загрузить скрин
+              <Icon name="Image" size={14} />
+              Загрузить скрин (скоро)
             </Button>
             <Button
               size="sm"
@@ -307,7 +307,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         <div className="text-center py-12 text-muted-foreground">
           <Icon name="ListTodo" size={40} className="mx-auto mb-3 opacity-30" />
           <p className="font-medium">Функции не добавлены</p>
-          <p className="text-sm mt-1">Загрузи скрин положения — AI сам извлечёт все функции</p>
+          <p className="text-sm mt-1">Загрузи положение в PDF или DOCX — AI сам извлечёт все функции</p>
         </div>
       ) : (
         <div className="space-y-6">

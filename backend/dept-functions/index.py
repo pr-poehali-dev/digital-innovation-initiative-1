@@ -5,7 +5,8 @@ Actions:
   GET  functions          — список функций проекта
   POST create_function    — создать функцию вручную
   PUT  update_function    — обновить функцию
-  POST extract_functions  — AI извлекает функции из base64-изображения (скрин), PDF (текстовый слой или скан ≤1 стр. через OCR) или DOCX. Возвращает черновик, ничего не сохраняет.
+  POST extract_functions  — AI извлекает функции из PDF (текстовый слой) или DOCX. Возвращает черновик, ничего не сохраняет.
+                            Распознавание изображений (скрины, PDF-сканы) временно отключено — нет прав на Yandex Vision API.
   POST confirm_functions  — сохраняет подтверждённый/отредактированный пользователем список функций из черновика
   GET  automation         — список записей автоматизации
   PUT  update_automation  — обновить запись автоматизации
@@ -257,27 +258,24 @@ def handler(event: dict, context) -> dict:
             if not image_b64 and not file_b64:
                 return cors({"ok": False, "error": "image_b64 или file_b64 required"}, 400)
 
+            # Распознавание изображений (скрины и PDF-сканы без текстового слоя) временно
+            # отключено — у сервисного аккаунта нет прав на Yandex Vision API (нужна роль
+            # ai.vision.user в Yandex Cloud). Включить обратно: вернуть вызовы yandex_vision_ocr
+            # для image_b64 и для PDF-скана ниже.
             if image_b64:
-                ocr_text = yandex_vision_ocr(image_b64, "image/png")
+                return cors({"ok": False, "error": "Распознавание изображений временно недоступно. Загрузите положение в формате PDF или DOCX."}, 400)
+
+            file_bytes = base64.b64decode(file_b64)
+            if file_type == "pdf":
+                ocr_text = extract_text_from_pdf(file_bytes)
+                if not ocr_text.strip():
+                    return cors({"ok": False, "error": "Это скан без текстового слоя (PDF без текста). Распознавание сканов временно недоступно — загрузите документ в формате DOCX или PDF с текстовым слоем."}, 400)
+            elif file_type == "docx":
+                ocr_text = extract_text_from_docx(file_bytes)
+                if not ocr_text.strip():
+                    return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
             else:
-                file_bytes = base64.b64decode(file_b64)
-                if file_type == "pdf":
-                    ocr_text = extract_text_from_pdf(file_bytes)
-                    if not ocr_text.strip():
-                        # Похоже на скан без текстового слоя — пробуем распознать через Vision OCR.
-                        # Ограничение самого Yandex Vision API: PDF поддерживается только на 1 страницу.
-                        pages = pdf_page_count(file_bytes)
-                        if pages > 1:
-                            return cors({"ok": False, "error": f"Это скан без текстового слоя на {pages} страниц. Распознавание сканов поддерживает только 1 страницу за раз — загрузите документ постранично как отдельные изображения (скрины)."}, 400)
-                        ocr_text = yandex_vision_ocr(file_b64, "application/pdf")
-                        if not ocr_text.strip():
-                            return cors({"ok": False, "error": "Не удалось распознать текст в PDF."}, 400)
-                elif file_type == "docx":
-                    ocr_text = extract_text_from_docx(file_bytes)
-                    if not ocr_text.strip():
-                        return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
-                else:
-                    return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
+                return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
 
             system = """Ты эксперт по организационному анализу. 
 Твоя задача — извлечь из текста положения о подразделении структурированный список функций и целей.
