@@ -265,27 +265,35 @@ def handler(event: dict, context) -> dict:
             if not image_b64 and not file_b64:
                 return cors({"ok": False, "error": "image_b64 или file_b64 required"}, 400)
 
-            if image_b64:
-                ocr_text = yandex_vision_ocr(image_b64, "image/png")
-            else:
-                file_bytes = base64.b64decode(file_b64)
-                if file_type == "pdf":
-                    ocr_text = extract_text_from_pdf(file_bytes)
-                    if not ocr_text.strip():
-                        # Похоже на скан без текстового слоя — пробуем распознать через Vision OCR.
-                        # Ограничение самого Yandex Vision API: PDF поддерживается только на 1 страницу.
-                        pages = pdf_page_count(file_bytes)
-                        if pages > 1:
-                            return cors({"ok": False, "error": f"Это скан без текстового слоя на {pages} страниц. Распознавание сканов поддерживает только 1 страницу за раз — загрузите документ постранично как отдельные изображения (скрины)."}, 400)
-                        ocr_text = yandex_vision_ocr(file_b64, "application/pdf")
-                        if not ocr_text.strip():
-                            return cors({"ok": False, "error": "Не удалось распознать текст в PDF."}, 400)
-                elif file_type == "docx":
-                    ocr_text = extract_text_from_docx(file_bytes)
-                    if not ocr_text.strip():
-                        return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
+            try:
+                if image_b64:
+                    ocr_text = yandex_vision_ocr(image_b64, "image/png")
                 else:
-                    return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
+                    try:
+                        file_bytes = base64.b64decode(file_b64, validate=True)
+                    except Exception:
+                        return cors({"ok": False, "error": "Файл повреждён или имеет неверный формат"}, 400)
+                    if file_type == "pdf":
+                        ocr_text = extract_text_from_pdf(file_bytes)
+                        if not ocr_text.strip():
+                            # Похоже на скан без текстового слоя — пробуем распознать через Vision OCR.
+                            # Ограничение самого Yandex Vision API: PDF поддерживается только на 1 страницу.
+                            pages = pdf_page_count(file_bytes)
+                            if pages > 1:
+                                return cors({"ok": False, "error": f"Это скан без текстового слоя на {pages} страниц. Распознавание сканов поддерживает только 1 страницу за раз — загрузите документ постранично как отдельные изображения (скрины)."}, 400)
+                            ocr_text = yandex_vision_ocr(file_b64, "application/pdf")
+                            if not ocr_text.strip():
+                                return cors({"ok": False, "error": "Не удалось распознать текст в PDF."}, 400)
+                    elif file_type == "docx":
+                        ocr_text = extract_text_from_docx(file_bytes)
+                        if not ocr_text.strip():
+                            return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
+                    else:
+                        return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
+            except RuntimeError as e:
+                return cors({"ok": False, "error": f"Не удалось распознать файл: {e}"}, 400)
+            except Exception:
+                return cors({"ok": False, "error": "Файл повреждён, имеет неверный формат или не поддерживается"}, 400)
 
             system = """Ты эксперт по организационному анализу. 
 Твоя задача — извлечь из текста положения о подразделении структурированный список функций и целей.

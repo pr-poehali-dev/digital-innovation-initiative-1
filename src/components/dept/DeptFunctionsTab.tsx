@@ -25,7 +25,10 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
   planning:      { label: "Планирование",   color: "bg-indigo-100 text-indigo-700" },
 };
 
-type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean };
+type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean; source_file?: string };
+
+type QueueFileStatus = "queued" | "processing" | "done" | "error";
+type QueueFile = { id: string; file: File; status: QueueFileStatus; error?: string; foundCount?: number };
 
 type LinkedProcess = {
   id: number;
@@ -62,6 +65,10 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   const [confirming, setConfirming] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
+
+  // Multi-upload скриншотов: очередь файлов + обработка по одному через extract_functions
+  const [queue, setQueue] = useState<QueueFile[] | null>(null);
+  const [queueRunning, setQueueRunning] = useState(false);
 
   // Связанные процессы: кэш по function_id + состояния формы привязки/создания
   const [processesByFunction, setProcessesByFunction] = useState<Record<number, LinkedProcess[] | undefined>>({});
@@ -162,6 +169,71 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     else setOcrError("Поддерживаются только PDF и DOCX");
   };
 
+  // ── Multi-upload: выбор нескольких PNG/JPG за раз ──────────────
+  const handleMultiSelect = (files: FileList) => {
+    const accepted: QueueFile[] = [];
+    Array.from(files).forEach((file, i) => {
+      const isImage = file.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(file.name);
+      if (isImage) {
+        accepted.push({ id: `${Date.now()}_${i}_${file.name}`, file, status: "queued" });
+      }
+    });
+    if (accepted.length === 0) {
+      setOcrError("Выберите файлы в формате PNG или JPG");
+      return;
+    }
+    setOcrError(null);
+    setConfirmResult(null);
+    setQueue(accepted);
+  };
+
+  const removeFromQueue = (id: string) => {
+    setQueue(q => q ? q.filter(f => f.id !== id) : q);
+  };
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve((e.target?.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const runQueue = async () => {
+    if (!queue || queue.length === 0) return;
+    setQueueRunning(true);
+    const collected: DraftFunction[] = [];
+
+    for (let i = 0; i < queue.length; i++) {
+      const item = queue[i];
+      setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "processing" } : f) : q);
+      try {
+        const b64 = await fileToBase64(item.file);
+        const res = await deptFunctionsApi.extractFunctions({
+          project_id: projectId, image_b64: b64, dept_name: deptName,
+        }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+
+        if (res.ok && res.functions) {
+          res.functions.forEach(f => collected.push({ ...f, dept_name: deptName, checked: true, source_file: item.file.name }));
+          setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "done", foundCount: res.functions!.length } : f) : q);
+        } else {
+          setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Не удалось распознать" } : f) : q);
+        }
+      } catch {
+        setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: "Ошибка обработки файла" } : f) : q);
+      }
+    }
+
+    setQueueRunning(false);
+    if (collected.length > 0) {
+      setDraft(collected);
+    } else {
+      setOcrError("AI не нашёл ни одной функции ни в одном из файлов. Попробуйте другие файлы или добавьте функции вручную.");
+    }
+  };
+
+  const clearQueue = () => setQueue(null);
+
   const updateDraftItem = (idx: number, patch: Partial<DraftFunction>) => {
     setDraft(d => d ? d.map((item, i) => i === idx ? { ...item, ...patch } : item) : d);
   };
@@ -179,6 +251,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       if (res.ok) {
         setConfirmResult(`Добавлено функций: ${res.created}`);
         setDraft(null);
+        setQueue(null);
         onReload();
       }
     } finally {
@@ -226,16 +299,16 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               size="sm"
               variant="outline"
               onClick={() => fileRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || !!queue}
               className="gap-2"
             >
-              {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Image" size={14} />}
-              {uploading ? "Распознаю..." : "Загрузить скрин"}
+              <Icon name="Images" size={14} />
+              Загрузить скрины
             </Button>
             <Button
               size="sm"
               onClick={() => docRef.current?.click()}
-              disabled={uploading}
+              disabled={uploading || !!queue}
               className="gap-2"
             >
               {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="FileText" size={14} />}
@@ -245,7 +318,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         </div>
         <p className="mt-3 text-xs text-slate-500 bg-slate-100 rounded-lg px-3 py-2 flex items-center gap-1.5">
           <Icon name="Info" size={13} className="flex-shrink-0" />
-          PDF-скан без текстового слоя распознаётся, если в нём 1 страница — для многостраничных сканов загрузите страницы по отдельности как скриншоты
+          Можно выбрать сразу несколько скриншотов (PNG/JPG) — AI распознает каждый и соберёт все функции в один список. PDF-скан без текстового слоя распознаётся, если в нём 1 страница.
         </p>
         {confirmResult && (
           <div className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -259,11 +332,65 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
             {ocrError}
           </div>
         )}
-        <input ref={fileRef} type="file" accept="image/*" className="hidden"
-          onChange={e => { if (e.target.files?.[0]) handleUpload(e.target.files[0], "image"); e.target.value = ""; }} />
+        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+          onChange={e => { if (e.target.files?.length) handleMultiSelect(e.target.files); e.target.value = ""; }} />
         <input ref={docRef} type="file" accept=".pdf,.docx" className="hidden"
           onChange={e => { if (e.target.files?.[0]) handleDocSelect(e.target.files[0]); e.target.value = ""; }} />
       </div>
+
+      {/* Очередь multi-upload: список выбранных скриншотов со статусами обработки */}
+      {queue && (
+        <div className="border border-blue-200 rounded-xl bg-blue-50/40 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-slate-800">Выбрано файлов: {queue.length}</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {queueRunning
+                  ? `Обрабатываю... (${queue.filter(f => f.status === "done" || f.status === "error").length}/${queue.length})`
+                  : "Проверьте список и запустите распознавание"}
+              </p>
+            </div>
+            <Button size="sm" variant="ghost" onClick={clearQueue} disabled={queueRunning} className="gap-1.5 flex-shrink-0">
+              <Icon name="X" size={14} /> Очистить
+            </Button>
+          </div>
+
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {queue.map(item => (
+              <div key={item.id} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                <Icon
+                  name={
+                    item.status === "queued" ? "Clock" :
+                    item.status === "processing" ? "Loader2" :
+                    item.status === "done" ? "CheckCircle2" : "AlertCircle"
+                  }
+                  size={14}
+                  className={`flex-shrink-0 ${
+                    item.status === "processing" ? "animate-spin text-blue-500" :
+                    item.status === "done" ? "text-green-600" :
+                    item.status === "error" ? "text-red-600" : "text-slate-400"
+                  }`}
+                />
+                <span className="flex-1 text-sm text-slate-700 truncate">{item.file.name}</span>
+                {item.status === "done" && <span className="text-xs text-green-700 flex-shrink-0">найдено: {item.foundCount}</span>}
+                {item.status === "error" && <span className="text-xs text-red-600 flex-shrink-0">{item.error}</span>}
+                {item.status === "queued" && !queueRunning && (
+                  <button onClick={() => removeFromQueue(item.id)} className="text-slate-300 hover:text-red-600 flex-shrink-0">
+                    <Icon name="X" size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end">
+            <Button size="sm" onClick={runQueue} disabled={queueRunning || queue.length === 0} className="gap-1.5">
+              {queueRunning ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Play" size={14} />}
+              {queueRunning ? "Распознаю..." : `Распознать все (${queue.length})`}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Экран подтверждения распознанных функций перед сохранением */}
       {draft && (
@@ -311,6 +438,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                         value={item.description}
                         onChange={e => updateDraftItem(idx, { description: e.target.value })}
                       />
+                    )}
+                    {item.source_file && (
+                      <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                        <Icon name="Image" size={10} /> Источник: {item.source_file}
+                      </p>
                     )}
                   </div>
                 </div>
