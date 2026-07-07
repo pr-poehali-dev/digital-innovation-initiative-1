@@ -66,6 +66,25 @@
       "expectedStatus": 403,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "project.set_workspace_mode requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "project.set_workspace_mode", "project_id": 1, "workspace_mode": "polygon"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "REGRESSION: project.set_workspace_mode чужой проект → 403",
+      "method": "POST",
+      "path": "/",
+      "headers": {"X-Session-Id": "regression_test_session_userb_isolation_check_64hexchar000000aaa"},
+      "body": {"action": "project.set_workspace_mode", "project_id": 1, "workspace_mode": "polygon"},
+      "expectedStatus": 403,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

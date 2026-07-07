@@ -418,6 +418,22 @@ export default function ProjectPage() {
   };
 
   const [postActionHint, setPostActionHint] = useState<PostActionKind | null>(null);
+  const [switchingMode, setSwitchingMode] = useState(false);
+
+  const toggleWorkspaceMode = async () => {
+    if (!project) return;
+    const nextMode = project.workspace_mode === "polygon" ? null : "polygon";
+    setSwitchingMode(true);
+    try {
+      await projectsApi.setWorkspaceMode(projectId, nextMode);
+      setProject(p => p ? { ...p, workspace_mode: nextMode ?? undefined } : p);
+      setTab("overview");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Не удалось переключить режим");
+    } finally {
+      setSwitchingMode(false);
+    }
+  };
 
   const load = () => {
     projectsApi.get(projectId).then((d) => setProject(d)).catch(() => {});
@@ -934,6 +950,21 @@ export default function ProjectPage() {
             )}
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
+            {project.my_role === "owner" && (
+              <button
+                onClick={toggleWorkspaceMode}
+                disabled={switchingMode}
+                className={`flex items-center justify-center gap-2 border p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                  project.workspace_mode === "polygon"
+                    ? "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
+                    : "border-slate-300 hover:bg-slate-50 text-slate-700"
+                }`}
+                title={project.workspace_mode === "polygon" ? "Выключить режим полигона (вернуть обычные вкладки кейса)" : "Включить режим полигона — откроет вкладки «Функции подразделения», «Автоматизация функций» и «Функции и процессы»"}
+              >
+                <Icon name="Layers" size={16} />
+                <span className="hidden sm:inline">{switchingMode ? "Переключаю..." : project.workspace_mode === "polygon" ? "Режим: Полигон" : "Включить полигон"}</span>
+              </button>
+            )}
             <Link
               to={`/cabinet/project/${projectId}/audit`}
               className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"

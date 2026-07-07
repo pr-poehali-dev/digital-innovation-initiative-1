@@ -8,6 +8,8 @@
   - project.create    — создать проект (требует title)
   - project.update    — обновить проект (требует project_id, title)
   - project.invite    — пригласить в проект (требует project_id, email)
+  - project.set_workspace_mode — переключить режим проекта (требует project_id, workspace_mode:
+    null|"polygon" — polygon включает вкладки "Функции подразделения"/"Функции и процессы")
 
 Формат ответа:
   Success: {"ok": true, "data": {...}}
@@ -31,6 +33,7 @@ ALLOWED_ACTIONS = {
     "project.archive",
     "project.restore",
     "project.invite",
+    "project.set_workspace_mode",
 }
 
 
@@ -288,6 +291,37 @@ def handle_update(conn, user, body, request_id, origin=None):
     return ok_response({"ok": True}, request_id, origin=origin)
 
 
+def handle_set_workspace_mode(conn, user, body, request_id, origin=None):
+    """Переключает режим проекта. workspace_mode = "polygon" открывает вкладки
+    "Функции подразделения" / "Автоматизация функций" / "Функции и процессы" —
+    контур загрузки положений о подразделении и поиска потенциала автоматизации.
+    workspace_mode = null (или отсутствие поля) возвращает обычный режим кейса."""
+    schema = get_schema()
+    project_id = body.get("project_id")
+    if not project_id:
+        return err_response("validation_error", "Поле project_id обязательно", 400, request_id, origin=origin)
+    project_id = int(project_id)
+    workspace_mode = body.get("workspace_mode")
+    if workspace_mode not in (None, "polygon"):
+        return err_response("validation_error", "workspace_mode должен быть null или 'polygon'", 400, request_id, origin=origin)
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
+    if role not in ("owner", "admin"):
+        return err_response("access_denied", "Только владелец может менять режим проекта", 403, request_id, origin=origin)
+
+    cur.execute(
+        f"UPDATE {schema}.projects SET workspace_mode = %s, updated_at = NOW() WHERE id = %s",
+        (workspace_mode, project_id),
+    )
+    log_activity(cur, schema, project_id, user["id"], "changed_workspace_mode", "project", project_id, workspace_mode or "default")
+    conn.commit()
+    notify_indexer("upsert", "project", project_id)
+    return ok_response({"ok": True, "workspace_mode": workspace_mode}, request_id, origin=origin)
+
+
 def handle_archive(conn, user, body, request_id, origin=None):
     """Soft delete проекта. Файлы/задания/история сохраняются — только скрытие из UI."""
     schema = get_schema()
@@ -447,6 +481,8 @@ def handler(event: dict, context) -> dict:
             return handle_create(conn, user, body, request_id, origin=origin)
         if action == "project.update":
             return handle_update(conn, user, body, request_id, origin=origin)
+        if action == "project.set_workspace_mode":
+            return handle_set_workspace_mode(conn, user, body, request_id, origin=origin)
         if action == "project.archive":
             return handle_archive(conn, user, body, request_id, origin=origin)
         if action == "project.restore":

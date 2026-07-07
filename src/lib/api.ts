@@ -98,6 +98,8 @@ export const projectsApi = {
     request(URLS.projects, "/", "POST", { action: "project.restore", project_id: id }),
   invite: (projectId: number, email: string) =>
     request(URLS.projects, "/", "POST", { action: "project.invite", project_id: projectId, email }),
+  setWorkspaceMode: (projectId: number, workspaceMode: "polygon" | null) =>
+    request(URLS.projects, "/", "POST", { action: "project.set_workspace_mode", project_id: projectId, workspace_mode: workspaceMode }),
 };
 
 export async function uploadDocumentChunked(
