@@ -402,6 +402,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     <div className="space-y-6">
       {/* Загрузка положения о подразделении — скриншот (в т.ч. drag-and-drop), DOCX или PDF */}
       <div
+        data-testid="dept-func-dropzone"
+        data-drag-over={isDragOver}
+        data-queue-running={queueRunning}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
@@ -438,6 +441,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               onClick={() => fileRef.current?.click()}
               disabled={uploading || queueRunning}
               className="gap-2"
+              data-testid="dept-func-select-images-btn"
             >
               <Icon name="Images" size={14} />
               {queue ? "Добавить ещё скрины" : "Загрузить скрины"}
@@ -447,6 +451,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               onClick={() => docRef.current?.click()}
               disabled={uploading || !!queue}
               className="gap-2"
+              data-testid="dept-func-select-doc-btn"
             >
               {uploading ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="FileText" size={14} />}
               {uploading ? "Распознаю..." : "Загрузить DOCX / PDF"}
@@ -458,32 +463,32 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
           Можно выбрать или перетащить сразу несколько скриншотов (PNG/JPG) — AI распознает каждый и соберёт все функции в один список. Файлы можно дозагружать в уже открытую очередь. PDF-скан без текстового слоя распознаётся, если в нём 1 страница.
         </p>
         {queueInfo && (
-          <div className="mt-3 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2 flex items-center gap-2">
+          <div data-testid="dept-func-queue-info" className="mt-3 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2 flex items-center gap-2">
             <Icon name="Info" size={14} />
             {queueInfo}
           </div>
         )}
         {confirmResult && (
-          <div className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
+          <div data-testid="dept-func-confirm-result" className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
             <Icon name="CheckCircle" size={14} />
             {confirmResult}
           </div>
         )}
         {ocrError && (
-          <div className="mt-3 text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2 flex items-center gap-2">
+          <div data-testid="dept-func-ocr-error" className="mt-3 text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2 flex items-center gap-2">
             <Icon name="AlertTriangle" size={14} />
             {ocrError}
           </div>
         )}
-        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden"
+        <input ref={fileRef} data-testid="dept-func-image-input" type="file" accept="image/*" multiple className="hidden"
           onChange={e => { if (e.target.files?.length) handleMultiSelect(e.target.files); e.target.value = ""; }} />
-        <input ref={docRef} type="file" accept=".pdf,.docx" className="hidden"
+        <input ref={docRef} data-testid="dept-func-doc-input" type="file" accept=".pdf,.docx" className="hidden"
           onChange={e => { if (e.target.files?.[0]) handleDocSelect(e.target.files[0]); e.target.value = ""; }} />
       </div>
 
       {/* Очередь multi-upload: список выбранных скриншотов со статусами обработки */}
       {queue && (
-        <div className="border border-blue-200 rounded-xl bg-blue-50/40 p-4 space-y-3">
+        <div data-testid="dept-func-queue" className="border border-blue-200 rounded-xl bg-blue-50/40 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="font-semibold text-slate-800">Выбрано файлов: {queue.length}</p>
@@ -495,14 +500,14 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                     : "Все файлы обработаны — можно дозагрузить ещё или подтвердить результат"}
               </p>
             </div>
-            <Button size="sm" variant="ghost" onClick={clearQueue} disabled={queueRunning} className="gap-1.5 flex-shrink-0">
+            <Button size="sm" variant="ghost" onClick={clearQueue} disabled={queueRunning} className="gap-1.5 flex-shrink-0" data-testid="dept-func-clear-queue-btn">
               <Icon name="X" size={14} /> Очистить
             </Button>
           </div>
 
           <div className="space-y-1.5 max-h-64 overflow-y-auto">
             {queue.map(item => (
-              <div key={item.id} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+              <div key={item.id} data-testid="dept-func-queue-item" data-file-name={item.file.name} data-status={item.status} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
                 <Icon
                   name={
                     item.status === "queued" ? "Clock" :
@@ -518,9 +523,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                 />
                 <span className="flex-1 text-sm text-slate-700 truncate">{item.file.name}</span>
                 {item.status === "done" && <span className="text-xs text-green-700 flex-shrink-0">найдено: {item.foundCount}</span>}
-                {item.status === "error" && <span className="text-xs text-red-600 flex-shrink-0">{item.error}</span>}
+                {item.status === "error" && <span data-testid="dept-func-queue-item-error" className="text-xs text-red-600 flex-shrink-0">{item.error}</span>}
                 {item.status === "queued" && !queueRunning && (
-                  <button onClick={() => removeFromQueue(item.id)} className="text-slate-300 hover:text-red-600 flex-shrink-0">
+                  <button onClick={() => removeFromQueue(item.id)} className="text-slate-300 hover:text-red-600 flex-shrink-0" data-testid="dept-func-remove-item-btn">
                     <Icon name="X" size={13} />
                   </button>
                 )}
@@ -535,13 +540,13 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               return (
                 <>
                   {failedCount > 0 && (
-                    <Button size="sm" variant="outline" onClick={retryFailedFiles} disabled={queueRunning} className="gap-1.5">
+                    <Button size="sm" variant="outline" onClick={retryFailedFiles} disabled={queueRunning} className="gap-1.5" data-testid="dept-func-retry-failed-btn">
                       {queueRunning ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="RotateCw" size={14} />}
                       {queueRunning ? "Повторяю..." : `Повторить ошибки (${failedCount})`}
                     </Button>
                   )}
                   {hasQueued && (
-                    <Button size="sm" onClick={runQueue} disabled={queueRunning || queue.length === 0} className="gap-1.5">
+                    <Button size="sm" onClick={runQueue} disabled={queueRunning || queue.length === 0} className="gap-1.5" data-testid="dept-func-run-queue-btn">
                       {queueRunning ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Play" size={14} />}
                       {queueRunning ? "Распознаю..." : `Распознать все (${queue.length})`}
                     </Button>
@@ -555,7 +560,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
 
       {/* Экран подтверждения распознанных функций перед сохранением */}
       {draft && (
-        <div className="border border-violet-200 rounded-xl bg-violet-50/50 p-4 space-y-3">
+        <div data-testid="dept-func-draft" className="border border-violet-200 rounded-xl bg-violet-50/50 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <div>
               <p className="font-semibold text-slate-800">AI нашёл {draft.length} функций — проверьте перед сохранением</p>
@@ -568,10 +573,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
 
           <div className="space-y-2 max-h-[480px] overflow-y-auto">
             {draft.map((item, idx) => (
-              <div key={idx} className={`border rounded-lg p-3 bg-white space-y-2 transition-opacity ${item.checked ? "border-slate-200" : "border-slate-100 opacity-50"}`}>
+              <div key={idx} data-testid="dept-func-draft-item" data-source-file={item.source_file || ""} className={`border rounded-lg p-3 bg-white space-y-2 transition-opacity ${item.checked ? "border-slate-200" : "border-slate-100 opacity-50"}`}>
                 <div className="flex items-start gap-2">
                   <input
                     type="checkbox"
+                    data-testid="dept-func-draft-item-checkbox"
                     className="mt-1.5 flex-shrink-0"
                     checked={item.checked}
                     onChange={e => updateDraftItem(idx, { checked: e.target.checked })}
@@ -579,6 +585,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                   <div className="flex-1 space-y-2 min-w-0">
                     <div className="flex gap-2">
                       <input
+                        data-testid="dept-func-draft-item-title"
                         className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-medium flex-1"
                         value={item.title}
                         onChange={e => updateDraftItem(idx, { title: e.target.value })}
@@ -620,6 +627,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               onClick={handleConfirmDraft}
               disabled={confirming || draft.every(f => !f.checked || !f.title.trim())}
               className="gap-1.5"
+              data-testid="dept-func-confirm-draft-btn"
             >
               {confirming ? <Icon name="Loader2" size={14} className="animate-spin" /> : <Icon name="Check" size={14} />}
               {confirming ? "Сохраняю..." : `Подтвердить и создать (${draft.filter(f => f.checked && f.title.trim()).length})`}
