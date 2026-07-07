@@ -25,20 +25,23 @@ const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
   planning:      { label: "Планирование",   color: "bg-indigo-100 text-indigo-700" },
 };
 
-type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean; source_file?: string };
+// source_id — внутренний стабильный идентификатор элемента очереди (не имя файла!),
+// используется для замены/сборки draft. source_file — только человекочитаемое имя для UI,
+// два разных файла с одинаковым именем НЕ должны конфликтовать между собой.
+type DraftFunction = { title: string; description: string; goals: string; category: string; dept_name: string; checked: boolean; source_id?: string; source_file?: string };
 
 type QueueFileStatus = "queued" | "processing" | "done" | "error";
 type QueueFile = { id: string; file: File; status: QueueFileStatus; error?: string; foundCount?: number; extractedFunctions?: DraftFunction[] };
 
-// Пересобирает draft в порядке файлов очереди (по имени файла), сохраняя стабильный
-// относительный порядок функций внутри одного файла. Нужно, чтобы retry ошибочных файлов
-// не ломал порядок и не терял правки пользователя в уже готовых функциях.
+// Пересобирает draft в порядке файлов очереди (по внутреннему source_id, НЕ по имени файла —
+// имена могут совпадать у разных файлов). Нужно, чтобы retry/дозагрузка не ломали порядок
+// и не теряли правки пользователя в уже готовых функциях.
 function buildOrderedDraft(items: DraftFunction[], queueSnapshot: QueueFile[]): DraftFunction[] {
   const orderIndex = new Map<string, number>();
-  queueSnapshot.forEach((item, idx) => orderIndex.set(item.file.name, idx));
+  queueSnapshot.forEach((item, idx) => orderIndex.set(item.id, idx));
   return [...items].sort((a, b) => {
-    const ia = a.source_file !== undefined ? orderIndex.get(a.source_file) ?? 9999 : 9999;
-    const ib = b.source_file !== undefined ? orderIndex.get(b.source_file) ?? 9999 : 9999;
+    const ia = a.source_id !== undefined ? orderIndex.get(a.source_id) ?? 9999 : 9999;
+    const ib = b.source_id !== undefined ? orderIndex.get(b.source_id) ?? 9999 : 9999;
     return ia - ib;
   });
 }
@@ -82,6 +85,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   // Multi-upload скриншотов: очередь файлов + обработка по одному через extract_functions
   const [queue, setQueue] = useState<QueueFile[] | null>(null);
   const [queueRunning, setQueueRunning] = useState(false);
+  // Монотонный счётчик для генерации гарантированно уникального id элемента очереди —
+  // защищает от коллизий при дозагрузке файлов с одинаковым именем в ту же миллисекунду.
+  const queueIdCounter = useRef(0);
 
   // Связанные процессы: кэш по function_id + состояния формы привязки/создания
   const [processesByFunction, setProcessesByFunction] = useState<Record<number, LinkedProcess[] | undefined>>({});
@@ -183,12 +189,16 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   };
 
   // ── Multi-upload: выбор нескольких PNG/JPG за раз ──────────────
+  // Если очередь уже существует (пользователь ранее что-то обработал) — новые файлы
+  // добавляются в конец, а не заменяют её. Уже обработанные файлы, их статусы и уже
+  // собранный/отредактированный draft при этом не трогаются.
   const handleMultiSelect = (files: FileList) => {
     const accepted: QueueFile[] = [];
-    Array.from(files).forEach((file, i) => {
+    Array.from(files).forEach((file) => {
       const isImage = file.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(file.name);
       if (isImage) {
-        accepted.push({ id: `${Date.now()}_${i}_${file.name}`, file, status: "queued" });
+        queueIdCounter.current += 1;
+        accepted.push({ id: `qf_${queueIdCounter.current}_${Date.now()}`, file, status: "queued" });
       }
     });
     if (accepted.length === 0) {
@@ -197,7 +207,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     }
     setOcrError(null);
     setConfirmResult(null);
-    setQueue(accepted);
+    setQueue(q => q ? [...q, ...accepted] : accepted);
   };
 
   const removeFromQueue = (id: string) => {
@@ -213,20 +223,21 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     });
 
   // Добавляет/заменяет функции конкретного файла в общем draft: сначала убирает старые
-  // функции этого же файла (если они там были — например, после повторного retry), затем
-  // добавляет свежие и пересобирает список в порядке файлов очереди. Так retry никогда
-  // не создаёт дублей и не трогает функции, найденные в других файлах (в т.ч. правки пользователя).
-  const addFunctionsToDraft = (sourceFileName: string, newFunctions: DraftFunction[], orderSnapshot: QueueFile[]) => {
+  // функции этого же файла по его внутреннему source_id (НЕ по имени — два файла могут
+  // называться одинаково), затем добавляет свежие и пересобирает список в порядке очереди.
+  // Так retry и дозагрузка никогда не создают дублей и не трогают функции других файлов
+  // (в т.ч. правки пользователя в уже готовых).
+  const addFunctionsToDraft = (sourceId: string, newFunctions: DraftFunction[], orderSnapshot: QueueFile[]) => {
     setDraft(d => {
       const base = d || [];
-      const withoutSource = base.filter(f => f.source_file !== sourceFileName);
+      const withoutSource = base.filter(f => f.source_id !== sourceId);
       const merged = [...withoutSource, ...newFunctions];
       return buildOrderedDraft(merged, orderSnapshot);
     });
   };
 
   // Обрабатывает один файл очереди: запрашивает OCR/AI, обновляет статус в queue и,
-  // при успехе, кладёт результат в draft. Используется и первым проходом, и retry.
+  // при успехе, кладёт результат в draft. Используется первым проходом, retry и дозагрузкой.
   // Возвращает true, если файл дал хотя бы одну функцию — нужно для итогового сообщения об ошибке.
   const processQueueFile = async (item: QueueFile, orderSnapshot: QueueFile[]): Promise<boolean> => {
     setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "processing" } : f) : q);
@@ -237,9 +248,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
 
       if (res.ok && res.functions) {
-        const extracted = res.functions.map(f => ({ ...f, dept_name: deptName, checked: true, source_file: item.file.name }));
+        const extracted = res.functions.map(f => ({ ...f, dept_name: deptName, checked: true, source_id: item.id, source_file: item.file.name }));
         setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "done", foundCount: extracted.length, extractedFunctions: extracted, error: undefined } : f) : q);
-        addFunctionsToDraft(item.file.name, extracted, orderSnapshot);
+        addFunctionsToDraft(item.id, extracted, orderSnapshot);
         return extracted.length > 0;
       } else {
         setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Не удалось распознать" } : f) : q);
@@ -251,25 +262,30 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     }
   };
 
+  // Обрабатывает только файлы со статусом "queued" — используется и первым запуском,
+  // и после дозагрузки новых файлов в уже существующую очередь (done/error не трогаются).
   const runQueue = async () => {
     if (!queue || queue.length === 0) return;
+    const toProcess = queue.filter(f => f.status === "queued");
+    if (toProcess.length === 0) return;
     setQueueRunning(true);
     const orderSnapshot = queue;
     let anyFound = false;
 
-    for (const item of orderSnapshot) {
+    for (const item of toProcess) {
       const found = await processQueueFile(item, orderSnapshot);
       anyFound = anyFound || found;
     }
 
     setQueueRunning(false);
-    if (!anyFound) {
+    const stillEmpty = !anyFound && !queue.some(f => f.status === "done");
+    if (stillEmpty) {
       setOcrError("AI не нашёл ни одной функции ни в одном из файлов. Попробуйте другие файлы или добавьте функции вручную.");
     }
   };
 
-  // Повторная обработка только файлов со статусом "error" — успешные файлы не трогаются,
-  // их функции в draft остаются как есть (в т.ч. правки пользователя).
+  // Повторная обработка только файлов со статусом "error" — успешные файлы (в т.ч. новые
+  // дозагруженные) не трогаются, их функции в draft остаются как есть.
   const retryFailedFiles = async () => {
     if (!queue || queueRunning) return;
     const failed = queue.filter(f => f.status === "error");
@@ -351,11 +367,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               size="sm"
               variant="outline"
               onClick={() => fileRef.current?.click()}
-              disabled={uploading || !!queue}
+              disabled={uploading || queueRunning}
               className="gap-2"
             >
               <Icon name="Images" size={14} />
-              Загрузить скрины
+              {queue ? "Добавить ещё скрины" : "Загрузить скрины"}
             </Button>
             <Button
               size="sm"
@@ -370,7 +386,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         </div>
         <p className="mt-3 text-xs text-slate-500 bg-slate-100 rounded-lg px-3 py-2 flex items-center gap-1.5">
           <Icon name="Info" size={13} className="flex-shrink-0" />
-          Можно выбрать сразу несколько скриншотов (PNG/JPG) — AI распознает каждый и соберёт все функции в один список. PDF-скан без текстового слоя распознаётся, если в нём 1 страница.
+          Можно выбрать сразу несколько скриншотов (PNG/JPG) — AI распознает каждый и соберёт все функции в один список. Файлы можно дозагружать в уже открытую очередь. PDF-скан без текстового слоя распознаётся, если в нём 1 страница.
         </p>
         {confirmResult && (
           <div className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
@@ -399,7 +415,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               <p className="text-sm text-muted-foreground mt-0.5">
                 {queueRunning
                   ? `Обрабатываю... (${queue.filter(f => f.status === "done" || f.status === "error").length}/${queue.length})`
-                  : "Проверьте список и запустите распознавание"}
+                  : queue.some(f => f.status === "queued")
+                    ? "Проверьте список и запустите распознавание"
+                    : "Все файлы обработаны — можно дозагрузить ещё или подтвердить результат"}
               </p>
             </div>
             <Button size="sm" variant="ghost" onClick={clearQueue} disabled={queueRunning} className="gap-1.5 flex-shrink-0">
