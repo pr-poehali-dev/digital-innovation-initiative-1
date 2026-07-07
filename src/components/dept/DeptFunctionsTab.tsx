@@ -88,6 +88,13 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   // Монотонный счётчик для генерации гарантированно уникального id элемента очереди —
   // защищает от коллизий при дозагрузке файлов с одинаковым именем в ту же миллисекунду.
   const queueIdCounter = useRef(0);
+  // Drag-and-drop поверх той же очереди: подсветка зоны + счётчик "вложенности" dragenter/dragleave
+  // (нужен, т.к. эти события всплывают от дочерних элементов и наивный toggle моргает).
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
+  // Короткое неблокирующее сообщение после drop/выбора файлов (например про пропущенные форматы) —
+  // отдельно от ocrError, чтобы не выглядеть как ошибка.
+  const [queueInfo, setQueueInfo] = useState<string | null>(null);
 
   // Связанные процессы: кэш по function_id + состояния формы привязки/создания
   const [processesByFunction, setProcessesByFunction] = useState<Record<number, LinkedProcess[] | undefined>>({});
@@ -188,26 +195,70 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     else setOcrError("Поддерживаются только PDF и DOCX");
   };
 
-  // ── Multi-upload: выбор нескольких PNG/JPG за раз ──────────────
+  // ── Multi-upload: единая точка добавления файлов в очередь ─────
+  // Используется и кнопкой выбора файлов, и drag-and-drop — чтобы валидация, генерация
+  // source_id и append-логика не расходились между двумя способами загрузки.
   // Если очередь уже существует (пользователь ранее что-то обработал) — новые файлы
   // добавляются в конец, а не заменяют её. Уже обработанные файлы, их статусы и уже
   // собранный/отредактированный draft при этом не трогаются.
-  const handleMultiSelect = (files: FileList) => {
+  const appendFilesToQueue = (files: FileList | File[]) => {
+    const list = Array.from(files);
     const accepted: QueueFile[] = [];
-    Array.from(files).forEach((file) => {
+    let skipped = 0;
+    list.forEach((file) => {
       const isImage = file.type.startsWith("image/") || /\.(png|jpe?g)$/i.test(file.name);
       if (isImage) {
         queueIdCounter.current += 1;
         accepted.push({ id: `qf_${queueIdCounter.current}_${Date.now()}`, file, status: "queued" });
+      } else {
+        skipped++;
       }
     });
+
+    setConfirmResult(null);
+
     if (accepted.length === 0) {
       setOcrError("Выберите файлы в формате PNG или JPG");
+      setQueueInfo(null);
       return;
     }
+
     setOcrError(null);
-    setConfirmResult(null);
+    setQueueInfo(
+      skipped > 0
+        ? `Добавлено ${accepted.length} файл${accepted.length === 1 ? "" : accepted.length < 5 ? "а" : "ов"}, пропущено ${skipped} неподдерживаемых`
+        : null
+    );
     setQueue(q => q ? [...q, ...accepted] : accepted);
+  };
+
+  const handleMultiSelect = (files: FileList) => appendFilesToQueue(files);
+
+  // ── Drag-and-drop поверх той же очереди ─────────────────────────
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (queueRunning) return;
+    dragCounter.current += 1;
+    if (e.dataTransfer.types.includes("Files")) setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setIsDragOver(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    // Обязателен preventDefault, иначе браузер откроет файл вместо drop в приложение.
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setIsDragOver(false);
+    if (queueRunning) return;
+    if (e.dataTransfer.files?.length) appendFilesToQueue(e.dataTransfer.files);
   };
 
   const removeFromQueue = (id: string) => {
@@ -349,11 +400,29 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
 
   return (
     <div className="space-y-6">
-      {/* Загрузка положения о подразделении — DOCX или PDF с текстовым слоем */}
-      <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 bg-slate-50">
+      {/* Загрузка положения о подразделении — скриншот (в т.ч. drag-and-drop), DOCX или PDF */}
+      <div
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        className={`border-2 border-dashed rounded-xl p-6 transition-colors ${
+          queueRunning
+            ? "border-slate-200 bg-slate-50 opacity-60"
+            : isDragOver
+              ? "border-blue-400 bg-blue-50"
+              : "border-slate-200 bg-slate-50"
+        }`}
+      >
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="flex-1">
-            <p className="font-medium text-slate-800">Загрузить положение о подразделении</p>
+            <p className="font-medium text-slate-800">
+              {isDragOver
+                ? "Отпустите файлы здесь"
+                : queue
+                  ? "Перетащите ещё скриншоты сюда или нажмите «Добавить ещё скрины»"
+                  : "Перетащите сюда скриншоты или нажмите, чтобы выбрать"}
+            </p>
             <p className="text-sm text-muted-foreground mt-0.5">AI распознает текст и автоматически извлечёт функции и цели — скриншот, DOCX или PDF</p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -386,8 +455,14 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         </div>
         <p className="mt-3 text-xs text-slate-500 bg-slate-100 rounded-lg px-3 py-2 flex items-center gap-1.5">
           <Icon name="Info" size={13} className="flex-shrink-0" />
-          Можно выбрать сразу несколько скриншотов (PNG/JPG) — AI распознает каждый и соберёт все функции в один список. Файлы можно дозагружать в уже открытую очередь. PDF-скан без текстового слоя распознаётся, если в нём 1 страница.
+          Можно выбрать или перетащить сразу несколько скриншотов (PNG/JPG) — AI распознает каждый и соберёт все функции в один список. Файлы можно дозагружать в уже открытую очередь. PDF-скан без текстового слоя распознаётся, если в нём 1 страница.
         </p>
+        {queueInfo && (
+          <div className="mt-3 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2 flex items-center gap-2">
+            <Icon name="Info" size={14} />
+            {queueInfo}
+          </div>
+        )}
         {confirmResult && (
           <div className="mt-3 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2 flex items-center gap-2">
             <Icon name="CheckCircle" size={14} />
