@@ -258,9 +258,9 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": "image_b64 или file_b64 required"}, 400)
 
             # Распознавание изображений (скрины и PDF-сканы без текстового слоя) временно
-            # отключено — API-ключ имеет scope только yc.ai.languageModels.execute, для Vision
-            # нужен ключ с областью действия yc.ai.vision.execute. Включить обратно: вернуть
-            # вызовы yandex_vision_ocr для image_b64 и для PDF-скана ниже (см. историю правок).
+            # отключено — сервисному аккаунту не хватает IAM-роли ai.vision.user (403 Forbidden
+            # от Yandex Vision API). Включить обратно: вернуть вызовы yandex_vision_ocr для
+            # image_b64 и для PDF-скана ниже (см. историю правок).
             if image_b64:
                 return cors({"ok": False, "error": "Распознавание изображений временно недоступно. Загрузите положение в формате DOCX или PDF с текстовым слоем."}, 400)
 
@@ -273,8 +273,8 @@ def handler(event: dict, context) -> dict:
                 ocr_text = extract_text_from_docx(file_bytes)
                 if not ocr_text.strip():
                     return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
-            else:
-                return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
+                else:
+                    return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
 
             system = """Ты эксперт по организационному анализу. 
 Твоя задача — извлечь из текста положения о подразделении структурированный список функций и целей.
