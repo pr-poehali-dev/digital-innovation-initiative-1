@@ -88,6 +88,37 @@ const ACTION_LABELS: Record<string, string> = {
 // Вынесено на уровень модуля, чтобы одна и та же логика использовалась и в счётчиках
 // управленческого обзора, и в preset-фильтрах списков — числа всегда совпадают.
 const isEmptyField = (v?: string | null) => !v || !v.trim();
+
+// Empty-state для вкладок, доступных только в режиме "Полигон" — на случай прямой
+// ссылки/истории браузера при выключенном режиме (список вкладок и контент не должны
+// расходиться: если вкладки в списке нет, контент тоже не должен молча отрисовываться).
+function PolygonOnlyNotice({ isOwner, onEnable, switching }: { isOwner: boolean; onEnable: () => void; switching: boolean }) {
+  return (
+    <div className="flex flex-col items-center text-center gap-3 py-14 px-4">
+      <div className="w-12 h-12 rounded-xl bg-violet-50 flex items-center justify-center">
+        <Icon name="Layers" size={22} className="text-violet-600" />
+      </div>
+      <div className="max-w-md space-y-1">
+        <p className="font-semibold text-slate-800">Этот раздел доступен в режиме «Полигон»</p>
+        <p className="text-sm text-muted-foreground">
+          {isOwner
+            ? "Включите режим «Полигон», чтобы открыть функции подразделения, их автоматизацию и связь с процессами."
+            : "Включить режим «Полигон» может только владелец проекта — попросите его сделать это."}
+        </p>
+      </div>
+      {isOwner && (
+        <button
+          onClick={onEnable}
+          disabled={switching}
+          className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+        >
+          <Icon name="Layers" size={15} />
+          {switching ? "Переключаю…" : "Включить полигон"}
+        </button>
+      )}
+    </div>
+  );
+}
 const PRE_LAUNCH_STATUSES = ["preparation", "approval", "in_plan"];
 
 type OverviewPreset = "stalled" | "launch_ready" | "without_initiative" | "without_hypothesis" | "without_solution" | "without_validation";
@@ -1022,19 +1053,31 @@ export default function ProjectPage() {
         </div>
 
         {project?.workspace_mode !== "polygon" && (
-          <div className="flex items-start gap-2.5 rounded-lg border border-violet-200 bg-violet-50 px-3.5 py-3 mb-4 sm:mb-6">
-            <Icon name="Layers" size={16} className="text-violet-600 flex-shrink-0 mt-0.5" />
-            <p className="text-xs sm:text-sm text-violet-900 leading-relaxed">
-              {project?.my_role === "owner" ? (
-                <>
-                  Включите режим <strong>«Полигон»</strong> кнопкой выше, чтобы открыть разделы «Функции подразделения», «Автоматизация функций» и «Функции и процессы».
-                </>
-              ) : (
-                <>
-                  Разделы «Функции подразделения», «Автоматизация функций» и «Функции и процессы» появятся в режиме <strong>«Полигон»</strong>. Включить его может только владелец проекта — попросите его сделать это.
-                </>
-              )}
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 rounded-lg border border-violet-200 bg-violet-50 px-3.5 py-3 mb-4 sm:mb-6">
+            <div className="flex items-start gap-2.5 flex-1">
+              <Icon name="Layers" size={16} className="text-violet-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs sm:text-sm text-violet-900 leading-relaxed">
+                {project?.my_role === "owner" ? (
+                  <>
+                    Включите режим <strong>«Полигон»</strong>, чтобы открыть разделы «Функции подразделения», «Автоматизация функций» и «Функции и процессы».
+                  </>
+                ) : (
+                  <>
+                    Разделы «Функции подразделения», «Автоматизация функций» и «Функции и процессы» появятся в режиме <strong>«Полигон»</strong>. Включить его может только владелец проекта — попросите его сделать это.
+                  </>
+                )}
+              </p>
+            </div>
+            {project?.my_role === "owner" && (
+              <button
+                onClick={toggleWorkspaceMode}
+                disabled={switchingMode}
+                className="flex-shrink-0 flex items-center justify-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
+              >
+                <Icon name="Layers" size={14} />
+                {switchingMode ? "Переключаю…" : "Включить сейчас"}
+              </button>
+            )}
           </div>
         )}
 
@@ -2655,25 +2698,37 @@ export default function ProjectPage() {
         )}
 
         {/* ── Функции подразделения (контур "Оргструктура и цифровизация Блока") ── */}
+        {/* Доступно только в режиме "Полигон" — если пользователь попал сюда по прямой
+            ссылке/истории браузера при выключенном режиме, показываем понятный
+            empty-state вместо содержимого вкладки (иначе контент и список вкладок
+            расходятся: вкладки в списке нет, а данные всё равно отрисовались бы). */}
         {tab === "dept-functions" && (
-          <DeptFunctionsTab
-            projectId={projectId}
-            functions={deptFunctions}
-            loading={deptFunctionsLoading}
-            onReload={loadDeptFunctions}
-            allProcesses={processes}
-            onNavigateToProcess={() => setTab("process")}
-          />
+          project?.workspace_mode === "polygon" ? (
+            <DeptFunctionsTab
+              projectId={projectId}
+              functions={deptFunctions}
+              loading={deptFunctionsLoading}
+              onReload={loadDeptFunctions}
+              allProcesses={processes}
+              onNavigateToProcess={() => setTab("process")}
+            />
+          ) : (
+            <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
+          )
         )}
 
         {/* ── Автоматизация функций подразделения ── */}
         {tab === "dept-automation" && (
-          <DeptAutomationTab
-            projectId={projectId}
-            automation={deptAutomation}
-            loading={deptAutomationLoading}
-            onReload={loadDeptAutomation}
-          />
+          project?.workspace_mode === "polygon" ? (
+            <DeptAutomationTab
+              projectId={projectId}
+              automation={deptAutomation}
+              loading={deptAutomationLoading}
+              onReload={loadDeptAutomation}
+            />
+          ) : (
+            <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
+          )
         )}
 
         {/* ── Процессы ── */}
