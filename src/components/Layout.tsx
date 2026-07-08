@@ -7,7 +7,7 @@ import { NAV_SECTIONS, NAV_SECONDARY, MOBILE_NAV, type NavSection, type NavItem 
 import SeoMeta from "@/components/SeoMeta";
 import AiChatPanel from "@/components/AiChatPanel";
 import PullToRefresh from "@/components/PullToRefresh";
-import { BUILD_COMMIT } from "@/lib/build-info";
+import { BUILD_HASH } from "@/lib/build-info";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -322,8 +322,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )}
           </div>
           {!collapsed && (
-            <div className="px-3 pt-1 text-[9px] text-slate-300 select-none" title="Версия сборки фронтенда">
-              build {BUILD_COMMIT}
+            <div className="px-3 pt-1 text-[9px] text-slate-300 select-none" title="Хеш реально загруженного JS-бандла (обновляется само на каждой сборке)">
+              build {BUILD_HASH}
             </div>
           )}
         </div>
@@ -341,7 +341,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <span className="text-white font-bold text-xs">Т</span>
                 </div>
                 <span className="font-bold text-sm text-slate-900">Траектория</span>
-                <span className="text-[9px] text-slate-300 select-none" title="Версия сборки фронтенда">{BUILD_COMMIT}</span>
+                <span className="text-[9px] text-slate-300 select-none" title="Хеш реально загруженного JS-бандла">{BUILD_HASH}</span>
               </Link>
               {canGoBack && (
                 <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 transition-colors px-2 py-1.5 rounded-lg hover:bg-slate-100">

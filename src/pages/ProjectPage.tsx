@@ -1021,6 +1021,23 @@ export default function ProjectPage() {
           </div>
         </div>
 
+        {project?.workspace_mode !== "polygon" && (
+          <div className="flex items-start gap-2.5 rounded-lg border border-violet-200 bg-violet-50 px-3.5 py-3 mb-4 sm:mb-6">
+            <Icon name="Layers" size={16} className="text-violet-600 flex-shrink-0 mt-0.5" />
+            <p className="text-xs sm:text-sm text-violet-900 leading-relaxed">
+              {project?.my_role === "owner" ? (
+                <>
+                  Включите режим <strong>«Полигон»</strong> кнопкой выше, чтобы открыть разделы «Функции подразделения», «Автоматизация функций» и «Функции и процессы».
+                </>
+              ) : (
+                <>
+                  Разделы «Функции подразделения», «Автоматизация функций» и «Функции и процессы» появятся в режиме <strong>«Полигон»</strong>. Включить его может только владелец проекта — попросите его сделать это.
+                </>
+              )}
+            </p>
+          </div>
+        )}
+
         {project?.workspace_mode === "polygon" ? (
           <HelpPanel
             title="Как работать с полигоном"
