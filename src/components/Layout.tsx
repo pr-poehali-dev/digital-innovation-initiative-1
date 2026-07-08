@@ -6,6 +6,7 @@ import GlobalSearchDialog from "@/components/GlobalSearchDialog";
 import { NAV_SECTIONS, NAV_SECONDARY, MOBILE_NAV, type NavSection, type NavItem } from "@/lib/routes";
 import SeoMeta from "@/components/SeoMeta";
 import AiChatPanel from "@/components/AiChatPanel";
+import PullToRefresh from "@/components/PullToRefresh";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -377,7 +378,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 pb-20 lg:pb-6 min-w-0 overflow-x-hidden">{children}</main>
+        <main className="flex-1 pb-20 lg:pb-6 min-w-0 overflow-x-hidden">
+          <PullToRefresh>{children}</PullToRefresh>
+        </main>
       </div>
 
       {/* ── Mobile bottom nav ── */}
