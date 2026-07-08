@@ -159,9 +159,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     setUploading(true);
     setOcrError(null);
     setConfirmResult(null);
+    let b64: string;
+    let mime: string;
     try {
-      let b64: string;
-      let mime: string;
       if (kind === "image") {
         const compressed = await compressImageToBase64(file);
         b64 = compressed.b64;
@@ -170,28 +170,34 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         b64 = await fileToBase64(file);
         mime = file.type;
       }
-      try {
-        const res = await deptFunctionsApi.extractFunctions(
-          kind === "image"
-            ? { project_id: projectId, image_b64: b64, image_mime: mime, dept_name: deptName }
-            : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
-        ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
-        if (res.ok && res.functions) {
-          if (res.functions.length === 0) {
-            setOcrError("AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
-          } else {
-            setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
-          }
-        } else {
-          setOcrError(res.error || "Не удалось распознать документ");
-        }
-      } catch {
-        setOcrError("Не удалось распознать документ. Попробуйте ещё раз.");
-      }
+    } catch (err) {
+      setOcrError(
+        err instanceof Error && err.message === "HEIC_UNSUPPORTED"
+          ? "Формат HEIC не поддерживается. Сохраните фото как JPEG или PNG (в настройках камеры iPhone: Настройки → Камера → Форматы → Наиболее совместимые) и загрузите снова."
+          : "Не удалось обработать файл. Попробуйте другой файл."
+      );
       setUploading(false);
-    } catch {
-      setUploading(false);
+      return;
     }
+    try {
+      const res = await deptFunctionsApi.extractFunctions(
+        kind === "image"
+          ? { project_id: projectId, image_b64: b64, image_mime: mime, dept_name: deptName }
+          : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
+      ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+      if (res.ok && res.functions) {
+        if (res.functions.length === 0) {
+          setOcrError("AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
+        } else {
+          setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
+        }
+      } else {
+        setOcrError(res.error || "Не удалось распознать документ");
+      }
+    } catch {
+      setOcrError("Не удалось распознать документ. Попробуйте ещё раз.");
+    }
+    setUploading(false);
   };
 
   const handleDocSelect = (file: File) => {
@@ -285,6 +291,13 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   const MAX_UPLOAD_B64_LEN = 850_000;
   const compressImageToBase64 = (file: File): Promise<{ b64: string; mime: string }> =>
     new Promise((resolve, reject) => {
+      // HEIC/HEIF (стандартный формат фото на iPhone) браузер не умеет декодировать через
+      // <img>/canvas — вместо непонятной "ошибки обработки файла" сразу даём внятный текст.
+      const isHeic = /image\/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+      if (isHeic) {
+        reject(new Error("HEIC_UNSUPPORTED"));
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
@@ -351,8 +364,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Не удалось распознать" } : f) : q);
         return false;
       }
-    } catch {
-      setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: "Ошибка обработки файла" } : f) : q);
+    } catch (err) {
+      const message = err instanceof Error && err.message === "HEIC_UNSUPPORTED"
+        ? "Формат HEIC не поддерживается — сохраните как JPEG/PNG"
+        : "Ошибка обработки файла";
+      setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: message } : f) : q);
       return false;
     }
   };
