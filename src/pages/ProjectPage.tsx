@@ -972,21 +972,27 @@ export default function ProjectPage() {
             )}
           </div>
           <div className="flex flex-wrap gap-1.5 sm:flex-shrink-0 sm:justify-end">
-            {project.my_role === "owner" && (
-              <button
-                onClick={toggleWorkspaceMode}
-                disabled={switchingMode}
-                className={`flex items-center justify-center gap-1.5 border px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap ${
-                  project.workspace_mode === "polygon"
-                    ? "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
-                    : "border-slate-300 hover:bg-slate-50 text-slate-700"
-                }`}
-                title={project.workspace_mode === "polygon" ? "Выключить режим полигона (вернуть обычные вкладки кейса)" : "Включить режим полигона — откроет вкладки «Функции подразделения», «Автоматизация функций» и «Функции и процессы»"}
-              >
-                <Icon name="Layers" size={15} className="flex-shrink-0" />
-                <span>{switchingMode ? "Переключаю…" : "Полигон"}</span>
-              </button>
-            )}
+            <button
+              onClick={project.my_role === "owner" ? toggleWorkspaceMode : undefined}
+              disabled={switchingMode || project.my_role !== "owner"}
+              className={`flex items-center justify-center gap-1.5 border px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                project.my_role !== "owner"
+                  ? "opacity-50 cursor-not-allowed border-slate-200 text-slate-400"
+                  : project.workspace_mode === "polygon"
+                    ? "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+                    : "border-slate-300 hover:bg-slate-50 text-slate-700 disabled:opacity-50"
+              }`}
+              title={
+                project.my_role !== "owner"
+                  ? "Переключать режим полигона может только владелец проекта"
+                  : project.workspace_mode === "polygon"
+                    ? "Выключить режим полигона (вернуть обычные вкладки кейса)"
+                    : "Включить режим полигона — откроет вкладки «Функции подразделения», «Автоматизация функций» и «Функции и процессы»"
+              }
+            >
+              <Icon name="Layers" size={15} className="flex-shrink-0" />
+              <span>{switchingMode ? "Переключаю…" : "Полигон"}</span>
+            </button>
             <Link
               to={`/cabinet/project/${projectId}/audit`}
               className="flex items-center justify-center gap-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap"
