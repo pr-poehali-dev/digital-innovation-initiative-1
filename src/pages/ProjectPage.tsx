@@ -190,6 +190,18 @@ export default function ProjectPage() {
   const urlPreset = searchParams.get("preset");
 
   const [project, setProject] = useState<Project | null>(null);
+  const tabScrollRef = useRef<HTMLDivElement | null>(null);
+  const [tabScrollState, setTabScrollState] = useState({ atStart: true, atEnd: true, scrollable: false });
+  const updateTabScrollState = () => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    const scrollable = el.scrollWidth > el.clientWidth + 2;
+    setTabScrollState({
+      atStart: el.scrollLeft <= 2,
+      atEnd: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2,
+      scrollable,
+    });
+  };
   const [docs, setDocs] = useState<Document[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tab, setTabState] = useState<TabKey>(
@@ -537,6 +549,16 @@ export default function ProjectPage() {
     } catch { /* silent */ }
     finally { setAiLoading(false); }
   };
+
+  useEffect(() => {
+    updateTabScrollState();
+    window.addEventListener("resize", updateTabScrollState);
+    return () => window.removeEventListener("resize", updateTabScrollState);
+  }, [
+    project?.workspace_mode, deptFunctions.length, deptAutomation.length, processes.length,
+    solutions.length, painPoints.length, aiOpportunities.length, hypotheses.length,
+    benchmarks.length, initiatives.length, artifacts.length, docs.length, tasks.length,
+  ]);
 
   useEffect(() => {
     load(); loadWorkbench(); analytics.workspaceOpened(projectId, "overview");
@@ -1101,8 +1123,18 @@ export default function ProjectPage() {
         )}
 
         {/* Вкладки — горизонтальный скролл на мобильном, перенос на десктопе */}
-        <div className="mb-4 sm:mb-6 border-b border-slate-200 -mx-3 px-3 sm:mx-0 sm:px-0">
-          <div className="flex flex-nowrap sm:flex-wrap gap-x-0 gap-y-0 overflow-x-auto sm:overflow-visible scrollbar-none">
+        <div className="relative mb-4 sm:mb-6 border-b border-slate-200 -mx-3 px-3 sm:mx-0 sm:px-0">
+          {tabScrollState.scrollable && !tabScrollState.atStart && (
+            <div className="pointer-events-none absolute left-3 sm:left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-slate-50 to-transparent z-10 sm:hidden" />
+          )}
+          {tabScrollState.scrollable && !tabScrollState.atEnd && (
+            <div className="pointer-events-none absolute right-3 sm:right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-50 to-transparent z-10 sm:hidden" />
+          )}
+          <div
+            ref={tabScrollRef}
+            onScroll={updateTabScrollState}
+            className="flex flex-nowrap sm:flex-wrap gap-x-0 gap-y-0 h-11 sm:h-auto items-center overflow-x-auto sm:overflow-visible scrollbar-none overscroll-x-contain touch-pan-x"
+          >
             {((() => {
               const isPolygon = project?.workspace_mode === "polygon";
               return isPolygon ? [
