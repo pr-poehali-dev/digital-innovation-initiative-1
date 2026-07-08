@@ -160,30 +160,35 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     setOcrError(null);
     setConfirmResult(null);
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const b64 = (e.target?.result as string).split(",")[1];
-        try {
-          const res = await deptFunctionsApi.extractFunctions(
-            kind === "image"
-              ? { project_id: projectId, image_b64: b64, image_mime: file.type || "image/png", dept_name: deptName }
-              : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
-          ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
-          if (res.ok && res.functions) {
-            if (res.functions.length === 0) {
-              setOcrError("AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
-            } else {
-              setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
-            }
+      let b64: string;
+      let mime: string;
+      if (kind === "image") {
+        const compressed = await compressImageToBase64(file);
+        b64 = compressed.b64;
+        mime = compressed.mime;
+      } else {
+        b64 = await fileToBase64(file);
+        mime = file.type;
+      }
+      try {
+        const res = await deptFunctionsApi.extractFunctions(
+          kind === "image"
+            ? { project_id: projectId, image_b64: b64, image_mime: mime, dept_name: deptName }
+            : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
+        ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+        if (res.ok && res.functions) {
+          if (res.functions.length === 0) {
+            setOcrError("AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
           } else {
-            setOcrError(res.error || "Не удалось распознать документ");
+            setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
           }
-        } catch {
-          setOcrError("Не удалось распознать документ. Попробуйте ещё раз.");
+        } else {
+          setOcrError(res.error || "Не удалось распознать документ");
         }
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
+      } catch {
+        setOcrError("Не удалось распознать документ. Попробуйте ещё раз.");
+      }
+      setUploading(false);
     } catch {
       setUploading(false);
     }
@@ -274,6 +279,44 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       reader.readAsDataURL(file);
     });
 
+  // Фото с телефона обычно весят 1-4 МБ — облачная функция принимает запросы примерно
+  // до 1 МБ, поэтому большие снимки нужно сжать перед отправкой на распознавание.
+  // Уменьшаем разрешение и подбираем качество JPEG так, чтобы уложиться в лимит.
+  const MAX_UPLOAD_B64_LEN = 850_000;
+  const compressImageToBase64 = (file: File): Promise<{ b64: string; mime: string }> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIM = 1800;
+          let { width, height } = img;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            const scale = MAX_DIM / Math.max(width, height);
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { reject(new Error("canvas unsupported")); return; }
+          ctx.drawImage(img, 0, 0, width, height);
+          let quality = 0.85;
+          let dataUrl = canvas.toDataURL("image/jpeg", quality);
+          while (dataUrl.length > MAX_UPLOAD_B64_LEN && quality > 0.35) {
+            quality -= 0.1;
+            dataUrl = canvas.toDataURL("image/jpeg", quality);
+          }
+          resolve({ b64: dataUrl.split(",")[1], mime: "image/jpeg" });
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
   // Добавляет/заменяет функции конкретного файла в общем draft: сначала убирает старые
   // функции этого же файла по его внутреннему source_id (НЕ по имени — два файла могут
   // называться одинаково), затем добавляет свежие и пересобирает список в порядке очереди.
@@ -294,9 +337,9 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   const processQueueFile = async (item: QueueFile, orderSnapshot: QueueFile[]): Promise<boolean> => {
     setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "processing" } : f) : q);
     try {
-      const b64 = await fileToBase64(item.file);
+      const { b64, mime } = await compressImageToBase64(item.file);
       const res = await deptFunctionsApi.extractFunctions({
-        project_id: projectId, image_b64: b64, image_mime: item.file.type || "image/png", dept_name: deptName,
+        project_id: projectId, image_b64: b64, image_mime: mime, dept_name: deptName,
       }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
 
       if (res.ok && res.functions) {
