@@ -166,7 +166,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         try {
           const res = await deptFunctionsApi.extractFunctions(
             kind === "image"
-              ? { project_id: projectId, image_b64: b64, dept_name: deptName }
+              ? { project_id: projectId, image_b64: b64, image_mime: file.type || "image/png", dept_name: deptName }
               : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
           ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
           if (res.ok && res.functions) {
@@ -296,7 +296,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     try {
       const b64 = await fileToBase64(item.file);
       const res = await deptFunctionsApi.extractFunctions({
-        project_id: projectId, image_b64: b64, dept_name: deptName,
+        project_id: projectId, image_b64: b64, image_mime: item.file.type || "image/png", dept_name: deptName,
       }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
 
       if (res.ok && res.functions) {

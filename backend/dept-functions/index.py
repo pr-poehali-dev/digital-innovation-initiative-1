@@ -259,6 +259,11 @@ def handler(event: dict, context) -> dict:
         # ── AI извлечение функций из скрина / документа (PDF, DOCX) ─
         if method == "POST" and action == "extract_functions":
             image_b64 = body.get("image_b64", "")
+            image_mime = (body.get("image_mime") or "image/png").lower()
+            if image_mime not in ("image/png", "image/jpeg", "image/jpg"):
+                image_mime = "image/png"
+            if image_mime == "image/jpg":
+                image_mime = "image/jpeg"
             file_b64 = body.get("file_b64", "")
             file_type = (body.get("file_type") or "").lower()
             dept_name = (body.get("dept_name") or "").strip()
@@ -267,7 +272,7 @@ def handler(event: dict, context) -> dict:
 
             try:
                 if image_b64:
-                    ocr_text = yandex_vision_ocr(image_b64, "image/png")
+                    ocr_text = yandex_vision_ocr(image_b64, image_mime)
                 else:
                     try:
                         file_bytes = base64.b64decode(file_b64, validate=True)
