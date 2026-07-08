@@ -941,7 +941,7 @@ export default function ProjectPage() {
           <span className="text-foreground font-medium truncate max-w-[200px] sm:max-w-none">{project.title}</span>
         </div>
 
-        <div className="flex items-start justify-between mb-4 sm:mb-6 gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-4 sm:mb-6 gap-2.5 sm:gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Кейс трансформации</p>
             <h1 className="text-lg sm:text-2xl font-bold leading-tight truncate">{project.title}</h1>
@@ -949,44 +949,45 @@ export default function ProjectPage() {
               <p className="text-muted-foreground text-xs sm:text-sm mt-0.5 sm:mt-1 line-clamp-2 sm:max-w-2xl">{project.description}</p>
             )}
           </div>
-          <div className="flex gap-1.5 flex-shrink-0">
+          <div className="flex flex-wrap gap-1.5 sm:flex-shrink-0 sm:justify-end">
             {project.my_role === "owner" && (
               <button
                 onClick={toggleWorkspaceMode}
                 disabled={switchingMode}
-                className={`flex items-center justify-center gap-2 border p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                className={`flex items-center justify-center gap-1.5 border px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap ${
                   project.workspace_mode === "polygon"
                     ? "border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100"
                     : "border-slate-300 hover:bg-slate-50 text-slate-700"
                 }`}
                 title={project.workspace_mode === "polygon" ? "Выключить режим полигона (вернуть обычные вкладки кейса)" : "Включить режим полигона — откроет вкладки «Функции подразделения», «Автоматизация функций» и «Функции и процессы»"}
               >
-                <Icon name="Layers" size={16} />
-                <span className="hidden sm:inline">{switchingMode ? "Переключаю..." : project.workspace_mode === "polygon" ? "Режим: Полигон" : "Включить полигон"}</span>
+                <Icon name="Layers" size={15} className="flex-shrink-0" />
+                <span>{switchingMode ? "Переключаю…" : "Полигон"}</span>
               </button>
             )}
             <Link
               to={`/cabinet/project/${projectId}/audit`}
-              className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center justify-center gap-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap"
               title="Аудит"
             >
-              <Icon name="ShieldCheck" size={16} />
-              <span className="hidden sm:inline">Аудит</span>
+              <Icon name="ShieldCheck" size={15} className="flex-shrink-0" />
+              <span>Аудит</span>
             </Link>
             <Link
               to={`/cabinet/project/${projectId}/search`}
-              className="flex items-center justify-center gap-2 border border-slate-300 hover:bg-slate-50 text-slate-700 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center justify-center gap-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap"
               title="Поиск"
             >
-              <Icon name="Search" size={16} />
-              <span className="hidden sm:inline">Поиск</span>
+              <Icon name="Search" size={15} className="flex-shrink-0" />
+              <span>Поиск</span>
             </Link>
             <Link
               to={`/cabinet/project/${projectId}/new-task`}
-              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-2 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors whitespace-nowrap"
               title="Новое задание"
             >
-              <Icon name="Plus" size={16} />
+              <Icon name="Plus" size={15} className="flex-shrink-0" />
+              <span className="sm:hidden">Задание</span>
               <span className="hidden sm:inline">Новое задание</span>
             </Link>
           </div>
@@ -1099,9 +1100,9 @@ export default function ProjectPage() {
           />
         )}
 
-        {/* Вкладки — flex-wrap, без скролла */}
-        <div className="mb-4 sm:mb-6 border-b border-slate-200">
-          <div className="flex flex-wrap gap-x-0 gap-y-0">
+        {/* Вкладки — горизонтальный скролл на мобильном, перенос на десктопе */}
+        <div className="mb-4 sm:mb-6 border-b border-slate-200 -mx-3 px-3 sm:mx-0 sm:px-0">
+          <div className="flex flex-nowrap sm:flex-wrap gap-x-0 gap-y-0 overflow-x-auto sm:overflow-visible scrollbar-none">
             {((() => {
               const isPolygon = project?.workspace_mode === "polygon";
               return isPolygon ? [
@@ -1137,7 +1138,7 @@ export default function ProjectPage() {
                 key={t.key}
                 data-tab={t.key}
                 onClick={() => setTab(t.key as TabKey)}
-                className={`whitespace-nowrap px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px ${
+                className={`flex-shrink-0 whitespace-nowrap px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px ${
                   tab === t.key
                     ? "text-slate-900 border-slate-800"
                     : "text-muted-foreground hover:text-foreground border-transparent"
