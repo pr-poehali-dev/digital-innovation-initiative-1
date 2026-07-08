@@ -2772,7 +2772,7 @@ export default function ProjectPage() {
                     )}
                     {b.source_name && (
                       <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        📎 <span className="truncate max-w-[140px]">{b.source_name}</span>
+                        📎 <span className="truncate max-w-[100px] sm:max-w-[140px]">{b.source_name}</span>
                         {b.industry && <span className="text-slate-300">· {b.industry}</span>}
                       </span>
                     )}

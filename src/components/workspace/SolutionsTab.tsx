@@ -148,7 +148,7 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
       {/* Loading state */}
       {loading && (
         <div className="space-y-2">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[0, 1, 2, 3].map(i => (
               <div key={i} className="bg-white border border-slate-200 rounded-xl p-3 h-14 animate-pulse" />
             ))}
@@ -161,7 +161,7 @@ export default function SolutionsTab({ projectId, solutions, loading = false, on
 
       {/* Сводка по статусам */}
       {!loading && solutions.length > 0 && (
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {Object.entries(STATUS_CONFIG).map(([k, cfg]) => (
             <div key={k} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
               <div className={`text-lg font-bold ${statusCounts[k] ? "text-slate-900" : "text-slate-300"}`}>
