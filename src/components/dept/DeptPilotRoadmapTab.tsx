@@ -2,10 +2,17 @@ import { useEffect, useState } from "react";
 import { deptFunctionsApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/use-toast";
+import { usePersistentSearchState } from "@/hooks/usePersistentSearchState";
+
+type OrgUnit = { id: number; code: string; name: string };
 
 type WaveFn = {
   function_id: number; function_name: string; org_unit_name: string | null;
@@ -49,14 +56,34 @@ export default function DeptPilotRoadmapTab({ projectId }: Props) {
   const [data, setData] = useState<Roadmap | null>(null);
   const [loading, setLoading] = useState(true);
   const [wave, setWave] = useState<Wave | null>(null);
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
+
+  // Персистентный scope дорожной карты — ОТДЕЛЬНЫЕ ключи от «Сводки решений» (независимая память вкладок)
+  const { state: view, setState: setView, reset: resetView } = usePersistentSearchState<{ ps: string; pou: string }>({
+    storageKey: `cabinet:roadmap:${projectId}:state`,
+    defaults: { ps: "project", pou: "" },
+    paramKeys: { ps: "ps", pou: "pou" },
+    validate: (raw) => {
+      const ps = raw.ps === "unit" ? "unit" : "project";
+      const pou = ps === "unit" && raw.pou && /^\d+$/.test(raw.pou) ? raw.pou : "";
+      return { ps, pou };
+    },
+  });
+
+  useEffect(() => {
+    deptFunctionsApi.getOrgTree(projectId)
+      .then((d: { nodes?: OrgUnit[] }) => setOrgUnits(d.nodes || []))
+      .catch(() => { /* переключатель scope не критичен */ });
+  }, [projectId]);
 
   useEffect(() => {
     setLoading(true);
-    deptFunctionsApi.getPilotRoadmap(projectId)
+    const orgUnitId = view.ps === "unit" && view.pou ? Number(view.pou) : undefined;
+    deptFunctionsApi.getPilotRoadmap(projectId, orgUnitId)
       .then((d: Roadmap & { ok: boolean }) => setData(d))
       .catch((e: Error) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }))
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, view.ps, view.pou]);
 
   if (loading) return <div className="text-sm text-slate-400 py-10 text-center">Загрузка дорожной карты…</div>;
   if (!data) return null;
@@ -72,6 +99,37 @@ export default function DeptPilotRoadmapTab({ projectId }: Props) {
         </p>
       </div>
 
+      {/* Scope: весь проект / конкретная оргединица (независимо от «Сводки решений») */}
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <span className="text-slate-400">Область:</span>
+        <button
+          onClick={() => setView({ ps: "project", pou: "" })}
+          className={`px-2.5 py-1 rounded border ${view.ps === "project" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}
+        >
+          Весь проект
+        </button>
+        <button
+          onClick={() => setView({ ps: "unit", pou: view.pou || (orgUnits[0] ? String(orgUnits[0].id) : "") })}
+          disabled={orgUnits.length === 0}
+          className={`px-2.5 py-1 rounded border disabled:opacity-40 ${view.ps === "unit" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}
+        >
+          Оргединица
+        </button>
+        {view.ps === "unit" && orgUnits.length > 0 && (
+          <Select value={view.pou} onValueChange={(v) => setView({ pou: v })}>
+            <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Выберите узел…" /></SelectTrigger>
+            <SelectContent>
+              {orgUnits.map((u) => <SelectItem key={u.id} value={String(u.id)} className="text-xs">{u.code} · {u.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {view.ps !== "project" && (
+          <button onClick={resetView} className="ml-1 text-slate-400 hover:text-slate-600 underline underline-offset-2 inline-flex items-center gap-0.5">
+            <Icon name="X" size={11} /> Сбросить
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Kpi label="Готовы к пилоту" value={data.summary.pilot_ready_count} tone="text-emerald-700" />
         <Kpi label="Кандидатных волн" value={data.summary.candidate_waves_count} tone="text-violet-700" />
@@ -84,7 +142,16 @@ export default function DeptPilotRoadmapTab({ projectId }: Props) {
         <div className="text-xs font-semibold text-slate-500 uppercase mb-2">Кандидатные волны</div>
         {data.waves.length === 0 ? (
           <div className="text-sm text-slate-400 rounded-lg border border-slate-200 bg-white p-4">
-            Пока нет готовых к пилоту функций. Отметьте preferred-набор и закройте required gaps / дрейф.
+            {view.ps === "unit"
+              ? "В этой оргединице пока нет готовых к пилоту функций."
+              : "Пока нет готовых к пилоту функций. Отметьте preferred-набор и закройте required gaps / дрейф."}
+            {view.ps === "unit" && (
+              <div>
+                <Button variant="outline" size="sm" className="mt-2 h-7 text-[11px]" onClick={() => setView({ ps: "project", pou: "" })}>
+                  Показать весь проект
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2">
