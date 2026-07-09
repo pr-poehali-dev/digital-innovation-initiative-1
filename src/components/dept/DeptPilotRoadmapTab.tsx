@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deptFunctionsApi } from "@/lib/api";
+import { deptFunctionsApi, getOrgTreeCached } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,8 +71,8 @@ export default function DeptPilotRoadmapTab({ projectId }: Props) {
   });
 
   useEffect(() => {
-    deptFunctionsApi.getOrgTree(projectId)
-      .then((d: { nodes?: OrgUnit[] }) => setOrgUnits(d.nodes || []))
+    getOrgTreeCached(projectId)
+      .then((d) => setOrgUnits((d as { nodes?: OrgUnit[] }).nodes || []))
       .catch(() => { /* переключатель scope не критичен */ });
   }, [projectId]);
 

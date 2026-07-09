@@ -71,6 +71,46 @@ async function request(base: string, path: string, method = "GET", body?: unknow
   return data;
 }
 
+// ── Кэш оргструктуры (org_tree) ────────────────────────────────────────────────
+// Дедупликация in-flight запросов + кэш результата по projectId. Убирает повторные
+// запросы дерева при переключении вкладок (rollup / roadmap / tree). Без TTL/store.
+type OrgTreeResult = unknown;
+const orgTreeResultCache = new Map<number, OrgTreeResult>();
+const orgTreeInflight = new Map<number, Promise<OrgTreeResult>>();
+
+export function invalidateOrgTree(projectId?: number) {
+  if (projectId === undefined) {
+    orgTreeResultCache.clear();
+    orgTreeInflight.clear();
+  } else {
+    orgTreeResultCache.delete(projectId);
+    orgTreeInflight.delete(projectId);
+  }
+}
+
+export function getOrgTreeCached(projectId: number, opts?: { force?: boolean }): Promise<OrgTreeResult> {
+  if (opts?.force) invalidateOrgTree(projectId);
+  if (orgTreeResultCache.has(projectId)) {
+    return Promise.resolve(orgTreeResultCache.get(projectId));
+  }
+  const existing = orgTreeInflight.get(projectId);
+  if (existing) return existing;
+
+  const p = request(URLS.deptFunctions, `/?action=org_tree&project_id=${projectId}`, "GET")
+    .then((data) => {
+      orgTreeResultCache.set(projectId, data);
+      orgTreeInflight.delete(projectId);
+      return data;
+    })
+    .catch((err) => {
+      // Важно: не оставлять «отравленный» failed-promise в кэше
+      orgTreeInflight.delete(projectId);
+      throw err;
+    });
+  orgTreeInflight.set(projectId, p);
+  return p;
+}
+
 export const authApi = {
   register: (email: string, password: string, name: string) =>
     request(URLS.auth, "/", "POST", { action: "register", email, password, name }),
@@ -743,11 +783,11 @@ export const deptFunctionsApi = {
   getOverlapsReport: (projectId: number) =>
     request(URLS.deptFunctions, `/?action=overlaps_report&project_id=${projectId}`, "GET"),
   createOrgUnit: (data: { project_id: number; code: string; name: string; type: string; parent_id: number | null }) =>
-    request(URLS.deptFunctions, "/?action=create_org_unit", "POST", data),
+    request(URLS.deptFunctions, "/?action=create_org_unit", "POST", data).then((r) => { invalidateOrgTree(data.project_id); return r; }),
   renameOrgUnit: (data: { project_id: number; org_unit_id: number; name: string }) =>
-    request(URLS.deptFunctions, "/?action=rename_org_unit", "PUT", data),
+    request(URLS.deptFunctions, "/?action=rename_org_unit", "PUT", data).then((r) => { invalidateOrgTree(data.project_id); return r; }),
   archiveOrgUnit: (data: { project_id: number; org_unit_id: number }) =>
-    request(URLS.deptFunctions, `/?action=archive_org_unit&project_id=${data.project_id}&org_unit_id=${data.org_unit_id}`, "DELETE"),
+    request(URLS.deptFunctions, `/?action=archive_org_unit&project_id=${data.project_id}&org_unit_id=${data.org_unit_id}`, "DELETE").then((r) => { invalidateOrgTree(data.project_id); return r; }),
   getOperatingProfile: (projectId: number, functionId: number) =>
     request(URLS.deptFunctions, `/?action=operating_profile&project_id=${projectId}&function_id=${functionId}`, "GET"),
   saveOperatingProfile: (data: { project_id: number; function_id: number; profile: Record<string, unknown> }) =>

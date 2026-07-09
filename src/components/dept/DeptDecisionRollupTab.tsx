@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { deptFunctionsApi } from "@/lib/api";
+import { deptFunctionsApi, getOrgTreeCached } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -82,8 +82,8 @@ export default function DeptDecisionRollupTab({ projectId }: Props) {
 
   // Список оргединиц для scope-переключателя
   useEffect(() => {
-    deptFunctionsApi.getOrgTree(projectId)
-      .then((d: { nodes?: OrgUnit[] }) => setOrgUnits(d.nodes || []))
+    getOrgTreeCached(projectId)
+      .then((d) => setOrgUnits((d as { nodes?: OrgUnit[] }).nodes || []))
       .catch(() => { /* переключатель scope не критичен */ });
   }, [projectId]);
 
