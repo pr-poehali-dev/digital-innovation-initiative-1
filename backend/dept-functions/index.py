@@ -48,6 +48,7 @@ Actions:
   POST update_function_shortlist — только metadata (title/status/note); состав неизменяем; note обязателен для preferred/rejected; ≤1 preferred на функцию
   POST archive_function_shortlist / restore_function_shortlist — soft-архив с проверкой конфликтов при восстановлении
   GET  function_decision_summary — derived read-only сводка решения над active preferred shortlist (selection_state, flags, residual required/supporting gaps, drift, archived supply; без авто-выбора и новой таблицы)
+  GET  decision_rollup — агрегат сводок решений по scope (project или org_unit_id): selection/risk counts, pilot_ready, functions[], top_required_gaps (с breakdown причин), top_preferred_products/modules; переиспользует единую семантику; без новой таблицы
 """
 import base64
 import io
@@ -261,6 +262,157 @@ def evaluate_single_bundle(groups, module_ids):
         "uncovered_capabilities": uncovered,
         "module_contributions": contributions,
         "non_contributing_module_ids": non_contributing_ids,
+    }
+
+
+def evaluate_function_decision(cur, schema, func_id, func_name):
+    """Единая derived-семантика решения по функции над active preferred shortlist.
+    Используется и function_decision_summary, и decision_rollup — чтобы семантика
+    (selection_state, флаги, pilot_ready, drift, residual gaps) не разъезжалась."""
+    cur.execute(
+        f"""SELECT decision_status, COUNT(*)
+            FROM {schema}.function_solution_shortlists
+            WHERE function_id = %s AND is_archived = false
+            GROUP BY decision_status""",
+        (func_id,),
+    )
+    by_status = {r[0]: r[1] for r in cur.fetchall()}
+    shortlists_summary = {
+        "active_count": sum(by_status.values()),
+        "preferred_count": by_status.get("preferred", 0),
+        "rejected_count": by_status.get("rejected", 0),
+        "shortlisted_count": by_status.get("shortlisted", 0),
+    }
+
+    cur.execute(
+        f"""SELECT id, title, decision_note, updated_at,
+                   saved_required_covered, saved_supporting_covered, saved_optional_covered
+            FROM {schema}.function_solution_shortlists
+            WHERE function_id = %s AND is_archived = false AND decision_status = 'preferred'
+            LIMIT 1""",
+        (func_id,),
+    )
+    pref = cur.fetchone()
+
+    preferred_modules = []
+    if pref:
+        cur.execute(
+            f"""SELECT m.id, m.name, m.status, m.slug, p.id, p.name, p.status, p.slug, v.id, v.name, v.status
+                FROM {schema}.function_solution_shortlist_modules sm
+                JOIN {schema}.solution_product_modules m ON m.id = sm.module_id
+                JOIN {schema}.solution_products p ON p.id = m.product_id
+                JOIN {schema}.solution_vendors v ON v.id = p.vendor_id
+                WHERE sm.shortlist_id = %s""",
+            (pref[0],),
+        )
+        preferred_modules = cur.fetchall()
+
+    groups = build_function_capability_supply(cur, schema, func_id,
+                                              include_arch_caps=False, include_arch_modules=True)
+
+    if shortlists_summary["active_count"] == 0:
+        selection_state = "no_shortlist"
+    elif not pref:
+        selection_state = "no_preferred"
+    else:
+        selection_state = "preferred_selected"
+
+    preferred_summary = None
+    residual_gaps = {"required": [], "supporting": []}
+    flags = {
+        "has_preferred": bool(pref), "has_required_gaps": False, "required_gaps_count": 0,
+        "has_supporting_gaps": False, "supporting_gaps_count": 0, "has_drift": False,
+        "has_archived_supply": False, "full_required_coverage": False,
+    }
+
+    if pref:
+        module_ids = [m[0] for m in preferred_modules]
+        ev = evaluate_single_bundle(groups, module_ids)
+        # m: (m.id, m.name, m.status, m.slug, p.id, p.name, p.status, p.slug, v.id, v.name, v.status)
+        products = {(m[4], m[5], m[6], m[7]) for m in preferred_modules}
+        vendors = {(m[8], m[9], m[10]) for m in preferred_modules}
+        arch_modules = [m for m in preferred_modules if m[2] != "active"]
+        arch_products = [pp for pp in products if pp[2] != "active"]
+        arch_vendors = [vv for vv in vendors if vv[2] != "active"]
+
+        drift_reasons = []
+        if ev["required_covered"] != (pref[4] or 0):
+            drift_reasons.append("required_coverage_changed")
+        if ev["supporting_covered"] != (pref[5] or 0):
+            drift_reasons.append("supporting_coverage_changed")
+        if ev["optional_covered"] != (pref[6] or 0):
+            drift_reasons.append("optional_coverage_changed")
+        if arch_modules or arch_products or arch_vendors:
+            drift_reasons.append("archived_supply")
+
+        for cr in ev["capability_results"]:
+            if not cr["covered"] and cr["need_level"] in ("required", "supporting"):
+                residual_gaps[cr["need_level"]].append({
+                    "capability_id": cr["capability_id"], "name": cr["capability_name"],
+                    "category": cr["capability_category"], "need_level": cr["need_level"],
+                    "priority_level": cr["priority_level"],
+                    "source_practices_count": len(cr["source_practices"]),
+                    "source_practices": cr["source_practices"],
+                })
+
+        flags["has_required_gaps"] = ev["required_uncovered"] > 0
+        flags["required_gaps_count"] = ev["required_uncovered"]
+        flags["has_supporting_gaps"] = ev["supporting_uncovered"] > 0
+        flags["supporting_gaps_count"] = ev["supporting_uncovered"]
+        flags["has_drift"] = len(drift_reasons) > 0
+        flags["has_archived_supply"] = bool(arch_modules or arch_products or arch_vendors)
+        flags["full_required_coverage"] = (ev["required_total"] > 0 and ev["required_uncovered"] == 0)
+
+        preferred_summary = {
+            "shortlist_id": pref[0], "title": pref[1], "decision_status": "preferred",
+            "decision_note": pref[2], "updated_at": pref[3],
+            "modules_count": len(preferred_modules), "products_count": len(products), "vendors_count": len(vendors),
+            "modules": [{"module_id": m[0], "module_name": m[1], "module_status": m[2], "module_slug": m[3]} for m in preferred_modules],
+            "products": [{"product_id": pp[0], "product_name": pp[1], "product_status": pp[2], "product_slug": pp[3]} for pp in products],
+            "vendors": [{"vendor_id": vv[0], "vendor_name": vv[1], "vendor_status": vv[2]} for vv in vendors],
+            "coverage": {
+                "required_total": ev["required_total"], "required_covered": ev["required_covered"], "required_uncovered": ev["required_uncovered"],
+                "supporting_total": ev["supporting_total"], "supporting_covered": ev["supporting_covered"], "supporting_uncovered": ev["supporting_uncovered"],
+                "optional_total": ev["optional_total"], "optional_covered": ev["optional_covered"], "optional_uncovered": ev["optional_uncovered"],
+            },
+            "drift": {"has_drift": len(drift_reasons) > 0, "drift_reasons": drift_reasons},
+            "archived_supply": {
+                "archived_modules_count": len(arch_modules),
+                "archived_products_count": len(arch_products),
+                "archived_vendors_count": len(arch_vendors),
+            },
+        }
+
+    if selection_state == "no_shortlist":
+        decision_health = "none"
+    elif selection_state == "no_preferred":
+        decision_health = "pending"
+    else:
+        gaps = flags["has_required_gaps"]
+        drift = flags["has_drift"]
+        if gaps and drift:
+            decision_health = "preferred_with_required_gaps_and_drift"
+        elif gaps:
+            decision_health = "preferred_with_required_gaps"
+        elif drift:
+            decision_health = "preferred_with_drift"
+        else:
+            decision_health = "preferred_ok"
+
+    # pilot_ready — прозрачный derived-критерий
+    pilot_ready = (
+        selection_state == "preferred_selected"
+        and not flags["has_required_gaps"]
+        and not flags["has_drift"]
+        and not flags["has_archived_supply"]
+    )
+
+    return {
+        "function": {"id": func_id, "name": func_name},
+        "selection_state": selection_state, "decision_health": decision_health,
+        "shortlists_summary": shortlists_summary, "decision_flags": flags,
+        "preferred_summary": preferred_summary, "residual_gaps": residual_gaps,
+        "pilot_ready": pilot_ready,
     }
 
 
@@ -2473,145 +2625,227 @@ def handler(event: dict, context) -> dict:
                 frow = cur.fetchone()
                 if not frow:
                     return cors({"ok": False, "error": "Функция не найдена"}, 404)
-                function = {"id": frow[0], "name": frow[1]}
+                dec = evaluate_function_decision(cur, SCHEMA, frow[0], frow[1])
+            return cors({"ok": True, "function": dec["function"], "selection_state": dec["selection_state"],
+                         "decision_health": dec["decision_health"], "shortlists_summary": dec["shortlists_summary"],
+                         "decision_flags": dec["decision_flags"], "preferred_summary": dec["preferred_summary"],
+                         "residual_gaps": dec["residual_gaps"]})
 
-                # сводка по shortlist (только активные)
-                cur.execute(
-                    f"""SELECT decision_status, COUNT(*)
-                        FROM {SCHEMA}.function_solution_shortlists
-                        WHERE function_id = %s AND is_archived = false
-                        GROUP BY decision_status""",
-                    (func_id,),
-                )
-                by_status = {r[0]: r[1] for r in cur.fetchall()}
-                shortlists_summary = {
-                    "active_count": sum(by_status.values()),
-                    "preferred_count": by_status.get("preferred", 0),
-                    "rejected_count": by_status.get("rejected", 0),
-                    "shortlisted_count": by_status.get("shortlisted", 0),
-                }
-
-                # active preferred (единственный по индексу)
-                cur.execute(
-                    f"""SELECT id, title, decision_note, updated_at,
-                               saved_required_covered, saved_supporting_covered, saved_optional_covered
-                        FROM {SCHEMA}.function_solution_shortlists
-                        WHERE function_id = %s AND is_archived = false AND decision_status = 'preferred'
-                        LIMIT 1""",
-                    (func_id,),
-                )
-                pref = cur.fetchone()
-
-                preferred_modules = []
-                if pref:
+        # ── Сводка решений по scope (project / org_unit) ──────────
+        if method == "GET" and action == "decision_rollup":
+            org_unit_id = int(qs.get("org_unit_id") or 0)
+            limit_top = max(1, min(30, int(qs.get("limit_top") or 10)))
+            include_rows = (qs.get("include_function_rows") or "true").lower() == "true"
+            with conn.cursor() as cur:
+                if org_unit_id:
                     cur.execute(
-                        f"""SELECT m.id, m.name, m.status, p.id, p.name, p.status, v.id, v.name, v.status
-                            FROM {SCHEMA}.function_solution_shortlist_modules sm
-                            JOIN {SCHEMA}.solution_product_modules m ON m.id = sm.module_id
-                            JOIN {SCHEMA}.solution_products p ON p.id = m.product_id
-                            JOIN {SCHEMA}.solution_vendors v ON v.id = p.vendor_id
-                            WHERE sm.shortlist_id = %s""",
-                        (pref[0],),
+                        f"SELECT id, name FROM {SCHEMA}.org_units WHERE id = %s AND project_id = %s AND is_archived = false",
+                        (org_unit_id, project_id),
                     )
-                    preferred_modules = cur.fetchall()
+                    urow = cur.fetchone()
+                    if not urow:
+                        return cors({"ok": False, "error": "Оргединица не найдена"}, 404)
+                    scope = {"scope_type": "org_unit", "scope_id": org_unit_id, "scope_name": urow[1]}
+                    cur.execute(
+                        f"""SELECT DISTINCT f.id, f.title, u.id, u.name
+                            FROM {SCHEMA}.dept_functions f
+                            JOIN {SCHEMA}.function_org_units l ON l.function_id = f.id
+                            JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+                            WHERE f.project_id = %s AND l.org_unit_id = %s
+                              AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                            ORDER BY f.title""",
+                        (project_id, org_unit_id),
+                    )
+                    func_rows = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+                    unassigned_count = None
+                else:
+                    scope = {"scope_type": "project", "scope_id": project_id, "scope_name": None}
+                    cur.execute(
+                        f"""SELECT f.id, f.title,
+                                   (SELECT u.id FROM {SCHEMA}.function_org_units l JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+                                    WHERE l.function_id = f.id ORDER BY l.id LIMIT 1),
+                                   (SELECT u.name FROM {SCHEMA}.function_org_units l JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+                                    WHERE l.function_id = f.id ORDER BY l.id LIMIT 1)
+                            FROM {SCHEMA}.dept_functions f
+                            WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                            ORDER BY f.title""",
+                        (project_id,),
+                    )
+                    func_rows = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+                    cur.execute(
+                        f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
+                            WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                              AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)""",
+                        (project_id,),
+                    )
+                    unassigned_count = cur.fetchone()[0]
 
-                groups = build_function_capability_supply(
-                    cur, SCHEMA, func_id, include_arch_caps=False, include_arch_modules=True)
+                # per-function decision (единая семантика)
+                decisions = []
+                for fid, fname, ou_id, ou_name in func_rows:
+                    d = evaluate_function_decision(cur, SCHEMA, fid, fname)
+                    d["_org_unit_id"], d["_org_unit_name"] = ou_id, ou_name
+                    decisions.append(d)
 
-            # selection_state — без авто-подмены
-            if shortlists_summary["active_count"] == 0:
-                selection_state = "no_shortlist"
-            elif not pref:
-                selection_state = "no_preferred"
-            else:
-                selection_state = "preferred_selected"
+            # ── агрегация ─────────────────────────────────────────
+            sel = {"no_shortlist_count": 0, "no_preferred_count": 0, "preferred_count": 0}
+            risk = {"pilot_ready_count": 0, "preferred_with_required_gaps_count": 0,
+                    "preferred_with_supporting_gaps_count": 0, "preferred_with_drift_count": 0,
+                    "preferred_with_archived_supply_count": 0}
+            attention = 0
+            gap_agg = {}
+            prod_agg = {}
+            mod_agg = {}
+            rows = []
 
-            preferred_summary = None
-            residual_gaps = {"required": [], "supporting": []}
-            flags = {
-                "has_preferred": bool(pref), "has_required_gaps": False, "required_gaps_count": 0,
-                "has_supporting_gaps": False, "supporting_gaps_count": 0, "has_drift": False,
-                "has_archived_supply": False, "full_required_coverage": False,
+            for d in decisions:
+                st = d["selection_state"]
+                fl = d["decision_flags"]
+                sel[f"{st}_count" if st != "preferred_selected" else "preferred_count"] += 1
+                has_issue = st == "preferred_selected" and (fl["has_required_gaps"] or fl["has_drift"] or fl["has_archived_supply"])
+                if has_issue:
+                    attention += 1
+                if d["pilot_ready"]:
+                    risk["pilot_ready_count"] += 1
+                if st == "preferred_selected":
+                    if fl["has_required_gaps"]:
+                        risk["preferred_with_required_gaps_count"] += 1
+                    if fl["has_supporting_gaps"]:
+                        risk["preferred_with_supporting_gaps_count"] += 1
+                    if fl["has_drift"]:
+                        risk["preferred_with_drift_count"] += 1
+                    if fl["has_archived_supply"]:
+                        risk["preferred_with_archived_supply_count"] += 1
+
+                fsample = {"function_id": d["function"]["id"], "function_name": d["function"]["name"],
+                           "selection_state": st, "decision_health": d["decision_health"]}
+
+                # top required gaps: capability незакрыта текущим решением
+                if st in ("no_shortlist", "no_preferred"):
+                    ps = d["preferred_summary"]  # None
+                    # для функций без preferred берём все required capability функции как «не закрыты решением»
+                    with conn.cursor() as gcur:
+                        groups = build_function_capability_supply(gcur, SCHEMA, d["function"]["id"],
+                                                                  include_arch_caps=False, include_arch_modules=True)
+                    for g in groups:
+                        if g["need_level"] != "required":
+                            continue
+                        e = gap_agg.setdefault(g["capability_id"], {
+                            "capability_id": g["capability_id"], "capability_slug": g["slug"],
+                            "capability_name": g["name"], "category": g["category"],
+                            "functions_count": 0, "preferred_gap_functions_count": 0,
+                            "no_preferred_functions_count": 0, "no_shortlist_functions_count": 0,
+                            "sample_functions": []})
+                        e["functions_count"] += 1
+                        e["no_shortlist_functions_count" if st == "no_shortlist" else "no_preferred_functions_count"] += 1
+                        if len(e["sample_functions"]) < 5:
+                            e["sample_functions"].append(fsample)
+                    _ = ps
+                else:
+                    for g in d["residual_gaps"]["required"]:
+                        e = gap_agg.setdefault(g["capability_id"], {
+                            "capability_id": g["capability_id"], "capability_slug": None,
+                            "capability_name": g["name"], "category": g["category"],
+                            "functions_count": 0, "preferred_gap_functions_count": 0,
+                            "no_preferred_functions_count": 0, "no_shortlist_functions_count": 0,
+                            "sample_functions": []})
+                        e["functions_count"] += 1
+                        e["preferred_gap_functions_count"] += 1
+                        if len(e["sample_functions"]) < 5:
+                            e["sample_functions"].append(fsample)
+
+                # top preferred products / modules (одна функция считается 1 раз на продукт/модуль)
+                if d["preferred_summary"]:
+                    ps = d["preferred_summary"]
+                    for pp in ps["products"]:
+                        e = prod_agg.setdefault(pp["product_id"], {
+                            "product_id": pp["product_id"], "product_slug": pp.get("product_slug"),
+                            "product_name": pp["product_name"], "vendor_name": None,
+                            "functions_count": 0, "pilot_ready_functions_count": 0,
+                            "attention_functions_count": 0, "sample_functions": []})
+                        e["functions_count"] += 1
+                        if d["pilot_ready"]:
+                            e["pilot_ready_functions_count"] += 1
+                        if has_issue:
+                            e["attention_functions_count"] += 1
+                        if len(e["sample_functions"]) < 5:
+                            e["sample_functions"].append(fsample)
+                    for m in ps["modules"]:
+                        e = mod_agg.setdefault(m["module_id"], {
+                            "module_id": m["module_id"], "module_slug": m.get("module_slug"),
+                            "module_name": m["module_name"], "functions_count": 0,
+                            "pilot_ready_functions_count": 0, "attention_functions_count": 0, "sample_functions": []})
+                        e["functions_count"] += 1
+                        if d["pilot_ready"]:
+                            e["pilot_ready_functions_count"] += 1
+                        if has_issue:
+                            e["attention_functions_count"] += 1
+                        if len(e["sample_functions"]) < 5:
+                            e["sample_functions"].append(fsample)
+
+                if include_rows:
+                    ps = d["preferred_summary"]
+                    cov = ps["coverage"] if ps else None
+                    rows.append({
+                        "function_id": d["function"]["id"], "function_name": d["function"]["name"],
+                        "org_unit_id": d["_org_unit_id"], "org_unit_name": d["_org_unit_name"],
+                        "selection_state": st, "decision_health": d["decision_health"],
+                        "has_preferred": fl["has_preferred"], "pilot_ready": d["pilot_ready"],
+                        "has_required_gaps": fl["has_required_gaps"], "required_gaps_count": fl["required_gaps_count"],
+                        "has_drift": fl["has_drift"], "has_archived_supply": fl["has_archived_supply"],
+                        "preferred_shortlist_id": ps["shortlist_id"] if ps else None,
+                        "preferred_title": ps["title"] if ps else None,
+                        "required_total": cov["required_total"] if cov else 0,
+                        "required_covered": cov["required_covered"] if cov else 0,
+                        "required_uncovered": cov["required_uncovered"] if cov else 0,
+                        "supporting_total": cov["supporting_total"] if cov else 0,
+                        "supporting_covered": cov["supporting_covered"] if cov else 0,
+                        "optional_total": cov["optional_total"] if cov else 0,
+                        "optional_covered": cov["optional_covered"] if cov else 0,
+                        "modules_count": ps["modules_count"] if ps else 0,
+                        "products_count": ps["products_count"] if ps else 0,
+                        "vendors_count": ps["vendors_count"] if ps else 0,
+                        "preferred_products_preview": [p["product_name"] for p in (ps["products"] if ps else [])][:3],
+                        "residual_required_gaps_preview": [g["name"] for g in d["residual_gaps"]["required"]][:3],
+                    })
+
+            functions_total = len(decisions)
+            scope["functions_total"] = functions_total
+            if scope["scope_type"] == "project":
+                scope["unassigned_functions_count"] = unassigned_count
+
+            summary = {
+                "functions_total": functions_total,
+                "preferred_count": sel["preferred_count"],
+                "pilot_ready_count": risk["pilot_ready_count"],
+                "attention_required_count": attention,
+                "no_preferred_count": sel["no_preferred_count"],
+                "no_shortlist_count": sel["no_shortlist_count"],
             }
 
-            if pref:
-                module_ids = [m[0] for m in preferred_modules]
-                ev = evaluate_single_bundle(groups, module_ids)
-                products = {(m[3], m[4], m[5]) for m in preferred_modules}
-                vendors = {(m[6], m[7], m[8]) for m in preferred_modules}
-                arch_modules = [m for m in preferred_modules if m[2] != "active"]
-                arch_products = [pp for pp in products if pp[2] != "active"]
-                arch_vendors = [vv for vv in vendors if vv[2] != "active"]
-
-                drift_reasons = []
-                if ev["required_covered"] != (pref[4] or 0):
-                    drift_reasons.append("required_coverage_changed")
-                if ev["supporting_covered"] != (pref[5] or 0):
-                    drift_reasons.append("supporting_coverage_changed")
-                if ev["optional_covered"] != (pref[6] or 0):
-                    drift_reasons.append("optional_coverage_changed")
-                if arch_modules or arch_products or arch_vendors:
-                    drift_reasons.append("archived_supply")
-
-                for cr in ev["capability_results"]:
-                    if not cr["covered"] and cr["need_level"] in ("required", "supporting"):
-                        residual_gaps[cr["need_level"]].append({
-                            "capability_id": cr["capability_id"], "name": cr["capability_name"],
-                            "category": cr["capability_category"], "need_level": cr["need_level"],
-                            "priority_level": cr["priority_level"],
-                            "source_practices_count": len(cr["source_practices"]),
-                            "source_practices": cr["source_practices"],
-                        })
-
-                flags["has_required_gaps"] = ev["required_uncovered"] > 0
-                flags["required_gaps_count"] = ev["required_uncovered"]
-                flags["has_supporting_gaps"] = ev["supporting_uncovered"] > 0
-                flags["supporting_gaps_count"] = ev["supporting_uncovered"]
-                flags["has_drift"] = len(drift_reasons) > 0
-                flags["has_archived_supply"] = bool(arch_modules or arch_products or arch_vendors)
-                flags["full_required_coverage"] = (ev["required_total"] > 0 and ev["required_uncovered"] == 0)
-
-                preferred_summary = {
-                    "shortlist_id": pref[0], "title": pref[1], "decision_status": "preferred",
-                    "decision_note": pref[2], "updated_at": pref[3],
-                    "modules_count": len(preferred_modules), "products_count": len(products), "vendors_count": len(vendors),
-                    "modules": [{"module_id": m[0], "module_name": m[1], "module_status": m[2]} for m in preferred_modules],
-                    "products": [{"product_id": pp[0], "product_name": pp[1], "product_status": pp[2]} for pp in products],
-                    "vendors": [{"vendor_id": vv[0], "vendor_name": vv[1], "vendor_status": vv[2]} for vv in vendors],
-                    "coverage": {
-                        "required_total": ev["required_total"], "required_covered": ev["required_covered"], "required_uncovered": ev["required_uncovered"],
-                        "supporting_total": ev["supporting_total"], "supporting_covered": ev["supporting_covered"], "supporting_uncovered": ev["supporting_uncovered"],
-                        "optional_total": ev["optional_total"], "optional_covered": ev["optional_covered"], "optional_uncovered": ev["optional_uncovered"],
-                    },
-                    "drift": {"has_drift": len(drift_reasons) > 0, "drift_reasons": drift_reasons},
-                    "archived_supply": {
-                        "archived_modules_count": len(arch_modules),
-                        "archived_products_count": len(arch_products),
-                        "archived_vendors_count": len(arch_vendors),
-                    },
-                }
-
-            # decision_health — производный label для UI (истина — в selection_state + flags)
-            if selection_state == "no_shortlist":
-                decision_health = "none"
-            elif selection_state == "no_preferred":
-                decision_health = "pending"
-            else:
-                gaps = flags["has_required_gaps"]
-                drift = flags["has_drift"]
-                if gaps and drift:
-                    decision_health = "preferred_with_required_gaps_and_drift"
-                elif gaps:
-                    decision_health = "preferred_with_required_gaps"
-                elif drift:
-                    decision_health = "preferred_with_drift"
+            # сортировка rows: то, что требует внимания — сверху
+            state_order = {"no_shortlist": 0, "no_preferred": 1, "preferred_selected": 2}
+            def row_key(r):
+                if r["selection_state"] != "preferred_selected":
+                    tier = state_order[r["selection_state"]]
+                elif r["has_required_gaps"]:
+                    tier = 2
+                elif r["has_drift"] or r["has_archived_supply"]:
+                    tier = 3
                 else:
-                    decision_health = "preferred_ok"
+                    tier = 4  # pilot_ready / clean
+                return (tier, -r["required_gaps_count"], r["function_name"])
+            rows.sort(key=row_key)
 
-            return cors({"ok": True, "function": function, "selection_state": selection_state,
-                         "decision_health": decision_health, "shortlists_summary": shortlists_summary,
-                         "decision_flags": flags, "preferred_summary": preferred_summary,
-                         "residual_gaps": residual_gaps})
+            def top(agg, key_count="functions_count"):
+                return sorted(agg.values(), key=lambda x: (-x[key_count], x.get("capability_name") or x.get("product_name") or x.get("module_name") or ""))[:limit_top]
+
+            return cors({"ok": True, "scope": scope, "summary": summary,
+                         "selection_counts": sel, "risk_counts": risk,
+                         "functions": rows if include_rows else [],
+                         "top_required_gaps": top(gap_agg),
+                         "top_preferred_products": top(prod_agg),
+                         "top_preferred_modules": top(mod_agg)})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

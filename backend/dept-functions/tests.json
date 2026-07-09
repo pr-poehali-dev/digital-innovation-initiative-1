@@ -224,6 +224,12 @@
       "method": "GET",
       "path": "/?action=function_decision_summary&project_id=1&function_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth decision_rollup",
+      "method": "GET",
+      "path": "/?action=decision_rollup&project_id=1",
+      "expectedStatus": 401
     }
   ]
 }

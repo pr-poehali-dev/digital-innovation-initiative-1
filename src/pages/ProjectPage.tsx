@@ -7,6 +7,7 @@ import PainsTab from "@/components/workspace/PainsTab";
 import DeptFunctionsTab from "@/components/dept/DeptFunctionsTab";
 import DeptAutomationTab from "@/components/dept/DeptAutomationTab";
 import DeptTreeTab from "@/components/dept/DeptTreeTab";
+import DeptDecisionRollupTab from "@/components/dept/DeptDecisionRollupTab";
 import DeptOverlapsTab from "@/components/dept/DeptOverlapsTab";
 import { analytics } from "@/lib/analytics";
 import { passportApi } from "@/lib/passportApi";
@@ -210,8 +211,8 @@ function filterPainsForPreset<T extends { id: number; linked_solution_id: number
   return list;
 }
 
-type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation" | "dept-tree" | "dept-overlaps";
-const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation", "dept-tree", "dept-overlaps"];
+type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation" | "dept-tree" | "dept-overlaps" | "dept-decisions";
+const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation", "dept-tree", "dept-overlaps", "dept-decisions"];
 const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution", "without_validation"];
 
 export default function ProjectPage() {
@@ -1210,6 +1211,7 @@ export default function ProjectPage() {
                 { key: "dept-functions", label: `🏢 Функции подразделения${deptFunctions.length ? ` (${deptFunctions.length})` : ""}` },
                 { key: "dept-tree", label: "🌳 Дерево департамента" },
                 { key: "dept-overlaps", label: "🔀 Пересечения функций" },
+                { key: "dept-decisions", label: "⚖️ Сводка решений" },
                 { key: "dept-automation", label: `🤖 Автоматизация функций${deptAutomation.length ? ` (${deptAutomation.length})` : ""}` },
                 { key: "process",     label: `⚙️ Функции и процессы${processes.length ? ` (${processes.length})` : ""}` },
                 { key: "solutions",   label: `🗃️ Решения и системы${solutions.length ? ` (${solutions.length})` : ""}` },
@@ -2734,6 +2736,15 @@ export default function ProjectPage() {
         {tab === "dept-overlaps" && (
           project?.workspace_mode === "polygon" ? (
             <DeptOverlapsTab projectId={projectId} onNavigateToTree={() => setTab("dept-tree")} onNavigateToUpload={() => setTab("dept-functions")} />
+          ) : (
+            <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
+          )
+        )}
+
+        {/* ── Сводка решений по функциям ── */}
+        {tab === "dept-decisions" && (
+          project?.workspace_mode === "polygon" ? (
+            <DeptDecisionRollupTab projectId={projectId} />
           ) : (
             <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
           )
