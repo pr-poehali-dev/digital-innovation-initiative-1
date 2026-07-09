@@ -484,7 +484,39 @@ def handler(event: dict, context) -> dict:
                 created_ids.append(func_id)
 
             conn.commit()
-            return cors({"ok": True, "created": len(created_ids), "ids": created_ids, "auto_linked": auto_linked})
+
+            # Итог дозагрузки (source of truth для post-import баннера)
+            left_unmatched = 0
+            if created_ids:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
+                            WHERE f.id = ANY(%s)
+                              AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)""",
+                        (created_ids,),
+                    )
+                    left_unmatched = cur.fetchone()[0]
+            # статус покрытия после импорта: partial, если остались тонкие управления или unmatched
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
+                        WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)""",
+                    (project_id,),
+                )
+                total_unassigned = cur.fetchone()[0]
+                cur.execute(
+                    f"""SELECT COUNT(*) FROM {SCHEMA}.org_units u
+                        WHERE u.project_id = %s AND u.is_archived = false AND u.type = 'management'
+                          AND (SELECT COUNT(*) FROM {SCHEMA}.function_org_units l WHERE l.org_unit_id = u.id) < 3""",
+                    (project_id,),
+                )
+                thin_mgmt = cur.fetchone()[0]
+            coverage_status_after = "partial" if (total_unassigned > 0 or thin_mgmt > 0) else "complete"
+
+            return cors({"ok": True, "created": len(created_ids), "ids": created_ids,
+                         "auto_linked": auto_linked, "left_unmatched": left_unmatched,
+                         "coverage_status_after": coverage_status_after})
 
         # ── Список автоматизации ──────────────────────────────────
         if method == "GET" and action == "automation":

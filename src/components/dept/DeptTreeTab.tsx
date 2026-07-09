@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
 import SourceCoverageBanner from "@/components/dept/SourceCoverageBanner";
+import PostImportBanner from "@/components/dept/PostImportBanner";
 
 type OrgNode = {
   id: number;
@@ -226,6 +227,13 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
           </Button>
         )}
       </div>
+
+      {/* Результат последней дозагрузки — поверх состояния покрытия */}
+      <PostImportBanner
+        projectId={projectId}
+        onOpenTree={undefined}
+        onShowUnassigned={() => setShowUnassigned(true)}
+      />
 
       {coverage?.show_upload_reminder && (
         <SourceCoverageBanner

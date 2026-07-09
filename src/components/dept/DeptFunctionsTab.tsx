@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import HelpPanel from "@/components/HelpPanel";
+import { savePostImportResult } from "@/components/dept/postImportResult";
 
 type DeptFunction = {
   id: number;
@@ -424,9 +425,15 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       const res = await deptFunctionsApi.confirmFunctions({
         project_id: projectId,
         functions: selected.map(({ title, description, goals, category, dept_name }) => ({ title, description, goals, category, dept_name })),
-      }) as { ok: boolean; created: number };
+      }) as { ok: boolean; created: number; auto_linked?: number; left_unmatched?: number; coverage_status_after?: string };
       if (res.ok) {
         setConfirmResult(`Добавлено функций: ${res.created}`);
+        savePostImportResult(projectId, {
+          created: res.created,
+          auto_linked: res.auto_linked ?? 0,
+          left_unmatched: res.left_unmatched ?? 0,
+          coverage_status_after: res.coverage_status_after,
+        });
         setDraft(null);
         setQueue(null);
         onReload();
