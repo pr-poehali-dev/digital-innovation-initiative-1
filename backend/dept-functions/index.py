@@ -41,6 +41,12 @@ Actions:
   GET  function_module_candidates — derived: под каждую capability функции — кандидатные модули (supply), group-by-capability, gaps не теряются, 3 независимые оси need/priority/coverage, explainability до практик; без persisted-модели
   GET  function_module_candidates_counts — краткий summary (distinct modules, gaps) для badge
   GET  function_module_bundles — derived: кандидатные наборы модулей (≤3) с coverage profile (без общего score), dominance pruning, det. sort, explainability до практик и module contribution; без persisted-модели
+  GET  function_shortlists — сохранённые наборы (persisted) с current-derived покрытием и drift-флагами
+  GET  function_shortlists_counts — счётчики active/preferred/rejected по функциям (badge)
+  GET  function_shortlist_detail — детали набора: snapshot + current-derived coverage/explainability + drift
+  POST create_function_shortlist — сохранить bundle как shortlist (immutable module set; bundle_key канонизируется на бэкенде; snapshot; dedup active; restore архивного)
+  POST update_function_shortlist — только metadata (title/status/note); состав неизменяем; note обязателен для preferred/rejected; ≤1 preferred на функцию
+  POST archive_function_shortlist / restore_function_shortlist — soft-архив с проверкой конфликтов при восстановлении
 """
 import base64
 import io
@@ -77,6 +83,9 @@ FPM_SOURCE = {"manual", "interview", "workshop", "analysis"}
 FPM_REASON = {"reduce_manual_work", "reduce_cycle_time", "reduce_errors", "reduce_approvals",
               "improve_visibility", "improve_compliance", "reduce_knowledge_dependency",
               "improve_service_quality", "scale_volume", "standardize_execution"}
+
+# Shortlist статусы решений
+SHORTLIST_STATUS = {"shortlisted", "preferred", "rejected"}
 
 # Ранги для агрегации derived capability view (чем больше — тем сильнее)
 NEED_RANK = {"required": 3, "supporting": 2, "optional": 1}
@@ -154,6 +163,104 @@ def build_function_capability_supply(cur, schema, func_id, include_arch_caps=Fal
         a.pop("_need_rank"); a.pop("_priority_rank")
         groups.append(a)
     return groups
+
+
+def canonical_bundle_key(module_slugs):
+    """Канонический identity набора: отсортированные slug через '-'. Строится на бэкенде."""
+    return "-".join(sorted(module_slugs))
+
+
+def evaluate_single_bundle(groups, module_ids):
+    """Current-derived оценка одного фиксированного набора модулей против capability функции.
+    Возвращает тот же shape, что и один bundle в build_module_bundles (coverage profile,
+    capability_results, uncovered, module_contributions) + список неизвестных/архивных модулей."""
+    # module_info из текущих capability групп (только модули, реально покрывающие нужные capability)
+    module_info = {}
+    mod_cap_cov = {}
+    for g in groups:
+        for mid, m in g["modules"].items():
+            module_info[mid] = m
+            mod_cap_cov.setdefault(mid, {})[g["capability_id"]] = COVERAGE_RANK.get(m["coverage_level"], 0)
+
+    cap_meta = {g["capability_id"]: g for g in groups}
+    required_total = sum(1 for g in groups if g["need_level"] == "required")
+    supporting_total = sum(1 for g in groups if g["need_level"] == "supporting")
+    optional_total = sum(1 for g in groups if g["need_level"] == "optional")
+
+    combo = [mid for mid in module_ids if mid in module_info]
+    # модули, которые в наборе, но уже ничего не покрывают из нужного функции (drift-сигнал)
+    non_contributing_ids = [mid for mid in module_ids if mid not in module_info]
+
+    best = {}
+    for mid in combo:
+        for cid, rank in mod_cap_cov.get(mid, {}).items():
+            if rank > best.get(cid, 0):
+                best[cid] = rank
+
+    prof = {
+        "required_covered": 0, "supporting_covered": 0, "optional_covered": 0,
+    }
+    for cid, rank in best.items():
+        if rank > 0:
+            prof[f"{cap_meta[cid]['need_level']}_covered"] += 1
+
+    capability_results, uncovered = [], []
+    module_contrib = {mid: {"required": 0, "supporting": 0, "optional": 0, "caps": []} for mid in combo}
+    for g in groups:
+        cid = g["capability_id"]
+        rank = best.get(cid, 0)
+        covered = rank > 0
+        best_lvl = COVERAGE_BY_RANK[rank]
+        best_modules = []
+        if covered:
+            for mid in combo:
+                if mod_cap_cov.get(mid, {}).get(cid, 0) == rank:
+                    best_modules.append({"module_id": mid, "module_name": module_info[mid]["module_name"]})
+                    mc = module_contrib[mid]
+                    mc[g["need_level"]] += 1
+                    mc["caps"].append(g["name"])
+        capability_results.append({
+            "capability_id": cid, "capability_name": g["name"], "capability_category": g["category"],
+            "need_level": g["need_level"], "priority_level": g["priority_level"],
+            "covered": covered, "best_coverage_level": best_lvl,
+            "best_modules": best_modules, "source_practices": g["source_practices"],
+        })
+        if not covered:
+            uncovered.append({"capability_id": cid, "capability_name": g["name"],
+                              "need_level": g["need_level"], "priority_level": g["priority_level"],
+                              "source_practices": g["source_practices"]})
+
+    capability_results.sort(key=lambda e: (
+        -NEED_RANK.get(e["need_level"], 0),
+        0 if (e["need_level"] == "required" and not e["covered"]) else 1,
+        0 if not e["covered"] else 1,
+        -PRIORITY_RANK.get(e["priority_level"], 0),
+        e["capability_name"],
+    ))
+
+    contributions = []
+    for mid in sorted(combo, key=lambda x: module_info[x]["module_name"]):
+        mc = module_contrib[mid]
+        contributions.append({
+            "module_id": mid, "module_name": module_info[mid]["module_name"],
+            "unique_required_coverage_count": mc["required"],
+            "unique_supporting_coverage_count": mc["supporting"],
+            "unique_optional_coverage_count": mc["optional"],
+            "best_covered_capabilities": mc["caps"],
+        })
+
+    return {
+        "required_total": required_total, "required_covered": prof["required_covered"],
+        "required_uncovered": required_total - prof["required_covered"],
+        "supporting_total": supporting_total, "supporting_covered": prof["supporting_covered"],
+        "supporting_uncovered": supporting_total - prof["supporting_covered"],
+        "optional_total": optional_total, "optional_covered": prof["optional_covered"],
+        "optional_uncovered": optional_total - prof["optional_covered"],
+        "capability_results": capability_results,
+        "uncovered_capabilities": uncovered,
+        "module_contributions": contributions,
+        "non_contributing_module_ids": non_contributing_ids,
+    }
 
 
 def build_module_bundles(groups, max_size=3, limit=10, only_full_required=False):
@@ -2024,6 +2131,333 @@ def handler(event: dict, context) -> dict:
             summary, bundles = build_module_bundles(groups, max_size=max_size, limit=limit,
                                                     only_full_required=only_full_required)
             return cors({"ok": True, "summary": summary, "bundles": bundles})
+
+        # ── Shortlist решений: список ─────────────────────────────
+        if method == "GET" and action == "function_shortlists":
+            func_id = int(qs.get("function_id") or 0)
+            include_archived = (qs.get("include_archived") or "false").lower() == "true"
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, bundle_key, title, decision_status, decision_note,
+                               saved_required_total, saved_required_covered, saved_required_uncovered,
+                               saved_supporting_total, saved_supporting_covered, saved_supporting_uncovered,
+                               saved_optional_total, saved_optional_covered, saved_optional_uncovered,
+                               is_archived, updated_at
+                        FROM {SCHEMA}.function_solution_shortlists
+                        WHERE function_id = %s {'' if include_archived else 'AND is_archived = false'}
+                        ORDER BY is_archived,
+                                 CASE decision_status WHEN 'preferred' THEN 0 WHEN 'shortlisted' THEN 1 ELSE 2 END,
+                                 updated_at DESC""",
+                    (func_id,),
+                )
+                rows = cur.fetchall()
+                sl_ids = [r[0] for r in rows]
+                mods_by_sl = {}
+                if sl_ids:
+                    cur.execute(
+                        f"""SELECT sm.shortlist_id, m.id, m.name, m.status, p.name, v.name
+                            FROM {SCHEMA}.function_solution_shortlist_modules sm
+                            JOIN {SCHEMA}.solution_product_modules m ON m.id = sm.module_id
+                            JOIN {SCHEMA}.solution_products p ON p.id = m.product_id
+                            JOIN {SCHEMA}.solution_vendors v ON v.id = p.vendor_id
+                            WHERE sm.shortlist_id = ANY(%s)""",
+                        (sl_ids,),
+                    )
+                    for r in cur.fetchall():
+                        mods_by_sl.setdefault(r[0], []).append(
+                            {"module_id": r[1], "module_name": r[2], "module_status": r[3],
+                             "product_name": r[4], "vendor_name": r[5]})
+
+            # current-derived для drift
+            with conn.cursor() as cur:
+                groups = build_function_capability_supply(cur, SCHEMA, func_id,
+                                                          include_arch_caps=False, include_arch_modules=True)
+            items = []
+            for r in rows:
+                mods = mods_by_sl.get(r[0], [])
+                cur_eval = evaluate_single_bundle(groups, [m["module_id"] for m in mods])
+                drift_flags = []
+                if cur_eval["required_covered"] != r[6]:
+                    drift_flags.append("required_coverage_changed")
+                if cur_eval["supporting_covered"] != r[9]:
+                    drift_flags.append("supporting_coverage_changed")
+                if cur_eval["optional_covered"] != r[12]:
+                    drift_flags.append("optional_coverage_changed")
+                if any(m["module_status"] != "active" for m in mods):
+                    drift_flags.append("module_archived")
+                items.append({
+                    "id": r[0], "bundle_key": r[1], "title": r[2], "decision_status": r[3], "decision_note": r[4],
+                    "saved": {
+                        "required_total": r[5], "required_covered": r[6], "required_uncovered": r[7],
+                        "supporting_total": r[8], "supporting_covered": r[9], "supporting_uncovered": r[10],
+                        "optional_total": r[11], "optional_covered": r[12], "optional_uncovered": r[13],
+                    },
+                    "current": {
+                        "required_covered": cur_eval["required_covered"], "required_uncovered": cur_eval["required_uncovered"],
+                        "supporting_covered": cur_eval["supporting_covered"], "optional_covered": cur_eval["optional_covered"],
+                    },
+                    "has_drift": len(drift_flags) > 0, "drift_flags": drift_flags,
+                    "modules": mods, "is_archived": r[14],
+                })
+            return cors({"ok": True, "items": items})
+
+        # ── Shortlist: счётчики по функциям (badge) ───────────────
+        if method == "GET" and action == "function_shortlists_counts":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT s.function_id,
+                               COUNT(*),
+                               COUNT(*) FILTER (WHERE s.decision_status = 'preferred'),
+                               COUNT(*) FILTER (WHERE s.decision_status = 'rejected')
+                        FROM {SCHEMA}.function_solution_shortlists s
+                        JOIN {SCHEMA}.dept_functions f ON f.id = s.function_id
+                        WHERE f.project_id = %s AND s.is_archived = false
+                        GROUP BY s.function_id""",
+                    (project_id,),
+                )
+                counts = {r[0]: {"active": r[1], "preferred": r[2], "rejected": r[3]} for r in cur.fetchall()}
+            return cors({"ok": True, "counts": counts})
+
+        # ── Shortlist: детали (current-derived + snapshot + drift) ─
+        if method == "GET" and action == "function_shortlist_detail":
+            sl_id = int(qs.get("shortlist_id") or 0)
+            if not sl_id:
+                return cors({"ok": False, "error": "shortlist_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT s.id, s.function_id, s.bundle_key, s.title, s.decision_status, s.decision_note,
+                               s.saved_required_total, s.saved_required_covered, s.saved_required_uncovered,
+                               s.saved_supporting_total, s.saved_supporting_covered, s.saved_supporting_uncovered,
+                               s.saved_optional_total, s.saved_optional_covered, s.saved_optional_uncovered, s.is_archived
+                        FROM {SCHEMA}.function_solution_shortlists s
+                        JOIN {SCHEMA}.dept_functions f ON f.id = s.function_id
+                        WHERE s.id = %s AND f.project_id = %s""",
+                    (sl_id, project_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return cors({"ok": False, "error": "not found"}, 404)
+                func_id = row[1]
+                cur.execute(
+                    f"""SELECT m.id, m.name, m.category, m.status, m.summary,
+                               p.name, p.status, p.deployment_types, v.name, v.status
+                        FROM {SCHEMA}.function_solution_shortlist_modules sm
+                        JOIN {SCHEMA}.solution_product_modules m ON m.id = sm.module_id
+                        JOIN {SCHEMA}.solution_products p ON p.id = m.product_id
+                        JOIN {SCHEMA}.solution_vendors v ON v.id = p.vendor_id
+                        WHERE sm.shortlist_id = %s""",
+                    (sl_id,),
+                )
+                modules = [{"module_id": r[0], "module_name": r[1], "module_category": r[2], "module_status": r[3],
+                            "module_summary": r[4], "product_name": r[5], "product_status": r[6],
+                            "deployment_types": r[7] or [], "vendor_name": r[8], "vendor_status": r[9]}
+                           for r in cur.fetchall()]
+                groups = build_function_capability_supply(cur, SCHEMA, func_id,
+                                                          include_arch_caps=False, include_arch_modules=True)
+            cur_eval = evaluate_single_bundle(groups, [m["module_id"] for m in modules])
+            saved = {"required_total": row[6], "required_covered": row[7], "required_uncovered": row[8],
+                     "supporting_total": row[9], "supporting_covered": row[10], "supporting_uncovered": row[11],
+                     "optional_total": row[12], "optional_covered": row[13], "optional_uncovered": row[14]}
+            drift_flags = []
+            if cur_eval["required_covered"] != saved["required_covered"]:
+                drift_flags.append("required_coverage_changed")
+            if cur_eval["supporting_covered"] != saved["supporting_covered"]:
+                drift_flags.append("supporting_coverage_changed")
+            if cur_eval["optional_covered"] != saved["optional_covered"]:
+                drift_flags.append("optional_coverage_changed")
+            if any(m["module_status"] != "active" for m in modules):
+                drift_flags.append("module_archived")
+            shortlist = {
+                "id": row[0], "function_id": func_id, "bundle_key": row[2], "title": row[3],
+                "decision_status": row[4], "decision_note": row[5], "is_archived": row[15],
+                "modules": modules, "saved": saved, "current": cur_eval,
+                "has_drift": len(drift_flags) > 0, "drift_flags": drift_flags,
+            }
+            return cors({"ok": True, "shortlist": shortlist})
+
+        # ── Shortlist: создать из bundle (immutable module set) ────
+        if method == "POST" and action == "create_function_shortlist":
+            func_id = int(body.get("function_id") or 0)
+            module_ids = body.get("module_ids") or []
+            if not func_id or not module_ids:
+                return cors({"ok": False, "error": "function_id и module_ids обязательны"}, 400)
+            module_ids = list(dict.fromkeys(int(x) for x in module_ids))  # уникальные, порядок
+            if len(module_ids) > 3:
+                return cors({"ok": False, "error": "Максимум 3 модуля в наборе"}, 400)
+            status = body.get("decision_status") or "shortlisted"
+            if status not in SHORTLIST_STATUS:
+                return cors({"ok": False, "error": "Недопустимый статус"}, 400)
+            note = (body.get("decision_note") or "").strip() or None
+            title = (body.get("title") or "").strip() or None
+            if status in ("preferred", "rejected") and not note:
+                return cors({"ok": False, "error": "Для preferred/rejected нужно обоснование"}, 400)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT m.id, m.slug, m.status, p.status, v.status
+                        FROM {SCHEMA}.solution_product_modules m
+                        JOIN {SCHEMA}.solution_products p ON p.id = m.product_id
+                        JOIN {SCHEMA}.solution_vendors v ON v.id = p.vendor_id
+                        WHERE m.id = ANY(%s)""",
+                    (module_ids,),
+                )
+                mrows = {r[0]: r for r in cur.fetchall()}
+                if len(mrows) != len(module_ids):
+                    return cors({"ok": False, "error": "Некоторые модули не найдены"}, 404)
+                for mid in module_ids:
+                    _, _, mst, pst, vst = mrows[mid]
+                    if mst != "active" or pst != "active" or vst != "active":
+                        return cors({"ok": False, "error": "Нельзя сохранить набор с архивным модулем/продуктом/вендором"}, 400)
+                bundle_key = canonical_bundle_key([mrows[mid][1] for mid in module_ids])
+
+                # snapshot текущего покрытия
+                groups = build_function_capability_supply(cur, SCHEMA, func_id,
+                                                          include_arch_caps=False, include_arch_modules=False)
+                ev = evaluate_single_bundle(groups, module_ids)
+
+                # активный дубль?
+                cur.execute(
+                    f"""SELECT id FROM {SCHEMA}.function_solution_shortlists
+                        WHERE function_id = %s AND bundle_key = %s AND is_archived = false""",
+                    (func_id, bundle_key),
+                )
+                if cur.fetchone():
+                    return cors({"ok": False, "error": "Этот набор уже в шортлисте"}, 409)
+                # preferred-конфликт
+                if status == "preferred":
+                    cur.execute(
+                        f"""SELECT 1 FROM {SCHEMA}.function_solution_shortlists
+                            WHERE function_id = %s AND is_archived = false AND decision_status = 'preferred'""",
+                        (func_id,),
+                    )
+                    if cur.fetchone():
+                        return cors({"ok": False, "error": "У функции уже есть preferred-набор"}, 409)
+                # архивный дубль -> restore + update
+                cur.execute(
+                    f"""SELECT id FROM {SCHEMA}.function_solution_shortlists
+                        WHERE function_id = %s AND bundle_key = %s AND is_archived = true
+                        ORDER BY updated_at DESC LIMIT 1""",
+                    (func_id, bundle_key),
+                )
+                arch = cur.fetchone()
+                if arch:
+                    sl_id = arch[0]
+                    cur.execute(
+                        f"""UPDATE {SCHEMA}.function_solution_shortlists SET
+                              is_archived = false, title = %s, decision_status = %s, decision_note = %s,
+                              saved_required_total=%s, saved_required_covered=%s, saved_required_uncovered=%s,
+                              saved_supporting_total=%s, saved_supporting_covered=%s, saved_supporting_uncovered=%s,
+                              saved_optional_total=%s, saved_optional_covered=%s, saved_optional_uncovered=%s,
+                              updated_by=%s, updated_at=now()
+                            WHERE id = %s""",
+                        (title, status, note,
+                         ev["required_total"], ev["required_covered"], ev["required_uncovered"],
+                         ev["supporting_total"], ev["supporting_covered"], ev["supporting_uncovered"],
+                         ev["optional_total"], ev["optional_covered"], ev["optional_uncovered"],
+                         user_id, sl_id),
+                    )
+                else:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.function_solution_shortlists
+                            (function_id, bundle_key, title, decision_status, decision_note,
+                             saved_required_total, saved_required_covered, saved_required_uncovered,
+                             saved_supporting_total, saved_supporting_covered, saved_supporting_uncovered,
+                             saved_optional_total, saved_optional_covered, saved_optional_uncovered, updated_by)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                        (func_id, bundle_key, title, status, note,
+                         ev["required_total"], ev["required_covered"], ev["required_uncovered"],
+                         ev["supporting_total"], ev["supporting_covered"], ev["supporting_uncovered"],
+                         ev["optional_total"], ev["optional_covered"], ev["optional_uncovered"], user_id),
+                    )
+                    sl_id = cur.fetchone()[0]
+                    for mid in module_ids:
+                        cur.execute(
+                            f"INSERT INTO {SCHEMA}.function_solution_shortlist_modules (shortlist_id, module_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                            (sl_id, mid),
+                        )
+            conn.commit()
+            return cors({"ok": True, "id": sl_id})
+
+        # ── Shortlist: обновить metadata (состав неизменяем) ──────
+        if method == "POST" and action == "update_function_shortlist":
+            sl_id = int(body.get("shortlist_id") or 0)
+            if not sl_id:
+                return cors({"ok": False, "error": "shortlist_id required"}, 400)
+            status = body.get("decision_status") or "shortlisted"
+            if status not in SHORTLIST_STATUS:
+                return cors({"ok": False, "error": "Недопустимый статус"}, 400)
+            note = (body.get("decision_note") or "").strip() or None
+            title = (body.get("title") or "").strip() or None
+            if status in ("preferred", "rejected") and not note:
+                return cors({"ok": False, "error": "Для preferred/rejected нужно обоснование"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT s.function_id FROM {SCHEMA}.function_solution_shortlists s
+                        JOIN {SCHEMA}.dept_functions f ON f.id = s.function_id
+                        WHERE s.id = %s AND f.project_id = %s AND s.is_archived = false""",
+                    (sl_id, project_id),
+                )
+                srow = cur.fetchone()
+                if not srow:
+                    return cors({"ok": False, "error": "Набор не найден"}, 404)
+                if status == "preferred":
+                    cur.execute(
+                        f"""SELECT 1 FROM {SCHEMA}.function_solution_shortlists
+                            WHERE function_id = %s AND is_archived = false AND decision_status = 'preferred' AND id <> %s""",
+                        (srow[0], sl_id),
+                    )
+                    if cur.fetchone():
+                        return cors({"ok": False, "error": "У функции уже есть preferred-набор"}, 409)
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.function_solution_shortlists
+                        SET title = %s, decision_status = %s, decision_note = %s, updated_by = %s, updated_at = now()
+                        WHERE id = %s""",
+                    (title, status, note, user_id, sl_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Shortlist: архив / восстановление ─────────────────────
+        if method == "POST" and action in ("archive_function_shortlist", "restore_function_shortlist"):
+            sl_id = int(body.get("shortlist_id") or 0)
+            if not sl_id:
+                return cors({"ok": False, "error": "shortlist_id required"}, 400)
+            archived = action == "archive_function_shortlist"
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT s.function_id, s.bundle_key, s.decision_status
+                        FROM {SCHEMA}.function_solution_shortlists s
+                        JOIN {SCHEMA}.dept_functions f ON f.id = s.function_id
+                        WHERE s.id = %s AND f.project_id = %s""",
+                    (sl_id, project_id),
+                )
+                srow = cur.fetchone()
+                if not srow:
+                    return cors({"ok": False, "error": "Набор не найден"}, 404)
+                if not archived:
+                    cur.execute(
+                        f"""SELECT 1 FROM {SCHEMA}.function_solution_shortlists
+                            WHERE function_id = %s AND bundle_key = %s AND is_archived = false AND id <> %s""",
+                        (srow[0], srow[1], sl_id),
+                    )
+                    if cur.fetchone():
+                        return cors({"ok": False, "error": "Активный набор с тем же составом уже существует"}, 409)
+                    if srow[2] == "preferred":
+                        cur.execute(
+                            f"""SELECT 1 FROM {SCHEMA}.function_solution_shortlists
+                                WHERE function_id = %s AND is_archived = false AND decision_status = 'preferred' AND id <> %s""",
+                            (srow[0], sl_id),
+                        )
+                        if cur.fetchone():
+                            return cors({"ok": False, "error": "У функции уже есть preferred-набор"}, 409)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.function_solution_shortlists SET is_archived = %s, updated_at = now() WHERE id = %s",
+                    (archived, sl_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

@@ -8,6 +8,12 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
 import { RELEVANCE, RELEVANCE_COLOR, REASON_TAGS, labelOf } from "@/components/dept/functionPracticeOptions";
 
@@ -45,7 +51,7 @@ type Summary = {
   full_required_bundle_exists: boolean;
 };
 
-interface Props { projectId: number; functionId: number; refreshKey?: number; }
+interface Props { projectId: number; functionId: number; refreshKey?: number; onShortlistChanged?: () => void; }
 
 const NEED_LABEL: Record<string, string> = { required: "обязательна", supporting: "поддерживает", optional: "опционально" };
 const NEED_COLOR: Record<string, string> = {
@@ -69,13 +75,34 @@ function CoverageBar({ label, covered, total, tone }: { label: string; covered: 
   );
 }
 
-export default function FunctionModuleBundlesBlock({ projectId, functionId, refreshKey }: Props) {
+export default function FunctionModuleBundlesBlock({ projectId, functionId, refreshKey, onShortlistChanged }: Props) {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [maxSize, setMaxSize] = useState("3");
   const [onlyFull, setOnlyFull] = useState(false);
   const [detail, setDetail] = useState<Bundle | null>(null);
+
+  // Диалог сохранения bundle в шортлист
+  const [saveBundle, setSaveBundle] = useState<Bundle | null>(null);
+  const [saveTitle, setSaveTitle] = useState("");
+  const [saveNote, setSaveNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const doSave = () => {
+    if (!saveBundle) return;
+    setSaving(true);
+    deptFunctionsApi.createFunctionShortlist({
+      project_id: projectId, function_id: functionId,
+      module_ids: saveBundle.modules.map((m) => m.module_id),
+      title: saveTitle.trim() || undefined,
+      decision_status: "shortlisted",
+      decision_note: saveNote.trim() || undefined,
+    })
+      .then(() => { toast({ title: "Сохранено в шортлист" }); setSaveBundle(null); setSaveTitle(""); setSaveNote(""); onShortlistChanged?.(); })
+      .catch((e: Error) => toast({ title: "Не удалось сохранить", description: e.message, variant: "destructive" }))
+      .finally(() => setSaving(false));
+  };
 
   const load = () => {
     setLoading(true);
@@ -131,26 +158,32 @@ export default function FunctionModuleBundlesBlock({ projectId, functionId, refr
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
           {bundles.map((b) => (
-            <button
+            <div
               key={b.bundle_key}
-              onClick={() => setDetail(b)}
-              className="text-left rounded-lg border border-slate-200 bg-white hover:border-fuchsia-300 hover:shadow-sm transition p-3"
+              className="rounded-lg border border-slate-200 bg-white hover:border-fuchsia-300 hover:shadow-sm transition p-3"
             >
-              <div className="flex flex-wrap gap-1 mb-2">
-                {b.modules.map((m) => <Badge key={m.module_id} variant="secondary" className="text-[10px]">{m.module_name}</Badge>)}
+              <button onClick={() => setDetail(b)} className="text-left w-full">
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {b.modules.map((m) => <Badge key={m.module_id} variant="secondary" className="text-[10px]">{m.module_name}</Badge>)}
+                </div>
+                <div className="space-y-1">
+                  <CoverageBar label="required" covered={b.required_covered} total={b.required_total} tone="h-full bg-rose-400" />
+                  <CoverageBar label="supporting" covered={b.supporting_covered} total={b.supporting_total} tone="h-full bg-blue-400" />
+                  <CoverageBar label="optional" covered={b.optional_covered} total={b.optional_total} tone="h-full bg-slate-400" />
+                </div>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  <Badge variant="outline" className="text-[10px]">{b.modules_count} модуля</Badge>
+                  <Badge variant="outline" className="text-[10px]">{b.products_count} прод.</Badge>
+                  <Badge variant="outline" className="text-[10px]">{b.vendors_count} вендор</Badge>
+                  {b.required_uncovered > 0 && <Badge className="text-[10px] border-0 bg-rose-50 text-rose-600">−{b.required_uncovered} required</Badge>}
+                </div>
+              </button>
+              <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
+                <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={() => { setSaveBundle(b); setSaveTitle(""); setSaveNote(""); }}>
+                  <Icon name="BookmarkPlus" size={12} className="mr-1" /> В шортлист
+                </Button>
               </div>
-              <div className="space-y-1">
-                <CoverageBar label="required" covered={b.required_covered} total={b.required_total} tone="h-full bg-rose-400" />
-                <CoverageBar label="supporting" covered={b.supporting_covered} total={b.supporting_total} tone="h-full bg-blue-400" />
-                <CoverageBar label="optional" covered={b.optional_covered} total={b.optional_total} tone="h-full bg-slate-400" />
-              </div>
-              <div className="flex flex-wrap gap-1 mt-2">
-                <Badge variant="outline" className="text-[10px]">{b.modules_count} модуля</Badge>
-                <Badge variant="outline" className="text-[10px]">{b.products_count} прод.</Badge>
-                <Badge variant="outline" className="text-[10px]">{b.vendors_count} вендор</Badge>
-                {b.required_uncovered > 0 && <Badge className="text-[10px] border-0 bg-rose-50 text-rose-600">−{b.required_uncovered} required</Badge>}
-              </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -283,6 +316,36 @@ export default function FunctionModuleBundlesBlock({ projectId, functionId, refr
           )}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={!!saveBundle} onOpenChange={(o) => !o && setSaveBundle(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Сохранить набор в шортлист</DialogTitle>
+          </DialogHeader>
+          {saveBundle && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-1">
+                {saveBundle.modules.map((m) => <Badge key={m.module_id} variant="secondary" className="text-[10px]">{m.module_name}</Badge>)}
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Состав набора фиксируется и не редактируется. Для другого состава сохраните новый набор.
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-500 mb-0.5">Название (необязательно)</div>
+                <Input value={saveTitle} onChange={(e) => setSaveTitle(e.target.value)} placeholder="Напр. Базовый стек" className="h-8 text-sm" />
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-500 mb-0.5">Заметка (необязательно)</div>
+                <Textarea value={saveNote} onChange={(e) => setSaveNote(e.target.value)} rows={2} placeholder="Комментарий к решению" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSaveBundle(null)} disabled={saving}>Отмена</Button>
+            <Button onClick={doSave} disabled={saving}>Сохранить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

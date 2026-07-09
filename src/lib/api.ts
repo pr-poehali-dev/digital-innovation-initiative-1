@@ -786,6 +786,20 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=function_module_candidates&project_id=${projectId}&function_id=${functionId}&include_archived_modules=${!!opts?.includeArchivedModules}&include_archived_capabilities=${!!opts?.includeArchivedCapabilities}`, "GET"),
   getFunctionModuleBundles: (projectId: number, functionId: number, opts?: { maxBundleSize?: number; onlyFullRequired?: boolean; includeArchivedSupply?: boolean; limit?: number }) =>
     request(URLS.deptFunctions, `/?action=function_module_bundles&project_id=${projectId}&function_id=${functionId}&max_bundle_size=${opts?.maxBundleSize ?? 3}&only_full_required=${!!opts?.onlyFullRequired}&include_archived_supply=${!!opts?.includeArchivedSupply}&limit=${opts?.limit ?? 10}`, "GET"),
+  getFunctionShortlists: (projectId: number, functionId: number, includeArchived = false) =>
+    request(URLS.deptFunctions, `/?action=function_shortlists&project_id=${projectId}&function_id=${functionId}&include_archived=${includeArchived}`, "GET"),
+  getFunctionShortlistsCounts: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=function_shortlists_counts&project_id=${projectId}`, "GET"),
+  getFunctionShortlistDetail: (projectId: number, shortlistId: number) =>
+    request(URLS.deptFunctions, `/?action=function_shortlist_detail&project_id=${projectId}&shortlist_id=${shortlistId}`, "GET"),
+  createFunctionShortlist: (data: { project_id: number; function_id: number; module_ids: number[]; title?: string; decision_status?: string; decision_note?: string }) =>
+    request(URLS.deptFunctions, "/?action=create_function_shortlist", "POST", data),
+  updateFunctionShortlist: (data: { project_id: number; shortlist_id: number; title?: string; decision_status: string; decision_note?: string }) =>
+    request(URLS.deptFunctions, "/?action=update_function_shortlist", "POST", data),
+  archiveFunctionShortlist: (data: { project_id: number; shortlist_id: number }) =>
+    request(URLS.deptFunctions, "/?action=archive_function_shortlist", "POST", data),
+  restoreFunctionShortlist: (data: { project_id: number; shortlist_id: number }) =>
+    request(URLS.deptFunctions, "/?action=restore_function_shortlist", "POST", data),
 };
 
 export const solutionsRegistryApi = {

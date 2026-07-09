@@ -11,6 +11,7 @@ import FunctionPracticesBlock from "@/components/dept/FunctionPracticesBlock";
 import FunctionCapabilitiesBlock from "@/components/dept/FunctionCapabilitiesBlock";
 import FunctionModuleCandidatesBlock from "@/components/dept/FunctionModuleCandidatesBlock";
 import FunctionModuleBundlesBlock from "@/components/dept/FunctionModuleBundlesBlock";
+import FunctionShortlistBlock from "@/components/dept/FunctionShortlistBlock";
 
 type DeptFunction = {
   id: number;
@@ -154,7 +155,20 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     setCapRefreshKey((k) => ({ ...k, [fnId]: (k[fnId] || 0) + 1 }));
   };
 
-  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); loadCapabilityCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
+  // Шортлист решений: счётчики + ключ пересчёта на функцию
+  const [shortlistCounts, setShortlistCounts] = useState<Record<number, { active: number; preferred: number; rejected: number }>>({});
+  const [shortlistRefreshKey, setShortlistRefreshKey] = useState<Record<number, number>>({});
+  const loadShortlistCounts = () => {
+    deptFunctionsApi.getFunctionShortlistsCounts(projectId)
+      .then((d: { counts: Record<number, { active: number; preferred: number; rejected: number }> }) => setShortlistCounts(d.counts || {}))
+      .catch(() => { /* индикатор не критичен */ });
+  };
+  const onShortlistChanged = (fnId: number) => {
+    loadShortlistCounts();
+    setShortlistRefreshKey((k) => ({ ...k, [fnId]: (k[fnId] || 0) + 1 }));
+  };
+
+  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); loadCapabilityCounts(); loadShortlistCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
 
   const loadFunctionProcesses = async (functionId: number) => {
     setProcessesLoading(p => ({ ...p, [functionId]: true }));
@@ -915,6 +929,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             <Icon name="Puzzle" size={11} className="mr-0.5" />{capabilityCounts[fn.id].active}
                           </Badge>
                         )}
+                        {(shortlistCounts[fn.id]?.active || 0) > 0 && (
+                          <Badge variant="secondary" className="text-[10px] flex-shrink-0 bg-amber-50 text-amber-700" title="Наборов в шортлисте">
+                            <Icon name="ListChecks" size={11} className="mr-0.5" />{shortlistCounts[fn.id].active}
+                            {(shortlistCounts[fn.id]?.preferred || 0) > 0 && <Icon name="Star" size={10} className="ml-0.5 text-emerald-600" />}
+                          </Badge>
+                        )}
                         <Badge className={`text-xs ${cat.color} border-0 flex-shrink-0`}>{cat.label}</Badge>
                       </button>
                       {isOpen && (
@@ -1065,6 +1085,14 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             projectId={projectId}
                             functionId={fn.id}
                             refreshKey={capRefreshKey[fn.id] || 0}
+                            onShortlistChanged={() => onShortlistChanged(fn.id)}
+                          />
+
+                          <FunctionShortlistBlock
+                            projectId={projectId}
+                            functionId={fn.id}
+                            key={`sl-${fn.id}-${shortlistRefreshKey[fn.id] || 0}`}
+                            onChanged={() => onShortlistChanged(fn.id)}
                           />
                         </div>
                       )}

@@ -198,6 +198,26 @@
       "method": "GET",
       "path": "/?action=function_module_bundles&project_id=1&function_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_shortlists",
+      "method": "GET",
+      "path": "/?action=function_shortlists&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth create_function_shortlist",
+      "method": "POST",
+      "path": "/?action=create_function_shortlist",
+      "body": {"project_id": 1, "function_id": 1, "module_ids": [1, 2]},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth update_function_shortlist",
+      "method": "POST",
+      "path": "/?action=update_function_shortlist",
+      "body": {"project_id": 1, "shortlist_id": 1, "decision_status": "preferred", "decision_note": "x"},
+      "expectedStatus": 401
     }
   ]
 }
