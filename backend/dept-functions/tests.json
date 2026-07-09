@@ -148,6 +148,26 @@
       "path": "/?action=archive_process_card",
       "body": {"project_id": 1, "card_id": 1},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_practices",
+      "method": "GET",
+      "path": "/?action=function_practices&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth add_function_practice",
+      "method": "POST",
+      "path": "/?action=add_function_practice",
+      "body": {"project_id": 1, "function_id": 1, "mapping": {"practice_id": 1, "relevance_level": "primary", "reason_tags": ["reduce_manual_work"]}},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth archive_function_practice",
+      "method": "POST",
+      "path": "/?action=archive_function_practice",
+      "body": {"project_id": 1, "mapping_id": 1},
+      "expectedStatus": 401
     }
   ]
 }

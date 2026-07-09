@@ -32,6 +32,10 @@ Actions:
   GET  process_cards_counts — счётчики активных карточек по функциям проекта
   POST create_process_card / update_process_card — создать/обновить карточку (controlled values валидируются)
   POST archive_process_card / restore_process_card — soft-архив и восстановление карточки
+  GET  function_practices — привязанные к функции практики улучшения (+ краткие поля практики и capability_count)
+  GET  function_practices_counts — счётчики активных привязок практик по функциям проекта
+  POST add_function_practice / update_function_practice — привязать/обновить практику (explainability обязателен)
+  POST archive_function_practice / restore_function_practice — снять/восстановить привязку (без hard delete)
 """
 import base64
 import io
@@ -60,6 +64,13 @@ PC_OUTPUT = {"decision", "document", "approval", "report", "notification", "data
 PC_SLA = {"none", "soft", "hard", "regulatory", "unknown"}
 PC_PAIN = {"manual_reentry", "long_cycle_time", "many_approvals", "low_visibility", "high_error_rate",
            "knowledge_dependency", "document_heaviness", "bottlenecks", "compliance_risk"}
+
+# Controlled values для привязки практик к функциям (function_practice_mappings)
+FPM_RELEVANCE = {"primary", "supporting", "explore"}
+FPM_SOURCE = {"manual", "interview", "workshop", "analysis"}
+FPM_REASON = {"reduce_manual_work", "reduce_cycle_time", "reduce_errors", "reduce_approvals",
+              "improve_visibility", "improve_compliance", "reduce_knowledge_dependency",
+              "improve_service_quality", "scale_volume", "standardize_execution"}
 
 
 def _clean_scalar(v, allowed):
@@ -1352,6 +1363,163 @@ def handler(event: dict, context) -> dict:
                 cur.execute(
                     f"UPDATE {SCHEMA}.function_process_cards SET is_archived=%s, updated_at=now() WHERE id=%s AND project_id=%s",
                     (archived, card_id, project_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Практики улучшения функции: список привязок ───────────
+        if method == "GET" and action == "function_practices":
+            func_id = int(qs.get("function_id") or 0)
+            include_archived = (qs.get("include_archived") or "false").lower() == "true"
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT m.id, m.relevance_level, m.reason_tags, m.rationale_note, m.source_kind, m.is_archived,
+                               p.id, p.slug, p.name, p.category, p.summary, p.is_digital, p.status,
+                               (SELECT COUNT(*) FROM {SCHEMA}.solution_practice_capability_map x WHERE x.practice_id = p.id)
+                        FROM {SCHEMA}.function_practice_mappings m
+                        JOIN {SCHEMA}.solution_practices p ON p.id = m.practice_id
+                        WHERE m.function_id = %s {'' if include_archived else 'AND m.is_archived = false'}
+                        ORDER BY m.is_archived,
+                                 CASE m.relevance_level WHEN 'primary' THEN 0 WHEN 'supporting' THEN 1 ELSE 2 END,
+                                 p.name""",
+                    (func_id,),
+                )
+                items = [{
+                    "id": r[0], "relevance_level": r[1], "reason_tags": r[2] or [], "rationale_note": r[3],
+                    "source_kind": r[4], "is_archived": r[5],
+                    "practice_id": r[6], "practice_slug": r[7], "practice_name": r[8], "practice_category": r[9],
+                    "practice_summary": r[10], "practice_is_digital": r[11], "practice_status": r[12],
+                    "capability_count": r[13],
+                } for r in cur.fetchall()]
+            return cors({"ok": True, "items": items})
+
+        # ── Счётчики привязанных практик по функциям (badge) ──────
+        if method == "GET" and action == "function_practices_counts":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT m.function_id, COUNT(*) FROM {SCHEMA}.function_practice_mappings m
+                        JOIN {SCHEMA}.dept_functions f ON f.id = m.function_id
+                        WHERE f.project_id = %s AND m.is_archived = false GROUP BY m.function_id""",
+                    (project_id,),
+                )
+                counts = {r[0]: r[1] for r in cur.fetchall()}
+            return cors({"ok": True, "counts": counts})
+
+        # ── Привязать / обновить практику функции ─────────────────
+        if method == "POST" and action in ("add_function_practice", "update_function_practice"):
+            p = body.get("mapping") or {}
+            relevance = p.get("relevance_level") or "supporting"
+            if relevance not in FPM_RELEVANCE:
+                return cors({"ok": False, "error": "Недопустимый уровень релевантности"}, 400)
+            source_kind = p.get("source_kind") or "manual"
+            if source_kind not in FPM_SOURCE:
+                return cors({"ok": False, "error": "Недопустимый источник"}, 400)
+            reason_tags = [t for t in (p.get("reason_tags") or []) if t in FPM_REASON]
+            rationale = (p.get("rationale_note") or "").strip() or None
+            # Explainability: нельзя сохранить пустое обоснование
+            if not reason_tags and not rationale:
+                return cors({"ok": False, "error": "Укажите причину: теги или текстовое обоснование"}, 400)
+
+            if action == "add_function_practice":
+                func_id = int(body.get("function_id") or 0)
+                practice_id = int(p.get("practice_id") or 0)
+                if not func_id or not practice_id:
+                    return cors({"ok": False, "error": "function_id и practice_id обязательны"}, 400)
+                with conn.cursor() as cur:
+                    # практика должна существовать и быть активной
+                    cur.execute(f"SELECT status FROM {SCHEMA}.solution_practices WHERE id = %s", (practice_id,))
+                    prow = cur.fetchone()
+                    if not prow:
+                        return cors({"ok": False, "error": "Практика не найдена"}, 404)
+                    if prow[0] != "active":
+                        return cors({"ok": False, "error": "Нельзя привязать архивную/черновую практику"}, 400)
+                    # уже есть активная связь?
+                    cur.execute(
+                        f"""SELECT id FROM {SCHEMA}.function_practice_mappings
+                            WHERE function_id = %s AND practice_id = %s AND is_archived = false""",
+                        (func_id, practice_id),
+                    )
+                    if cur.fetchone():
+                        return cors({"ok": False, "error": "Практика уже привязана к функции"}, 409)
+                    # есть архивная связь? — restore + update вместо дубля
+                    cur.execute(
+                        f"""SELECT id FROM {SCHEMA}.function_practice_mappings
+                            WHERE function_id = %s AND practice_id = %s AND is_archived = true
+                            ORDER BY updated_at DESC LIMIT 1""",
+                        (func_id, practice_id),
+                    )
+                    arch = cur.fetchone()
+                    if arch:
+                        cur.execute(
+                            f"""UPDATE {SCHEMA}.function_practice_mappings SET
+                                  is_archived = false, relevance_level = %s, reason_tags = %s,
+                                  rationale_note = %s, source_kind = %s, updated_by = %s, updated_at = now()
+                                WHERE id = %s RETURNING id""",
+                            (relevance, reason_tags, rationale, source_kind, user_id, arch[0]),
+                        )
+                        new_id = cur.fetchone()[0]
+                    else:
+                        cur.execute(
+                            f"""INSERT INTO {SCHEMA}.function_practice_mappings
+                                (function_id, practice_id, relevance_level, reason_tags, rationale_note, source_kind, updated_by)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                            (func_id, practice_id, relevance, reason_tags, rationale, source_kind, user_id),
+                        )
+                        new_id = cur.fetchone()[0]
+                conn.commit()
+                return cors({"ok": True, "id": new_id})
+            else:
+                mapping_id = int(p.get("id") or body.get("mapping_id") or 0)
+                if not mapping_id:
+                    return cors({"ok": False, "error": "mapping id required"}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""UPDATE {SCHEMA}.function_practice_mappings m SET
+                              relevance_level = %s, reason_tags = %s, rationale_note = %s,
+                              source_kind = %s, updated_by = %s, updated_at = now()
+                            FROM {SCHEMA}.dept_functions f
+                            WHERE m.id = %s AND m.function_id = f.id AND f.project_id = %s""",
+                        (relevance, reason_tags, rationale, source_kind, user_id, mapping_id, project_id),
+                    )
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── Практика функции: архив / восстановление ──────────────
+        if method == "POST" and action in ("archive_function_practice", "restore_function_practice"):
+            mapping_id = int(body.get("mapping_id") or 0)
+            if not mapping_id:
+                return cors({"ok": False, "error": "mapping_id required"}, 400)
+            archived = action == "archive_function_practice"
+            with conn.cursor() as cur:
+                if not archived:
+                    # при восстановлении проверяем, что нет активного дубля и практика активна
+                    cur.execute(
+                        f"""SELECT m.function_id, m.practice_id, p.status
+                            FROM {SCHEMA}.function_practice_mappings m
+                            JOIN {SCHEMA}.solution_practices p ON p.id = m.practice_id
+                            JOIN {SCHEMA}.dept_functions f ON f.id = m.function_id
+                            WHERE m.id = %s AND f.project_id = %s""",
+                        (mapping_id, project_id),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        return cors({"ok": False, "error": "Связь не найдена"}, 404)
+                    if row[2] != "active":
+                        return cors({"ok": False, "error": "Практика больше не активна — восстановление запрещено"}, 400)
+                    cur.execute(
+                        f"""SELECT 1 FROM {SCHEMA}.function_practice_mappings
+                            WHERE function_id = %s AND practice_id = %s AND is_archived = false AND id <> %s""",
+                        (row[0], row[1], mapping_id),
+                    )
+                    if cur.fetchone():
+                        return cors({"ok": False, "error": "Активная связь с этой практикой уже существует"}, 409)
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.function_practice_mappings m SET is_archived = %s, updated_at = now()
+                        FROM {SCHEMA}.dept_functions f
+                        WHERE m.id = %s AND m.function_id = f.id AND f.project_id = %s""",
+                    (archived, mapping_id, project_id),
                 )
             conn.commit()
             return cors({"ok": True})

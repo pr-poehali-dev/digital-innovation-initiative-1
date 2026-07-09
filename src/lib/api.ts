@@ -766,6 +766,18 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=archive_process_card", "POST", data),
   restoreProcessCard: (data: { project_id: number; card_id: number }) =>
     request(URLS.deptFunctions, "/?action=restore_process_card", "POST", data),
+  getFunctionPractices: (projectId: number, functionId: number, includeArchived = false) =>
+    request(URLS.deptFunctions, `/?action=function_practices&project_id=${projectId}&function_id=${functionId}&include_archived=${includeArchived}`, "GET"),
+  getFunctionPracticesCounts: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=function_practices_counts&project_id=${projectId}`, "GET"),
+  addFunctionPractice: (data: { project_id: number; function_id: number; mapping: Record<string, unknown> }) =>
+    request(URLS.deptFunctions, "/?action=add_function_practice", "POST", data),
+  updateFunctionPractice: (data: { project_id: number; mapping: Record<string, unknown> }) =>
+    request(URLS.deptFunctions, "/?action=update_function_practice", "POST", data),
+  archiveFunctionPractice: (data: { project_id: number; mapping_id: number }) =>
+    request(URLS.deptFunctions, "/?action=archive_function_practice", "POST", data),
+  restoreFunctionPractice: (data: { project_id: number; mapping_id: number }) =>
+    request(URLS.deptFunctions, "/?action=restore_function_practice", "POST", data),
 };
 
 export const solutionsRegistryApi = {

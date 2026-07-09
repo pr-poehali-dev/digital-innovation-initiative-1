@@ -7,6 +7,7 @@ import HelpPanel from "@/components/HelpPanel";
 import { savePostImportResult } from "@/components/dept/postImportResult";
 import OperatingProfileCard from "@/components/dept/OperatingProfileCard";
 import ProcessCardsBlock from "@/components/dept/ProcessCardsBlock";
+import FunctionPracticesBlock from "@/components/dept/FunctionPracticesBlock";
 
 type DeptFunction = {
   id: number;
@@ -127,7 +128,15 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       .catch(() => { /* индикатор не критичен */ });
   };
 
-  useEffect(() => { loadProfileStatus(); loadCardCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
+  // Практики улучшения: счётчик активных привязок по функциям
+  const [practiceCounts, setPracticeCounts] = useState<Record<number, number>>({});
+  const loadPracticeCounts = () => {
+    deptFunctionsApi.getFunctionPracticesCounts(projectId)
+      .then((d: { counts: Record<number, number> }) => setPracticeCounts(d.counts || {}))
+      .catch(() => { /* индикатор не критичен */ });
+  };
+
+  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
 
   const loadFunctionProcesses = async (functionId: number) => {
     setProcessesLoading(p => ({ ...p, [functionId]: true }));
@@ -878,6 +887,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             <Icon name="Workflow" size={11} className="mr-0.5" />{cardCounts[fn.id]}
                           </Badge>
                         )}
+                        {(practiceCounts[fn.id] || 0) > 0 && (
+                          <Badge variant="secondary" className="text-[10px] flex-shrink-0 bg-emerald-50 text-emerald-700" title="Практик улучшения">
+                            <Icon name="Sparkles" size={11} className="mr-0.5" />{practiceCounts[fn.id]}
+                          </Badge>
+                        )}
                         <Badge className={`text-xs ${cat.color} border-0 flex-shrink-0`}>{cat.label}</Badge>
                       </button>
                       {isOpen && (
@@ -1004,6 +1018,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             projectId={projectId}
                             functionId={fn.id}
                             onChanged={loadCardCounts}
+                          />
+
+                          <FunctionPracticesBlock
+                            projectId={projectId}
+                            functionId={fn.id}
+                            onChanged={loadPracticeCounts}
                           />
                         </div>
                       )}
