@@ -28,6 +28,10 @@ Actions:
   GET  operating_profile  — операционный профиль функции (signal-поля для будущего мэтчинга)
   POST save_operating_profile — сохранить/обновить операционный профиль (upsert)
   GET  operating_profiles_status — статусы заполненности профилей по проекту (empty/partial/full)
+  GET  process_cards      — процессные карточки функции (внутри функции; include_archived=true для архива)
+  GET  process_cards_counts — счётчики активных карточек по функциям проекта
+  POST create_process_card / update_process_card — создать/обновить карточку (controlled values валидируются)
+  POST archive_process_card / restore_process_card — soft-архив и восстановление карточки
 """
 import base64
 import io
@@ -47,6 +51,36 @@ YANDEX_VISION_API_KEY = os.environ.get("YANDEX_GPT_API_KEY", "")
 
 HORIZONS = {"short": "до 3 мес", "medium": "3–12 мес", "long": "1–3 года"}
 STATUSES = {"manual": "Ручной", "partial": "Частично автоматизирован", "automated": "Автоматизирован", "planned": "Планируется"}
+
+# Controlled values для процессных карточек (валидация на бэкенде)
+PC_TRIGGER = {"incoming_request", "document_received", "scheduled", "system_event",
+              "manager_assignment", "customer_action", "external_signal", "manual_start", "other", "unknown"}
+PC_INPUT = {"structured_data", "semi_structured", "documents", "email", "scans", "external_sources"}
+PC_OUTPUT = {"decision", "document", "approval", "report", "notification", "data_update"}
+PC_SLA = {"none", "soft", "hard", "regulatory", "unknown"}
+PC_PAIN = {"manual_reentry", "long_cycle_time", "many_approvals", "low_visibility", "high_error_rate",
+           "knowledge_dependency", "document_heaviness", "bottlenecks", "compliance_risk"}
+
+
+def _clean_scalar(v, allowed):
+    """None/'' -> None; недопустимое значение из controlled-набора -> None."""
+    if v in ("", None):
+        return None
+    return v if v in allowed else None
+
+
+def _clean_arr(v, allowed):
+    """Оставляет только допустимые controlled-значения, единообразно возвращает list."""
+    if not isinstance(v, list):
+        return []
+    return [x for x in v if x in allowed]
+
+
+def _clean_free_arr(v):
+    """Свободные теги: строки без пустых, единообразно list."""
+    if not isinstance(v, list):
+        return []
+    return [str(x).strip() for x in v if str(x).strip()]
 
 
 def cors(body: dict, code: int = 200) -> dict:
@@ -1202,6 +1236,125 @@ def handler(event: dict, context) -> dict:
                     filled = r[1]
                     status[r[0]] = "full" if filled >= 6 else ("partial" if filled > 0 else "empty")
             return cors({"ok": True, "statuses": status})
+
+        # ── Процессные карточки функции: список ───────────────────
+        if method == "GET" and action == "process_cards":
+            func_id = int(qs.get("function_id") or 0)
+            include_archived = (qs.get("include_archived") or "false").lower() == "true"
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, name, summary, sort_order, trigger_type, trigger_note,
+                               input_types, input_note, output_types, output_note,
+                               systems_used, participants, sla_criticality, sla_note,
+                               pain_points, automation_notes, is_archived, updated_at
+                        FROM {SCHEMA}.function_process_cards
+                        WHERE function_id = %s {'' if include_archived else 'AND is_archived = false'}
+                        ORDER BY is_archived, sort_order, created_at""",
+                    (func_id,),
+                )
+                cards = [{
+                    "id": r[0], "name": r[1], "summary": r[2], "sort_order": r[3],
+                    "trigger_type": r[4], "trigger_note": r[5],
+                    "input_types": r[6] or [], "input_note": r[7],
+                    "output_types": r[8] or [], "output_note": r[9],
+                    "systems_used": r[10] or [], "participants": r[11] or [],
+                    "sla_criticality": r[12], "sla_note": r[13],
+                    "pain_points": r[14] or [], "automation_notes": r[15],
+                    "is_archived": r[16], "updated_at": r[17],
+                } for r in cur.fetchall()]
+            return cors({"ok": True, "cards": cards})
+
+        # ── Процессные карточки: счётчики по функциям (индикатор) ──
+        if method == "GET" and action == "process_cards_counts":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT function_id, COUNT(*) FROM {SCHEMA}.function_process_cards
+                        WHERE project_id = %s AND is_archived = false GROUP BY function_id""",
+                    (project_id,),
+                )
+                counts = {r[0]: r[1] for r in cur.fetchall()}
+            return cors({"ok": True, "counts": counts})
+
+        # ── Процессная карточка: создать / обновить ───────────────
+        if method == "POST" and action in ("create_process_card", "update_process_card"):
+            p = body.get("card") or {}
+            name = (p.get("name") or "").strip()
+            if not name:
+                return cors({"ok": False, "error": "Название обязательно"}, 400)
+            fields = dict(
+                summary=(p.get("summary") or "").strip() or None,
+                trigger_type=_clean_scalar(p.get("trigger_type"), PC_TRIGGER),
+                trigger_note=(p.get("trigger_note") or "").strip() or None,
+                input_types=_clean_arr(p.get("input_types"), PC_INPUT),
+                input_note=(p.get("input_note") or "").strip() or None,
+                output_types=_clean_arr(p.get("output_types"), PC_OUTPUT),
+                output_note=(p.get("output_note") or "").strip() or None,
+                systems_used=_clean_free_arr(p.get("systems_used")),
+                participants=_clean_free_arr(p.get("participants")),
+                sla_criticality=_clean_scalar(p.get("sla_criticality"), PC_SLA),
+                sla_note=(p.get("sla_note") or "").strip() or None,
+                pain_points=_clean_arr(p.get("pain_points"), PC_PAIN),
+                automation_notes=(p.get("automation_notes") or "").strip() or None,
+            )
+            if action == "create_process_card":
+                func_id = int(body.get("function_id") or 0)
+                if not func_id:
+                    return cors({"ok": False, "error": "function_id required"}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT COALESCE(MAX(sort_order), 0) + 1 FROM {SCHEMA}.function_process_cards WHERE function_id = %s",
+                        (func_id,),
+                    )
+                    next_order = cur.fetchone()[0]
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.function_process_cards
+                            (function_id, project_id, name, summary, sort_order, trigger_type, trigger_note,
+                             input_types, input_note, output_types, output_note, systems_used, participants,
+                             sla_criticality, sla_note, pain_points, automation_notes, updated_by)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                        (func_id, project_id, name, fields["summary"], next_order, fields["trigger_type"],
+                         fields["trigger_note"], fields["input_types"], fields["input_note"], fields["output_types"],
+                         fields["output_note"], fields["systems_used"], fields["participants"], fields["sla_criticality"],
+                         fields["sla_note"], fields["pain_points"], fields["automation_notes"], user_id),
+                    )
+                    new_id = cur.fetchone()[0]
+                conn.commit()
+                return cors({"ok": True, "id": new_id})
+            else:
+                card_id = int(p.get("id") or body.get("card_id") or 0)
+                if not card_id:
+                    return cors({"ok": False, "error": "card id required"}, 400)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""UPDATE {SCHEMA}.function_process_cards SET
+                              name=%s, summary=%s, trigger_type=%s, trigger_note=%s,
+                              input_types=%s, input_note=%s, output_types=%s, output_note=%s,
+                              systems_used=%s, participants=%s, sla_criticality=%s, sla_note=%s,
+                              pain_points=%s, automation_notes=%s, updated_by=%s, updated_at=now()
+                            WHERE id=%s AND project_id=%s""",
+                        (name, fields["summary"], fields["trigger_type"], fields["trigger_note"],
+                         fields["input_types"], fields["input_note"], fields["output_types"], fields["output_note"],
+                         fields["systems_used"], fields["participants"], fields["sla_criticality"], fields["sla_note"],
+                         fields["pain_points"], fields["automation_notes"], user_id, card_id, project_id),
+                    )
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── Процессная карточка: архив / восстановление ───────────
+        if method == "POST" and action in ("archive_process_card", "restore_process_card"):
+            card_id = int(body.get("card_id") or 0)
+            if not card_id:
+                return cors({"ok": False, "error": "card_id required"}, 400)
+            archived = action == "archive_process_card"
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.function_process_cards SET is_archived=%s, updated_at=now() WHERE id=%s AND project_id=%s",
+                    (archived, card_id, project_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

@@ -753,4 +753,16 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=save_operating_profile", "POST", data),
   getOperatingProfilesStatus: (projectId: number) =>
     request(URLS.deptFunctions, `/?action=operating_profiles_status&project_id=${projectId}`, "GET"),
+  getProcessCards: (projectId: number, functionId: number, includeArchived = false) =>
+    request(URLS.deptFunctions, `/?action=process_cards&project_id=${projectId}&function_id=${functionId}&include_archived=${includeArchived}`, "GET"),
+  getProcessCardsCounts: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=process_cards_counts&project_id=${projectId}`, "GET"),
+  createProcessCard: (data: { project_id: number; function_id: number; card: Record<string, unknown> }) =>
+    request(URLS.deptFunctions, "/?action=create_process_card", "POST", data),
+  updateProcessCard: (data: { project_id: number; card: Record<string, unknown> }) =>
+    request(URLS.deptFunctions, "/?action=update_process_card", "POST", data),
+  archiveProcessCard: (data: { project_id: number; card_id: number }) =>
+    request(URLS.deptFunctions, "/?action=archive_process_card", "POST", data),
+  restoreProcessCard: (data: { project_id: number; card_id: number }) =>
+    request(URLS.deptFunctions, "/?action=restore_process_card", "POST", data),
 };

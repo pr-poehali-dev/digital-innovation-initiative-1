@@ -128,6 +128,26 @@
       "method": "GET",
       "path": "/?action=operating_profiles_status&project_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth process_cards",
+      "method": "GET",
+      "path": "/?action=process_cards&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth create_process_card",
+      "method": "POST",
+      "path": "/?action=create_process_card",
+      "body": {"project_id": 1, "function_id": 1, "card": {"name": "Тест"}},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth archive_process_card",
+      "method": "POST",
+      "path": "/?action=archive_process_card",
+      "body": {"project_id": 1, "card_id": 1},
+      "expectedStatus": 401
     }
   ]
 }

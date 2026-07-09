@@ -104,6 +104,19 @@ export const PAIN_POINTS: Opt[] = [
   { value: "compliance_risk", label: "Комплаенс-риск" },
 ];
 
+export const TRIGGER_TYPES: Opt[] = [
+  { value: "incoming_request", label: "Входящий запрос" },
+  { value: "document_received", label: "Получен документ" },
+  { value: "scheduled", label: "По расписанию" },
+  { value: "system_event", label: "Системное событие" },
+  { value: "manager_assignment", label: "Поручение руководителя" },
+  { value: "customer_action", label: "Действие клиента" },
+  { value: "external_signal", label: "Внешний сигнал" },
+  { value: "manual_start", label: "Ручной запуск" },
+  { value: "other", label: "Другое" },
+  { value: "unknown", label: "Неизвестно" },
+];
+
 export type OperatingProfile = {
   frequency_band?: string | null;
   volume_band?: string | null;

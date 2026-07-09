@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import HelpPanel from "@/components/HelpPanel";
 import { savePostImportResult } from "@/components/dept/postImportResult";
 import OperatingProfileCard from "@/components/dept/OperatingProfileCard";
+import ProcessCardsBlock from "@/components/dept/ProcessCardsBlock";
 
 type DeptFunction = {
   id: number;
@@ -117,7 +118,16 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       .then((d: { statuses: Record<number, string> }) => setProfileStatus(d.statuses || {}))
       .catch(() => { /* индикатор не критичен */ });
   };
-  useEffect(() => { loadProfileStatus(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
+
+  // Процессные карточки: счётчик активных по функциям (индикатор в заголовке)
+  const [cardCounts, setCardCounts] = useState<Record<number, number>>({});
+  const loadCardCounts = () => {
+    deptFunctionsApi.getProcessCardsCounts(projectId)
+      .then((d: { counts: Record<number, number> }) => setCardCounts(d.counts || {}))
+      .catch(() => { /* индикатор не критичен */ });
+  };
+
+  useEffect(() => { loadProfileStatus(); loadCardCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
 
   const loadFunctionProcesses = async (functionId: number) => {
     setProcessesLoading(p => ({ ...p, [functionId]: true }));
@@ -863,6 +873,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                         <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={14} className="text-slate-400 flex-shrink-0" />
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${pDot}`} title={pTitle} />
                         <span className="flex-1 font-medium text-sm text-slate-800">{fn.title}</span>
+                        {(cardCounts[fn.id] || 0) > 0 && (
+                          <Badge variant="secondary" className="text-[10px] flex-shrink-0" title="Процессных карточек">
+                            <Icon name="Workflow" size={11} className="mr-0.5" />{cardCounts[fn.id]}
+                          </Badge>
+                        )}
                         <Badge className={`text-xs ${cat.color} border-0 flex-shrink-0`}>{cat.label}</Badge>
                       </button>
                       {isOpen && (
@@ -983,6 +998,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             projectId={projectId}
                             functionId={fn.id}
                             onSaved={loadProfileStatus}
+                          />
+
+                          <ProcessCardsBlock
+                            projectId={projectId}
+                            functionId={fn.id}
+                            onChanged={loadCardCounts}
                           />
                         </div>
                       )}
