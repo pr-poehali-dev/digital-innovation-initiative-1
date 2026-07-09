@@ -184,15 +184,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         kind === "image"
           ? { project_id: projectId, image_b64: b64, image_mime: mime, dept_name: deptName }
           : { project_id: projectId, file_b64: b64, file_type: kind, dept_name: deptName }
-      ) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
-      if (res.ok && res.functions) {
-        if (res.functions.length === 0) {
-          setOcrError("AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
-        } else {
-          setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
-        }
+      ) as { ok?: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+      if (res.functions && res.functions.length > 0) {
+        setDraft(res.functions.map(f => ({ ...f, dept_name: deptName, checked: true })));
       } else {
-        setOcrError(res.error || "Не удалось распознать документ");
+        setOcrError(res.error || "AI не нашёл ни одной функции в документе. Попробуйте другой файл или добавьте функции вручную.");
       }
     } catch {
       setOcrError("Не удалось распознать документ. Попробуйте ещё раз.");
@@ -353,20 +349,22 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       const { b64, mime } = await compressImageToBase64(item.file);
       const res = await deptFunctionsApi.extractFunctions({
         project_id: projectId, image_b64: b64, image_mime: mime, dept_name: deptName,
-      }) as { ok: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
+      }) as { ok?: boolean; functions?: Array<{ title: string; description: string; goals: string; category: string }>; error?: string };
 
-      if (res.ok && res.functions) {
+      if (res.functions && res.functions.length > 0) {
         const extracted = res.functions.map(f => ({ ...f, dept_name: deptName, checked: true, source_id: item.id, source_file: item.file.name }));
         setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "done", foundCount: extracted.length, extractedFunctions: extracted, error: undefined } : f) : q);
         addFunctionsToDraft(item.id, extracted, orderSnapshot);
-        return extracted.length > 0;
+        return true;
       } else {
-        setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Не удалось распознать" } : f) : q);
+        setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: res.error || "Функции не найдены" } : f) : q);
         return false;
       }
     } catch (err) {
       const message = err instanceof Error && err.message === "HEIC_UNSUPPORTED"
         ? "Формат HEIC не поддерживается — сохраните как JPEG/PNG"
+        : err instanceof Error && err.message
+        ? err.message
         : "Ошибка обработки файла";
       setQueue(q => q ? q.map(f => f.id === item.id ? { ...f, status: "error", error: message } : f) : q);
       return false;
