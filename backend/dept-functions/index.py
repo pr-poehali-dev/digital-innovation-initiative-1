@@ -335,18 +335,38 @@ def handler(event: dict, context) -> dict:
 
 Только JSON-массив, без текста до и после."""
 
-            raw = yandex_gpt(prompt, system, max_tokens=8000)
-            print(f"[EXTRACT] gpt_raw_len={len(raw)} preview={raw[:200]!r}")
-            start = raw.find("[")
-            end = raw.rfind("]") + 1
-            extracted = []
-            if start >= 0 and end > start:
+            def parse_functions(text: str) -> list:
+                t = text.strip()
+                if "```" in t:
+                    t = t.replace("```json", "```").replace("```JSON", "```")
+                    parts = t.split("```")
+                    for part in parts:
+                        if "[" in part and "]" in part:
+                            t = part
+                            break
+                s = t.find("[")
+                e = t.rfind("]") + 1
+                if s < 0 or e <= s:
+                    return []
                 try:
-                    extracted = json.loads(raw[start:end])
-                except json.JSONDecodeError as e:
-                    print(f"[EXTRACT] JSON parse error: {e}")
-                    extracted = []
+                    data = json.loads(t[s:e])
+                    return data if isinstance(data, list) else []
+                except json.JSONDecodeError as err:
+                    print(f"[EXTRACT] JSON parse error: {err}")
+                    return []
+
+            extracted = []
+            for attempt in range(2):
+                raw = yandex_gpt(prompt, system, max_tokens=8000)
+                print(f"[EXTRACT] attempt={attempt} gpt_raw_len={len(raw)} preview={raw[:150]!r}")
+                extracted = parse_functions(raw)
+                if extracted:
+                    break
+                print(f"[EXTRACT] attempt={attempt} empty, retrying" if attempt == 0 else "[EXTRACT] final empty")
             print(f"[EXTRACT] extracted_count={len(extracted)}")
+
+            if not extracted:
+                return cors({"ok": False, "error": "ИИ не смог выделить функции из текста. Проверьте, что на скрине есть перечень функций подразделения, или добавьте функции вручную.", "ocr_text": ocr_text}, 200)
 
             # Ничего не сохраняем в БД — только возвращаем черновик для проверки пользователем.
             # Сохранение происходит через action=confirm_functions после подтверждения.
