@@ -725,4 +725,18 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=unlink_process&project_id=${data.project_id}&function_id=${data.function_id}&process_id=${data.process_id}`, "DELETE"),
   createAndLinkProcess: (data: { project_id: number; function_id: number; title: string; description?: string }) =>
     request(URLS.deptFunctions, "/?action=create_and_link_process", "POST", data),
+  getOrgTree: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=org_tree&project_id=${projectId}`, "GET"),
+  getOrgFunctions: (projectId: number, orgUnitId: number, includeChildren = false) =>
+    request(URLS.deptFunctions, `/?action=org_functions&project_id=${projectId}&org_unit_id=${orgUnitId}&include_children=${includeChildren}`, "GET"),
+  getUnassignedFunctions: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=unassigned_functions&project_id=${projectId}`, "GET"),
+  assignOrgUnit: (data: { project_id: number; function_id: number; org_unit_id: number; role: string }) =>
+    request(URLS.deptFunctions, "/?action=assign_org_unit", "POST", data),
+  unassignOrgUnit: (data: { project_id: number; function_id: number; org_unit_id: number; role?: string }) =>
+    request(URLS.deptFunctions, `/?action=unassign_org_unit&project_id=${data.project_id}&function_id=${data.function_id}&org_unit_id=${data.org_unit_id}${data.role ? `&role=${data.role}` : ""}`, "DELETE"),
+  assignDirection: (data: { project_id: number; function_id: number; direction_code: string; direction_name?: string }) =>
+    request(URLS.deptFunctions, "/?action=assign_direction", "POST", data),
+  unassignDirection: (data: { project_id: number; function_id: number; direction_code: string }) =>
+    request(URLS.deptFunctions, `/?action=unassign_direction&project_id=${data.project_id}&function_id=${data.function_id}&direction_code=${data.direction_code}`, "DELETE"),
 };

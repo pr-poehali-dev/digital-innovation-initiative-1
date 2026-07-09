@@ -57,6 +57,32 @@
       "path": "/?action=create_and_link_process",
       "body": {"project_id": 1, "function_id": 1, "title": "Test"},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth org_tree",
+      "method": "GET",
+      "path": "/?action=org_tree&project_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth org_functions",
+      "method": "GET",
+      "path": "/?action=org_functions&project_id=1&org_unit_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth assign_org_unit",
+      "method": "POST",
+      "path": "/?action=assign_org_unit",
+      "body": {"project_id": 1, "function_id": 1, "org_unit_id": 1, "role": "owner"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth assign_direction",
+      "method": "POST",
+      "path": "/?action=assign_direction",
+      "body": {"project_id": 1, "function_id": 1, "direction_code": "18"},
+      "expectedStatus": 401
     }
   ]
 }

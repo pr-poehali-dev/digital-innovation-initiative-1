@@ -14,6 +14,13 @@ Actions:
   POST link_process       — привязать существующий процесс к функции
   DELETE unlink_process    — отвязать процесс от функции
   POST create_and_link_process — создать новый процесс (в wb_processes) и сразу связать с функцией
+  GET  org_tree           — оргдерево проекта (узлы + число функций + непривязанные)
+  GET  org_functions      — функции узла (роли, направления, автоматизация); include_children=true — с дочерними
+  GET  unassigned_functions — функции без привязки к оргединице
+  POST assign_org_unit    — привязать функцию к узлу (owner/co_executor/participant/reviewer)
+  DELETE unassign_org_unit — снять привязку функции к узлу
+  POST assign_direction   — привязать код направления (18, 93, 32.2…) к функции
+  DELETE unassign_direction — снять направление
 """
 import base64
 import io
@@ -635,6 +642,183 @@ def handler(event: dict, context) -> dict:
                 )
             conn.commit()
             return cors({"ok": True, "id": proc_id})
+
+        # ── Оргдерево: список узлов с числом функций ──────────────
+        if method == "GET" and action == "org_tree":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT u.id, u.code, u.name, u.type, u.parent_id, u.path, u.level, u.sort_order,
+                               COALESCE(o.own_cnt, 0) AS own_cnt
+                        FROM {SCHEMA}.org_units u
+                        LEFT JOIN (
+                            SELECT org_unit_id, COUNT(*) AS own_cnt
+                            FROM {SCHEMA}.function_org_units GROUP BY org_unit_id
+                        ) o ON o.org_unit_id = u.id
+                        WHERE u.project_id = %s AND u.is_archived = false
+                        ORDER BY u.sort_order, u.code""",
+                    (project_id,),
+                )
+                nodes = [{"id": r[0], "code": r[1], "name": r[2], "type": r[3], "parent_id": r[4],
+                          "path": r[5], "level": r[6], "sort_order": r[7], "own_count": r[8]}
+                         for r in cur.fetchall()]
+                # непривязанные функции проекта (без единой связи с оргединицей)
+                cur.execute(
+                    f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
+                        WHERE f.project_id = %s
+                          AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)""",
+                    (project_id,),
+                )
+                unassigned = cur.fetchone()[0]
+            return cors({"ok": True, "nodes": nodes, "unassigned": unassigned})
+
+        # ── Функции узла (с ролями, направлениями, автоматизацией) ─
+        if method == "GET" and action == "org_functions":
+            org_unit_id = int(qs.get("org_unit_id") or 0)
+            include_children = (qs.get("include_children") or "false").lower() == "true"
+            if not org_unit_id:
+                return cors({"ok": False, "error": "org_unit_id required"}, 400)
+            with conn.cursor() as cur:
+                if include_children:
+                    cur.execute(
+                        f"""WITH RECURSIVE sub AS (
+                                SELECT id FROM {SCHEMA}.org_units WHERE id = %s
+                                UNION ALL
+                                SELECT c.id FROM {SCHEMA}.org_units c JOIN sub ON c.parent_id = sub.id
+                            ) SELECT id FROM sub""",
+                        (org_unit_id,),
+                    )
+                    unit_ids = [r[0] for r in cur.fetchall()]
+                else:
+                    unit_ids = [org_unit_id]
+                cur.execute(
+                    f"""SELECT DISTINCT f.id, f.title, f.description, f.category, f.priority,
+                               l.role, l.org_unit_id, u.code AS unit_code,
+                               a.current_status, a.ai_potential_score
+                        FROM {SCHEMA}.function_org_units l
+                        JOIN {SCHEMA}.dept_functions f ON f.id = l.function_id
+                        JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+                        LEFT JOIN {SCHEMA}.dept_automation a ON a.function_id = f.id
+                        WHERE l.org_unit_id = ANY(%s)
+                        ORDER BY f.priority DESC, f.title""",
+                    (unit_ids,),
+                )
+                rows = cur.fetchall()
+                fids = list({r[0] for r in rows})
+                dirs_map: dict = {}
+                if fids:
+                    cur.execute(
+                        f"""SELECT function_id, direction_code, direction_name
+                            FROM {SCHEMA}.function_directions WHERE function_id = ANY(%s)
+                            ORDER BY direction_code""",
+                        (fids,),
+                    )
+                    for fr in cur.fetchall():
+                        dirs_map.setdefault(fr[0], []).append({"code": fr[1], "name": fr[2]})
+            funcs = [{"id": r[0], "title": r[1], "description": r[2], "category": r[3],
+                      "priority": r[4], "role": r[5], "org_unit_id": r[6], "unit_code": r[7],
+                      "automation_status": r[8] or "manual", "ai_potential_score": r[9] or 0,
+                      "directions": dirs_map.get(r[0], [])}
+                     for r in rows]
+            return cors({"ok": True, "functions": funcs})
+
+        # ── Непривязанные функции проекта ─────────────────────────
+        if method == "GET" and action == "unassigned_functions":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT f.id, f.title, f.dept_name, f.category
+                        FROM {SCHEMA}.dept_functions f
+                        WHERE f.project_id = %s
+                          AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)
+                        ORDER BY f.title""",
+                    (project_id,),
+                )
+                funcs = [{"id": r[0], "title": r[1], "dept_name": r[2], "category": r[3]}
+                         for r in cur.fetchall()]
+            return cors({"ok": True, "functions": funcs})
+
+        # ── Привязать функцию к узлу (owner/co_executor/...) ───────
+        if method == "POST" and action == "assign_org_unit":
+            func_id = int(body.get("function_id") or 0)
+            org_unit_id = int(body.get("org_unit_id") or 0)
+            role = (body.get("role") or "owner").strip()
+            if role not in ("owner", "co_executor", "participant", "reviewer"):
+                return cors({"ok": False, "error": "invalid role"}, 400)
+            if not func_id or not org_unit_id:
+                return cors({"ok": False, "error": "function_id и org_unit_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.dept_functions WHERE id = %s AND project_id = %s",
+                    (func_id, project_id),
+                )
+                if not cur.fetchone():
+                    return cors({"ok": False, "error": "Функция не найдена"}, 404)
+                # правило "один owner": при назначении owner снимаем прежнего
+                if role == "owner":
+                    cur.execute(
+                        f"DELETE FROM {SCHEMA}.function_org_units WHERE function_id = %s AND role = 'owner'",
+                        (func_id,),
+                    )
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.function_org_units (function_id, org_unit_id, role, source_ref)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (function_id, org_unit_id, role) DO NOTHING""",
+                    (func_id, org_unit_id, role, body.get("source_ref", "manual")),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Снять привязку функции к узлу ─────────────────────────
+        if method == "DELETE" and action == "unassign_org_unit":
+            func_id = int(qs.get("function_id") or body.get("function_id") or 0)
+            org_unit_id = int(qs.get("org_unit_id") or body.get("org_unit_id") or 0)
+            role = (qs.get("role") or body.get("role") or "").strip()
+            if not func_id or not org_unit_id:
+                return cors({"ok": False, "error": "function_id и org_unit_id required"}, 400)
+            with conn.cursor() as cur:
+                if role:
+                    cur.execute(
+                        f"DELETE FROM {SCHEMA}.function_org_units WHERE function_id = %s AND org_unit_id = %s AND role = %s",
+                        (func_id, org_unit_id, role),
+                    )
+                else:
+                    cur.execute(
+                        f"DELETE FROM {SCHEMA}.function_org_units WHERE function_id = %s AND org_unit_id = %s",
+                        (func_id, org_unit_id),
+                    )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Привязать направление к функции ───────────────────────
+        if method == "POST" and action == "assign_direction":
+            func_id = int(body.get("function_id") or 0)
+            code = (body.get("direction_code") or "").strip()
+            if not func_id or not code:
+                return cors({"ok": False, "error": "function_id и direction_code required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.function_directions (function_id, direction_code, direction_name, source_ref)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (function_id, direction_code) DO UPDATE SET direction_name = EXCLUDED.direction_name""",
+                    (func_id, code, body.get("direction_name", ""), body.get("source_ref", "manual")),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Снять направление ─────────────────────────────────────
+        if method == "DELETE" and action == "unassign_direction":
+            func_id = int(qs.get("function_id") or body.get("function_id") or 0)
+            code = (qs.get("direction_code") or body.get("direction_code") or "").strip()
+            if not func_id or not code:
+                return cors({"ok": False, "error": "function_id и direction_code required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.function_directions WHERE function_id = %s AND direction_code = %s",
+                    (func_id, code),
+                )
+            conn.commit()
+            return cors({"ok": True})
 
         return cors({"ok": False, "error": f"Unknown action: {action}"}, 400)
 
