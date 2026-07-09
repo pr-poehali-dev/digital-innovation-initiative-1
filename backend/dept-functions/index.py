@@ -49,6 +49,7 @@ Actions:
   POST archive_function_shortlist / restore_function_shortlist — soft-архив с проверкой конфликтов при восстановлении
   GET  function_decision_summary — derived read-only сводка решения над active preferred shortlist (selection_state, flags, residual required/supporting gaps, drift, archived supply; без авто-выбора и новой таблицы)
   GET  decision_rollup — агрегат сводок решений по scope (project или org_unit_id): selection/risk counts, pilot_ready, functions[], top_required_gaps (с breakdown причин), top_preferred_products/modules; переиспользует единую семантику; без новой таблицы
+  GET  pilot_roadmap — derived дорожная карта: pilot_ready функции сгруппированы в кандидатные волны по product signature (с exact module bundle_variants) + preparation_backlog (preferred, но не готов); scope project/org_unit; без дат/owner/score/новой таблицы
 """
 import base64
 import io
@@ -263,6 +264,53 @@ def evaluate_single_bundle(groups, module_ids):
         "module_contributions": contributions,
         "non_contributing_module_ids": non_contributing_ids,
     }
+
+
+def resolve_scope_functions(cur, schema, project_id, org_unit_id):
+    """Разрешение scope для decision_rollup / pilot_roadmap.
+    Возвращает (scope_dict, func_rows[(id,title,ou_id,ou_name)], unassigned_count|None)."""
+    if org_unit_id:
+        cur.execute(
+            f"SELECT id, name FROM {schema}.org_units WHERE id = %s AND project_id = %s AND is_archived = false",
+            (org_unit_id, project_id),
+        )
+        urow = cur.fetchone()
+        if not urow:
+            return None, None, None
+        scope = {"scope_type": "org_unit", "scope_id": org_unit_id, "scope_name": urow[1]}
+        cur.execute(
+            f"""SELECT DISTINCT f.id, f.title, u.id, u.name
+                FROM {schema}.dept_functions f
+                JOIN {schema}.function_org_units l ON l.function_id = f.id
+                JOIN {schema}.org_units u ON u.id = l.org_unit_id
+                WHERE f.project_id = %s AND l.org_unit_id = %s
+                  AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                ORDER BY f.title""",
+            (project_id, org_unit_id),
+        )
+        func_rows = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+        return scope, func_rows, None
+
+    scope = {"scope_type": "project", "scope_id": project_id, "scope_name": None}
+    cur.execute(
+        f"""SELECT f.id, f.title,
+                   (SELECT u.id FROM {schema}.function_org_units l JOIN {schema}.org_units u ON u.id = l.org_unit_id
+                    WHERE l.function_id = f.id ORDER BY l.id LIMIT 1),
+                   (SELECT u.name FROM {schema}.function_org_units l JOIN {schema}.org_units u ON u.id = l.org_unit_id
+                    WHERE l.function_id = f.id ORDER BY l.id LIMIT 1)
+            FROM {schema}.dept_functions f
+            WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
+            ORDER BY f.title""",
+        (project_id,),
+    )
+    func_rows = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+    cur.execute(
+        f"""SELECT COUNT(*) FROM {schema}.dept_functions f
+            WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
+              AND NOT EXISTS (SELECT 1 FROM {schema}.function_org_units l WHERE l.function_id = f.id)""",
+        (project_id,),
+    )
+    return scope, func_rows, cur.fetchone()[0]
 
 
 def evaluate_function_decision(cur, schema, func_id, func_name):
@@ -2637,49 +2685,9 @@ def handler(event: dict, context) -> dict:
             limit_top = max(1, min(30, int(qs.get("limit_top") or 10)))
             include_rows = (qs.get("include_function_rows") or "true").lower() == "true"
             with conn.cursor() as cur:
-                if org_unit_id:
-                    cur.execute(
-                        f"SELECT id, name FROM {SCHEMA}.org_units WHERE id = %s AND project_id = %s AND is_archived = false",
-                        (org_unit_id, project_id),
-                    )
-                    urow = cur.fetchone()
-                    if not urow:
-                        return cors({"ok": False, "error": "Оргединица не найдена"}, 404)
-                    scope = {"scope_type": "org_unit", "scope_id": org_unit_id, "scope_name": urow[1]}
-                    cur.execute(
-                        f"""SELECT DISTINCT f.id, f.title, u.id, u.name
-                            FROM {SCHEMA}.dept_functions f
-                            JOIN {SCHEMA}.function_org_units l ON l.function_id = f.id
-                            JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
-                            WHERE f.project_id = %s AND l.org_unit_id = %s
-                              AND f.dept_name NOT LIKE '[SMOKETEST%%'
-                            ORDER BY f.title""",
-                        (project_id, org_unit_id),
-                    )
-                    func_rows = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
-                    unassigned_count = None
-                else:
-                    scope = {"scope_type": "project", "scope_id": project_id, "scope_name": None}
-                    cur.execute(
-                        f"""SELECT f.id, f.title,
-                                   (SELECT u.id FROM {SCHEMA}.function_org_units l JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
-                                    WHERE l.function_id = f.id ORDER BY l.id LIMIT 1),
-                                   (SELECT u.name FROM {SCHEMA}.function_org_units l JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
-                                    WHERE l.function_id = f.id ORDER BY l.id LIMIT 1)
-                            FROM {SCHEMA}.dept_functions f
-                            WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
-                            ORDER BY f.title""",
-                        (project_id,),
-                    )
-                    func_rows = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
-                    cur.execute(
-                        f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
-                            WHERE f.project_id = %s AND f.dept_name NOT LIKE '[SMOKETEST%%'
-                              AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)""",
-                        (project_id,),
-                    )
-                    unassigned_count = cur.fetchone()[0]
-
+                scope, func_rows, unassigned_count = resolve_scope_functions(cur, SCHEMA, project_id, org_unit_id)
+                if scope is None:
+                    return cors({"ok": False, "error": "Оргединица не найдена"}, 404)
                 # per-function decision (единая семантика)
                 decisions = []
                 for fid, fname, ou_id, ou_name in func_rows:
@@ -2846,6 +2854,124 @@ def handler(event: dict, context) -> dict:
                          "top_required_gaps": top(gap_agg),
                          "top_preferred_products": top(prod_agg),
                          "top_preferred_modules": top(mod_agg)})
+
+        # ── Дорожная карта пилотов (derived над preferred) ────────
+        if method == "GET" and action == "pilot_roadmap":
+            org_unit_id = int(qs.get("org_unit_id") or 0)
+            limit_waves = max(1, min(30, int(qs.get("limit_waves") or 10)))
+            include_backlog = (qs.get("include_preparation_backlog") or "true").lower() == "true"
+            with conn.cursor() as cur:
+                scope, func_rows, unassigned_count = resolve_scope_functions(cur, SCHEMA, project_id, org_unit_id)
+                if scope is None:
+                    return cors({"ok": False, "error": "Оргединица не найдена"}, 404)
+                decisions = []
+                for fid, fname, ou_id, ou_name in func_rows:
+                    d = evaluate_function_decision(cur, SCHEMA, fid, fname)
+                    d["_org_unit_id"], d["_org_unit_name"] = ou_id, ou_name
+                    decisions.append(d)
+
+            functions_total = len(decisions)
+            preferred_count = sum(1 for d in decisions if d["selection_state"] == "preferred_selected")
+            pilot_ready = [d for d in decisions if d["pilot_ready"]]
+            # preparation backlog: preferred есть, но не готов
+            backlog_pool = [d for d in decisions
+                            if d["selection_state"] == "preferred_selected" and not d["pilot_ready"]]
+
+            # ── Волны: группировка pilot_ready по product signature ─
+            waves_map = {}
+            for d in pilot_ready:
+                ps = d["preferred_summary"]
+                prod_sig = "|".join(sorted(p["product_slug"] or str(p["product_id"]) for p in ps["products"]))
+                bundle_key = "-".join(sorted(m["module_slug"] or str(m["module_id"]) for m in ps["modules"]))
+                w = waves_map.setdefault(prod_sig, {
+                    "wave_key": prod_sig, "functions": [], "products": {}, "vendors": {}, "variants": {},
+                })
+                w["functions"].append({
+                    "function_id": d["function"]["id"], "function_name": d["function"]["name"],
+                    "org_unit_id": d["_org_unit_id"], "org_unit_name": d["_org_unit_name"],
+                    "preferred_shortlist_id": ps["shortlist_id"], "preferred_title": ps["title"],
+                    "modules_preview": [m["module_name"] for m in ps["modules"]][:4],
+                    "products_preview": [p["product_name"] for p in ps["products"]][:4],
+                })
+                for p in ps["products"]:
+                    w["products"][p["product_id"]] = {"product_id": p["product_id"], "product_name": p["product_name"], "product_slug": p.get("product_slug")}
+                for v in ps["vendors"]:
+                    w["vendors"][v["vendor_id"]] = {"vendor_id": v["vendor_id"], "vendor_name": v["vendor_name"]}
+                variant = w["variants"].setdefault(bundle_key, {
+                    "bundle_key": bundle_key,
+                    "modules": [{"module_id": m["module_id"], "module_name": m["module_name"]} for m in ps["modules"]],
+                    "modules_count": len(ps["modules"]), "functions": [],
+                })
+                variant["functions"].append({"function_id": d["function"]["id"], "function_name": d["function"]["name"]})
+
+            waves = []
+            for w in waves_map.values():
+                org_units = {f["org_unit_id"] for f in w["functions"] if f["org_unit_id"] is not None}
+                variants = sorted(w["variants"].values(), key=lambda v: (-len(v["functions"]), v["bundle_key"]))
+                for v in variants:
+                    v["functions_count"] = len(v["functions"])
+                    v["sample_functions"] = v.pop("functions")[:5]
+                waves.append({
+                    "wave_key": w["wave_key"],
+                    "functions_count": len(w["functions"]),
+                    "org_units_count": len(org_units),
+                    "products_count": len(w["products"]),
+                    "vendors_count": len(w["vendors"]),
+                    "bundle_variants_count": len(variants),
+                    "products": list(w["products"].values()),
+                    "vendors": list(w["vendors"].values()),
+                    "functions": w["functions"],
+                    "bundle_variants": variants,
+                })
+
+            # детерминированная сортировка волн (без score)
+            waves.sort(key=lambda x: (
+                -x["functions_count"], x["products_count"], x["vendors_count"],
+                x["bundle_variants_count"], x["wave_key"],
+            ))
+            for i, w in enumerate(waves[:limit_waves], 1):
+                w["wave_rank"] = i
+            waves = waves[:limit_waves]
+
+            # ── Preparation backlog ───────────────────────────────
+            bsum = {"preferred_with_required_gaps_count": 0, "preferred_with_drift_count": 0,
+                    "preferred_with_archived_supply_count": 0}
+            backlog_rows = []
+            for d in backlog_pool:
+                fl = d["decision_flags"]
+                ps = d["preferred_summary"]
+                blockers = []
+                if fl["has_required_gaps"]:
+                    bsum["preferred_with_required_gaps_count"] += 1; blockers.append("required_gaps")
+                if fl["has_drift"]:
+                    bsum["preferred_with_drift_count"] += 1; blockers.append("drift")
+                if fl["has_archived_supply"]:
+                    bsum["preferred_with_archived_supply_count"] += 1; blockers.append("archived_supply")
+                backlog_rows.append({
+                    "function_id": d["function"]["id"], "function_name": d["function"]["name"],
+                    "org_unit_name": d["_org_unit_name"], "decision_health": d["decision_health"],
+                    "required_gaps_count": fl["required_gaps_count"],
+                    "has_drift": fl["has_drift"], "has_archived_supply": fl["has_archived_supply"],
+                    "preferred_title": ps["title"] if ps else None,
+                    "preferred_products_preview": [p["product_name"] for p in (ps["products"] if ps else [])][:3],
+                    "residual_required_gaps_preview": [g["name"] for g in d["residual_gaps"]["required"]][:3],
+                    "blockers": blockers,
+                })
+            backlog_rows.sort(key=lambda r: (-r["required_gaps_count"], r["function_name"]))
+
+            scope["functions_total"] = functions_total
+            if scope["scope_type"] == "project":
+                scope["unassigned_functions_count"] = unassigned_count
+
+            summary = {
+                "functions_total": functions_total, "preferred_count": preferred_count,
+                "pilot_ready_count": len(pilot_ready), "candidate_waves_count": len(waves),
+                "preparation_backlog_count": len(backlog_rows),
+                "largest_wave_size": max((w["functions_count"] for w in waves), default=0),
+            }
+            return cors({"ok": True, "scope": scope, "summary": summary, "waves": waves,
+                         "preparation_backlog_summary": bsum,
+                         "preparation_backlog": backlog_rows if include_backlog else []})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

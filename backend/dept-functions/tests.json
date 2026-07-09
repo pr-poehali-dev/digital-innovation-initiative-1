@@ -230,6 +230,12 @@
       "method": "GET",
       "path": "/?action=decision_rollup&project_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth pilot_roadmap",
+      "method": "GET",
+      "path": "/?action=pilot_roadmap&project_id=1",
+      "expectedStatus": 401
     }
   ]
 }

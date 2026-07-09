@@ -804,6 +804,8 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=function_decision_summary&project_id=${projectId}&function_id=${functionId}`, "GET"),
   getDecisionRollup: (projectId: number, orgUnitId?: number) =>
     request(URLS.deptFunctions, `/?action=decision_rollup&project_id=${projectId}${orgUnitId ? `&org_unit_id=${orgUnitId}` : ""}`, "GET"),
+  getPilotRoadmap: (projectId: number, orgUnitId?: number) =>
+    request(URLS.deptFunctions, `/?action=pilot_roadmap&project_id=${projectId}${orgUnitId ? `&org_unit_id=${orgUnitId}` : ""}`, "GET"),
 };
 
 export const solutionsRegistryApi = {

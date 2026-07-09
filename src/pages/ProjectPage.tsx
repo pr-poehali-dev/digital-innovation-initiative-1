@@ -8,6 +8,7 @@ import DeptFunctionsTab from "@/components/dept/DeptFunctionsTab";
 import DeptAutomationTab from "@/components/dept/DeptAutomationTab";
 import DeptTreeTab from "@/components/dept/DeptTreeTab";
 import DeptDecisionRollupTab from "@/components/dept/DeptDecisionRollupTab";
+import DeptPilotRoadmapTab from "@/components/dept/DeptPilotRoadmapTab";
 import DeptOverlapsTab from "@/components/dept/DeptOverlapsTab";
 import { analytics } from "@/lib/analytics";
 import { passportApi } from "@/lib/passportApi";
@@ -211,8 +212,8 @@ function filterPainsForPreset<T extends { id: number; linked_solution_id: number
   return list;
 }
 
-type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation" | "dept-tree" | "dept-overlaps" | "dept-decisions";
-const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation", "dept-tree", "dept-overlaps", "dept-decisions"];
+type TabKey = "overview" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation" | "dept-tree" | "dept-overlaps" | "dept-decisions" | "dept-roadmap";
+const VALID_TABS: TabKey[] = ["overview", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation", "dept-tree", "dept-overlaps", "dept-decisions", "dept-roadmap"];
 const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution", "without_validation"];
 
 export default function ProjectPage() {
@@ -1212,6 +1213,7 @@ export default function ProjectPage() {
                 { key: "dept-tree", label: "🌳 Дерево департамента" },
                 { key: "dept-overlaps", label: "🔀 Пересечения функций" },
                 { key: "dept-decisions", label: "⚖️ Сводка решений" },
+                { key: "dept-roadmap", label: "🧭 Дорожная карта пилотов" },
                 { key: "dept-automation", label: `🤖 Автоматизация функций${deptAutomation.length ? ` (${deptAutomation.length})` : ""}` },
                 { key: "process",     label: `⚙️ Функции и процессы${processes.length ? ` (${processes.length})` : ""}` },
                 { key: "solutions",   label: `🗃️ Решения и системы${solutions.length ? ` (${solutions.length})` : ""}` },
@@ -2745,6 +2747,15 @@ export default function ProjectPage() {
         {tab === "dept-decisions" && (
           project?.workspace_mode === "polygon" ? (
             <DeptDecisionRollupTab projectId={projectId} />
+          ) : (
+            <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
+          )
+        )}
+
+        {/* ── Дорожная карта пилотов ── */}
+        {tab === "dept-roadmap" && (
+          project?.workspace_mode === "polygon" ? (
+            <DeptPilotRoadmapTab projectId={projectId} />
           ) : (
             <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
           )
