@@ -58,6 +58,7 @@ import PublicProfilePage from "./pages/PublicProfilePage";
 import CompetencyMapPage from "./pages/CompetencyMapPage";
 import GuidePage from "./pages/GuidePage";
 import GoalsPage from "./pages/GoalsPage";
+import SolutionsPage from "./pages/SolutionsPage";
 
 const queryClient = new QueryClient();
 
@@ -120,6 +121,7 @@ const App = () => (
               <Route path="/cabinet/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
               <Route path="/cabinet/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
               <Route path="/cabinet/goals" element={<ProtectedRoute><GoalsPage /></ProtectedRoute>} />
+              <Route path="/cabinet/solutions" element={<ProtectedRoute><SolutionsPage /></ProtectedRoute>} />
               <Route path="/cabinet/profile" element={<ProtectedRoute><ProfessionalPassportPage /></ProtectedRoute>} />
               <Route path="/cabinet/growth" element={<ProtectedRoute><GrowthNavigatorPage /></ProtectedRoute>} />
               <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />

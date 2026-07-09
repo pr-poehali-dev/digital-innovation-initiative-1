@@ -23,6 +23,7 @@ const URLS = {
   goals: "https://functions.poehali.dev/97ab26dc-af56-4172-abc5-579979e30b01",
   learningPack: "https://functions.poehali.dev/8ad151d1-d688-49c2-822a-5f5d366a8b3b",
   deptFunctions: "https://functions.poehali.dev/7e9accad-43d6-44e2-b388-14d15b7a8153",
+  solutionsRegistry: "https://functions.poehali.dev/da6fac65-f14d-490d-8abd-2b8654237370",
 };
 
 function getSession(): string {
@@ -765,4 +766,15 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=archive_process_card", "POST", data),
   restoreProcessCard: (data: { project_id: number; card_id: number }) =>
     request(URLS.deptFunctions, "/?action=restore_process_card", "POST", data),
+};
+
+export const solutionsRegistryApi = {
+  getPractices: () =>
+    request(URLS.solutionsRegistry, "/?action=practices", "GET"),
+  getCapabilities: () =>
+    request(URLS.solutionsRegistry, "/?action=capabilities", "GET"),
+  getPracticeDetail: (slug: string) =>
+    request(URLS.solutionsRegistry, `/?action=practice_detail&slug=${encodeURIComponent(slug)}`, "GET"),
+  getCapabilityDetail: (slug: string) =>
+    request(URLS.solutionsRegistry, `/?action=capability_detail&slug=${encodeURIComponent(slug)}`, "GET"),
 };

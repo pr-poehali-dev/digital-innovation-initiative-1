@@ -1,1 +1,16 @@
-id,name,slug,category,description
+slug,name,category,description,status,sort_order,source_note,source_url
+data-capture,Захват данных,capture,Приём и фиксация входящих данных из разных каналов,active,10,curated starter set,
+ocr-idp,OCR и извлечение из документов,capture,Распознавание текста и извлечение полей из документов и сканов,active,20,curated starter set,
+classification,Классификация,classify,Автоматическое отнесение объекта к категории или типу,active,30,curated starter set,
+workflow-routing,Маршрутизация процессов,route,Назначение задач и маршрутов по правилам,active,40,curated starter set,
+rules-engine,Движок правил,decide,Исполнение бизнес-правил для автоматических решений,active,50,curated starter set,
+case-management,Управление кейсами,decide,Ведение обращения от приёма до закрытия с историей,active,60,curated starter set,
+knowledge-retrieval,Поиск по знаниям,retrieve,Быстрый поиск релевантной информации и прецедентов,active,70,curated starter set,
+document-generation,Генерация документов,generate,Автоматическое формирование документов по шаблонам и данным,active,80,curated starter set,
+sla-tracking,Контроль SLA,monitor,Отслеживание сроков и триггеры при их нарушении,active,90,curated starter set,
+audit-logging,Журналирование аудита,monitor,Неизменяемая фиксация действий и изменений,active,100,curated starter set,
+notifications,Уведомления,collaborate,Оповещение участников о событиях и сроках,active,110,curated starter set,
+collaboration,Совместная работа,collaborate,Совместное ведение и обсуждение задач,active,120,curated starter set,
+integration,Интеграция систем,integrate,Обмен данными между системами и сервисами,active,130,curated starter set,
+analytics-dashboards,Аналитика и дашборды,analyze,Визуализация показателей и трендов процесса,active,140,curated starter set,
+screening-scoring,Скоринг и скрининг,decide,Оценка и ранжирование объектов по правилам или моделям,active,150,curated starter set,

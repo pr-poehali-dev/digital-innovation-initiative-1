@@ -1,0 +1,29 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauth practices",
+      "method": "GET",
+      "path": "/?action=practices",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth capabilities",
+      "method": "GET",
+      "path": "/?action=capabilities",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth import",
+      "method": "POST",
+      "path": "/?action=import",
+      "body": {"practices_csv": "slug,name\np1,Test"},
+      "expectedStatus": 401
+    }
+  ]
+}
