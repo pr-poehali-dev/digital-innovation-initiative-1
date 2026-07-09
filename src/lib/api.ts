@@ -793,4 +793,12 @@ export const solutionsRegistryApi = {
     request(URLS.solutionsRegistry, `/?action=practice_detail&slug=${encodeURIComponent(slug)}`, "GET"),
   getCapabilityDetail: (slug: string) =>
     request(URLS.solutionsRegistry, `/?action=capability_detail&slug=${encodeURIComponent(slug)}`, "GET"),
+  getProducts: () =>
+    request(URLS.solutionsRegistry, "/?action=products", "GET"),
+  getProductDetail: (slug: string) =>
+    request(URLS.solutionsRegistry, `/?action=product_detail&slug=${encodeURIComponent(slug)}`, "GET"),
+  getModules: () =>
+    request(URLS.solutionsRegistry, "/?action=modules", "GET"),
+  getModuleDetail: (slug: string) =>
+    request(URLS.solutionsRegistry, `/?action=module_detail&slug=${encodeURIComponent(slug)}`, "GET"),
 };

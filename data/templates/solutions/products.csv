@@ -1,0 +1,7 @@
+vendor_slug,slug,name,category,summary,deployment_types,website_url,status,sort_order,source_note,source_url
+acme-flow,acme-flow-bpm,Acme Flow BPM,BPM/workflow,Оркестрация процессов и маршрутизация задач,cloud;hybrid,https://example.com/acme-bpm,active,10,curated starter set,
+docuwise,docuwise-ecm,DocuWise ECM,ECM/СЭД,Хранение документов и извлечение данных,cloud;on_prem;hybrid,https://example.com/docuwise-ecm,active,20,curated starter set,
+knowlink,knowlink-platform,KnowLink Platform,Knowledge management,База знаний и семантический поиск,cloud,https://example.com/knowlink,active,30,curated starter set,
+insightgrid,insightgrid-analytics,InsightGrid Analytics,BI/analytics,Дашборды и аналитика процессов,cloud;on_prem,https://example.com/insightgrid,active,40,curated starter set,
+guardline,guardline-suite,GuardLine Suite,GRC/regtech,Скоринг и скрининг с контрольными точками,on_prem;hybrid,https://example.com/guardline,active,50,curated starter set,
+servicedesk-pro,servicedesk-pro-csm,ServiceDesk Pro CSM,Case management,Кейс-менеджмент и самообслуживание,cloud;hybrid,https://example.com/sdpro,active,60,curated starter set,

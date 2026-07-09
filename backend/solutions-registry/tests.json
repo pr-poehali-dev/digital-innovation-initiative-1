@@ -24,6 +24,18 @@
       "path": "/?action=import",
       "body": {"practices_csv": "slug,name\np1,Test"},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth products",
+      "method": "GET",
+      "path": "/?action=products",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth modules",
+      "method": "GET",
+      "path": "/?action=modules",
+      "expectedStatus": 401
     }
   ]
 }

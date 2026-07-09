@@ -1,1 +1,7 @@
-id,name,company_type,country,local_presence_ru,website,notes
+slug,name,summary,website_url,status,sort_order,source_note,source_url
+acme-flow,Acme Flow,Разработчик BPM и workflow-платформы,https://example.com/acme,active,10,curated starter set,
+docuwise,DocuWise,Вендор ECM и интеллектуальной обработки документов,https://example.com/docuwise,active,20,curated starter set,
+knowlink,KnowLink,Платформа управления знаниями и поиска,https://example.com/knowlink,active,30,curated starter set,
+insightgrid,InsightGrid,BI и аналитика процессов,https://example.com/insightgrid,active,40,curated starter set,
+guardline,GuardLine,Комплаенс и скоринг для контроля рисков,https://example.com/guardline,active,50,curated starter set,
+servicedesk-pro,ServiceDesk Pro,Кейс-менеджмент и портал самообслуживания,https://example.com/sdpro,active,60,curated starter set,
