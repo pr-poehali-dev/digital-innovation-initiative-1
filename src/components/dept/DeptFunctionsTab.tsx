@@ -13,6 +13,7 @@ import FunctionModuleCandidatesBlock from "@/components/dept/FunctionModuleCandi
 import FunctionModuleBundlesBlock from "@/components/dept/FunctionModuleBundlesBlock";
 import FunctionShortlistBlock from "@/components/dept/FunctionShortlistBlock";
 import FunctionDecisionSummary from "@/components/dept/FunctionDecisionSummary";
+import { functionCompactStatus } from "@/components/dept/decisionNextStep";
 
 type DeptFunction = {
   id: number;
@@ -154,6 +155,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     loadPracticeCounts();
     loadCapabilityCounts();
     setCapRefreshKey((k) => ({ ...k, [fnId]: (k[fnId] || 0) + 1 }));
+    loadDecisionStatuses();
   };
 
   // Шортлист решений: счётчики + ключ пересчёта на функцию
@@ -167,9 +169,31 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   const onShortlistChanged = (fnId: number) => {
     loadShortlistCounts();
     setShortlistRefreshKey((k) => ({ ...k, [fnId]: (k[fnId] || 0) + 1 }));
+    loadDecisionStatuses();
   };
 
-  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); loadCapabilityCounts(); loadShortlistCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
+  // Компактный статус решения на каждую функцию (батч-загрузка через decision_rollup)
+  const [decisionStatus, setDecisionStatus] = useState<Record<number, {
+    selection_state: "no_shortlist" | "no_preferred" | "preferred_selected";
+    has_required_gaps: boolean; required_gaps_count: number; has_drift: boolean; has_archived_supply: boolean;
+  }>>({});
+  const loadDecisionStatuses = () => {
+    deptFunctionsApi.getDecisionRollup(projectId)
+      .then((d: { functions?: Array<{ function_id: number; selection_state: string; has_required_gaps: boolean; required_gaps_count: number; has_drift: boolean; has_archived_supply: boolean }> }) => {
+        const map: Record<number, { selection_state: "no_shortlist" | "no_preferred" | "preferred_selected"; has_required_gaps: boolean; required_gaps_count: number; has_drift: boolean; has_archived_supply: boolean }> = {};
+        (d.functions || []).forEach((f) => {
+          map[f.function_id] = {
+            selection_state: f.selection_state as "no_shortlist" | "no_preferred" | "preferred_selected",
+            has_required_gaps: f.has_required_gaps, required_gaps_count: f.required_gaps_count,
+            has_drift: f.has_drift, has_archived_supply: f.has_archived_supply,
+          };
+        });
+        setDecisionStatus(map);
+      })
+      .catch(() => { /* индикатор не критичен */ });
+  };
+
+  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); loadCapabilityCounts(); loadShortlistCounts(); loadDecisionStatuses(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
 
   const loadFunctionProcesses = async (functionId: number) => {
     setProcessesLoading(p => ({ ...p, [functionId]: true }));
@@ -917,6 +941,8 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                   const pStatus = profileStatus[fn.id] || "empty";
                   const pDot = pStatus === "full" ? "bg-emerald-500" : pStatus === "partial" ? "bg-amber-400" : "bg-slate-300";
                   const pTitle = pStatus === "full" ? "Профиль заполнен" : pStatus === "partial" ? "Профиль частично заполнен" : "Профиль не заполнен";
+                  const ds = decisionStatus[fn.id];
+                  const compact = ds ? functionCompactStatus(ds) : null;
                   return (
                     <div key={fn.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                       <button
@@ -925,7 +951,17 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                       >
                         <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={14} className="text-slate-400 flex-shrink-0" />
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${pDot}`} title={pTitle} />
-                        <span className="flex-1 font-medium text-sm text-slate-800">{fn.title}</span>
+                        <span className="font-medium text-sm text-slate-800 truncate">{fn.title}</span>
+                        {compact && (
+                          <span
+                            className={`hidden sm:inline-flex items-center gap-1 flex-shrink-0 text-[11px] ${compact.text} ${isOpen ? "opacity-50" : ""}`}
+                            title="Следующий шаг по решению"
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${compact.dot}`} />
+                            {compact.label}
+                          </span>
+                        )}
+                        <span className="flex-1" />
                         {(cardCounts[fn.id] || 0) > 0 && (
                           <Badge variant="secondary" className="text-[10px] flex-shrink-0" title="Процессных карточек">
                             <Icon name="Workflow" size={11} className="mr-0.5" />{cardCounts[fn.id]}

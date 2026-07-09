@@ -130,6 +130,23 @@ export function rollupNextStep(s: RollupSummaryInput): NextStep & { filter: stri
   };
 }
 
+// Компактный статус для заголовка функции в списке (одна строка, один приоритетный шаг).
+export type CompactStatus = { tone: NextStepTone; label: string; dot: string; text: string; icon: string };
+
+export function functionCompactStatus(d: FnDecisionInput): CompactStatus {
+  if (d.selection_state === "no_shortlist")
+    return { tone: "info", label: "Собрать шортлист", dot: "bg-slate-300", text: "text-slate-500", icon: "Circle" };
+  if (d.selection_state === "no_preferred")
+    return { tone: "action", label: "Выбрать preferred", dot: "bg-amber-400", text: "text-amber-600", icon: "CircleDot" };
+  if (d.has_required_gaps)
+    return { tone: "warn", label: "Закрыть required-gaps", dot: "bg-rose-500", text: "text-rose-600", icon: "TriangleAlert" };
+  if (d.has_archived_supply)
+    return { tone: "warn", label: "Заменить архивный supply", dot: "bg-orange-500", text: "text-orange-600", icon: "TriangleAlert" };
+  if (d.has_drift)
+    return { tone: "warn", label: "Обновить решение", dot: "bg-amber-500", text: "text-amber-600", icon: "TriangleAlert" };
+  return { tone: "ready", label: "Готово к пилоту", dot: "bg-emerald-500", text: "text-emerald-600", icon: "CircleCheck" };
+}
+
 export const TONE_STYLES: Record<NextStepTone, { box: string; icon: string; iconName: string }> = {
   info: { box: "border-slate-200 bg-slate-50", icon: "text-slate-500", iconName: "Info" },
   action: { box: "border-blue-200 bg-blue-50", icon: "text-blue-600", iconName: "ArrowRight" },
