@@ -1,0 +1,5 @@
+source_ref,page_no,source_section_code,function_text,confidence,is_function,category,directions,source_snippet,notes
+dfm_041_p01.png,12,4.1,"Консультирование работников по вопросам ПОД/ФТ",high,true,communication,18,"...цитата из положения...",""
+dfm_041_p02.png,13,4.1.2,"Осуществление анализа эффективности внутреннего контроля",high,true,analytical,18,"...цитата...",""
+dfm_042_p01.png,18,4.2,"Методическая поддержка по обязательному контролю",medium,true,communication,18,"...цитата...","формулировка читается не полностью"
+dfm_042_p02.png,19,,"Взаимодействие с контрольно-надзорными органами",medium,true,communication,,"...цитата...","код секции не виден на скрине"

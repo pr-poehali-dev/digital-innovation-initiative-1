@@ -1,0 +1,18 @@
+{
+  "project": "DFM",
+  "import_batch": "dfm_4_1_4_2_pages_v1",
+  "totals": {
+    "rows_input": 0,
+    "functions_created": 0,
+    "exact_matched_to_org_units": 0,
+    "left_unmatched": 0
+  },
+  "unmatched_by_reason": {
+    "section_code_missing": 0,
+    "section_code_ambiguous": 0,
+    "text_not_confident": 0,
+    "org_unit_not_found": 0
+  },
+  "missing_unit_codes": [],
+  "notes": []
+}
