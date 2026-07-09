@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, deptFunctionsApi, fileToBase64 } from "@/lib/api";
+import { projectsApi, documentsApi, uploadDocumentChunked, mediaApi, tasksApi, workspaceApi, deptFunctionsApi, fileToBase64, getOrgTreeCached } from "@/lib/api";
 import SolutionsTab from "@/components/workspace/SolutionsTab";
 import ProcessesTab from "@/components/workspace/ProcessesTab";
 import PainsTab from "@/components/workspace/PainsTab";
@@ -226,6 +226,23 @@ export default function ProjectPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const tabScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Тихий prefetch оргструктуры для polygon-проектов: к переходу на «Сводку решений» /
+  // «Дорожную карту» дерево уже в кэше. Fire-and-forget, без loading/ошибок, через idle.
+  useEffect(() => {
+    if (!projectId || project?.workspace_mode !== "polygon") return;
+    const run = () => { void getOrgTreeCached(projectId).catch(() => { /* тихий prefetch */ }); };
+    const w = window as Window & {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof w.requestIdleCallback === "function") {
+      const rid = w.requestIdleCallback(run);
+      return () => w.cancelIdleCallback?.(rid);
+    }
+    const t = window.setTimeout(run, 150);
+    return () => window.clearTimeout(t);
+  }, [projectId, project?.workspace_mode]);
   const [tabScrollState, setTabScrollState] = useState({ atStart: true, atEnd: true, scrollable: false });
   const updateTabScrollState = () => {
     const el = tabScrollRef.current;
