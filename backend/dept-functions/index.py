@@ -40,9 +40,11 @@ Actions:
   GET  function_capabilities_counts — счётчики active/required capability по функциям проекта (badge)
   GET  function_module_candidates — derived: под каждую capability функции — кандидатные модули (supply), group-by-capability, gaps не теряются, 3 независимые оси need/priority/coverage, explainability до практик; без persisted-модели
   GET  function_module_candidates_counts — краткий summary (distinct modules, gaps) для badge
+  GET  function_module_bundles — derived: кандидатные наборы модулей (≤3) с coverage profile (без общего score), dominance pruning, det. sort, explainability до практик и module contribution; без persisted-модели
 """
 import base64
 import io
+import itertools
 import json
 import os
 import re
@@ -82,6 +84,257 @@ PRIORITY_RANK = {"primary": 3, "supporting": 2, "explore": 1}
 NEED_BY_RANK = {3: "required", 2: "supporting", 1: "optional"}
 PRIORITY_BY_RANK = {3: "primary", 2: "supporting", 1: "explore"}
 COVERAGE_RANK = {"core": 3, "supporting": 2, "limited": 1}
+COVERAGE_BY_RANK = {3: "core", 2: "supporting", 1: "limited", 0: None}
+
+
+def build_function_capability_supply(cur, schema, func_id, include_arch_caps=False, include_arch_modules=False):
+    """Общая derivation demand+supply для функции.
+    Возвращает: список capability-групп (need/priority/source_practices) + модули, покрывающие их.
+    Используется и candidate-view, и bundle-view — единый источник, без дублирования логики."""
+    cur.execute(
+        f"""SELECT c.id, c.slug, c.name, c.category, c.status,
+                   pcm.relation_type,
+                   m.relevance_level, m.reason_tags, m.rationale_note,
+                   p.id, p.name, p.slug
+            FROM {schema}.function_practice_mappings m
+            JOIN {schema}.solution_practices p ON p.id = m.practice_id
+            JOIN {schema}.solution_practice_capability_map pcm ON pcm.practice_id = p.id
+            JOIN {schema}.solution_capabilities c ON c.id = pcm.capability_id
+            WHERE m.function_id = %s AND m.is_archived = false""",
+        (func_id,),
+    )
+    caps = {}
+    for r in cur.fetchall():
+        (cap_id, cap_slug, cap_name, cap_cat, cap_status, relation_type,
+         relevance, reason_tags, rationale, p_id, p_name, p_slug) = r
+        if cap_id not in caps:
+            caps[cap_id] = {"capability_id": cap_id, "slug": cap_slug, "name": cap_name, "category": cap_cat,
+                            "status": cap_status, "_need_rank": 0, "_priority_rank": 0,
+                            "source_practices": [], "modules": {}}
+        a = caps[cap_id]
+        a["_need_rank"] = max(a["_need_rank"], NEED_RANK.get(relation_type, 0))
+        a["_priority_rank"] = max(a["_priority_rank"], PRIORITY_RANK.get(relevance, 0))
+        a["source_practices"].append({
+            "practice_id": p_id, "practice_name": p_name, "practice_slug": p_slug,
+            "practice_relevance": relevance, "relation_type": relation_type,
+            "reason_tags": reason_tags or [], "rationale_note": rationale,
+        })
+
+    cap_ids = [cid for cid, a in caps.items() if include_arch_caps or a["status"] == "active"]
+    if cap_ids:
+        mod_filter = "" if include_arch_modules else \
+            "AND md.status = 'active' AND pr.status = 'active' AND ve.status = 'active'"
+        cur.execute(
+            f"""SELECT mc.capability_id, mc.coverage_level,
+                       md.id, md.slug, md.name, md.category, md.status,
+                       pr.id, pr.name, pr.status, pr.deployment_types,
+                       ve.id, ve.name, ve.status
+                FROM {schema}.solution_module_capability_map mc
+                JOIN {schema}.solution_product_modules md ON md.id = mc.module_id
+                JOIN {schema}.solution_products pr ON pr.id = md.product_id
+                JOIN {schema}.solution_vendors ve ON ve.id = pr.vendor_id
+                WHERE mc.capability_id = ANY(%s) {mod_filter}""",
+            (cap_ids,),
+        )
+        for s in cur.fetchall():
+            (scap_id, coverage_level, mod_id, mod_slug, mod_name, mod_cat, mod_status,
+             prod_id, prod_name, prod_status, depl_types, ven_id, ven_name, ven_status) = s
+            caps[scap_id]["modules"][mod_id] = {
+                "module_id": mod_id, "module_slug": mod_slug, "module_name": mod_name,
+                "module_category": mod_cat, "module_status": mod_status, "coverage_level": coverage_level,
+                "product_id": prod_id, "product_name": prod_name, "product_status": prod_status,
+                "deployment_types": depl_types or [],
+                "vendor_id": ven_id, "vendor_name": ven_name, "vendor_status": ven_status,
+            }
+    groups = []
+    for cid in cap_ids:
+        a = caps[cid]
+        a["need_level"] = NEED_BY_RANK.get(a["_need_rank"], "optional")
+        a["priority_level"] = PRIORITY_BY_RANK.get(a["_priority_rank"], "explore")
+        a.pop("_need_rank"); a.pop("_priority_rank")
+        groups.append(a)
+    return groups
+
+
+def build_module_bundles(groups, max_size=3, limit=10, only_full_required=False):
+    """Derived bundle-view: наборы модулей ≤ max_size, покрытие агрегируется по best coverage
+    per capability. Без общего score — coverage profile + лексикографическая сортировка +
+    dominance pruning. bundle = набор модулей; продукт/вендор — атрибуты модулей."""
+    # Реестр модулей и карта module_id -> {capability_id: coverage_rank}
+    module_info = {}
+    mod_cap_cov = {}
+    for g in groups:
+        for mid, m in g["modules"].items():
+            module_info[mid] = m
+            mod_cap_cov.setdefault(mid, {})[g["capability_id"]] = COVERAGE_RANK.get(m["coverage_level"], 0)
+
+    cap_meta = {g["capability_id"]: g for g in groups}
+    required_total = sum(1 for g in groups if g["need_level"] == "required")
+    supporting_total = sum(1 for g in groups if g["need_level"] == "supporting")
+    optional_total = sum(1 for g in groups if g["need_level"] == "optional")
+
+    candidate_module_ids = sorted(module_info.keys())
+    evaluated = 0
+    raw = []
+
+    def evaluate(combo):
+        # best coverage rank по каждой capability из модулей набора
+        best = {}
+        for mid in combo:
+            for cid, rank in mod_cap_cov.get(mid, {}).items():
+                if rank > best.get(cid, 0):
+                    best[cid] = rank
+        prof = {
+            "required_covered": 0, "required_covered_core": 0, "required_covered_supporting": 0, "required_covered_limited": 0,
+            "supporting_covered": 0, "supporting_covered_core": 0, "supporting_covered_supporting": 0, "supporting_covered_limited": 0,
+            "optional_covered": 0, "optional_covered_core": 0, "optional_covered_supporting": 0, "optional_covered_limited": 0,
+        }
+        for cid, rank in best.items():
+            if rank <= 0:
+                continue
+            need = cap_meta[cid]["need_level"]
+            lvl = COVERAGE_BY_RANK[rank]
+            prof[f"{need}_covered"] += 1
+            prof[f"{need}_covered_{lvl}"] += 1
+        return best, prof
+
+    for size in range(1, max_size + 1):
+        for combo in itertools.combinations(candidate_module_ids, size):
+            evaluated += 1
+            best, prof = evaluate(combo)
+            if only_full_required and prof["required_covered"] < required_total:
+                continue
+            # отбрасываем наборы, где какой-то модуль ничего не добавил (не best ни по одной capability)
+            contributes = set()
+            for cid, rank in best.items():
+                for mid in combo:
+                    if mod_cap_cov.get(mid, {}).get(cid, 0) == rank and rank > 0:
+                        contributes.add(mid)
+            if len(contributes) < len(combo):
+                continue
+            raw.append({"combo": combo, "best": best, "prof": prof})
+
+    # Dominance pruning: A доминирует B, если по всем осям покрытия A >= B,
+    # по качеству required core A >= B и модулей не больше, при этом строго лучше хотя бы в одном.
+    def dominates(a, b):
+        ap, bp = a["prof"], b["prof"]
+        keys = ["required_covered", "required_covered_core", "supporting_covered",
+                "supporting_covered_core", "optional_covered"]
+        ge_all = all(ap[k] >= bp[k] for k in keys) and len(a["combo"]) <= len(b["combo"])
+        gt_any = any(ap[k] > bp[k] for k in keys) or len(a["combo"]) < len(b["combo"])
+        return ge_all and gt_any
+
+    kept = []
+    for b in raw:
+        if any(dominates(a, b) for a in raw if a is not b):
+            continue
+        kept.append(b)
+
+    def products_vendors(combo):
+        ps = {module_info[mid]["product_id"] for mid in combo}
+        vs = {module_info[mid]["vendor_id"] for mid in combo}
+        return len(ps), len(vs)
+
+    def sort_key(b):
+        prof = b["prof"]
+        req_unc = required_total - prof["required_covered"]
+        pc, vc = products_vendors(b["combo"])
+        return (
+            req_unc,
+            -prof["required_covered_core"],
+            -prof["required_covered"],
+            -prof["supporting_covered"],
+            -prof["optional_covered"],
+            len(b["combo"]), pc, vc,
+            "-".join(module_info[mid]["module_slug"] for mid in sorted(b["combo"])),
+        )
+
+    kept.sort(key=sort_key)
+    returned = kept[:limit]
+
+    # Финализация выдачи
+    bundles = []
+    for b in returned:
+        combo, best, prof = b["combo"], b["best"], b["prof"]
+        pc, vc = products_vendors(combo)
+        modules_out = [module_info[mid] for mid in sorted(combo, key=lambda x: (module_info[x]["product_name"], module_info[x]["module_name"]))]
+
+        capability_results = []
+        uncovered = []
+        module_contrib = {mid: {"required": 0, "supporting": 0, "optional": 0, "caps": []} for mid in combo}
+        for g in groups:
+            cid = g["capability_id"]
+            rank = best.get(cid, 0)
+            covered = rank > 0
+            best_lvl = COVERAGE_BY_RANK[rank]
+            best_modules = []
+            if covered:
+                for mid in combo:
+                    if mod_cap_cov.get(mid, {}).get(cid, 0) == rank:
+                        best_modules.append({"module_id": mid, "module_name": module_info[mid]["module_name"]})
+                        mc = module_contrib[mid]
+                        mc[g["need_level"]] += 1
+                        mc["caps"].append(g["name"])
+            entry = {
+                "capability_id": cid, "capability_name": g["name"], "capability_category": g["category"],
+                "need_level": g["need_level"], "priority_level": g["priority_level"],
+                "covered": covered, "best_coverage_level": best_lvl,
+                "best_modules": best_modules, "source_practices": g["source_practices"],
+            }
+            capability_results.append(entry)
+            if not covered:
+                uncovered.append({"capability_id": cid, "capability_name": g["name"],
+                                  "need_level": g["need_level"], "priority_level": g["priority_level"],
+                                  "source_practices": g["source_practices"]})
+
+        # порядок capability_results: сначала непокрытые required, затем по need/priority
+        capability_results.sort(key=lambda e: (
+            -NEED_RANK.get(e["need_level"], 0),
+            0 if (e["need_level"] == "required" and not e["covered"]) else 1,
+            0 if not e["covered"] else 1,
+            -PRIORITY_RANK.get(e["priority_level"], 0),
+            e["capability_name"],
+        ))
+
+        contributions = []
+        for mid in sorted(combo, key=lambda x: module_info[x]["module_name"]):
+            mc = module_contrib[mid]
+            contributions.append({
+                "module_id": mid, "module_name": module_info[mid]["module_name"],
+                "unique_required_coverage_count": mc["required"],
+                "unique_supporting_coverage_count": mc["supporting"],
+                "unique_optional_coverage_count": mc["optional"],
+                "best_covered_capabilities": mc["caps"],
+            })
+
+        bundles.append({
+            "bundle_key": "-".join(module_info[mid]["module_slug"] for mid in sorted(combo)),
+            "modules_count": len(combo), "products_count": pc, "vendors_count": vc,
+            "required_total": required_total, "required_covered": prof["required_covered"],
+            "required_uncovered": required_total - prof["required_covered"],
+            "supporting_total": supporting_total, "supporting_covered": prof["supporting_covered"],
+            "supporting_uncovered": supporting_total - prof["supporting_covered"],
+            "optional_total": optional_total, "optional_covered": prof["optional_covered"],
+            "optional_uncovered": optional_total - prof["optional_covered"],
+            "coverage_breakdown": prof,
+            "modules": modules_out,
+            "capability_results": capability_results,
+            "uncovered_capabilities": uncovered,
+            "module_contributions": contributions,
+        })
+
+    best_req_uncovered = min((required_total - b["prof"]["required_covered"] for b in kept), default=required_total)
+    summary = {
+        "candidate_modules_count": len(candidate_module_ids),
+        "evaluated_bundles_count": evaluated,
+        "returned_bundles_count": len(bundles),
+        "required_total": required_total, "supporting_total": supporting_total, "optional_total": optional_total,
+        "best_required_uncovered": best_req_uncovered,
+        "best_required_covered": max((b["prof"]["required_covered"] for b in kept), default=0),
+        "best_supporting_covered": max((b["prof"]["supporting_covered"] for b in kept), default=0),
+        "full_required_bundle_exists": (required_total > 0 and best_req_uncovered == 0),
+    }
+    return summary, bundles
 
 
 def _clean_scalar(v, allowed):
@@ -1753,6 +2006,24 @@ def handler(event: dict, context) -> dict:
                 g["name"],
             ))
             return cors({"ok": True, "summary": summary, "capability_groups": groups})
+
+        # ── Derived: кандидатные наборы модулей (bundle-view) ─────
+        if method == "GET" and action == "function_module_bundles":
+            func_id = int(qs.get("function_id") or 0)
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            max_size = int(qs.get("max_bundle_size") or 3)
+            max_size = max(1, min(3, max_size))
+            limit = int(qs.get("limit") or 10)
+            limit = max(1, min(30, limit))
+            only_full_required = (qs.get("only_full_required") or "false").lower() == "true"
+            include_arch = (qs.get("include_archived_supply") or "false").lower() == "true"
+            with conn.cursor() as cur:
+                groups = build_function_capability_supply(
+                    cur, SCHEMA, func_id, include_arch_caps=False, include_arch_modules=include_arch)
+            summary, bundles = build_module_bundles(groups, max_size=max_size, limit=limit,
+                                                    only_full_required=only_full_required)
+            return cors({"ok": True, "summary": summary, "bundles": bundles})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

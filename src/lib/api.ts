@@ -784,6 +784,8 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=function_capabilities_counts&project_id=${projectId}`, "GET"),
   getFunctionModuleCandidates: (projectId: number, functionId: number, opts?: { includeArchivedModules?: boolean; includeArchivedCapabilities?: boolean }) =>
     request(URLS.deptFunctions, `/?action=function_module_candidates&project_id=${projectId}&function_id=${functionId}&include_archived_modules=${!!opts?.includeArchivedModules}&include_archived_capabilities=${!!opts?.includeArchivedCapabilities}`, "GET"),
+  getFunctionModuleBundles: (projectId: number, functionId: number, opts?: { maxBundleSize?: number; onlyFullRequired?: boolean; includeArchivedSupply?: boolean; limit?: number }) =>
+    request(URLS.deptFunctions, `/?action=function_module_bundles&project_id=${projectId}&function_id=${functionId}&max_bundle_size=${opts?.maxBundleSize ?? 3}&only_full_required=${!!opts?.onlyFullRequired}&include_archived_supply=${!!opts?.includeArchivedSupply}&limit=${opts?.limit ?? 10}`, "GET"),
 };
 
 export const solutionsRegistryApi = {
