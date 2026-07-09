@@ -778,6 +778,10 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=archive_function_practice", "POST", data),
   restoreFunctionPractice: (data: { project_id: number; mapping_id: number }) =>
     request(URLS.deptFunctions, "/?action=restore_function_practice", "POST", data),
+  getFunctionCapabilities: (projectId: number, functionId: number, includeArchivedCapabilities = false) =>
+    request(URLS.deptFunctions, `/?action=function_capabilities&project_id=${projectId}&function_id=${functionId}&include_archived_capabilities=${includeArchivedCapabilities}`, "GET"),
+  getFunctionCapabilitiesCounts: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=function_capabilities_counts&project_id=${projectId}`, "GET"),
 };
 
 export const solutionsRegistryApi = {

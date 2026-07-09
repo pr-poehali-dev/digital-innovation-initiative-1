@@ -8,6 +8,7 @@ import { savePostImportResult } from "@/components/dept/postImportResult";
 import OperatingProfileCard from "@/components/dept/OperatingProfileCard";
 import ProcessCardsBlock from "@/components/dept/ProcessCardsBlock";
 import FunctionPracticesBlock from "@/components/dept/FunctionPracticesBlock";
+import FunctionCapabilitiesBlock from "@/components/dept/FunctionCapabilitiesBlock";
 
 type DeptFunction = {
   id: number;
@@ -136,7 +137,22 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       .catch(() => { /* индикатор не критичен */ });
   };
 
-  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
+  // Derived capability: счётчик active/required по функциям + ключ пересчёта на функцию
+  const [capabilityCounts, setCapabilityCounts] = useState<Record<number, { active: number; required: number }>>({});
+  const [capRefreshKey, setCapRefreshKey] = useState<Record<number, number>>({});
+  const loadCapabilityCounts = () => {
+    deptFunctionsApi.getFunctionCapabilitiesCounts(projectId)
+      .then((d: { counts: Record<number, { active: number; required: number }> }) => setCapabilityCounts(d.counts || {}))
+      .catch(() => { /* индикатор не критичен */ });
+  };
+  // При изменении практик функции — обновить счётчики практик, capability и пересчитать derived-view
+  const onPracticesChanged = (fnId: number) => {
+    loadPracticeCounts();
+    loadCapabilityCounts();
+    setCapRefreshKey((k) => ({ ...k, [fnId]: (k[fnId] || 0) + 1 }));
+  };
+
+  useEffect(() => { loadProfileStatus(); loadCardCounts(); loadPracticeCounts(); loadCapabilityCounts(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
 
   const loadFunctionProcesses = async (functionId: number) => {
     setProcessesLoading(p => ({ ...p, [functionId]: true }));
@@ -892,6 +908,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             <Icon name="Sparkles" size={11} className="mr-0.5" />{practiceCounts[fn.id]}
                           </Badge>
                         )}
+                        {(capabilityCounts[fn.id]?.active || 0) > 0 && (
+                          <Badge variant="secondary" className="text-[10px] flex-shrink-0 bg-sky-50 text-sky-700" title="Необходимых capability">
+                            <Icon name="Puzzle" size={11} className="mr-0.5" />{capabilityCounts[fn.id].active}
+                          </Badge>
+                        )}
                         <Badge className={`text-xs ${cat.color} border-0 flex-shrink-0`}>{cat.label}</Badge>
                       </button>
                       {isOpen && (
@@ -1023,7 +1044,13 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                           <FunctionPracticesBlock
                             projectId={projectId}
                             functionId={fn.id}
-                            onChanged={loadPracticeCounts}
+                            onChanged={() => onPracticesChanged(fn.id)}
+                          />
+
+                          <FunctionCapabilitiesBlock
+                            projectId={projectId}
+                            functionId={fn.id}
+                            refreshKey={capRefreshKey[fn.id] || 0}
                           />
                         </div>
                       )}

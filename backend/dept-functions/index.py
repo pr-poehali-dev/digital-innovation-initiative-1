@@ -36,6 +36,8 @@ Actions:
   GET  function_practices_counts — счётчики активных привязок практик по функциям проекта
   POST add_function_practice / update_function_practice — привязать/обновить практику (explainability обязателен)
   POST archive_function_practice / restore_function_practice — снять/восстановить привязку (без hard delete)
+  GET  function_capabilities — derived capability view функции (агрегация practices→capabilities, need/priority, explainability; без persisted-модели)
+  GET  function_capabilities_counts — счётчики active/required capability по функциям проекта (badge)
 """
 import base64
 import io
@@ -71,6 +73,12 @@ FPM_SOURCE = {"manual", "interview", "workshop", "analysis"}
 FPM_REASON = {"reduce_manual_work", "reduce_cycle_time", "reduce_errors", "reduce_approvals",
               "improve_visibility", "improve_compliance", "reduce_knowledge_dependency",
               "improve_service_quality", "scale_volume", "standardize_execution"}
+
+# Ранги для агрегации derived capability view (чем больше — тем сильнее)
+NEED_RANK = {"required": 3, "supporting": 2, "optional": 1}
+PRIORITY_RANK = {"primary": 3, "supporting": 2, "explore": 1}
+NEED_BY_RANK = {3: "required", 2: "supporting", 1: "optional"}
+PRIORITY_BY_RANK = {3: "primary", 2: "supporting", 1: "explore"}
 
 
 def _clean_scalar(v, allowed):
@@ -1523,6 +1531,96 @@ def handler(event: dict, context) -> dict:
                 )
             conn.commit()
             return cors({"ok": True})
+
+        # ── Derived capability view функции (без persisted-модели) ─
+        if method == "GET" and action == "function_capabilities":
+            func_id = int(qs.get("function_id") or 0)
+            include_archived_caps = (qs.get("include_archived_capabilities") or "false").lower() == "true"
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            with conn.cursor() as cur:
+                # Раскрываем активные practice-привязки функции через practice↔capability map
+                cur.execute(
+                    f"""SELECT c.id, c.slug, c.name, c.category, c.description, c.status,
+                               pcm.relation_type,
+                               m.relevance_level, m.reason_tags, m.rationale_note,
+                               p.id, p.name, p.slug, p.category
+                        FROM {SCHEMA}.function_practice_mappings m
+                        JOIN {SCHEMA}.solution_practices p ON p.id = m.practice_id
+                        JOIN {SCHEMA}.solution_practice_capability_map pcm ON pcm.practice_id = p.id
+                        JOIN {SCHEMA}.solution_capabilities c ON c.id = pcm.capability_id
+                        WHERE m.function_id = %s AND m.is_archived = false""",
+                    (func_id,),
+                )
+                rows = cur.fetchall()
+
+            agg: dict = {}
+            for r in rows:
+                (cap_id, cap_slug, cap_name, cap_cat, cap_desc, cap_status,
+                 relation_type, relevance, reason_tags, rationale,
+                 p_id, p_name, p_slug, p_cat) = r
+                if cap_id not in agg:
+                    agg[cap_id] = {
+                        "capability_id": cap_id, "slug": cap_slug, "name": cap_name,
+                        "category": cap_cat, "description": cap_desc, "status": cap_status,
+                        "_need_rank": 0, "_priority_rank": 0, "source_practices": [],
+                    }
+                a = agg[cap_id]
+                a["_need_rank"] = max(a["_need_rank"], NEED_RANK.get(relation_type, 0))
+                a["_priority_rank"] = max(a["_priority_rank"], PRIORITY_RANK.get(relevance, 0))
+                a["source_practices"].append({
+                    "practice_id": p_id, "practice_name": p_name, "practice_slug": p_slug,
+                    "practice_category": p_cat, "practice_relevance": relevance,
+                    "relation_type": relation_type, "reason_tags": reason_tags or [],
+                    "rationale_note": rationale,
+                })
+
+            items = []
+            summary = {"required_count": 0, "supporting_count": 0, "optional_count": 0,
+                       "active_count": 0, "archived_count": 0}
+            for a in agg.values():
+                if a["status"] != "active" and not include_archived_caps:
+                    # архивную capability не теряем в счётчиках, но не выводим в список
+                    summary["archived_count"] += 1
+                    continue
+                need = NEED_BY_RANK.get(a["_need_rank"], "optional")
+                priority = PRIORITY_BY_RANK.get(a["_priority_rank"], "explore")
+                a["need_level"] = need
+                a["priority_level"] = priority
+                a["source_practices_count"] = len(a["source_practices"])
+                a.pop("_need_rank"); a.pop("_priority_rank")
+                items.append(a)
+                summary[f"{need}_count"] += 1
+                if a["status"] == "active":
+                    summary["active_count"] += 1
+                else:
+                    summary["archived_count"] += 1
+
+            items.sort(key=lambda x: (
+                -NEED_RANK.get(x["need_level"], 0),
+                -PRIORITY_RANK.get(x["priority_level"], 0),
+                -x["source_practices_count"],
+                x["name"],
+            ))
+            return cors({"ok": True, "items": items, "summary": summary})
+
+        # ── Счётчики derived capability по функциям проекта (badge) ─
+        if method == "GET" and action == "function_capabilities_counts":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT m.function_id,
+                               COUNT(DISTINCT pcm.capability_id) FILTER (WHERE c.status = 'active'),
+                               COUNT(DISTINCT pcm.capability_id) FILTER (WHERE c.status = 'active' AND pcm.relation_type = 'required')
+                        FROM {SCHEMA}.function_practice_mappings m
+                        JOIN {SCHEMA}.dept_functions f ON f.id = m.function_id
+                        JOIN {SCHEMA}.solution_practice_capability_map pcm ON pcm.practice_id = m.practice_id
+                        JOIN {SCHEMA}.solution_capabilities c ON c.id = pcm.capability_id
+                        WHERE f.project_id = %s AND m.is_archived = false
+                        GROUP BY m.function_id""",
+                    (project_id,),
+                )
+                counts = {r[0]: {"active": r[1], "required": r[2]} for r in cur.fetchall()}
+            return cors({"ok": True, "counts": counts})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

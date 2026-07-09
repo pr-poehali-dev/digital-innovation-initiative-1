@@ -168,6 +168,18 @@
       "path": "/?action=archive_function_practice",
       "body": {"project_id": 1, "mapping_id": 1},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_capabilities",
+      "method": "GET",
+      "path": "/?action=function_capabilities&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_capabilities_counts",
+      "method": "GET",
+      "path": "/?action=function_capabilities_counts&project_id=1",
+      "expectedStatus": 401
     }
   ]
 }
