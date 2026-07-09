@@ -2724,7 +2724,7 @@ export default function ProjectPage() {
         {/* ── Дерево департамента ── */}
         {tab === "dept-tree" && (
           project?.workspace_mode === "polygon" ? (
-            <DeptTreeTab projectId={projectId} />
+            <DeptTreeTab projectId={projectId} onNavigateToUpload={() => setTab("dept-functions")} />
           ) : (
             <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
           )
@@ -2733,7 +2733,7 @@ export default function ProjectPage() {
         {/* ── Пересечения функций ── */}
         {tab === "dept-overlaps" && (
           project?.workspace_mode === "polygon" ? (
-            <DeptOverlapsTab projectId={projectId} onNavigateToTree={() => setTab("dept-tree")} />
+            <DeptOverlapsTab projectId={projectId} onNavigateToTree={() => setTab("dept-tree")} onNavigateToUpload={() => setTab("dept-functions")} />
           ) : (
             <PolygonOnlyNotice isOwner={project?.my_role === "owner"} onEnable={toggleWorkspaceMode} switching={switchingMode} />
           )

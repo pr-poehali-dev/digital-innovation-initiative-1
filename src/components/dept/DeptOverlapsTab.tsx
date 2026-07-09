@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
+import SourceCoverageBanner from "@/components/dept/SourceCoverageBanner";
 
 type OverlapUnit = { role: string; unit_id: number; code: string; name: string };
 type Cluster = {
@@ -25,22 +26,30 @@ type MatrixItem = {
   b: { code: string; name: string } | null;
 };
 
+type ThinMgmt = { code: string; name: string; own_count: number };
+
 interface Props {
   projectId: number;
   onNavigateToTree?: () => void;
+  onNavigateToUpload?: () => void;
 }
 
-export default function DeptOverlapsTab({ projectId, onNavigateToTree }: Props) {
+export default function DeptOverlapsTab({ projectId, onNavigateToTree, onNavigateToUpload }: Props) {
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [matrix, setMatrix] = useState<MatrixItem[]>([]);
+  const [thinManagements, setThinManagements] = useState<ThinMgmt[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    deptFunctionsApi.getOverlapsReport(projectId)
-      .then((d: { clusters: Cluster[]; matrix: MatrixItem[] }) => {
-        setClusters(d.clusters || []);
-        setMatrix(d.matrix || []);
+    Promise.all([
+      deptFunctionsApi.getOverlapsReport(projectId),
+      deptFunctionsApi.getOrgTree(projectId).catch(() => null),
+    ])
+      .then(([rep, tree]: [{ clusters: Cluster[]; matrix: MatrixItem[] }, { coverage?: { thin_managements: ThinMgmt[] } } | null]) => {
+        setClusters(rep.clusters || []);
+        setMatrix(rep.matrix || []);
+        setThinManagements(tree?.coverage?.thin_managements || []);
       })
       .catch((e: Error) => toast({ title: "Ошибка загрузки отчёта", description: e.message, variant: "destructive" }))
       .finally(() => setLoading(false));
@@ -80,16 +89,14 @@ export default function DeptOverlapsTab({ projectId, onNavigateToTree }: Props) 
       </div>
 
       {clusters.length === 0 ? (
-        <div className="border border-dashed border-slate-200 rounded-lg p-8 text-center">
-          <Icon name="SearchCheck" size={32} className="mx-auto text-slate-300 mb-2" />
-          <p className="text-sm text-slate-500 mb-1">Пересечений пока не найдено.</p>
-          <p className="text-xs text-slate-400 mb-3">
-            Отчёт строится по функциям, привязанным к узлам дерева. Загрузите функции ДФМ и разнесите их по отделам.
-          </p>
+        <div className="space-y-2">
+          <SourceCoverageBanner variant="empty" thinManagements={thinManagements} onUpload={onNavigateToUpload} />
           {onNavigateToTree && (
-            <Button variant="outline" size="sm" onClick={onNavigateToTree}>
-              <Icon name="Network" size={14} className="mr-1.5" /> Перейти к дереву департамента
-            </Button>
+            <div className="text-center">
+              <Button variant="ghost" size="sm" onClick={onNavigateToTree}>
+                <Icon name="Network" size={14} className="mr-1.5" /> Открыть дерево департамента
+              </Button>
+            </div>
           )}
         </div>
       ) : (

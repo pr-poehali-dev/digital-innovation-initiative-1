@@ -9,6 +9,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
+import SourceCoverageBanner from "@/components/dept/SourceCoverageBanner";
 
 type OrgNode = {
   id: number;
@@ -62,13 +63,22 @@ const AUTOMATION_LABELS: Record<string, { label: string; color: string }> = {
 
 const ROLE_OPTIONS = ["owner", "co_executor", "participant", "reviewer"];
 
+type Coverage = {
+  status: string;
+  thin_managements: { code: string; name: string; own_count: number }[];
+  missing_section_code_count: number;
+  show_upload_reminder: boolean;
+};
+
 interface Props {
   projectId: number;
+  onNavigateToUpload?: () => void;
 }
 
-export default function DeptTreeTab({ projectId }: Props) {
+export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
   const [nodes, setNodes] = useState<OrgNode[]>([]);
   const [unassignedCount, setUnassignedCount] = useState(0);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [includeChildren, setIncludeChildren] = useState(false);
@@ -84,9 +94,10 @@ export default function DeptTreeTab({ projectId }: Props) {
   const loadTree = useCallback(() => {
     setLoading(true);
     deptFunctionsApi.getOrgTree(projectId)
-      .then((d: { nodes: OrgNode[]; unassigned: number }) => {
+      .then((d: { nodes: OrgNode[]; unassigned: number; coverage?: Coverage }) => {
         setNodes(d.nodes || []);
         setUnassignedCount(d.unassigned || 0);
+        setCoverage(d.coverage || null);
         if (!selectedId && d.nodes?.length) setSelectedId(d.nodes[0].id);
       })
       .catch((e: Error) => toast({ title: "Ошибка загрузки дерева", description: e.message, variant: "destructive" }))
@@ -215,6 +226,14 @@ export default function DeptTreeTab({ projectId }: Props) {
           </Button>
         )}
       </div>
+
+      {coverage?.show_upload_reminder && (
+        <SourceCoverageBanner
+          thinManagements={coverage.thin_managements}
+          onUpload={onNavigateToUpload}
+          onShowUnassigned={unassignedCount > 0 ? () => setShowUnassigned(true) : undefined}
+        />
+      )}
 
       {showUnassigned && (
         <div className="border border-amber-200 bg-amber-50/60 rounded-lg p-3">

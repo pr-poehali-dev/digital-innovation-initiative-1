@@ -848,7 +848,31 @@ def handler(event: dict, context) -> dict:
                     (project_id,),
                 )
                 unassigned = cur.fetchone()[0]
-            return cors({"ok": True, "nodes": nodes, "unassigned": unassigned})
+                # Признак неполноты источника: управления (level=1, management) с малым числом
+                # собственных функций + наличие функций с пустым source_section_code.
+                cur.execute(
+                    f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
+                        WHERE f.project_id = %s
+                          AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                          AND COALESCE(f.source_section_code, '') = ''""",
+                    (project_id,),
+                )
+                missing_code_cnt = cur.fetchone()[0]
+
+            # Управления с подозрительно малым покрытием (< 3 функций на узле)
+            THIN_THRESHOLD = 3
+            thin_mgmt = [
+                {"code": n["code"], "name": n["name"], "own_count": n["own_count"]}
+                for n in nodes
+                if n["type"] == "management" and n["own_count"] < THIN_THRESHOLD
+            ]
+            coverage = {
+                "status": "partial" if (thin_mgmt or unassigned > 0 or missing_code_cnt > 0) else "complete",
+                "thin_managements": thin_mgmt,
+                "missing_section_code_count": missing_code_cnt,
+                "show_upload_reminder": bool(thin_mgmt or unassigned > 0 or missing_code_cnt > 0),
+            }
+            return cors({"ok": True, "nodes": nodes, "unassigned": unassigned, "coverage": coverage})
 
         # ── Функции узла (с ролями, направлениями, автоматизацией) ─
         if method == "GET" and action == "org_functions":
