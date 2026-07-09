@@ -83,6 +83,12 @@
       "path": "/?action=assign_direction",
       "body": {"project_id": 1, "function_id": 1, "direction_code": "18"},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth overlaps_report",
+      "method": "GET",
+      "path": "/?action=overlaps_report&project_id=1",
+      "expectedStatus": 401
     }
   ]
 }

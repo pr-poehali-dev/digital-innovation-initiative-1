@@ -739,4 +739,6 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=assign_direction", "POST", data),
   unassignDirection: (data: { project_id: number; function_id: number; direction_code: string }) =>
     request(URLS.deptFunctions, `/?action=unassign_direction&project_id=${data.project_id}&function_id=${data.function_id}&direction_code=${data.direction_code}`, "DELETE"),
+  getOverlapsReport: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=overlaps_report&project_id=${projectId}`, "GET"),
 };

@@ -21,11 +21,13 @@ Actions:
   DELETE unassign_org_unit — снять привязку функции к узлу
   POST assign_direction   — привязать код направления (18, 93, 32.2…) к функции
   DELETE unassign_direction — снять направление
+  GET  overlaps_report    — отчёт «Пересечения функций»: кластеры дублей между узлами + матрица узел×узел + связь с автоматизацией
 """
 import base64
 import io
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -164,6 +166,61 @@ def extract_text_from_docx(data: bytes) -> str:
     doc = docx.Document(io.BytesIO(data))
     paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
     return "\n".join(paragraphs)[:MAX_TEXT_LEN]
+
+
+# Служебные/стоп-слова, которые не несут смысла при сравнении функций
+_STOP_WORDS = {
+    "и", "в", "во", "на", "по", "с", "со", "к", "о", "об", "от", "для", "при",
+    "а", "также", "или", "их", "его", "ее", "том", "числе", "части", "рамках",
+    "целях", "том числе", "банка", "подразделения", "деятельности",
+}
+
+# Приведение частых глагольных форм к канону (грубая лемматизация «действия»)
+_VERB_CANON = [
+    (r"осуществлени\w*|осуществля\w*", "осуществление"),
+    (r"обеспечени\w*|обеспечива\w*", "обеспечение"),
+    (r"разработк\w*|разрабат\w*", "разработка"),
+    (r"проведени\w*|провод\w*", "проведение"),
+    (r"организаци\w*|организу\w*", "организация"),
+    (r"подготовк\w*|подготов\w*", "подготовка"),
+    (r"участи\w*|участв\w*", "участие"),
+    (r"консультировани\w*|консультир\w*|методическ\w+ помощ\w*", "консультирование"),
+    (r"выявлени\w*|выявля\w*", "выявление"),
+    (r"контрол\w*", "контроль"),
+    (r"мониторинг\w*", "мониторинг"),
+    (r"оценк\w*|оценива\w*", "оценка"),
+    (r"анализ\w*|анализир\w*", "анализ"),
+    (r"взаимодействи\w*", "взаимодействие"),
+    (r"формировани\w*|формиру\w*", "формирование"),
+    (r"согласовани\w*|согласу\w*", "согласование"),
+    (r"рассмотрени\w*|рассматрив\w*", "рассмотрение"),
+]
+
+
+def normalize_function_text(text: str) -> str:
+    """Нормализует формулировку функции для exact/normalized-сравнения:
+    lower-case, чистка пунктуации, лемматизация частых глаголов, удаление стоп-слов."""
+    t = (text or "").lower().replace("ё", "е")
+    t = re.sub(r"[^\w\s]", " ", t)
+    for pattern, canon in _VERB_CANON:
+        t = re.sub(pattern, canon, t)
+    words = [w for w in t.split() if w and w not in _STOP_WORDS and len(w) > 2]
+    words.sort()
+    return " ".join(words)
+
+
+def find_org_unit_by_code(conn, project_id: int, code: str):
+    """Находит id узла оргдерева по коду раздела (4.1.2 / 4.3.3...)."""
+    code = (code or "").strip().rstrip(".")
+    if not code:
+        return None
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id FROM {SCHEMA}.org_units WHERE project_id = %s AND code = %s AND is_archived = false LIMIT 1",
+            (project_id, code),
+        )
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 def get_or_create_automation(conn, function_id: int, project_id: int) -> dict:
@@ -337,7 +394,8 @@ def handler(event: dict, context) -> dict:
   "title": "краткое название функции глаголом/отглагольным существительным, до 10 слов",
   "description": "полный текст функции из документа (можно слегка причесать опечатки OCR)",
   "goals": "цель функции, если понятна из контекста, иначе пустая строка",
-  "category": "одно из: regulatory (нормативка, ПВК, методология), operational (операционная деятельность), analytical (анализ, аналитика, оценка рисков), communication (консультирование, взаимодействие, ответы на обращения), control (контроль, проверки, мониторинг, выявление), planning (планирование, разработка ТЗ, автоматизация)"
+  "category": "одно из: regulatory (нормативка, ПВК, методология), operational (операционная деятельность), analytical (анализ, аналитика, оценка рисков), communication (консультирование, взаимодействие, ответы на обращения), control (контроль, проверки, мониторинг, выявление), planning (планирование, разработка ТЗ, автоматизация)",
+  "source_section_code": "код структурного пункта (например 4.1.2, 4.3.3), из блока которого взята функция; если рядом с функцией стоит номер управления/отдела/группы — укажи его, иначе пустая строка"
 }}
 
 Только JSON-массив, без текста до и после."""
@@ -379,7 +437,8 @@ def handler(event: dict, context) -> dict:
             # Сохранение происходит через action=confirm_functions после подтверждения.
             draft = [
                 {"title": f.get("title", ""), "description": f.get("description", ""),
-                 "goals": f.get("goals", ""), "category": f.get("category", "operational")}
+                 "goals": f.get("goals", ""), "category": f.get("category", "operational"),
+                 "source_section_code": (f.get("source_section_code") or "").strip()}
                 for f in extracted
             ]
             return cors({"ok": True, "functions": draft, "dept_name": dept_name, "ocr_text": ocr_text})
@@ -391,25 +450,41 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": "functions (непустой список) required"}, 400)
 
             created_ids = []
+            auto_linked = 0
             for i, f in enumerate(items):
                 title = (f.get("title") or "").strip()
                 if not title:
                     continue
+                section_code = (f.get("source_section_code") or "").strip()
+                normalized = normalize_function_text(title)
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.dept_functions
-                            (project_id, dept_name, title, description, goals, category, priority, created_by)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                            (project_id, dept_name, title, description, goals, category, priority, created_by,
+                             normalized_title, source_section_code)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                         (project_id, (f.get("dept_name") or "").strip(), title,
                          f.get("description", ""), f.get("goals", ""),
-                         f.get("category", "operational"), i, user_id),
+                         f.get("category", "operational"), i, user_id,
+                         normalized, section_code),
                     )
                     func_id = cur.fetchone()[0]
                 get_or_create_automation(conn, func_id, project_id)
+                # Автопредзаполнение в узел дерева по коду раздела источника
+                unit_id = find_org_unit_by_code(conn, project_id, section_code)
+                if unit_id:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""INSERT INTO {SCHEMA}.function_org_units (function_id, org_unit_id, role, confidence, source_ref)
+                                VALUES (%s, %s, 'owner', 0.7, %s)
+                                ON CONFLICT (function_id, org_unit_id, role) DO NOTHING""",
+                            (func_id, unit_id, f"auto:{section_code}"),
+                        )
+                    auto_linked += 1
                 created_ids.append(func_id)
 
             conn.commit()
-            return cors({"ok": True, "created": len(created_ids), "ids": created_ids})
+            return cors({"ok": True, "created": len(created_ids), "ids": created_ids, "auto_linked": auto_linked})
 
         # ── Список автоматизации ──────────────────────────────────
         if method == "GET" and action == "automation":
@@ -642,6 +717,109 @@ def handler(event: dict, context) -> dict:
                 )
             conn.commit()
             return cors({"ok": True, "id": proc_id})
+
+        # ── Отчёт «Пересечения функций» (exact/normalized match) ──
+        if method == "GET" and action == "overlaps_report":
+            with conn.cursor() as cur:
+                # Берём функции проекта, у которых есть привязка хотя бы к одному узлу,
+                # группируем по нормализованной формулировке.
+                cur.execute(
+                    f"""SELECT f.id, f.title, f.normalized_title, f.category,
+                               a.current_status, a.ai_potential_score
+                        FROM {SCHEMA}.dept_functions f
+                        LEFT JOIN {SCHEMA}.dept_automation a ON a.function_id = f.id
+                        WHERE f.project_id = %s
+                          AND f.dept_name NOT LIKE '[SMOKETEST%%'
+                          AND COALESCE(f.normalized_title, '') <> ''""",
+                    (project_id,),
+                )
+                frows = cur.fetchall()
+                # id -> инфо
+                finfo = {r[0]: {"id": r[0], "title": r[1], "norm": r[2], "category": r[3],
+                                "automation_status": r[4] or "manual", "ai": r[5] or 0} for r in frows}
+                fids = list(finfo.keys())
+                # узлы каждой функции
+                units_by_func: dict = {}
+                dirs_by_func: dict = {}
+                if fids:
+                    cur.execute(
+                        f"""SELECT l.function_id, l.role, u.id, u.code, u.name
+                            FROM {SCHEMA}.function_org_units l
+                            JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+                            WHERE l.function_id = ANY(%s)""",
+                        (fids,),
+                    )
+                    for r in cur.fetchall():
+                        units_by_func.setdefault(r[0], []).append(
+                            {"role": r[1], "unit_id": r[2], "code": r[3], "name": r[4]})
+                    cur.execute(
+                        f"""SELECT function_id, direction_code FROM {SCHEMA}.function_directions
+                            WHERE function_id = ANY(%s)""",
+                        (fids,),
+                    )
+                    for r in cur.fetchall():
+                        dirs_by_func.setdefault(r[0], set()).add(r[1])
+
+            # группировка по нормализованной формулировке
+            groups: dict = {}
+            for fid, info in finfo.items():
+                groups.setdefault(info["norm"], []).append(fid)
+
+            clusters = []
+            matrix: dict = {}
+            for norm, group_fids in groups.items():
+                # уникальные узлы среди всех функций группы
+                unit_ids = set()
+                member_units = []
+                for fid in group_fids:
+                    for u in units_by_func.get(fid, []):
+                        unit_ids.add(u["unit_id"])
+                        member_units.append(u)
+                # пересечение = одна и та же функция в 2+ разных узлах
+                if len(unit_ids) < 2:
+                    continue
+                statuses = [finfo[fid]["automation_status"] for fid in group_fids]
+                ais = [finfo[fid]["ai"] for fid in group_fids if finfo[fid]["ai"] > 0]
+                all_dirs = set()
+                for fid in group_fids:
+                    all_dirs |= dirs_by_func.get(fid, set())
+                # дедуп узлов для карточки
+                seen = {}
+                for u in member_units:
+                    seen[u["unit_id"]] = u
+                units_list = list(seen.values())
+                clusters.append({
+                    "canonical_name": finfo[group_fids[0]]["title"],
+                    "normalized_key": norm,
+                    "function_ids": group_fids,
+                    "repeat_count": len(group_fids),
+                    "unit_count": len(unit_ids),
+                    "units": units_list,
+                    "directions": sorted(all_dirs),
+                    "manual_count": sum(1 for s in statuses if s == "manual"),
+                    "avg_ai_potential": round(sum(ais) / len(ais)) if ais else 0,
+                })
+                # матрица узел×узел
+                ulist = sorted(unit_ids)
+                for a in range(len(ulist)):
+                    for b in range(a + 1, len(ulist)):
+                        key = f"{ulist[a]}_{ulist[b]}"
+                        matrix[key] = matrix.get(key, 0) + 1
+
+            clusters.sort(key=lambda c: (c["unit_count"], c["repeat_count"]), reverse=True)
+            # имена узлов для матрицы
+            unit_names = {}
+            for c in clusters:
+                for u in c["units"]:
+                    unit_names[u["unit_id"]] = {"code": u["code"], "name": u["name"]}
+            matrix_list = [
+                {"unit_a": int(k.split("_")[0]), "unit_b": int(k.split("_")[1]), "count": v,
+                 "a": unit_names.get(int(k.split("_")[0])), "b": unit_names.get(int(k.split("_")[1]))}
+                for k, v in matrix.items()
+            ]
+            matrix_list.sort(key=lambda m: m["count"], reverse=True)
+            return cors({"ok": True, "clusters": clusters, "matrix": matrix_list,
+                         "total_overlaps": len(clusters)})
 
         # ── Оргдерево: список узлов с числом функций ──────────────
         if method == "GET" and action == "org_tree":
