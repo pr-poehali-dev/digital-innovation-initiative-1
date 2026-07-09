@@ -38,6 +38,8 @@ Actions:
   POST archive_function_practice / restore_function_practice — снять/восстановить привязку (без hard delete)
   GET  function_capabilities — derived capability view функции (агрегация practices→capabilities, need/priority, explainability; без persisted-модели)
   GET  function_capabilities_counts — счётчики active/required capability по функциям проекта (badge)
+  GET  function_module_candidates — derived: под каждую capability функции — кандидатные модули (supply), group-by-capability, gaps не теряются, 3 независимые оси need/priority/coverage, explainability до практик; без persisted-модели
+  GET  function_module_candidates_counts — краткий summary (distinct modules, gaps) для badge
 """
 import base64
 import io
@@ -79,6 +81,7 @@ NEED_RANK = {"required": 3, "supporting": 2, "optional": 1}
 PRIORITY_RANK = {"primary": 3, "supporting": 2, "explore": 1}
 NEED_BY_RANK = {3: "required", 2: "supporting", 1: "optional"}
 PRIORITY_BY_RANK = {3: "primary", 2: "supporting", 1: "explore"}
+COVERAGE_RANK = {"core": 3, "supporting": 2, "limited": 1}
 
 
 def _clean_scalar(v, allowed):
@@ -1621,6 +1624,135 @@ def handler(event: dict, context) -> dict:
                 )
                 counts = {r[0]: {"active": r[1], "required": r[2]} for r in cur.fetchall()}
             return cors({"ok": True, "counts": counts})
+
+        # ── Derived: кандидатные модули под capability функции ────
+        if method == "GET" and action in ("function_module_candidates", "function_module_candidates_counts"):
+            func_id = int(qs.get("function_id") or 0)
+            counts_only = action == "function_module_candidates_counts"
+            include_arch_caps = (qs.get("include_archived_capabilities") or "false").lower() == "true"
+            include_arch_modules = (qs.get("include_archived_modules") or "false").lower() == "true"
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+
+            with conn.cursor() as cur:
+                # 1) demand-side: capability функции из активных практик (+ explainability)
+                cur.execute(
+                    f"""SELECT c.id, c.slug, c.name, c.category, c.description, c.status,
+                               pcm.relation_type,
+                               m.relevance_level, m.reason_tags, m.rationale_note,
+                               p.id, p.name, p.slug
+                        FROM {SCHEMA}.function_practice_mappings m
+                        JOIN {SCHEMA}.solution_practices p ON p.id = m.practice_id
+                        JOIN {SCHEMA}.solution_practice_capability_map pcm ON pcm.practice_id = p.id
+                        JOIN {SCHEMA}.solution_capabilities c ON c.id = pcm.capability_id
+                        WHERE m.function_id = %s AND m.is_archived = false""",
+                    (func_id,),
+                )
+                demand = cur.fetchall()
+
+                caps: dict = {}
+                for r in demand:
+                    (cap_id, cap_slug, cap_name, cap_cat, cap_desc, cap_status,
+                     relation_type, relevance, reason_tags, rationale, p_id, p_name, p_slug) = r
+                    if cap_id not in caps:
+                        caps[cap_id] = {
+                            "capability_id": cap_id, "slug": cap_slug, "name": cap_name, "category": cap_cat,
+                            "description": cap_desc, "status": cap_status,
+                            "_need_rank": 0, "_priority_rank": 0, "source_practices": [], "candidates": [],
+                        }
+                    a = caps[cap_id]
+                    a["_need_rank"] = max(a["_need_rank"], NEED_RANK.get(relation_type, 0))
+                    a["_priority_rank"] = max(a["_priority_rank"], PRIORITY_RANK.get(relevance, 0))
+                    a["source_practices"].append({
+                        "practice_id": p_id, "practice_name": p_name, "practice_slug": p_slug,
+                        "practice_relevance": relevance, "relation_type": relation_type,
+                        "reason_tags": reason_tags or [], "rationale_note": rationale,
+                    })
+
+                # фильтр архивных capability
+                cap_ids = [cid for cid, a in caps.items() if include_arch_caps or a["status"] == "active"]
+
+                # 2) supply-side: модули, покрывающие эти capability
+                if cap_ids:
+                    mod_filter = "" if include_arch_modules else \
+                        "AND md.status = 'active' AND pr.status = 'active' AND ve.status = 'active'"
+                    cur.execute(
+                        f"""SELECT mc.capability_id, mc.coverage_level, mc.note, mc.source_note, mc.source_url,
+                                   md.id, md.slug, md.name, md.category, md.summary, md.status,
+                                   pr.id, pr.slug, pr.name, pr.category, pr.status, pr.deployment_types,
+                                   ve.id, ve.slug, ve.name, ve.status
+                            FROM {SCHEMA}.solution_module_capability_map mc
+                            JOIN {SCHEMA}.solution_product_modules md ON md.id = mc.module_id
+                            JOIN {SCHEMA}.solution_products pr ON pr.id = md.product_id
+                            JOIN {SCHEMA}.solution_vendors ve ON ve.id = pr.vendor_id
+                            WHERE mc.capability_id = ANY(%s) {mod_filter}""",
+                        (cap_ids,),
+                    )
+                    for s in cur.fetchall():
+                        (scap_id, coverage_level, cov_note, src_note, src_url,
+                         mod_id, mod_slug, mod_name, mod_cat, mod_summary, mod_status,
+                         prod_id, prod_slug, prod_name, prod_cat, prod_status, depl_types,
+                         ven_id, ven_slug, ven_name, ven_status) = s
+                        caps[scap_id]["candidates"].append({
+                            "module_id": mod_id, "module_slug": mod_slug, "module_name": mod_name,
+                            "module_category": mod_cat, "module_summary": mod_summary, "module_status": mod_status,
+                            "coverage_level": coverage_level, "coverage_note": cov_note,
+                            "source_note": src_note, "source_url": src_url,
+                            "product_id": prod_id, "product_slug": prod_slug, "product_name": prod_name,
+                            "product_category": prod_cat, "product_status": prod_status,
+                            "deployment_types": depl_types or [],
+                            "vendor_id": ven_id, "vendor_slug": ven_slug, "vendor_name": ven_name, "vendor_status": ven_status,
+                        })
+
+            # 3) финализация групп + summary
+            distinct_modules, distinct_products, distinct_vendors = set(), set(), set()
+            groups = []
+            summary = {"capabilities_total": 0, "capabilities_with_candidates": 0,
+                       "capabilities_without_candidates": 0, "required_total": 0,
+                       "required_without_candidates": 0, "distinct_modules_count": 0,
+                       "distinct_products_count": 0, "distinct_vendors_count": 0}
+            for cid in cap_ids:
+                a = caps[cid]
+                a["need_level"] = NEED_BY_RANK.get(a["_need_rank"], "optional")
+                a["priority_level"] = PRIORITY_BY_RANK.get(a["_priority_rank"], "explore")
+                a["source_practices_count"] = len(a["source_practices"])
+                a["candidates"].sort(key=lambda x: (
+                    -COVERAGE_RANK.get(x["coverage_level"], 0), x["product_name"], x["module_name"]))
+                a["candidates_count"] = len(a["candidates"])
+                a.pop("_need_rank"); a.pop("_priority_rank")
+
+                summary["capabilities_total"] += 1
+                if a["candidates_count"] > 0:
+                    summary["capabilities_with_candidates"] += 1
+                else:
+                    summary["capabilities_without_candidates"] += 1
+                if a["need_level"] == "required":
+                    summary["required_total"] += 1
+                    if a["candidates_count"] == 0:
+                        summary["required_without_candidates"] += 1
+                for c in a["candidates"]:
+                    distinct_modules.add(c["module_id"]); distinct_products.add(c["product_id"]); distinct_vendors.add(c["vendor_id"])
+                groups.append(a)
+
+            summary["distinct_modules_count"] = len(distinct_modules)
+            summary["distinct_products_count"] = len(distinct_products)
+            summary["distinct_vendors_count"] = len(distinct_vendors)
+
+            if counts_only:
+                return cors({"ok": True, "summary": {
+                    "distinct_modules_count": summary["distinct_modules_count"],
+                    "capabilities_without_candidates": summary["capabilities_without_candidates"],
+                    "required_without_candidates": summary["required_without_candidates"],
+                }})
+
+            # required gaps наверх, затем required с покрытием, затем supporting, optional; внутри — по priority и имени
+            groups.sort(key=lambda g: (
+                -NEED_RANK.get(g["need_level"], 0),
+                0 if (g["need_level"] == "required" and g["candidates_count"] == 0) else 1,
+                -PRIORITY_RANK.get(g["priority_level"], 0),
+                g["name"],
+            ))
+            return cors({"ok": True, "summary": summary, "capability_groups": groups})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

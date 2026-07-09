@@ -782,6 +782,8 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=function_capabilities&project_id=${projectId}&function_id=${functionId}&include_archived_capabilities=${includeArchivedCapabilities}`, "GET"),
   getFunctionCapabilitiesCounts: (projectId: number) =>
     request(URLS.deptFunctions, `/?action=function_capabilities_counts&project_id=${projectId}`, "GET"),
+  getFunctionModuleCandidates: (projectId: number, functionId: number, opts?: { includeArchivedModules?: boolean; includeArchivedCapabilities?: boolean }) =>
+    request(URLS.deptFunctions, `/?action=function_module_candidates&project_id=${projectId}&function_id=${functionId}&include_archived_modules=${!!opts?.includeArchivedModules}&include_archived_capabilities=${!!opts?.includeArchivedCapabilities}`, "GET"),
 };
 
 export const solutionsRegistryApi = {

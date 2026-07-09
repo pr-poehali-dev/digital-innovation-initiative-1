@@ -9,6 +9,7 @@ import OperatingProfileCard from "@/components/dept/OperatingProfileCard";
 import ProcessCardsBlock from "@/components/dept/ProcessCardsBlock";
 import FunctionPracticesBlock from "@/components/dept/FunctionPracticesBlock";
 import FunctionCapabilitiesBlock from "@/components/dept/FunctionCapabilitiesBlock";
+import FunctionModuleCandidatesBlock from "@/components/dept/FunctionModuleCandidatesBlock";
 
 type DeptFunction = {
   id: number;
@@ -1048,6 +1049,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                           />
 
                           <FunctionCapabilitiesBlock
+                            projectId={projectId}
+                            functionId={fn.id}
+                            refreshKey={capRefreshKey[fn.id] || 0}
+                          />
+
+                          <FunctionModuleCandidatesBlock
                             projectId={projectId}
                             functionId={fn.id}
                             refreshKey={capRefreshKey[fn.id] || 0}

@@ -180,6 +180,18 @@
       "method": "GET",
       "path": "/?action=function_capabilities_counts&project_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_module_candidates",
+      "method": "GET",
+      "path": "/?action=function_module_candidates&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_module_candidates_counts",
+      "method": "GET",
+      "path": "/?action=function_module_candidates_counts&project_id=1&function_id=1",
+      "expectedStatus": 401
     }
   ]
 }
