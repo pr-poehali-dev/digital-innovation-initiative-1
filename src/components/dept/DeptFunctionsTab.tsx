@@ -577,6 +577,17 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               { title: "Создать новый", content: "В том же окне — переключатель «Создать новый»: процесс появится сразу и в общей вкладке «Процессы»." },
             ],
           },
+          {
+            title: "Путь к решению по функции",
+            icon: "Route",
+            subsections: [
+              { title: "1. Практики", content: "Раскройте функцию и в блоке «Практики улучшения» отметьте релевантные практики с причиной. Из них выводится всё дальнейшее." },
+              { title: "2. Capability и модули", content: "«Необходимые capability» и «Кандидатные модули» считаются автоматически — это ориентир, а не выбор." },
+              { title: "3. Наборы → шортлист", content: "В «Кандидатных наборах» сравните покрытие и сохраните рабочий вариант кнопкой «В шортлист»." },
+              { title: "4. Preferred", content: "В «Шортлисте решений» отметьте один вариант «Предпочтителен» — так решение по функции фиксируется." },
+              { title: "5. Сводка ведёт дальше", content: "Блок «Сводка решения» всегда показывает «Что делать дальше»: закрыть required-gaps, обновить дрейф или включить в дорожную карту пилотов." },
+            ],
+          },
         ]}
         tips={[
           { kind: "tip", text: "Название подразделения можно указать один раз перед загрузкой — оно подставится всем распознанным функциям." },
@@ -1064,43 +1075,58 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             onChanged={loadCardCounts}
                           />
 
-                          <FunctionPracticesBlock
-                            projectId={projectId}
-                            functionId={fn.id}
-                            onChanged={() => onPracticesChanged(fn.id)}
-                          />
-
-                          <FunctionCapabilitiesBlock
-                            projectId={projectId}
-                            functionId={fn.id}
-                            refreshKey={capRefreshKey[fn.id] || 0}
-                          />
-
-                          <FunctionModuleCandidatesBlock
-                            projectId={projectId}
-                            functionId={fn.id}
-                            refreshKey={capRefreshKey[fn.id] || 0}
-                          />
-
-                          <FunctionModuleBundlesBlock
-                            projectId={projectId}
-                            functionId={fn.id}
-                            refreshKey={capRefreshKey[fn.id] || 0}
-                            onShortlistChanged={() => onShortlistChanged(fn.id)}
-                          />
-
                           <FunctionDecisionSummary
                             projectId={projectId}
                             functionId={fn.id}
                             refreshKey={(capRefreshKey[fn.id] || 0) + (shortlistRefreshKey[fn.id] || 0)}
+                            onNavigate={(target) => {
+                              if (target === "roadmap") { window.location.hash = ""; toast({ title: "Дорожная карта", description: "Откройте вкладку «Дорожная карта пилотов»" }); return; }
+                              const el = document.getElementById(`fnblock-${target}-${fn.id}`);
+                              if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }}
                           />
 
-                          <FunctionShortlistBlock
-                            projectId={projectId}
-                            functionId={fn.id}
-                            key={`sl-${fn.id}-${shortlistRefreshKey[fn.id] || 0}`}
-                            onChanged={() => onShortlistChanged(fn.id)}
-                          />
+                          <div id={`fnblock-practices-${fn.id}`}>
+                            <FunctionPracticesBlock
+                              projectId={projectId}
+                              functionId={fn.id}
+                              onChanged={() => onPracticesChanged(fn.id)}
+                            />
+                          </div>
+
+                          <div id={`fnblock-capabilities-${fn.id}`}>
+                            <FunctionCapabilitiesBlock
+                              projectId={projectId}
+                              functionId={fn.id}
+                              refreshKey={capRefreshKey[fn.id] || 0}
+                            />
+                          </div>
+
+                          <div id={`fnblock-candidates-${fn.id}`}>
+                            <FunctionModuleCandidatesBlock
+                              projectId={projectId}
+                              functionId={fn.id}
+                              refreshKey={capRefreshKey[fn.id] || 0}
+                            />
+                          </div>
+
+                          <div id={`fnblock-bundles-${fn.id}`}>
+                            <FunctionModuleBundlesBlock
+                              projectId={projectId}
+                              functionId={fn.id}
+                              refreshKey={capRefreshKey[fn.id] || 0}
+                              onShortlistChanged={() => onShortlistChanged(fn.id)}
+                            />
+                          </div>
+
+                          <div id={`fnblock-shortlist-${fn.id}`}>
+                            <FunctionShortlistBlock
+                              projectId={projectId}
+                              functionId={fn.id}
+                              key={`sl-${fn.id}-${shortlistRefreshKey[fn.id] || 0}`}
+                              onChanged={() => onShortlistChanged(fn.id)}
+                            />
+                          </div>
                         </div>
                       )}
                     </div>

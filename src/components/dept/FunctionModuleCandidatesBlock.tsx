@@ -121,7 +121,7 @@ export default function FunctionModuleCandidatesBlock({ projectId, functionId, r
       </div>
 
       <div className="text-[11px] text-slate-400 mb-2">
-        Кандидаты из реестра модулей под capability функции. Не рейтинг и не рекомендация — только просмотр.
+        Возможные строительные блоки, а не решение. Смотрите, какие capability закрывает каждый модуль — это основа для сравнения наборов ниже. Не рейтинг и не рекомендация.
       </div>
 
       {loading ? (

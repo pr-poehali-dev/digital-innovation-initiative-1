@@ -3,10 +3,12 @@ import { deptFunctionsApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
+import { rollupNextStep, TONE_STYLES } from "@/components/dept/decisionNextStep";
 
 type FnRow = {
   function_id: number; function_name: string; org_unit_id: number | null; org_unit_name: string | null;
@@ -25,6 +27,10 @@ type ModAgg = { module_id: number; module_name: string; functions_count: number;
 type Rollup = {
   scope: { scope_type: string; scope_name: string | null; functions_total: number; unassigned_functions_count?: number };
   summary: { functions_total: number; preferred_count: number; pilot_ready_count: number; attention_required_count: number; no_preferred_count: number; no_shortlist_count: number };
+  risk_counts: {
+    pilot_ready_count: number; preferred_with_required_gaps_count: number;
+    preferred_with_supporting_gaps_count: number; preferred_with_drift_count: number; preferred_with_archived_supply_count: number;
+  };
   functions: FnRow[];
   top_required_gaps: GapAgg[];
   top_preferred_products: ProdAgg[];
@@ -94,6 +100,45 @@ export default function DeptDecisionRollupTab({ projectId }: Props) {
           )}
         </p>
       </div>
+
+      {(() => {
+        const ns = rollupNextStep({
+          no_shortlist_count: data.summary.no_shortlist_count,
+          no_preferred_count: data.summary.no_preferred_count,
+          preferred_with_required_gaps_count: data.risk_counts.preferred_with_required_gaps_count,
+          preferred_with_drift_count: data.risk_counts.preferred_with_drift_count,
+          preferred_with_archived_supply_count: data.risk_counts.preferred_with_archived_supply_count,
+          pilot_ready_count: data.summary.pilot_ready_count,
+          functions_total: data.summary.functions_total,
+        });
+        const ts = TONE_STYLES[ns.tone];
+        return (
+          <div className={`rounded-lg border p-3 ${ts.box}`}>
+            <div className="flex items-start gap-2">
+              <Icon name={ts.iconName} size={17} className={`mt-0.5 flex-shrink-0 ${ts.icon}`} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-slate-800">С чего начать: {ns.title}</div>
+                <div className="text-xs text-slate-600 mt-0.5">{ns.description}</div>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {ns.ctas.map((c) => (
+                    <Button
+                      key={c.target}
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        if (c.target.startsWith("filter:")) setHealthFilter(c.target.slice(7));
+                        else if (c.target === "roadmap") toast({ title: "Дорожная карта", description: "Откройте вкладку «Дорожная карта пилотов»" });
+                      }}
+                    >
+                      {c.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
         <Kpi label="Функций" value={data.summary.functions_total} tone="text-slate-800" />

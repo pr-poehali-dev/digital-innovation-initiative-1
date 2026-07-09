@@ -146,7 +146,7 @@ export default function FunctionModuleBundlesBlock({ projectId, functionId, refr
       </div>
 
       <div className="text-[11px] text-slate-400 mb-2">
-        Наборы модулей, вместе покрывающие больше нужных capability. Кандидаты, не рекомендация. Без общего рейтинга.
+        Сравнивайте прежде всего покрытие required, затем supporting/optional. Рабочий набор сохраняйте кнопкой «В шортлист» — лучший вариант система не выбирает, решение фиксируете вы.
       </div>
 
       {loading ? (

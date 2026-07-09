@@ -177,10 +177,20 @@ export default function FunctionShortlistBlock({ projectId, functionId, onChange
         </div>
       </div>
 
+      <div className="text-[11px] text-slate-400 mb-2">
+        Ваш ручной слой решения. После сохранения состав набора фиксируется — меняются только название, заметка и статус. Один active preferred = решение по функции выбрано.
+      </div>
+
       {loading ? (
         <div className="text-xs text-slate-400 py-2">Загрузка…</div>
       ) : active.length === 0 && archived.length === 0 ? (
-        <div className="text-xs text-slate-400 py-2">Пока нет сохранённых наборов. Сохраните кандидатный набор кнопкой «В шортлист».</div>
+        <div className="text-xs text-slate-500 py-2">
+          Шортлист ещё не сформирован. <span className="font-medium">Следующий шаг:</span> откройте наборы модулей выше и сохраните 1–3 рабочих варианта кнопкой «В шортлист».
+        </div>
+      ) : active.length === 0 ? (
+        <div className="text-xs text-slate-500 py-2">
+          Все варианты в архиве. <span className="font-medium">Следующий шаг:</span> восстановите нужный или сохраните новый набор из блока «Кандидатные наборы модулей».
+        </div>
       ) : (
         <div className="space-y-1.5">
           {active.map((s) => <Row key={s.id} s={s} />)}

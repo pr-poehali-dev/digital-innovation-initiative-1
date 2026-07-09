@@ -90,7 +90,7 @@ export default function FunctionCapabilitiesBlock({ projectId, functionId, refre
       </div>
 
       <div className="text-[11px] text-slate-400 mb-2">
-        Вычисляется из привязанных практик. Только просмотр.
+        Потребность в capability выводится из практик функции. Это ориентир для сравнения модулей и наборов, а не финальный выбор. Только просмотр.
       </div>
 
       {loading ? (

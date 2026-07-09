@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { deptFunctionsApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
+import { functionNextStep, TONE_STYLES } from "@/components/dept/decisionNextStep";
 
 type Gap = {
   capability_id: number; name: string; category: string; need_level: string;
@@ -35,7 +37,7 @@ type Summary = {
   residual_gaps: { required: Gap[]; supporting: Gap[] };
 };
 
-interface Props { projectId: number; functionId: number; refreshKey?: number; }
+interface Props { projectId: number; functionId: number; refreshKey?: number; onNavigate?: (target: string) => void; }
 
 const DRIFT_LABEL: Record<string, string> = {
   required_coverage_changed: "изменилось required-покрытие",
@@ -58,7 +60,7 @@ function Cov({ label, c, u, tone }: { label: string; c: number; u: number; tone:
   );
 }
 
-export default function FunctionDecisionSummary({ projectId, functionId, refreshKey }: Props) {
+export default function FunctionDecisionSummary({ projectId, functionId, refreshKey, onNavigate }: Props) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -75,24 +77,42 @@ export default function FunctionDecisionSummary({ projectId, functionId, refresh
 
   const { selection_state: state, decision_flags: flags, preferred_summary: pref } = data;
 
+  const pilotReady = state === "preferred_selected" && !flags.has_required_gaps && !flags.has_drift && !flags.has_archived_supply;
+  const next = functionNextStep({
+    selection_state: state,
+    has_required_gaps: flags.has_required_gaps,
+    required_gaps_count: flags.required_gaps_count,
+    has_drift: flags.has_drift,
+    has_archived_supply: flags.has_archived_supply,
+    pilot_ready: pilotReady,
+  });
+  const ts = TONE_STYLES[next.tone];
+
   return (
     <div className="mt-3 border border-slate-300 rounded-lg p-3 bg-white">
       <div className="text-sm font-semibold text-slate-800 flex items-center gap-1.5 mb-2">
         <Icon name="Gavel" size={15} /> Сводка решения
       </div>
 
-      {state === "no_shortlist" && (
-        <div className="text-xs text-slate-500">
-          Шортлист ещё не сформирован. Соберите кандидатные наборы и сохраните подходящий в шортлист.
+      {/* Что делать дальше — derived next step */}
+      <div className={`rounded-lg border p-2.5 mb-2.5 ${ts.box}`}>
+        <div className="flex items-start gap-2">
+          <Icon name={ts.iconName} size={15} className={`mt-0.5 flex-shrink-0 ${ts.icon}`} />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-slate-800">Что делать дальше: {next.title}</div>
+            <div className="text-[11px] text-slate-600 mt-0.5">{next.description}</div>
+            {onNavigate && next.ctas.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {next.ctas.map((c, i) => (
+                  <Button key={c.target} size="sm" variant={i === 0 ? "default" : "outline"} className="h-6 text-[11px]" onClick={() => onNavigate(c.target)}>
+                    {c.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      )}
-
-      {state === "no_preferred" && (
-        <div className="text-xs text-slate-600">
-          Есть сохранённые варианты ({data.shortlists_summary.active_count}), но предпочтительный ещё не выбран.
-          Отметьте один набор как «Предпочтителен» в шортлисте.
-        </div>
-      )}
+      </div>
 
       {state === "preferred_selected" && pref && (
         <div className="space-y-2.5">
