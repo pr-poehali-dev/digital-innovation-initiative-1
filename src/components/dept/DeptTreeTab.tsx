@@ -39,7 +39,11 @@ type OrgFunction = {
   directions: { code: string; name: string }[];
 };
 
-type UnassignedFunction = { id: number; title: string; dept_name: string; category: string };
+type PreselectUnit = { org_unit_id: number; code: string; name: string };
+type UnassignedFunction = {
+  id: number; title: string; dept_name: string; category: string;
+  source_section_code?: string; preselect_unit?: PreselectUnit | null;
+};
 
 const TYPE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
   department: { label: "Департамент", icon: "Building2", color: "text-slate-800" },
@@ -75,9 +79,10 @@ type Coverage = {
 interface Props {
   projectId: number;
   onNavigateToUpload?: () => void;
+  initialUnmatchedIds?: number[] | null;
 }
 
-export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
+export default function DeptTreeTab({ projectId, onNavigateToUpload, initialUnmatchedIds }: Props) {
   const [nodes, setNodes] = useState<OrgNode[]>([]);
   const [unassignedCount, setUnassignedCount] = useState(0);
   const [coverage, setCoverage] = useState<Coverage | null>(null);
@@ -93,6 +98,7 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
   const [unassigned, setUnassigned] = useState<UnassignedFunction[]>([]);
   const [assignTarget, setAssignTarget] = useState<{ funcId: number; unitId: number } | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [lastImportFilter, setLastImportFilter] = useState<number[] | null>(null);
 
   const loadTree = useCallback(() => {
     setLoading(true);
@@ -121,13 +127,23 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
     if (selectedId) loadFunctions(selectedId, includeChildren);
   }, [selectedId, includeChildren, loadFunctions]);
 
-  const loadUnassigned = useCallback(() => {
-    deptFunctionsApi.getUnassignedFunctions(projectId)
+  const loadUnassigned = useCallback((ids?: number[]) => {
+    deptFunctionsApi.getUnassignedFunctions(projectId, ids)
       .then((d: { functions: UnassignedFunction[] }) => setUnassigned(d.functions || []))
       .catch((e: Error) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }));
   }, [projectId]);
 
-  useEffect(() => { if (showUnassigned) loadUnassigned(); }, [showUnassigned, loadUnassigned]);
+  useEffect(() => {
+    if (showUnassigned) loadUnassigned(lastImportFilter ?? undefined);
+  }, [showUnassigned, loadUnassigned, lastImportFilter]);
+
+  // Внешний вход: «Разобрать несопоставленные» из post-import banner
+  useEffect(() => {
+    if (initialUnmatchedIds && initialUnmatchedIds.length) {
+      setLastImportFilter(initialUnmatchedIds);
+      setShowUnassigned(true);
+    }
+  }, [initialUnmatchedIds]);
 
   const childrenOf = (pid: number | null) =>
     nodes.filter((n) => n.parent_id === pid).sort((a, b) => a.sort_order - b.sort_order);
@@ -255,7 +271,10 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
       <PostImportBanner
         projectId={projectId}
         onOpenTree={undefined}
-        onShowUnassigned={() => setShowUnassigned(true)}
+        onResolveUnmatched={(ids) => {
+          setLastImportFilter(ids && ids.length ? ids : null);
+          setShowUnassigned(true);
+        }}
       />
 
       {coverage?.show_upload_reminder && (
@@ -268,15 +287,41 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
 
       {showUnassigned && (
         <div className="border border-amber-200 bg-amber-50/60 rounded-lg p-3">
-          <div className="text-sm font-medium text-amber-800 mb-2">Функции без привязки к оргединице</div>
+          <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+            <div className="text-sm font-medium text-amber-800">
+              {lastImportFilter
+                ? "Несопоставленные функции из последней дозагрузки"
+                : "Функции без привязки к оргединице"}
+            </div>
+            {lastImportFilter && (
+              <button
+                onClick={() => setLastImportFilter(null)}
+                className="text-xs text-amber-700 underline underline-offset-2 hover:text-amber-900"
+              >
+                Сбросить фильтр
+              </button>
+            )}
+          </div>
           {unassigned.length === 0 ? (
-            <p className="text-sm text-slate-500">Все функции привязаны.</p>
+            <p className="text-sm text-slate-500">
+              {lastImportFilter ? "Все функции из последней дозагрузки разобраны." : "Все функции привязаны."}
+            </p>
           ) : (
             <div className="space-y-1.5">
               {unassigned.map((f) => (
                 <div key={f.id} className="flex items-center gap-2 flex-wrap bg-white rounded-md px-2.5 py-1.5 border border-amber-100">
-                  <span className="text-sm text-slate-700 flex-1 min-w-0">{f.title}</span>
-                  <Select onValueChange={(unitId) => setAssignTarget({ funcId: f.id, unitId: Number(unitId) })}>
+                  <span className="text-sm text-slate-700 flex-1 min-w-0">
+                    {f.title}
+                    {f.preselect_unit && (
+                      <span className="ml-1.5 text-[10px] text-emerald-600" title="Предзаполнено по коду раздела">
+                        · предложен {f.preselect_unit.code}
+                      </span>
+                    )}
+                  </span>
+                  <Select
+                    defaultValue={f.preselect_unit ? String(f.preselect_unit.org_unit_id) : undefined}
+                    onValueChange={(unitId) => setAssignTarget({ funcId: f.id, unitId: Number(unitId) })}
+                  >
                     <SelectTrigger className="h-7 w-[220px] text-xs">
                       <SelectValue placeholder="Привязать к узлу…" />
                     </SelectTrigger>
@@ -288,18 +333,24 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
                       ))}
                     </SelectContent>
                   </Select>
-                  {assignTarget?.funcId === f.id && (
-                    <Select onValueChange={(role) => assignFunction(f.id, assignTarget.unitId, role)}>
-                      <SelectTrigger className="h-7 w-[130px] text-xs">
-                        <SelectValue placeholder="Роль…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ROLE_OPTIONS.map((r) => (
-                          <SelectItem key={r} value={r} className="text-xs">{ROLE_LABELS[r].label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
+                  {(() => {
+                    const effectiveUnitId = assignTarget?.funcId === f.id
+                      ? assignTarget.unitId
+                      : (f.preselect_unit?.org_unit_id ?? null);
+                    if (!effectiveUnitId) return null;
+                    return (
+                      <Select onValueChange={(role) => assignFunction(f.id, effectiveUnitId, role)}>
+                        <SelectTrigger className="h-7 w-[130px] text-xs">
+                          <SelectValue placeholder="Роль…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ROLE_OPTIONS.map((r) => (
+                            <SelectItem key={r} value={r} className="text-xs">{ROLE_LABELS[r].label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

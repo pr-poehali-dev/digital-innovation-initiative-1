@@ -2,6 +2,7 @@ export type ImportResult = {
   created: number;
   auto_linked: number;
   left_unmatched: number;
+  unmatched_function_ids?: number[];
   coverage_status_after?: string;
   at: number;
 };

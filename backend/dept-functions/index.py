@@ -489,16 +489,18 @@ def handler(event: dict, context) -> dict:
             conn.commit()
 
             # Итог дозагрузки (source of truth для post-import баннера)
-            left_unmatched = 0
+            unmatched_ids = []
             if created_ids:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"""SELECT COUNT(*) FROM {SCHEMA}.dept_functions f
+                        f"""SELECT f.id FROM {SCHEMA}.dept_functions f
                             WHERE f.id = ANY(%s)
-                              AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)""",
+                              AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)
+                            ORDER BY f.id""",
                         (created_ids,),
                     )
-                    left_unmatched = cur.fetchone()[0]
+                    unmatched_ids = [r[0] for r in cur.fetchall()]
+            left_unmatched = len(unmatched_ids)
             # статус покрытия после импорта: partial, если остались тонкие управления или unmatched
             with conn.cursor() as cur:
                 cur.execute(
@@ -519,6 +521,7 @@ def handler(event: dict, context) -> dict:
 
             return cors({"ok": True, "created": len(created_ids), "ids": created_ids,
                          "auto_linked": auto_linked, "left_unmatched": left_unmatched,
+                         "unmatched_function_ids": unmatched_ids,
                          "coverage_status_after": coverage_status_after})
 
         # ── Список автоматизации ──────────────────────────────────
@@ -1064,18 +1067,46 @@ def handler(event: dict, context) -> dict:
 
         # ── Непривязанные функции проекта ─────────────────────────
         if method == "GET" and action == "unassigned_functions":
+            # Опциональный фильтр по конкретным id (свежие unmatched последней дозагрузки)
+            ids_param = (qs.get("ids") or "").strip()
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""SELECT f.id, f.title, f.dept_name, f.category
+                base_sql = f"""SELECT f.id, f.title, f.dept_name, f.category, COALESCE(f.source_section_code, '')
                         FROM {SCHEMA}.dept_functions f
                         WHERE f.project_id = %s
                           AND f.dept_name NOT LIKE '[SMOKETEST%%'
-                          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)
-                        ORDER BY f.title""",
-                    (project_id,),
-                )
-                funcs = [{"id": r[0], "title": r[1], "dept_name": r[2], "category": r[3]}
-                         for r in cur.fetchall()]
+                          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.function_org_units l WHERE l.function_id = f.id)"""
+                params = [project_id]
+                if ids_param:
+                    try:
+                        id_list = [int(x) for x in ids_param.split(",") if x.strip()]
+                    except ValueError:
+                        id_list = []
+                    if id_list:
+                        base_sql += " AND f.id = ANY(%s)"
+                        params.append(id_list)
+                base_sql += " ORDER BY f.title"
+                cur.execute(base_sql, tuple(params))
+                rows = cur.fetchall()
+                # Детерминированный preselect: ровно один активный узел с таким кодом
+                codes = list({r[4] for r in rows if r[4]})
+                code_to_units: dict = {}
+                if codes:
+                    cur.execute(
+                        f"""SELECT code, id, name FROM {SCHEMA}.org_units
+                            WHERE project_id = %s AND is_archived = false AND code = ANY(%s)""",
+                        (project_id, codes),
+                    )
+                    for cr in cur.fetchall():
+                        code_to_units.setdefault(cr[0], []).append({"id": cr[1], "name": cr[2]})
+                funcs = []
+                for r in rows:
+                    section = r[4]
+                    preselect = None
+                    cands = code_to_units.get(section, [])
+                    if section and len(cands) == 1:
+                        preselect = {"org_unit_id": cands[0]["id"], "code": section, "name": cands[0]["name"]}
+                    funcs.append({"id": r[0], "title": r[1], "dept_name": r[2], "category": r[3],
+                                  "source_section_code": section, "preselect_unit": preselect})
             return cors({"ok": True, "functions": funcs})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────

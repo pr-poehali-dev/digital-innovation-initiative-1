@@ -425,13 +425,14 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
       const res = await deptFunctionsApi.confirmFunctions({
         project_id: projectId,
         functions: selected.map(({ title, description, goals, category, dept_name }) => ({ title, description, goals, category, dept_name })),
-      }) as { ok: boolean; created: number; auto_linked?: number; left_unmatched?: number; coverage_status_after?: string };
+      }) as { ok: boolean; created: number; auto_linked?: number; left_unmatched?: number; unmatched_function_ids?: number[]; coverage_status_after?: string };
       if (res.ok) {
         setConfirmResult(`Добавлено функций: ${res.created}`);
         savePostImportResult(projectId, {
           created: res.created,
           auto_linked: res.auto_linked ?? 0,
           left_unmatched: res.left_unmatched ?? 0,
+          unmatched_function_ids: res.unmatched_function_ids ?? [],
           coverage_status_after: res.coverage_status_after,
         });
         setDraft(null);

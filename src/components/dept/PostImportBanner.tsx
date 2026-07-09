@@ -7,10 +7,10 @@ import { downloadExtractTemplate } from "@/components/dept/SourceCoverageBanner"
 interface Props {
   projectId: number;
   onOpenTree?: () => void;
-  onShowUnassigned?: () => void;
+  onResolveUnmatched?: (ids: number[]) => void;
 }
 
-export default function PostImportBanner({ projectId, onOpenTree, onShowUnassigned }: Props) {
+export default function PostImportBanner({ projectId, onOpenTree, onResolveUnmatched }: Props) {
   const [result, setResult] = useState<ImportResult | null>(() => readPostImportResult(projectId));
 
   if (!result) return null;
@@ -48,9 +48,14 @@ export default function PostImportBanner({ projectId, onOpenTree, onShowUnassign
                 <Icon name="Network" size={13} className="mr-1" /> Открыть дерево
               </Button>
             )}
-            {result.left_unmatched > 0 && onShowUnassigned && (
-              <Button variant="outline" size="sm" className="h-7 text-xs bg-white" onClick={onShowUnassigned}>
-                <Icon name="AlertTriangle" size={13} className="mr-1" /> Показать несопоставленные
+            {result.left_unmatched > 0 && onResolveUnmatched && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs bg-white"
+                onClick={() => onResolveUnmatched(result.unmatched_function_ids ?? [])}
+              >
+                <Icon name="ListChecks" size={13} className="mr-1" /> Разобрать несопоставленные ({result.left_unmatched})
               </Button>
             )}
             {isEmpty && (

@@ -729,8 +729,8 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=org_tree&project_id=${projectId}`, "GET"),
   getOrgFunctions: (projectId: number, orgUnitId: number, includeChildren = false) =>
     request(URLS.deptFunctions, `/?action=org_functions&project_id=${projectId}&org_unit_id=${orgUnitId}&include_children=${includeChildren}`, "GET"),
-  getUnassignedFunctions: (projectId: number) =>
-    request(URLS.deptFunctions, `/?action=unassigned_functions&project_id=${projectId}`, "GET"),
+  getUnassignedFunctions: (projectId: number, ids?: number[]) =>
+    request(URLS.deptFunctions, `/?action=unassigned_functions&project_id=${projectId}${ids && ids.length ? `&ids=${ids.join(",")}` : ""}`, "GET"),
   assignOrgUnit: (data: { project_id: number; function_id: number; org_unit_id: number; role: string }) =>
     request(URLS.deptFunctions, "/?action=assign_org_unit", "POST", data),
   unassignOrgUnit: (data: { project_id: number; function_id: number; org_unit_id: number; role?: string }) =>
