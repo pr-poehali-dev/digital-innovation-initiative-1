@@ -9,6 +9,10 @@ import {
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
 import { rollupNextStep, TONE_STYLES } from "@/components/dept/decisionNextStep";
+import { usePersistentSearchState } from "@/hooks/usePersistentSearchState";
+
+type OrgUnit = { id: number; code: string; name: string };
+const HEALTH_VALUES = ["all", "no_shortlist", "no_preferred", "required_gaps", "drift", "pilot_ready"];
 
 type FnRow = {
   function_id: number; function_name: string; org_unit_id: number | null; org_unit_name: string | null;
@@ -57,17 +61,41 @@ export default function DeptDecisionRollupTab({ projectId }: Props) {
   const [data, setData] = useState<Rollup | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
-  const [healthFilter, setHealthFilter] = useState("all");
   const [capFilter, setCapFilter] = useState<number | null>(null);
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
+
+  // Персистентное состояние обзора: scope (rs), health filter (rh), org unit (ou)
+  const { state: view, setState: setView, reset: resetView } = usePersistentSearchState<{ rs: string; rh: string; ou: string }>({
+    storageKey: `cabinet:rollup:${projectId}:state`,
+    defaults: { rs: "project", rh: "all", ou: "" },
+    paramKeys: { rs: "rs", rh: "rh", ou: "ou" },
+    validate: (raw) => {
+      const rs = raw.rs === "unit" ? "unit" : "project";
+      const rh = HEALTH_VALUES.includes(raw.rh || "") ? (raw.rh as string) : "all";
+      // ou валиден только в scope=unit; при project — очищаем зависимый параметр
+      const ou = rs === "unit" && raw.ou && /^\d+$/.test(raw.ou) ? raw.ou : "";
+      return { rs, rh, ou };
+    },
+  });
+  const healthFilter = view.rh;
+  const setHealthFilter = (v: string) => setView({ rh: v });
+
+  // Список оргединиц для scope-переключателя
+  useEffect(() => {
+    deptFunctionsApi.getOrgTree(projectId)
+      .then((d: { nodes?: OrgUnit[] }) => setOrgUnits(d.nodes || []))
+      .catch(() => { /* переключатель scope не критичен */ });
+  }, [projectId]);
 
   const load = () => {
     setLoading(true);
-    deptFunctionsApi.getDecisionRollup(projectId)
+    const orgUnitId = view.rs === "unit" && view.ou ? Number(view.ou) : undefined;
+    deptFunctionsApi.getDecisionRollup(projectId, orgUnitId)
       .then((d: Rollup & { ok: boolean }) => setData(d))
       .catch((e: Error) => toast({ title: "Ошибка", description: e.message, variant: "destructive" }))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, view.rs, view.ou]);
 
   const capName = useMemo(() => data?.top_required_gaps.find((g) => g.capability_id === capFilter)?.capability_name, [data, capFilter]);
 
@@ -99,6 +127,37 @@ export default function DeptDecisionRollupTab({ projectId }: Props) {
             <span>Без привязки к оргединице: {data.scope.unassigned_functions_count}.</span>
           )}
         </p>
+      </div>
+
+      {/* Scope: весь проект / конкретная оргединица */}
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <span className="text-slate-400">Область:</span>
+        <button
+          onClick={() => setView({ rs: "project", ou: "" })}
+          className={`px-2.5 py-1 rounded border ${view.rs === "project" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}
+        >
+          Весь проект
+        </button>
+        <button
+          onClick={() => setView({ rs: "unit", ou: view.ou || (orgUnits[0] ? String(orgUnits[0].id) : "") })}
+          disabled={orgUnits.length === 0}
+          className={`px-2.5 py-1 rounded border disabled:opacity-40 ${view.rs === "unit" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}
+        >
+          Оргединица
+        </button>
+        {view.rs === "unit" && orgUnits.length > 0 && (
+          <Select value={view.ou} onValueChange={(v) => setView({ ou: v })}>
+            <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue placeholder="Выберите узел…" /></SelectTrigger>
+            <SelectContent>
+              {orgUnits.map((u) => <SelectItem key={u.id} value={String(u.id)} className="text-xs">{u.code} · {u.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {(view.rs !== "project" || view.rh !== "all") && (
+          <button onClick={resetView} className="ml-1 text-slate-400 hover:text-slate-600 underline underline-offset-2 inline-flex items-center gap-0.5">
+            <Icon name="X" size={11} /> Сбросить
+          </button>
+        )}
       </div>
 
       {(() => {
@@ -205,7 +264,16 @@ export default function DeptDecisionRollupTab({ projectId }: Props) {
                 )}
               </div>
             ))}
-            {filtered.length === 0 && <div className="text-xs text-slate-400 py-4 text-center">Нет функций под фильтры.</div>}
+            {filtered.length === 0 && (
+              <div className="text-xs text-slate-400 py-6 text-center">
+                <div>Нет функций под текущий фильтр.</div>
+                {(healthFilter !== "all" || capFilter || q) && (
+                  <Button variant="outline" size="sm" className="mt-2 h-7 text-[11px]" onClick={() => { setHealthFilter("all"); setCapFilter(null); setQ(""); }}>
+                    Показать все функции
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
