@@ -11,6 +11,7 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import SourceCoverageBanner from "@/components/dept/SourceCoverageBanner";
 import PostImportBanner from "@/components/dept/PostImportBanner";
+import OrgUnitEditor from "@/components/dept/OrgUnitEditor";
 
 type OrgNode = {
   id: number;
@@ -91,6 +92,7 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
   const [showUnassigned, setShowUnassigned] = useState(false);
   const [unassigned, setUnassigned] = useState<UnassignedFunction[]>([]);
   const [assignTarget, setAssignTarget] = useState<{ funcId: number; unitId: number } | null>(null);
+  const [editMode, setEditMode] = useState(false);
 
   const loadTree = useCallback(() => {
     setLoading(true);
@@ -216,17 +218,38 @@ export default function DeptTreeTab({ projectId, onNavigateToUpload }: Props) {
           <h2 className="text-lg font-semibold text-slate-900">Дерево департамента</h2>
           <p className="text-sm text-slate-500">Оргструктура и привязка функций к отделам, ролям и направлениям.</p>
         </div>
-        {unassignedCount > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
-            variant={showUnassigned ? "default" : "outline"}
+            variant={editMode ? "default" : "outline"}
             size="sm"
-            onClick={() => setShowUnassigned((v) => !v)}
+            onClick={() => setEditMode((v) => !v)}
           >
-            <Icon name="AlertTriangle" size={14} className="mr-1.5" />
-            Без привязки: {unassignedCount}
+            <Icon name="Settings2" size={14} className="mr-1.5" />
+            {editMode ? "Готово" : "Изменить структуру"}
           </Button>
-        )}
+          {unassignedCount > 0 && (
+            <Button
+              variant={showUnassigned ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowUnassigned((v) => !v)}
+            >
+              <Icon name="AlertTriangle" size={14} className="mr-1.5" />
+              Без привязки: {unassignedCount}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {editMode && (
+        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60">
+          <div className="text-xs text-slate-500 mb-2">
+            {selectedNode
+              ? <>Выбран узел: <span className="font-mono">{selectedNode.code}</span> {selectedNode.name}. Добавьте дочерний, переименуйте или архивируйте.</>
+              : "Выберите узел в дереве, чтобы добавить дочерний / переименовать / архивировать. Или создайте узел без родителя."}
+          </div>
+          <OrgUnitEditor projectId={projectId} nodes={nodes} selected={selectedNode} onReload={loadTree} />
+        </div>
+      )}
 
       {/* Результат последней дозагрузки — поверх состояния покрытия */}
       <PostImportBanner

@@ -741,4 +741,10 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, `/?action=unassign_direction&project_id=${data.project_id}&function_id=${data.function_id}&direction_code=${data.direction_code}`, "DELETE"),
   getOverlapsReport: (projectId: number) =>
     request(URLS.deptFunctions, `/?action=overlaps_report&project_id=${projectId}`, "GET"),
+  createOrgUnit: (data: { project_id: number; code: string; name: string; type: string; parent_id: number | null }) =>
+    request(URLS.deptFunctions, "/?action=create_org_unit", "POST", data),
+  renameOrgUnit: (data: { project_id: number; org_unit_id: number; name: string }) =>
+    request(URLS.deptFunctions, "/?action=rename_org_unit", "PUT", data),
+  archiveOrgUnit: (data: { project_id: number; org_unit_id: number }) =>
+    request(URLS.deptFunctions, `/?action=archive_org_unit&project_id=${data.project_id}&org_unit_id=${data.org_unit_id}`, "DELETE"),
 };

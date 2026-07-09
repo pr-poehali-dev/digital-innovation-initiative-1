@@ -89,6 +89,26 @@
       "method": "GET",
       "path": "/?action=overlaps_report&project_id=1",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth create_org_unit",
+      "method": "POST",
+      "path": "/?action=create_org_unit",
+      "body": {"project_id": 1, "code": "4.1.9", "name": "Тест", "type": "division", "parent_id": 2},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth rename_org_unit",
+      "method": "PUT",
+      "path": "/?action=rename_org_unit",
+      "body": {"project_id": 1, "org_unit_id": 2, "name": "Новое имя"},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth archive_org_unit",
+      "method": "DELETE",
+      "path": "/?action=archive_org_unit&project_id=1&org_unit_id=2",
+      "expectedStatus": 401
     }
   ]
 }

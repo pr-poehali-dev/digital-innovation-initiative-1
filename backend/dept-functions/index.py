@@ -22,6 +22,9 @@ Actions:
   POST assign_direction   — привязать код направления (18, 93, 32.2…) к функции
   DELETE unassign_direction — снять направление
   GET  overlaps_report    — отчёт «Пересечения функций»: кластеры дублей между узлами + матрица узел×узел + связь с автоматизацией
+  POST create_org_unit    — создать дочерний узел оргструктуры (code уникален, path/level считает бэкенд)
+  PUT  rename_org_unit    — переименовать узел (пересчёт path у узла и потомков)
+  DELETE archive_org_unit — архивировать узел (soft; запрещено при активных детях или привязанных функциях)
 """
 import base64
 import io
@@ -852,6 +855,109 @@ def handler(event: dict, context) -> dict:
             matrix_list.sort(key=lambda m: m["count"], reverse=True)
             return cors({"ok": True, "clusters": clusters, "matrix": matrix_list,
                          "total_overlaps": len(clusters)})
+
+        # ── Создать дочерний узел оргструктуры ────────────────────
+        if method == "POST" and action == "create_org_unit":
+            code = (body.get("code") or "").strip().rstrip(".")
+            name = (body.get("name") or "").strip()
+            utype = (body.get("type") or "division").strip()
+            parent_id = body.get("parent_id")
+            if not code or not name:
+                return cors({"ok": False, "error": "code и name обязательны"}, 400)
+            if utype not in ("department", "management", "division", "group", "center"):
+                return cors({"ok": False, "error": "недопустимый тип узла"}, 400)
+            with conn.cursor() as cur:
+                # code уникален в проекте
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.org_units WHERE project_id = %s AND code = %s",
+                    (project_id, code),
+                )
+                if cur.fetchone():
+                    return cors({"ok": False, "error": f"Код {code} уже существует"}, 400)
+                parent_path = ""
+                parent_level = -1
+                if parent_id:
+                    cur.execute(
+                        f"SELECT path, level FROM {SCHEMA}.org_units WHERE id = %s AND project_id = %s AND is_archived = false",
+                        (int(parent_id), project_id),
+                    )
+                    prow = cur.fetchone()
+                    if not prow:
+                        return cors({"ok": False, "error": "Родительский узел не найден"}, 400)
+                    parent_path, parent_level = prow[0], prow[1]
+                elif utype != "department":
+                    return cors({"ok": False, "error": "parent_id обязателен для не-корневого узла"}, 400)
+                # path и level считает бэкенд
+                new_path = (parent_path + " / " + name) if parent_path else name
+                new_level = parent_level + 1
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.org_units
+                        (project_id, code, name, type, parent_id, path, level, sort_order, source_ref)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'manual_editor') RETURNING id""",
+                    (project_id, code, name, utype, parent_id or None, new_path, new_level, 999),
+                )
+                new_id = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "id": new_id})
+
+        # ── Переименовать узел (пересчёт path у узла и потомков) ────
+        if method == "PUT" and action == "rename_org_unit":
+            unit_id = int(body.get("org_unit_id") or 0)
+            name = (body.get("name") or "").strip()
+            if not unit_id or not name:
+                return cors({"ok": False, "error": "org_unit_id и name обязательны"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT path FROM {SCHEMA}.org_units WHERE id = %s AND project_id = %s",
+                    (unit_id, project_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return cors({"ok": False, "error": "Узел не найден"}, 404)
+                old_path = row[0]
+                # новый path текущего узла
+                if " / " in old_path:
+                    new_path = old_path.rsplit(" / ", 1)[0] + " / " + name
+                else:
+                    new_path = name
+                cur.execute(
+                    f"UPDATE {SCHEMA}.org_units SET name = %s, path = %s, updated_at = now() WHERE id = %s",
+                    (name, new_path, unit_id),
+                )
+                # пересчёт path у всех потомков (заменяем префикс)
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.org_units
+                        SET path = %s || substring(path from %s), updated_at = now()
+                        WHERE project_id = %s AND path LIKE %s AND id <> %s""",
+                    (new_path, len(old_path) + 1, project_id, old_path + " / %", unit_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Архивировать узел (soft) с защитой ────────────────────
+        if method == "DELETE" and action == "archive_org_unit":
+            unit_id = int(qs.get("org_unit_id") or body.get("org_unit_id") or 0)
+            if not unit_id:
+                return cors({"ok": False, "error": "org_unit_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.org_units WHERE parent_id = %s AND is_archived = false",
+                    (unit_id,),
+                )
+                if cur.fetchone():
+                    return cors({"ok": False, "error": "Нельзя архивировать узел с активными дочерними узлами"}, 400)
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {SCHEMA}.function_org_units WHERE org_unit_id = %s",
+                    (unit_id,),
+                )
+                if cur.fetchone()[0] > 0:
+                    return cors({"ok": False, "error": "К узлу привязаны функции — сначала перепривяжите их"}, 400)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.org_units SET is_archived = true, updated_at = now() WHERE id = %s AND project_id = %s",
+                    (unit_id, project_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
 
         # ── Оргдерево: список узлов с числом функций ──────────────
         if method == "GET" and action == "org_tree":
