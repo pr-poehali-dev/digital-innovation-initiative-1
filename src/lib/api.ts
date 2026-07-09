@@ -747,4 +747,10 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=rename_org_unit", "PUT", data),
   archiveOrgUnit: (data: { project_id: number; org_unit_id: number }) =>
     request(URLS.deptFunctions, `/?action=archive_org_unit&project_id=${data.project_id}&org_unit_id=${data.org_unit_id}`, "DELETE"),
+  getOperatingProfile: (projectId: number, functionId: number) =>
+    request(URLS.deptFunctions, `/?action=operating_profile&project_id=${projectId}&function_id=${functionId}`, "GET"),
+  saveOperatingProfile: (data: { project_id: number; function_id: number; profile: Record<string, unknown> }) =>
+    request(URLS.deptFunctions, "/?action=save_operating_profile", "POST", data),
+  getOperatingProfilesStatus: (projectId: number) =>
+    request(URLS.deptFunctions, `/?action=operating_profiles_status&project_id=${projectId}`, "GET"),
 };

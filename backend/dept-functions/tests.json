@@ -109,6 +109,25 @@
       "method": "DELETE",
       "path": "/?action=archive_org_unit&project_id=1&org_unit_id=2",
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth operating_profile",
+      "method": "GET",
+      "path": "/?action=operating_profile&project_id=1&function_id=1",
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth save_operating_profile",
+      "method": "POST",
+      "path": "/?action=save_operating_profile",
+      "body": {"project_id": 1, "function_id": 1, "profile": {"frequency_band": "daily"}},
+      "expectedStatus": 401
+    },
+    {
+      "name": "Unauth operating_profiles_status",
+      "method": "GET",
+      "path": "/?action=operating_profiles_status&project_id=1",
+      "expectedStatus": 401
     }
   ]
 }

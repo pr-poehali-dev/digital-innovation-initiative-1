@@ -25,6 +25,9 @@ Actions:
   POST create_org_unit    — создать дочерний узел оргструктуры (code уникален, path/level считает бэкенд)
   PUT  rename_org_unit    — переименовать узел (пересчёт path у узла и потомков)
   DELETE archive_org_unit — архивировать узел (soft; запрещено при активных детях или привязанных функциях)
+  GET  operating_profile  — операционный профиль функции (signal-поля для будущего мэтчинга)
+  POST save_operating_profile — сохранить/обновить операционный профиль (upsert)
+  GET  operating_profiles_status — статусы заполненности профилей по проекту (empty/partial/full)
 """
 import base64
 import io
@@ -1108,6 +1111,97 @@ def handler(event: dict, context) -> dict:
                     funcs.append({"id": r[0], "title": r[1], "dept_name": r[2], "category": r[3],
                                   "source_section_code": section, "preselect_unit": preselect})
             return cors({"ok": True, "functions": funcs})
+
+        # ── Операционный профиль функции: чтение ──────────────────
+        if method == "GET" and action == "operating_profile":
+            func_id = int(qs.get("function_id") or 0)
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT frequency_band, volume_band, manual_share_band, rule_based_share_band,
+                               expert_judgment_share_band, exception_rate_band, sla_criticality, audit_required,
+                               input_types, output_types, participants_band, systems_involved,
+                               sensitive_data_level, ai_policy, deployment_constraint, pain_points,
+                               source_kind, source_note, updated_at
+                        FROM {SCHEMA}.function_operating_profiles WHERE function_id = %s""",
+                    (func_id,),
+                )
+                row = cur.fetchone()
+            if not row:
+                return cors({"ok": True, "profile": None})
+            profile = {
+                "frequency_band": row[0], "volume_band": row[1], "manual_share_band": row[2],
+                "rule_based_share_band": row[3], "expert_judgment_share_band": row[4],
+                "exception_rate_band": row[5], "sla_criticality": row[6], "audit_required": row[7],
+                "input_types": row[8] or [], "output_types": row[9] or [], "participants_band": row[10],
+                "systems_involved": row[11], "sensitive_data_level": row[12], "ai_policy": row[13],
+                "deployment_constraint": row[14], "pain_points": row[15] or [], "source_kind": row[16],
+                "source_note": row[17], "updated_at": row[18],
+            }
+            return cors({"ok": True, "profile": profile})
+
+        # ── Операционный профиль функции: сохранение (upsert) ─────
+        if method == "POST" and action == "save_operating_profile":
+            func_id = int(body.get("function_id") or 0)
+            if not func_id:
+                return cors({"ok": False, "error": "function_id required"}, 400)
+            p = body.get("profile") or {}
+            scalar_fields = ["frequency_band", "volume_band", "manual_share_band", "rule_based_share_band",
+                             "expert_judgment_share_band", "exception_rate_band", "sla_criticality",
+                             "participants_band", "systems_involved", "sensitive_data_level", "ai_policy",
+                             "deployment_constraint", "source_kind", "source_note"]
+            vals = {f: (p.get(f) if p.get(f) not in ("", None) else None) for f in scalar_fields}
+            audit_required = p.get("audit_required")
+            input_types = p.get("input_types") or []
+            output_types = p.get("output_types") or []
+            pain_points = p.get("pain_points") or []
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.function_operating_profiles
+                        (function_id, project_id, frequency_band, volume_band, manual_share_band,
+                         rule_based_share_band, expert_judgment_share_band, exception_rate_band,
+                         sla_criticality, audit_required, input_types, output_types, participants_band,
+                         systems_involved, sensitive_data_level, ai_policy, deployment_constraint,
+                         pain_points, source_kind, source_note, updated_by, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (function_id) DO UPDATE SET
+                          frequency_band = EXCLUDED.frequency_band, volume_band = EXCLUDED.volume_band,
+                          manual_share_band = EXCLUDED.manual_share_band, rule_based_share_band = EXCLUDED.rule_based_share_band,
+                          expert_judgment_share_band = EXCLUDED.expert_judgment_share_band, exception_rate_band = EXCLUDED.exception_rate_band,
+                          sla_criticality = EXCLUDED.sla_criticality, audit_required = EXCLUDED.audit_required,
+                          input_types = EXCLUDED.input_types, output_types = EXCLUDED.output_types,
+                          participants_band = EXCLUDED.participants_band, systems_involved = EXCLUDED.systems_involved,
+                          sensitive_data_level = EXCLUDED.sensitive_data_level, ai_policy = EXCLUDED.ai_policy,
+                          deployment_constraint = EXCLUDED.deployment_constraint, pain_points = EXCLUDED.pain_points,
+                          source_kind = EXCLUDED.source_kind, source_note = EXCLUDED.source_note,
+                          updated_by = EXCLUDED.updated_by, updated_at = now()""",
+                    (func_id, project_id, vals["frequency_band"], vals["volume_band"], vals["manual_share_band"],
+                     vals["rule_based_share_band"], vals["expert_judgment_share_band"], vals["exception_rate_band"],
+                     vals["sla_criticality"], audit_required, input_types, output_types, vals["participants_band"],
+                     vals["systems_involved"], vals["sensitive_data_level"], vals["ai_policy"],
+                     vals["deployment_constraint"], pain_points, vals["source_kind"], vals["source_note"], user_id),
+                )
+            conn.commit()
+            return cors({"ok": True})
+
+        # ── Статусы заполненности профилей по проекту ─────────────
+        if method == "GET" and action == "operating_profiles_status":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT function_id,
+                               (frequency_band IS NOT NULL)::int + (volume_band IS NOT NULL)::int
+                             + (manual_share_band IS NOT NULL)::int + (sla_criticality IS NOT NULL)::int
+                             + (COALESCE(array_length(input_types,1),0) > 0)::int
+                             + (ai_policy IS NOT NULL)::int AS filled_key
+                        FROM {SCHEMA}.function_operating_profiles WHERE project_id = %s""",
+                    (project_id,),
+                )
+                status = {}
+                for r in cur.fetchall():
+                    filled = r[1]
+                    status[r[0]] = "full" if filled >= 6 else ("partial" if filled > 0 else "empty")
+            return cors({"ok": True, "statuses": status})
 
         # ── Привязать функцию к узлу (owner/co_executor/...) ───────
         if method == "POST" and action == "assign_org_unit":

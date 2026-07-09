@@ -1,10 +1,11 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { deptFunctionsApi } from "@/lib/api";
 import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import HelpPanel from "@/components/HelpPanel";
 import { savePostImportResult } from "@/components/dept/postImportResult";
+import OperatingProfileCard from "@/components/dept/OperatingProfileCard";
 
 type DeptFunction = {
   id: number;
@@ -106,6 +107,17 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   const [selectedProcessId, setSelectedProcessId] = useState("");
   const [newProcessTitle, setNewProcessTitle] = useState("");
   const [linking, setLinking] = useState(false);
+
+  // Операционные профили: статус заполненности (empty/partial/full) + фильтр по нему
+  const [profileStatus, setProfileStatus] = useState<Record<number, string>>({});
+  const [profileFilter, setProfileFilter] = useState<"all" | "empty" | "partial" | "full">("all");
+
+  const loadProfileStatus = () => {
+    deptFunctionsApi.getOperatingProfilesStatus(projectId)
+      .then((d: { statuses: Record<number, string> }) => setProfileStatus(d.statuses || {}))
+      .catch(() => { /* индикатор не критичен */ });
+  };
+  useEffect(() => { loadProfileStatus(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [projectId, functions.length]);
 
   const loadFunctionProcesses = async (functionId: number) => {
     setProcessesLoading(p => ({ ...p, [functionId]: true }));
@@ -811,6 +823,23 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
         </div>
       ) : (
         <div className="space-y-6">
+          <div className="flex items-center gap-1.5 flex-wrap text-xs">
+            <span className="text-slate-400 mr-1">Профиль:</span>
+            {([
+              { k: "all", label: "Все" },
+              { k: "empty", label: "Не заполнен" },
+              { k: "partial", label: "Частично" },
+              { k: "full", label: "Заполнен" },
+            ] as const).map((o) => (
+              <button
+                key={o.k}
+                onClick={() => setProfileFilter(o.k)}
+                className={`px-2 py-0.5 rounded border ${profileFilter === o.k ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
           {Object.entries(grouped).map(([dept, fns]) => (
             <div key={dept}>
               <div className="flex items-center gap-2 mb-3">
@@ -819,9 +848,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                 <span className="text-xs text-muted-foreground">({fns.length})</span>
               </div>
               <div className="space-y-2">
-                {fns.map(fn => {
+                {fns.filter(fn => profileFilter === "all" || (profileStatus[fn.id] || "empty") === profileFilter).map(fn => {
                   const cat = CATEGORY_LABELS[fn.category] || { label: fn.category, color: "bg-slate-100 text-slate-600" };
                   const isOpen = expanded === fn.id;
+                  const pStatus = profileStatus[fn.id] || "empty";
+                  const pDot = pStatus === "full" ? "bg-emerald-500" : pStatus === "partial" ? "bg-amber-400" : "bg-slate-300";
+                  const pTitle = pStatus === "full" ? "Профиль заполнен" : pStatus === "partial" ? "Профиль частично заполнен" : "Профиль не заполнен";
                   return (
                     <div key={fn.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                       <button
@@ -829,6 +861,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                         onClick={() => toggleExpand(fn.id)}
                       >
                         <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={14} className="text-slate-400 flex-shrink-0" />
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${pDot}`} title={pTitle} />
                         <span className="flex-1 font-medium text-sm text-slate-800">{fn.title}</span>
                         <Badge className={`text-xs ${cat.color} border-0 flex-shrink-0`}>{cat.label}</Badge>
                       </button>
@@ -945,6 +978,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                               </div>
                             )}
                           </div>
+
+                          <OperatingProfileCard
+                            projectId={projectId}
+                            functionId={fn.id}
+                            onSaved={loadProfileStatus}
+                          />
                         </div>
                       )}
                     </div>
