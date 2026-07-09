@@ -13,7 +13,7 @@ import FunctionModuleCandidatesBlock from "@/components/dept/FunctionModuleCandi
 import FunctionModuleBundlesBlock from "@/components/dept/FunctionModuleBundlesBlock";
 import FunctionShortlistBlock from "@/components/dept/FunctionShortlistBlock";
 import FunctionDecisionSummary from "@/components/dept/FunctionDecisionSummary";
-import { functionCompactStatus } from "@/components/dept/decisionNextStep";
+import { functionCompactStatus, functionStatusKey, statusToFilterGroup, STATUS_PRIORITY, type DecisionFilterGroup } from "@/components/dept/decisionNextStep";
 
 type DeptFunction = {
   id: number;
@@ -119,6 +119,7 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
   // Операционные профили: статус заполненности (empty/partial/full) + фильтр по нему
   const [profileStatus, setProfileStatus] = useState<Record<number, string>>({});
   const [profileFilter, setProfileFilter] = useState<"all" | "empty" | "partial" | "full">("all");
+  const [decisionFilter, setDecisionFilter] = useState<DecisionFilterGroup>("all");
 
   const loadProfileStatus = () => {
     deptFunctionsApi.getOperatingProfilesStatus(projectId)
@@ -552,6 +553,33 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
     return acc;
   }, {});
 
+  // Группа фильтра по next-step для функции ("all" если статус ещё не загружен)
+  const fnGroup = (fnId: number): DecisionFilterGroup | null => {
+    const ds = decisionStatus[fnId];
+    if (!ds) return null;
+    return statusToFilterGroup(functionStatusKey(ds));
+  };
+  // Приоритет next-step для сортировки очереди работы (не загружено → в конец)
+  const fnPriority = (fnId: number): number => {
+    const ds = decisionStatus[fnId];
+    return ds ? STATUS_PRIORITY[functionStatusKey(ds)] : 99;
+  };
+  // Счётчики по фильтр-группам (только среди функций, прошедших фильтр профиля)
+  const decisionCounts: Record<DecisionFilterGroup, number> = { all: 0, no_shortlist: 0, no_preferred: 0, problems: 0, pilot_ready: 0 };
+  functions.forEach((f) => {
+    if (profileFilter !== "all" && (profileStatus[f.id] || "empty") !== profileFilter) return;
+    decisionCounts.all += 1;
+    const g = fnGroup(f.id);
+    if (g && g !== "all") decisionCounts[g] += 1;
+  });
+  const DECISION_FILTERS: { k: DecisionFilterGroup; label: string }[] = [
+    { k: "all", label: "Все" },
+    { k: "no_shortlist", label: "Собрать шортлист" },
+    { k: "no_preferred", label: "Выбрать preferred" },
+    { k: "problems", label: "С проблемами" },
+    { k: "pilot_ready", label: "Готово к пилоту" },
+  ];
+
   return (
     <div className="space-y-6">
       <HelpPanel
@@ -927,15 +955,40 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
               </button>
             ))}
           </div>
-          {Object.entries(grouped).map(([dept, fns]) => (
+
+          <div className="flex items-center gap-1.5 flex-wrap text-xs">
+            <span className="text-slate-400 mr-1">Следующий шаг:</span>
+            {DECISION_FILTERS.map((o) => (
+              <button
+                key={o.k}
+                onClick={() => setDecisionFilter(o.k)}
+                className={`px-2 py-0.5 rounded border inline-flex items-center gap-1 ${decisionFilter === o.k ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200"}`}
+              >
+                {o.label}
+                <span className={`text-[10px] ${decisionFilter === o.k ? "text-indigo-100" : "text-slate-400"}`}>{decisionCounts[o.k]}</span>
+              </button>
+            ))}
+          </div>
+
+          {Object.entries(grouped).map(([dept, fns]) => {
+            const visibleFns = fns
+              .filter(fn => profileFilter === "all" || (profileStatus[fn.id] || "empty") === profileFilter)
+              .filter(fn => {
+                if (decisionFilter === "all") return true;
+                const g = fnGroup(fn.id);
+                return g === decisionFilter; // не загруженный статус (null) скрывается только при активном фильтре
+              })
+              .sort((a, b) => fnPriority(a.id) - fnPriority(b.id));
+            if (visibleFns.length === 0) return null;
+            return (
             <div key={dept}>
               <div className="flex items-center gap-2 mb-3">
                 <Icon name="Building2" size={15} className="text-slate-400" />
                 <span className="text-sm font-semibold text-slate-600 uppercase tracking-wide">{dept}</span>
-                <span className="text-xs text-muted-foreground">({fns.length})</span>
+                <span className="text-xs text-muted-foreground">({visibleFns.length})</span>
               </div>
               <div className="space-y-2">
-                {fns.filter(fn => profileFilter === "all" || (profileStatus[fn.id] || "empty") === profileFilter).map(fn => {
+                {visibleFns.map(fn => {
                   const cat = CATEGORY_LABELS[fn.category] || { label: fn.category, color: "bg-slate-100 text-slate-600" };
                   const isOpen = expanded === fn.id;
                   const pStatus = profileStatus[fn.id] || "empty";
@@ -1170,7 +1223,20 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                 })}
               </div>
             </div>
-          ))}
+            );
+          })}
+          {decisionCounts[decisionFilter] === 0 && (
+            <div className="text-center py-10 text-muted-foreground">
+              <Icon name="CircleCheck" size={34} className="mx-auto mb-2 opacity-30" />
+              <p className="text-sm">
+                {decisionFilter === "pilot_ready"
+                  ? "Пока нет функций, готовых к пилоту."
+                  : decisionFilter === "all"
+                    ? "Нет функций под текущим фильтром профиля."
+                    : "Для этого шага функций нет — по этому статусу сейчас ничего делать не нужно."}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

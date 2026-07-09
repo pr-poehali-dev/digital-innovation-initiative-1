@@ -147,6 +147,33 @@ export function functionCompactStatus(d: FnDecisionInput): CompactStatus {
   return { tone: "ready", label: "Готово к пилоту", dot: "bg-emerald-500", text: "text-emerald-600", icon: "CircleCheck" };
 }
 
+// Детальный status key (точный) + приоритет для сортировки очереди работы.
+export type DecisionStatusKey = "no_shortlist" | "no_preferred" | "required_gaps" | "archived_supply" | "drift" | "pilot_ready";
+
+export function functionStatusKey(d: FnDecisionInput): DecisionStatusKey {
+  if (d.selection_state === "no_shortlist") return "no_shortlist";
+  if (d.selection_state === "no_preferred") return "no_preferred";
+  if (d.has_required_gaps) return "required_gaps";
+  if (d.has_archived_supply) return "archived_supply";
+  if (d.has_drift) return "drift";
+  return "pilot_ready";
+}
+
+// Приоритет действия — чем меньше, тем выше в очереди (сортировка списка функций).
+export const STATUS_PRIORITY: Record<DecisionStatusKey, number> = {
+  no_shortlist: 0, no_preferred: 1, required_gaps: 2, archived_supply: 3, drift: 4, pilot_ready: 5,
+};
+
+// Пользовательские фильтры (5 групп) поверх детальных ключей.
+export type DecisionFilterGroup = "all" | "no_shortlist" | "no_preferred" | "problems" | "pilot_ready";
+
+export function statusToFilterGroup(k: DecisionStatusKey): Exclude<DecisionFilterGroup, "all"> {
+  if (k === "no_shortlist") return "no_shortlist";
+  if (k === "no_preferred") return "no_preferred";
+  if (k === "pilot_ready") return "pilot_ready";
+  return "problems"; // required_gaps | archived_supply | drift
+}
+
 export const TONE_STYLES: Record<NextStepTone, { box: string; icon: string; iconName: string }> = {
   info: { box: "border-slate-200 bg-slate-50", icon: "text-slate-500", iconName: "Info" },
   action: { box: "border-blue-200 bg-blue-50", icon: "text-blue-600", iconName: "ArrowRight" },
