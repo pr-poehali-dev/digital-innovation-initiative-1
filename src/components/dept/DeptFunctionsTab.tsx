@@ -14,6 +14,9 @@ import FunctionModuleBundlesBlock from "@/components/dept/FunctionModuleBundlesB
 import FunctionShortlistBlock from "@/components/dept/FunctionShortlistBlock";
 import FunctionDecisionSummary from "@/components/dept/FunctionDecisionSummary";
 import { functionCompactStatus, functionStatusKey, statusToFilterGroup, STATUS_PRIORITY, type DecisionFilterGroup } from "@/components/dept/decisionNextStep";
+import { useSearchParams } from "react-router-dom";
+import { resolveInitialFilters, writeStored, dfToCode, type ProfileFilter } from "@/components/dept/functionFilterPersistence";
+import { toast } from "@/components/ui/use-toast";
 
 type DeptFunction = {
   id: number;
@@ -118,8 +121,20 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
 
   // Операционные профили: статус заполненности (empty/partial/full) + фильтр по нему
   const [profileStatus, setProfileStatus] = useState<Record<number, string>>({});
-  const [profileFilter, setProfileFilter] = useState<"all" | "empty" | "partial" | "full">("all");
-  const [decisionFilter, setDecisionFilter] = useState<DecisionFilterGroup>("all");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialFilters = useRef(resolveInitialFilters(projectId, searchParams.get("df"), searchParams.get("pf")));
+  const [profileFilter, setProfileFilter] = useState<ProfileFilter>(initialFilters.current.pf);
+  const [decisionFilter, setDecisionFilter] = useState<DecisionFilterGroup>(initialFilters.current.df);
+
+  // Синхронизация фильтров: localStorage (per project) + URL (replace, без засорения истории).
+  useEffect(() => {
+    writeStored(projectId, decisionFilter, profileFilter);
+    const next = new URLSearchParams(searchParams);
+    if (decisionFilter === "all") next.delete("df"); else next.set("df", dfToCode(decisionFilter));
+    if (profileFilter === "all") next.delete("pf"); else next.set("pf", profileFilter);
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [decisionFilter, profileFilter, projectId]);
 
   const loadProfileStatus = () => {
     deptFunctionsApi.getOperatingProfilesStatus(projectId)
@@ -968,6 +983,14 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                 <span className={`text-[10px] ${decisionFilter === o.k ? "text-indigo-100" : "text-slate-400"}`}>{decisionCounts[o.k]}</span>
               </button>
             ))}
+            {(decisionFilter !== "all" || profileFilter !== "all") && (
+              <button
+                onClick={() => { setDecisionFilter("all"); setProfileFilter("all"); }}
+                className="ml-1 text-slate-400 hover:text-slate-600 underline underline-offset-2 inline-flex items-center gap-0.5"
+              >
+                <Icon name="X" size={11} /> Сбросить
+              </button>
+            )}
           </div>
 
           {Object.entries(grouped).map(([dept, fns]) => {
@@ -1235,6 +1258,11 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                     ? "Нет функций под текущим фильтром профиля."
                     : "Для этого шага функций нет — по этому статусу сейчас ничего делать не нужно."}
               </p>
+              {(decisionFilter !== "all" || profileFilter !== "all") && (
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => { setDecisionFilter("all"); setProfileFilter("all"); }}>
+                  Показать все функции
+                </Button>
+              )}
             </div>
           )}
         </div>
