@@ -119,7 +119,12 @@ def yandex_vision_ocr(content_b64: str, mime_type: str = "image/png") -> str:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Vision API {e.code}: {e.read().decode(errors='replace')}") from e
+        err_body = e.read().decode(errors="replace")
+        print(f"[VISION_OCR] HTTPError {e.code}: {err_body}")
+        raise RuntimeError(f"Vision API {e.code}: {err_body}") from e
+    except Exception as e:
+        print(f"[VISION_OCR] {type(e).__name__}: {e}")
+        raise
     blocks = data.get("result", {}).get("textAnnotation", {}).get("blocks", [])
     lines = []
     for block in blocks:
@@ -270,9 +275,11 @@ def handler(event: dict, context) -> dict:
             if not image_b64 and not file_b64:
                 return cors({"ok": False, "error": "image_b64 или file_b64 required"}, 400)
 
+            print(f"[EXTRACT] image_b64={bool(image_b64)} mime={image_mime} file_type={file_type} vision_key_len={len(YANDEX_VISION_API_KEY)} folder={bool(YANDEX_FOLDER_ID)}")
             try:
                 if image_b64:
                     ocr_text = yandex_vision_ocr(image_b64, image_mime)
+                    print(f"[EXTRACT] ocr_text_len={len(ocr_text)}")
                 else:
                     try:
                         file_bytes = base64.b64decode(file_b64, validate=True)
