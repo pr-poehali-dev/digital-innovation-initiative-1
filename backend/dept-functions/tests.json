@@ -218,6 +218,12 @@
       "path": "/?action=update_function_shortlist",
       "body": {"project_id": 1, "shortlist_id": 1, "decision_status": "preferred", "decision_note": "x"},
       "expectedStatus": 401
+    },
+    {
+      "name": "Unauth function_decision_summary",
+      "method": "GET",
+      "path": "/?action=function_decision_summary&project_id=1&function_id=1",
+      "expectedStatus": 401
     }
   ]
 }

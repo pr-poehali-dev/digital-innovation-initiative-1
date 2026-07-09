@@ -12,6 +12,7 @@ import FunctionCapabilitiesBlock from "@/components/dept/FunctionCapabilitiesBlo
 import FunctionModuleCandidatesBlock from "@/components/dept/FunctionModuleCandidatesBlock";
 import FunctionModuleBundlesBlock from "@/components/dept/FunctionModuleBundlesBlock";
 import FunctionShortlistBlock from "@/components/dept/FunctionShortlistBlock";
+import FunctionDecisionSummary from "@/components/dept/FunctionDecisionSummary";
 
 type DeptFunction = {
   id: number;
@@ -1086,6 +1087,12 @@ export default function DeptFunctionsTab({ projectId, functions, loading = false
                             functionId={fn.id}
                             refreshKey={capRefreshKey[fn.id] || 0}
                             onShortlistChanged={() => onShortlistChanged(fn.id)}
+                          />
+
+                          <FunctionDecisionSummary
+                            projectId={projectId}
+                            functionId={fn.id}
+                            refreshKey={(capRefreshKey[fn.id] || 0) + (shortlistRefreshKey[fn.id] || 0)}
                           />
 
                           <FunctionShortlistBlock

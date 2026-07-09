@@ -800,6 +800,8 @@ export const deptFunctionsApi = {
     request(URLS.deptFunctions, "/?action=archive_function_shortlist", "POST", data),
   restoreFunctionShortlist: (data: { project_id: number; shortlist_id: number }) =>
     request(URLS.deptFunctions, "/?action=restore_function_shortlist", "POST", data),
+  getFunctionDecisionSummary: (projectId: number, functionId: number) =>
+    request(URLS.deptFunctions, `/?action=function_decision_summary&project_id=${projectId}&function_id=${functionId}`, "GET"),
 };
 
 export const solutionsRegistryApi = {
