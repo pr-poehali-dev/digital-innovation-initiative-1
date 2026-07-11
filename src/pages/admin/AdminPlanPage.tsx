@@ -20,87 +20,113 @@ type Sprint = {
   tasks: Task[];
 };
 
+// Продуктовые волны (актуализировано 07.2026). Отражают фактическое состояние продукта.
 const INITIAL_SPRINTS: Sprint[] = [
   {
-    id: "s1",
-    title: "Спринт 1 — Стабилизация",
-    goal: "Всё уже обещанное реально видно и работает",
+    id: "w1",
+    title: "Волна 1 — Платформенное ядро",
+    goal: "Done · Базовая архитектура, общие сущности, навигация, файлы, AI-инфраструктура",
     status: "done",
-    days: "3–5 дней",
+    days: "Реализовано",
     tasks: [
-      { id: "s1-1", title: "Проверка всех маршрутов — убрать 404", status: "done", note: "commit 9cc266f" },
-      { id: "s1-2", title: "Единый источник роутов (routes.ts)", status: "done", note: "commit 9cc266f" },
-      { id: "s1-3", title: "Синхронизация мобильного и десктопного меню", status: "done", note: "commit 9cc266f" },
-      { id: "s1-4", title: "Виджет «Мои цели» с живыми данными на главной", status: "done", note: "commit 535f208" },
-      { id: "s1-5", title: "Индекс развития: проекты + обучение", status: "done", note: "commit 8870789" },
-      { id: "s1-6", title: "Версия сборки / commit / дата в Штабе", status: "done", note: "commit 9cc266f" },
-      { id: "s1-7", title: "Штаб: блоки Done / In Progress / Next", status: "done", note: "commit 9cc266f" },
-      { id: "s1-8", title: "Раздел «План проекта» в админке", status: "in_progress", note: "текущий спринт" },
+      { id: "w1-1", title: "Базовая архитектура платформы и общие сущности", status: "done" },
+      { id: "w1-2", title: "Единая навигация (десктоп + мобайл)", status: "done" },
+      { id: "w1-3", title: "Работа с файлами и артефактами", status: "done" },
+      { id: "w1-4", title: "AI-инфраструктура для ключевых сценариев", status: "done" },
     ],
   },
   {
-    id: "s2",
-    title: "Спринт 2 — Обучение MVP",
-    goal: "«Обучение» — ежедневный рабочий кабинет, а не витрина",
+    id: "w2",
+    title: "Волна 2 — Учебный кабинет core",
+    goal: "Done / Stabilizing · Цели, AI-план, темы, статусы, weekly check-in, образовательный паспорт",
+    status: "done",
+    days: "Реализовано",
+    tasks: [
+      { id: "w2-1", title: "Цели обучения и AI-план развития", status: "done" },
+      { id: "w2-2", title: "Темы и статусы (not_started / studying / understood / applied)", status: "done" },
+      { id: "w2-3", title: "Weekly check-in + история + AI-резюме", status: "done" },
+      { id: "w2-4", title: "Образовательный паспорт и парсинг дипломов/сертификатов", status: "done" },
+      { id: "w2-5", title: "Стабилизация прогресса и обзорных экранов", status: "in_progress" },
+    ],
+  },
+  {
+    id: "w3",
+    title: "Волна 3 — Профессиональный кабинет core",
+    goal: "Done / Growing · Профиль, карта компетенций, fit / gap, навигатор развития",
+    status: "done",
+    days: "Реализовано",
+    tasks: [
+      { id: "w3-1", title: "Профессиональный паспорт (опыт, образование, цели, роли)", status: "done" },
+      { id: "w3-2", title: "Карта компетенций (самооценка + сигналы)", status: "done" },
+      { id: "w3-3", title: "Fit / gap логика к целевой роли", status: "done" },
+      { id: "w3-4", title: "Навигатор развития и план 30/60/90", status: "done" },
+      { id: "w3-5", title: "Развитие доказательности профиля", status: "in_progress" },
+    ],
+  },
+  {
+    id: "w4",
+    title: "Волна 4 — Суперадминка core",
+    goal: "Done · HQ, strategy, roadmap, plans, tickets, users, audit",
+    status: "done",
+    days: "Реализовано",
+    tasks: [
+      { id: "w4-1", title: "HQ / штаб — единая память проекта", status: "done" },
+      { id: "w4-2", title: "Strategy Intelligence и Roadmap", status: "done" },
+      { id: "w4-3", title: "Планы, тикеты, пользователи", status: "done" },
+      { id: "w4-4", title: "Аудит и наблюдаемость состояния продукта", status: "done" },
+    ],
+  },
+  {
+    id: "w5",
+    title: "Волна 5 — Рабочий кабинет / Полигон трансформации",
+    goal: "Done / Expanding · Оргструктура, функции, проблемы, гипотезы, инициативы, решения, пилоты",
+    status: "done",
+    days: "Реализовано, расширяется",
+    tasks: [
+      { id: "w5-1", title: "Оргструктура (дерево департамента) и функции подразделения", status: "done" },
+      { id: "w5-2", title: "AI-распознавание положений и извлечение функций", status: "done" },
+      { id: "w5-3", title: "Пересечения, проблемы, гипотезы, альтернативы", status: "done" },
+      { id: "w5-4", title: "Инициативы, решения и системы, автоматизация и ИИ", status: "done" },
+      { id: "w5-5", title: "Сводка решений, дорожная карта пилотов, AI Copilot", status: "done" },
+      { id: "w5-6", title: "Расширение обзорных сценариев и rollup", status: "in_progress" },
+    ],
+  },
+  {
+    id: "w6",
+    title: "Волна 6 — Сквозная связка кабинетов",
+    goal: "Current · Работа → обучение → компетенции → профиль; доказательные сигналы; межкабинетная аналитика",
     status: "in_progress",
-    days: "5–7 дней",
+    days: "Текущий фокус",
     tasks: [
-      { id: "s2-1", title: "4 уровня статусов тем: not_started / studying / understood / applied", status: "done" },
-      { id: "s2-2", title: "Миграция старых статусов: done→applied, in_progress→studying, null→not_started", status: "done" },
-      { id: "s2-3", title: "Прогресс % по новым весам (0 / 0.33 / 0.66 / 1.0)", status: "done" },
-      { id: "s2-4", title: "UI: компактный селектор статуса темы (1 клик, без перезагрузки)", status: "done" },
-      { id: "s2-5", title: "Блок «Что делать сейчас» — вычисляемый по фазе и статусам", status: "done" },
-      { id: "s2-6", title: "Блок «Осталось освоить» — сводка + список хвоста", status: "done" },
-      { id: "s2-7", title: "Weekly check-in: форма (4 вопроса) + сохранение", status: "done" },
-      { id: "s2-8", title: "История weekly check-in по цели", status: "done" },
-      { id: "s2-9", title: "AI summary после check-in", status: "done" },
-      { id: "s2-10", title: "QA: прогресс одинаков на главной / в цели / в 30/60/90", status: "in_progress" },
+      { id: "w6-1", title: "Связка «работа → обучение → компетенции → профиль»", status: "in_progress" },
+      { id: "w6-2", title: "Доказательные сигналы развития из реальных действий", status: "in_progress" },
+      { id: "w6-3", title: "Межкабинетная аналитика", status: "todo" },
+      { id: "w6-4", title: "Метрики зрелости и актуализация стратегии", status: "in_progress" },
     ],
   },
   {
-    id: "s3",
-    title: "Спринт 3 — Project HQ / Командный штаб",
-    goal: "Единая живая память проекта — видение, правила, решения, риски, идеи, контекст для AI",
-    status: "in_progress",
-    days: "3–5 дней",
-    tasks: [
-      { id: "s3-1", title: "БД: hq_blocks, hq_goals, hq_decisions, hq_risks, hq_rules, hq_ideas", status: "done" },
-      { id: "s3-2", title: "Бэкенд /hq: CRUD всех секций (GET all, save_block, add/update goals/decisions/risks/rules/ideas)", status: "done" },
-      { id: "s3-3", title: "UI /admin/hq: Текущий фокус, Видение, Миссия, Цели, Решения, Риски, Правила, Идеи, Размышления", status: "done" },
-      { id: "s3-4", title: "Блок «Контекст для AI» — кнопка копировать всё одним текстом", status: "done" },
-      { id: "s3-5", title: "Карточка «Штаб» на главной AdminDashboard (выделена фиолетовым)", status: "done" },
-      { id: "s3-6", title: "QA: данные сохраняются в БД, переживают refresh и новую сессию", status: "in_progress" },
-    ],
-  },
-  {
-    id: "s4",
-    title: "Спринт 4 — Шаблоны для новой роли",
-    goal: "Прикладная ценность: реальные рабочие документы для CDO",
+    id: "w7",
+    title: "Волна 7 — Внешний карьерный контур",
+    goal: "Next · Публичный профиль, внешнее представление, карьерные сценарии, verified signals",
     status: "planned",
-    days: "5–7 дней",
+    days: "Следующий горизонт",
     tasks: [
-      { id: "s4-1", title: "Шаблон: Stakeholder map", status: "todo" },
-      { id: "s4-2", title: "Шаблон: Current state process map", status: "todo" },
-      { id: "s4-3", title: "Шаблон: Pain point register", status: "todo" },
-      { id: "s4-4", title: "Шаблон: Data map", status: "todo" },
-      { id: "s4-5", title: "Шаблон: Pilot charter", status: "todo" },
-      { id: "s4-6", title: "Шаблон: AI governance draft", status: "todo" },
-      { id: "s4-7", title: "Шаблон: Management deck outline", status: "todo" },
-      { id: "s4-8", title: "Шаблон: Priority matrix", status: "todo" },
+      { id: "w7-1", title: "Публичный профиль и внешнее профессиональное представление", status: "todo" },
+      { id: "w7-2", title: "Карьерные сценарии и работодательский контур", status: "todo" },
+      { id: "w7-3", title: "Верифицированные профессиональные сигналы", status: "todo" },
     ],
   },
   {
-    id: "s5",
-    title: "Спринт 5 — Навигатор развития",
-    goal: "Профиль компетенций, gap-анализ, AI-резюме",
+    id: "w8",
+    title: "Волна 8 — Enterprise-слой",
+    goal: "Next / Later · Безопасность, роли и доступы, расширенный аудит, интеграции, масштабируемость",
     status: "planned",
-    days: "7–10 дней",
+    days: "Следующий горизонт",
     tasks: [
-      { id: "s5-1", title: "Карта навыков на основе тем и проектов", status: "todo" },
-      { id: "s5-2", title: "Gap analysis — чего не хватает для цели", status: "todo" },
-      { id: "s5-3", title: "AI строит резюме и карьерный профиль", status: "todo" },
-      { id: "s5-4", title: "Визуальная карта компетенций (radar или grid)", status: "todo" },
-      { id: "s5-5", title: "Рекомендованный путь 30/60/90 на следующий период", status: "todo" },
+      { id: "w8-1", title: "Роли, доступы и безопасность корпоративного уровня", status: "todo" },
+      { id: "w8-2", title: "Расширенный аудит и управляемость данных", status: "todo" },
+      { id: "w8-3", title: "Интеграции", status: "todo" },
+      { id: "w8-4", title: "Организационная масштабируемость", status: "todo" },
     ],
   },
 ];
@@ -119,7 +145,7 @@ const SPRINT_STATUS_CONFIG = {
 
 export default function AdminPlanPage() {
   const [sprints, setSprints] = useState<Sprint[]>(INITIAL_SPRINTS);
-  const [expanded, setExpanded] = useState<string[]>(["s1", "s2"]);
+  const [expanded, setExpanded] = useState<string[]>(["w5", "w6"]);
 
   function toggleExpand(id: string) {
     setExpanded(prev =>
@@ -158,7 +184,7 @@ export default function AdminPlanPage() {
             </div>
             <h1 className="text-xl font-bold text-white">План проекта</h1>
           </div>
-          <p className="text-gray-500 text-sm ml-11">Спринты и задачи · фиксируем факт выполнения</p>
+          <p className="text-gray-500 text-sm ml-11">Продуктовые волны · фактическое состояние продукта</p>
         </div>
 
         {/* Общий прогресс */}
@@ -190,7 +216,7 @@ export default function AdminPlanPage() {
           </div>
         </div>
 
-        {/* Спринты */}
+        {/* Волны */}
         <div className="space-y-3">
           {sprints.map(sprint => {
             const isOpen = expanded.includes(sprint.id);
