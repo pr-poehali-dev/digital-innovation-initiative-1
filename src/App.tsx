@@ -59,6 +59,8 @@ import CompetencyMapPage from "./pages/CompetencyMapPage";
 import GuidePage from "./pages/GuidePage";
 import GoalsPage from "./pages/GoalsPage";
 import SolutionsPage from "./pages/SolutionsPage";
+import PresentationPage from "./pages/PresentationPage";
+import AdminPresentationPage from "./pages/admin/AdminPresentationPage";
 
 const queryClient = new QueryClient();
 
@@ -103,10 +105,12 @@ const App = () => (
               <Route path="/admin/competencies" element={<AdminRoute><AdminCompetenciesPage /></AdminRoute>} />
               <Route path="/admin/analytics/competency-map" element={<AdminRoute><AdminAdoptionPage /></AdminRoute>} />
               <Route path="/admin/benchmark" element={<AdminRoute><AdminBenchmarkPage /></AdminRoute>} />
+              <Route path="/admin/presentation" element={<AdminRoute><AdminPresentationPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}
               <Route path="/" element={<Index />} />
+              <Route path="/presentation" element={<PresentationPage />} />
               <Route path="/login" element={<AuthPage />} />
               <Route path="/cabinet" element={<ProtectedRoute><GrowthDashboard /></ProtectedRoute>} />
               <Route path="/cabinet/projects" element={<ProtectedRoute><CabinetPage /></ProtectedRoute>} />
