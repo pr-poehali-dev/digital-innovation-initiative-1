@@ -5,10 +5,13 @@ import Icon from "@/components/ui/icon";
 import AiContextExporter from "@/components/admin/AiContextExporter";
 import { ticketsApi, contentApi } from "@/lib/admin-api";
 
-type Card = { label: string; icon: string; href: string; color: string; highlight?: boolean };
+type Card = { label: string; icon: string; href: string; color: string; highlight?: boolean; badge?: string; badgeNote?: string };
+
+// Дата синхронизации планового контура (HQ / plan / roadmap) с фактическим состоянием продукта
+const SYNC_DATE = "11.07.2026";
 
 const PLATFORM: Card[] = [
-  { label: "Штаб",        icon: "Command",    href: "/admin/hq",      color: "text-violet-400", highlight: true },
+  { label: "Штаб",        icon: "Command",    href: "/admin/hq",      color: "text-violet-400", highlight: true, badge: "Актуализировано", badgeNote: `HQ / plan / roadmap синхронизированы · ${SYNC_DATE}` },
   { label: "План",        icon: "ClipboardList", href: "/admin/plan",  color: "text-indigo-400" },
   { label: "Архитектура", icon: "Map",        href: "/admin/project",  color: "text-cyan-400" },
   { label: "Паспорт",     icon: "BookMarked", href: "/admin/passport", color: "text-emerald-400" },
@@ -52,6 +55,18 @@ function CardGroup({ title, icon, cards }: { title: string; icon: string; cards:
             <span className="text-sm font-medium text-gray-400 group-hover:text-white transition-colors leading-tight">
               {card.label}
             </span>
+            {card.badge && (
+              <span
+                title={card.badgeNote}
+                className="inline-flex items-center gap-1 self-start rounded-md border border-teal-800/60 bg-teal-900/25 px-1.5 py-0.5 text-[10px] font-medium text-teal-300/90"
+              >
+                <Icon name="Check" size={10} />
+                {card.badge}
+              </span>
+            )}
+            {card.badgeNote && (
+              <span className="text-[10px] leading-tight text-gray-600">{card.badgeNote}</span>
+            )}
           </button>
         ))}
       </div>
