@@ -1,6 +1,33 @@
 import { motion } from 'framer-motion';
+import { useRef, useState, useLayoutEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { CABINET_THEME, type CabinetKey } from './theme';
+
+// Пропорционально масштабирует диаграмму фиксированного размера под ширину контейнера,
+// чтобы на узких/мобильных экранах подписи не разъезжались.
+function ScaleFit({ base, children }: { base: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      setScale(w < base ? Math.max(w / base, 0.45) : 1);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [base]);
+  return (
+    <div ref={ref} className="mx-auto w-full" style={{ height: base * scale, maxWidth: base }}>
+      <div style={{ transform: `scale(${scale})`, transformOrigin: 'top center', width: base, margin: '0 auto' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 // Круговая экосистемная схема (общий цикл продукта)
 export function EcosystemLoop({ steps }: { steps: string[] }) {
@@ -10,7 +37,8 @@ export function EcosystemLoop({ steps }: { steps: string[] }) {
   const cy = 260;
   const colors = ['#3B82F6', '#8B5CF6', '#14B8A6', '#38BDF8', '#34D399', '#F59E0B'];
   return (
-    <div className="relative mx-auto" style={{ width: 520, height: 520, maxWidth: '100%' }}>
+    <ScaleFit base={520}>
+    <div className="relative" style={{ width: 520, height: 520 }}>
       <svg viewBox="0 0 520 520" className="absolute inset-0 h-full w-full">
         <circle cx={cx} cy={cy} r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={2} strokeDasharray="6 8" />
         {steps.map((_, i) => {
@@ -50,6 +78,7 @@ export function EcosystemLoop({ steps }: { steps: string[] }) {
         <div className="text-xs text-white/50">замкнутый цикл</div>
       </div>
     </div>
+    </ScaleFit>
   );
 }
 
@@ -82,7 +111,8 @@ export function LearningLoopDiagram({ steps, accent }: { steps: string[]; accent
   const cx = 220;
   const cy = 220;
   return (
-    <div className="relative mx-auto" style={{ width: 440, height: 440, maxWidth: '100%' }}>
+    <ScaleFit base={440}>
+    <div className="relative" style={{ width: 440, height: 440 }}>
       <svg viewBox="0 0 440 440" className="absolute inset-0 h-full w-full">
         <circle cx={cx} cy={cy} r={R} fill="none" stroke={`${accent}44`} strokeWidth={2.5} />
         <motion.circle cx={cx} cy={cy} r={R} fill="none" stroke={accent} strokeWidth={3} strokeLinecap="round"
@@ -110,6 +140,7 @@ export function LearningLoopDiagram({ steps, accent }: { steps: string[]; accent
         <div className="mt-1 text-xs font-semibold text-white/70">Цикл обучения</div>
       </div>
     </div>
+    </ScaleFit>
   );
 }
 
