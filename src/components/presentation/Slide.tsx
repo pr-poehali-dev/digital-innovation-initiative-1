@@ -57,6 +57,12 @@ export default function Slide({ data }: { data: SlideData }) {
     <div className="flex h-full flex-col justify-center px-6 py-10 md:px-14">
       <Header />
       <SlideTitle accent={accent}>{data.title}</SlideTitle>
+      {data.subtitle && (
+        <motion.p className="mx-auto mt-3 max-w-2xl text-center text-sm font-medium text-amber-300/80 md:text-base"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.05 }}>
+          {data.subtitle}
+        </motion.p>
+      )}
       <div className="mt-8 flex flex-col items-center gap-6">
         {data.lead && <Lead accent={data.kind === 'aiRole' || data.kind === 'aiMap' ? CABINET_THEME.ai.accent : undefined}>{data.lead}</Lead>}
 

@@ -11,6 +11,7 @@ export default function Deck({ internal = false }: { internal?: boolean }) {
   const slides = getSlides(internal);
   const [idx, setIdx] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
+  const [expDone, setExpDone] = useState(0);
   const total = slides.length;
 
   const go = useCallback((n: number) => setIdx((c) => Math.min(Math.max(c + n, 0), total - 1)), [total]);
@@ -28,17 +29,21 @@ export default function Deck({ internal = false }: { internal?: boolean }) {
   }, [go, goTo, total]);
 
   const handleExport = async (kind: 'pdf' | 'pptx') => {
+    if (busy) return;
     try {
       setBusy(kind);
+      setExpDone(0);
       const name = internal ? 'Траектория-презентация-внутренняя' : 'Траектория-презентация';
-      if (kind === 'pdf') await exportPdf(slides, `${name}.pdf`);
-      else await exportPptx(slides, `${name}.pptx`);
+      const onProgress = (done: number) => setExpDone(done);
+      if (kind === 'pdf') await exportPdf(slides, `${name}.pdf`, onProgress);
+      else await exportPptx(slides, `${name}.pptx`, onProgress);
       toast.success(kind === 'pdf' ? 'PDF готов' : 'PowerPoint готов');
     } catch (e) {
       toast.error('Не удалось собрать файл');
       console.error(e);
     } finally {
       setBusy(null);
+      setExpDone(0);
     }
   };
 
@@ -116,6 +121,24 @@ export default function Deck({ internal = false }: { internal?: boolean }) {
         </div>
         <span className="text-xs font-semibold tabular-nums text-white/60">{idx + 1} / {total}</span>
       </div>
+
+      {/* оверлей прогресса экспорта */}
+      {busy && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-72 rounded-2xl border border-white/10 bg-slate-900/90 p-6 text-center">
+            <Icon name="Loader" size={28} className="mx-auto animate-spin text-blue-400" />
+            <div className="mt-3 text-sm font-semibold text-white">
+              Собираю {busy === 'pdf' ? 'PDF' : 'PowerPoint'}
+            </div>
+            <div className="mt-1 text-xs text-white/50">Рендерю слайды в изображения…</div>
+            <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div className="h-full bg-gradient-to-r from-blue-400 to-teal-300 transition-all"
+                style={{ width: `${Math.round((expDone / total) * 100)}%` }} />
+            </div>
+            <div className="mt-2 text-xs font-medium tabular-nums text-white/60">{expDone} / {total}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
