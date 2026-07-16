@@ -380,6 +380,19 @@ def handler(event: dict, context) -> dict:
                     f"UPDATE {schema}.project_invitations SET status = 'accepted', accepted_at = NOW() WHERE project_id = %s AND email = %s",
                     (inv_project_id, email),
                 )
+                cur.execute(f"SELECT title FROM {schema}.projects WHERE id = %s", (inv_project_id,))
+                proj_row = cur.fetchone()
+                proj_title = proj_row[0] if proj_row else ""
+                cur.execute(
+                    f"""INSERT INTO {schema}.notifications (user_id, type, title, message, project_id, link)
+                        VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (
+                        user_id, "project_invite",
+                        f"Вам открыт доступ к проекту «{proj_title}»",
+                        "Приглашение, отправленное до вашей регистрации, активировано автоматически.",
+                        inv_project_id, f"/projects/{inv_project_id}",
+                    ),
+                )
 
             sid = secrets.token_hex(32)
             expires = datetime.now() + timedelta(days=30)

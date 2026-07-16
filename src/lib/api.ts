@@ -24,6 +24,7 @@ const URLS = {
   learningPack: "https://functions.poehali.dev/8ad151d1-d688-49c2-822a-5f5d366a8b3b",
   deptFunctions: "https://functions.poehali.dev/7e9accad-43d6-44e2-b388-14d15b7a8153",
   solutionsRegistry: "https://functions.poehali.dev/da6fac65-f14d-490d-8abd-2b8654237370",
+  notifications: "https://functions.poehali.dev/2853134d-9e44-4adb-9b07-64cf43b26149",
 };
 
 function getSession(): string {
@@ -122,6 +123,26 @@ export const authApi = {
     request(URLS.auth, "/", "POST", { action: "reset_password", email }),
   changePassword: (oldPassword: string, newPassword: string) =>
     request(URLS.auth, "/", "POST", { action: "change_password", old_password: oldPassword, new_password: newPassword }),
+};
+
+export interface NotificationItem {
+  id: number;
+  type: string;
+  title: string;
+  message: string | null;
+  project_id: number | null;
+  link: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export const notificationsApi = {
+  list: (): Promise<{ items: NotificationItem[]; unread_count: number }> =>
+    request(URLS.notifications, "/", "POST", { action: "notification.list" }),
+  markRead: (notificationId: number) =>
+    request(URLS.notifications, "/", "POST", { action: "notification.mark_read", notification_id: notificationId }),
+  markAllRead: () =>
+    request(URLS.notifications, "/", "POST", { action: "notification.mark_all_read" }),
 };
 
 export const projectsApi = {

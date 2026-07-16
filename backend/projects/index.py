@@ -21,6 +21,8 @@ import uuid
 import logging
 import psycopg2
 
+from email_utils import send_email
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("projects")
 
@@ -150,6 +152,14 @@ def get_current_user(conn, session_id):
     )
     row = cur.fetchone()
     return {"id": row[0], "email": row[1], "name": row[2]} if row else None
+
+
+def create_notification(cur, schema, user_id, ntype, title, message=None, project_id=None, link=None):
+    cur.execute(
+        f"""INSERT INTO {schema}.notifications (user_id, type, title, message, project_id, link)
+            VALUES (%s, %s, %s, %s, %s, %s)""",
+        (user_id, ntype, title, message, project_id, link),
+    )
 
 
 def log_activity(cur, schema, project_id, user_id, action, entity_type=None, entity_id=None, details=None):
@@ -416,8 +426,23 @@ def handle_invite(conn, user, body, request_id, origin=None):
             (project_id, invite_user[0]),
         )
         log_activity(cur, schema, project_id, user["id"], "invited_member", "user", invite_user[0], email)
+        create_notification(
+            cur, schema, invite_user[0],
+            "project_invite",
+            f"Вас добавили в проект «{project_title}»",
+            f"{user['name']} пригласил(а) вас в проект «{project_title}»",
+            project_id=project_id,
+            link=f"/projects/{project_id}",
+        )
         conn.commit()
         notify_indexer("rebuild_acl", project_id=project_id)
+        send_email(
+            email,
+            f"Вас добавили в проект «{project_title}»",
+            f"""<p>Здравствуйте, {invite_user[1]}!</p>
+            <p><b>{user['name']}</b> добавил(а) вас в проект <b>«{project_title}»</b> в Траектории.</p>
+            <p>Зайдите в личный кабинет, чтобы увидеть проект.</p>""",
+        )
         return ok_response({"name": invite_user[1], "pending": False}, request_id, origin=origin)
     else:
         # Пользователь не зарегистрирован — сохраняем pending-приглашение
@@ -429,6 +454,13 @@ def handle_invite(conn, user, body, request_id, origin=None):
         )
         log_activity(cur, schema, project_id, user["id"], "invited_pending", "project", project_id, email)
         conn.commit()
+        send_email(
+            email,
+            f"Вас пригласили в проект «{project_title}»",
+            f"""<p>Здравствуйте!</p>
+            <p><b>{user['name']}</b> пригласил(а) вас в проект <b>«{project_title}»</b> в Траектории.</p>
+            <p>Зарегистрируйтесь с этим email — и вы автоматически получите доступ к проекту.</p>""",
+        )
         return ok_response({
             "pending": True,
             "email": email,

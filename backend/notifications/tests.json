@@ -1,0 +1,40 @@
+{
+  "tests": [
+    {
+      "name": "notification.list requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "notification.list"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unknown action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "fake.action"},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "missing action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "notification.mark_all_read requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "notification.mark_all_read"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

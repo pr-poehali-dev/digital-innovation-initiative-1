@@ -6,6 +6,7 @@ import GlobalSearchDialog from "@/components/GlobalSearchDialog";
 import { NAV_SECTIONS, NAV_SECONDARY, MOBILE_NAV, type NavSection, type NavItem } from "@/lib/routes";
 import SeoMeta from "@/components/SeoMeta";
 import AiChatPanel from "@/components/AiChatPanel";
+import NotificationBell from "@/components/NotificationBell";
 import PullToRefresh from "@/components/PullToRefresh";
 import { BUILD_HASH } from "@/lib/build-info";
 
@@ -363,10 +364,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <button onClick={() => setSearchOpen(true)} className="md:hidden w-8 h-8 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors">
                 <Icon name="Search" size={18} />
               </button>
-              <button className="relative w-8 h-8 flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 transition-colors">
-                <Icon name="Bell" size={18} />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-orange-500 rounded-full" />
-              </button>
+              <NotificationBell />
               <button
                 onClick={() => setAiOpen(true)}
                 className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity"
