@@ -26,6 +26,7 @@ const URLS = {
   solutionsRegistry: "https://functions.poehali.dev/da6fac65-f14d-490d-8abd-2b8654237370",
   notifications: "https://functions.poehali.dev/2853134d-9e44-4adb-9b07-64cf43b26149",
   glossary: "https://functions.poehali.dev/b4008710-65c7-411a-b175-7d28f7248be3",
+  processMap: "https://functions.poehali.dev/812f08ca-ceb5-474e-b5d4-d92a791c1f31",
 };
 
 function getSession(): string {
@@ -187,6 +188,69 @@ export const glossaryApi = {
     request(URLS.glossary, "/", "POST", { action: "glossary.update", term_id: termId, ...data }),
   mark: (termId: number, data: { is_favorite?: boolean; is_learned?: boolean; personal_note?: string }) =>
     request(URLS.glossary, "/", "POST", { action: "glossary.mark", term_id: termId, ...data }),
+};
+
+export interface ProcessUnit {
+  code: string;
+  name: string;
+  type: string;
+  role: string;
+}
+
+export interface ProcessFunction {
+  id: number;
+  title: string;
+  category: string;
+  priority: number;
+  status: string;
+  ai_score: number;
+}
+
+export interface MacroProcess {
+  id: number;
+  code: string;
+  name: string;
+  stage: string;
+  purpose: string;
+  trigger_event: string;
+  result_output: string;
+  owner_unit_code: string;
+  current_state: string;
+  pain_points: string;
+  target_state: string;
+  target_effect: string;
+  ai_opportunity: string;
+  maturity_current: number;
+  maturity_target: number;
+  ai_potential: number;
+  priority: number;
+  horizon: string;
+  sort_order: number;
+  function_count: number;
+  automated_count: number;
+  partial_count: number;
+  gap: number;
+  units: ProcessUnit[];
+  functions?: ProcessFunction[];
+}
+
+export interface ProcessMapSummary {
+  total: number;
+  core: number;
+  enabling: number;
+  functions_total: number;
+  high_ai: number;
+  avg_maturity_current: number;
+  avg_maturity_target: number;
+}
+
+export const processMapApi = {
+  list: (projectId: number): Promise<{ processes: MacroProcess[]; summary: ProcessMapSummary }> =>
+    request(URLS.processMap, "/", "POST", { action: "process_map.list", project_id: projectId }),
+  get: (processId: number): Promise<{ process: MacroProcess }> =>
+    request(URLS.processMap, "/", "POST", { action: "process_map.get", process_id: processId }),
+  update: (processId: number, data: Partial<MacroProcess>) =>
+    request(URLS.processMap, "/", "POST", { action: "process_map.update", process_id: processId, ...data }),
 };
 
 export const projectsApi = {

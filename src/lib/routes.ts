@@ -14,6 +14,7 @@ export const ROUTES = {
   goals:          "/cabinet/goals",
   solutions:      "/cabinet/solutions",
   glossary:       "/cabinet/glossary",
+  processMap:     "/cabinet/process-map",
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
@@ -64,7 +65,8 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Кабинет руководителя",
     icon: "Crown",
     items: [
-      { id: "chief.glossary", label: "Глоссарий", icon: "BookOpen", href: ROUTES.glossary, active: true, badge: { text: "Новое", tone: "success" } },
+      { id: "chief.processMap", label: "Карта процессов", icon: "Network", href: ROUTES.processMap, active: true, badge: { text: "Новое", tone: "success" } },
+      { id: "chief.glossary", label: "Глоссарий", icon: "BookOpen", href: ROUTES.glossary, active: true },
     ],
   },
   {

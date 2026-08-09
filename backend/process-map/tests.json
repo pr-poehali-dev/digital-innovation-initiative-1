@@ -1,0 +1,48 @@
+{
+  "tests": [
+    {
+      "name": "process_map.list requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "process_map.list", "project_id": 12},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "process_map.get requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "process_map.get", "process_id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unknown action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "fake.action"},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "missing action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET method not allowed",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 405,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
