@@ -1,0 +1,48 @@
+{
+  "tests": [
+    {
+      "name": "glossary.list requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "glossary.list"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "glossary.categories requires auth",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "glossary.categories"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "unknown action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "fake.action"},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "missing action returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "GET method not allowed",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 405,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
