@@ -3,82 +3,52 @@ import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
-import { processMapApi, projectsApi, type MacroProcess, type ProcessMapSummary } from "@/lib/api";
+import { processMapApi, projectsApi, type MacroProcess, type ProcessMapSummary, type UncoveredFunction } from "@/lib/api";
 
-type ViewMode = "current" | "target";
-
-const MATURITY_LABEL: Record<number, string> = {
-  1: "Ручной",
-  2: "Частично",
-  3: "Автоматизирован",
-  4: "Интеллектуальный",
+const STATUS_STYLE: Record<string, { label: string; className: string }> = {
+  ai_draft: { label: "AI-черновик", className: "bg-amber-100 text-amber-800" },
+  user_draft: { label: "Черновик пользователя", className: "bg-slate-100 text-slate-700" },
+  in_review: { label: "На проверке", className: "bg-blue-100 text-blue-700" },
+  confirmed: { label: "Подтверждено владельцем", className: "bg-emerald-100 text-emerald-700" },
+  approved: { label: "Утверждено", className: "bg-emerald-600 text-white" },
+  needs_update: { label: "Требует актуализации", className: "bg-rose-100 text-rose-700" },
+  archived: { label: "Архив", className: "bg-slate-200 text-slate-500" },
 };
 
-function maturityColor(level: number) {
-  if (level >= 4) return "bg-emerald-500";
-  if (level === 3) return "bg-blue-500";
-  if (level === 2) return "bg-amber-500";
-  return "bg-rose-500";
+const CONFIDENCE_LABEL: Record<string, string> = {
+  low: "низкая",
+  medium: "средняя",
+  high: "высокая",
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_STYLE[status] || STATUS_STYLE.ai_draft;
+  return <Badge className={`text-[10px] h-5 border-0 ${s.className}`}>{s.label}</Badge>;
 }
 
-function MaturityBar({ current, target, mode }: { current: number; target: number; mode: ViewMode }) {
-  const value = mode === "current" ? current : target;
-  return (
-    <div className="flex items-center gap-1.5">
-      {[1, 2, 3, 4].map((lvl) => (
-        <span
-          key={lvl}
-          className={`h-1.5 flex-1 rounded-full transition-colors ${
-            lvl <= value ? maturityColor(value) : "bg-slate-200"
-          }`}
-        />
-      ))}
-      <span className="text-[10px] font-semibold text-slate-500 w-24 text-right flex-shrink-0">
-        {MATURITY_LABEL[value]}
-      </span>
-    </div>
-  );
-}
-
-function ProcessCard({ proc, mode, onOpen }: { proc: MacroProcess; mode: ViewMode; onOpen: (p: MacroProcess) => void }) {
+function GroupCard({ proc, onOpen }: { proc: MacroProcess; onOpen: (p: MacroProcess) => void }) {
   const owner = proc.units.find((u) => u.role === "owner");
-  const isTarget = mode === "target";
 
   return (
     <button
       onClick={() => onOpen(proc)}
-      className={`text-left border rounded-xl p-4 bg-white transition-all hover:shadow-md w-full ${
-        isTarget ? "border-emerald-200 hover:border-emerald-300" : "border-slate-200 hover:border-slate-300"
-      }`}
+      className="text-left border border-slate-200 rounded-xl p-4 bg-white transition-all hover:shadow-md hover:border-slate-300 w-full"
     >
       <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] font-mono font-bold text-slate-400 flex-shrink-0">{proc.code}</span>
-          {proc.stage === "enabling" && (
-            <Badge variant="outline" className="text-[9px] h-4 px-1.5 text-slate-500 border-slate-200">
-              обеспеч.
-            </Badge>
-          )}
-        </div>
-        {proc.ai_potential >= 8 && (
-          <Badge className="text-[9px] h-4 px-1.5 bg-violet-100 text-violet-700 border-0 flex-shrink-0">
-            AI {proc.ai_potential}
-          </Badge>
-        )}
+        <span className="text-[10px] font-mono font-bold text-slate-400">{proc.code}</span>
+        <StatusBadge status={proc.verification_status} />
       </div>
 
-      <p className="font-semibold text-slate-900 text-sm leading-snug mb-2">{proc.name}</p>
+      <p className="font-semibold text-slate-900 text-sm leading-snug mb-1.5">{proc.name}</p>
 
-      <p className="text-xs text-slate-600 leading-relaxed mb-3 line-clamp-3">
-        {isTarget ? proc.target_state : proc.current_state}
-      </p>
+      {proc.purpose && (
+        <p className="text-xs text-slate-500 leading-relaxed mb-3 line-clamp-2">{proc.purpose}</p>
+      )}
 
-      <MaturityBar current={proc.maturity_current} target={proc.maturity_target} mode={mode} />
-
-      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
+      <div className="flex items-center gap-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">
         <span className="flex items-center gap-1">
-          <Icon name="Layers" size={11} />
-          {proc.function_count} функц.
+          <Icon name="FileText" size={11} />
+          {proc.function_count} функц. из документов
         </span>
         {owner && (
           <span className="flex items-center gap-1 truncate">
@@ -86,17 +56,12 @@ function ProcessCard({ proc, mode, onOpen }: { proc: MacroProcess; mode: ViewMod
             {owner.code}
           </span>
         )}
-        {isTarget && proc.gap > 0 && (
-          <span className="ml-auto flex items-center gap-1 text-emerald-600 font-semibold flex-shrink-0">
-            <Icon name="TrendingUp" size={11} />+{proc.gap}
-          </span>
-        )}
       </div>
     </button>
   );
 }
 
-function DetailPanel({ proc, mode, onClose }: { proc: MacroProcess; mode: ViewMode; onClose: () => void }) {
+function DetailPanel({ proc, onClose }: { proc: MacroProcess; onClose: () => void }) {
   const [detail, setDetail] = useState<MacroProcess | null>(null);
 
   useEffect(() => {
@@ -107,13 +72,13 @@ function DetailPanel({ proc, mode, onClose }: { proc: MacroProcess; mode: ViewMo
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={onClose}>
-      <div
-        className="w-full max-w-xl bg-white h-full overflow-y-auto shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="w-full max-w-xl bg-white h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-start justify-between gap-3 z-10">
           <div className="min-w-0">
-            <span className="text-[11px] font-mono font-bold text-slate-400">{p.code}</span>
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-[11px] font-mono font-bold text-slate-400">{p.code}</span>
+              <StatusBadge status={p.verification_status} />
+            </div>
             <h2 className="text-lg font-bold text-slate-900 leading-tight">{p.name}</h2>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center flex-shrink-0">
@@ -122,81 +87,42 @@ function DetailPanel({ proc, mode, onClose }: { proc: MacroProcess; mode: ViewMo
         </div>
 
         <div className="px-5 py-5 space-y-5">
-          <div className="bg-slate-50 rounded-xl p-4 space-y-2.5">
-            <div>
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Назначение</p>
-              <p className="text-sm text-slate-700 mt-0.5">{p.purpose}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              <div>
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Вход</p>
-                <p className="text-xs text-slate-600 mt-0.5">{p.trigger_event}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Результат</p>
-                <p className="text-xs text-slate-600 mt-0.5">{p.result_output}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Как есть */}
-          <div className={`border rounded-xl p-4 ${mode === "current" ? "border-slate-300 bg-white" : "border-slate-200 bg-slate-50/50"}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-6 h-6 rounded-lg bg-slate-200 flex items-center justify-center">
-                <Icon name="Circle" size={12} className="text-slate-600" />
-              </span>
-              <span className="text-sm font-semibold text-slate-900">Как есть сейчас</span>
-              <Badge variant="outline" className="ml-auto text-[10px] h-5">
-                {MATURITY_LABEL[p.maturity_current]}
-              </Badge>
-            </div>
-            <p className="text-sm text-slate-600 leading-relaxed">{p.current_state}</p>
-            {p.pain_points && (
-              <div className="mt-3 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2.5">
-                <p className="text-[10px] font-semibold text-rose-500 uppercase tracking-wide mb-1">Болевые точки</p>
-                <p className="text-xs text-rose-900 leading-relaxed">{p.pain_points}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Целевое */}
-          <div className={`border rounded-xl p-4 ${mode === "target" ? "border-emerald-300 bg-emerald-50/40" : "border-slate-200 bg-slate-50/50"}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center">
-                <Icon name="Target" size={12} className="text-emerald-600" />
-              </span>
-              <span className="text-sm font-semibold text-slate-900">Целевое состояние</span>
-              <Badge className="ml-auto text-[10px] h-5 bg-emerald-100 text-emerald-700 border-0">
-                {MATURITY_LABEL[p.maturity_target]}
-              </Badge>
-            </div>
-            <p className="text-sm text-slate-700 leading-relaxed">{p.target_state}</p>
-            {p.target_effect && (
-              <div className="mt-3 bg-white border border-emerald-100 rounded-lg px-3 py-2.5">
-                <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide mb-1">Ожидаемый эффект</p>
-                <p className="text-xs text-slate-700 leading-relaxed">{p.target_effect}</p>
-              </div>
-            )}
-          </div>
-
-          {/* AI */}
-          {p.ai_opportunity && (
-            <div className="border border-violet-200 bg-violet-50/50 rounded-xl p-4">
+          {p.grouping_basis && (
+            <div className="border border-amber-200 bg-amber-50 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">
-                <Icon name="Sparkles" size={14} className="text-violet-600" />
-                <span className="text-sm font-semibold text-slate-900">Где применим ИИ</span>
-                <Badge className="ml-auto text-[10px] h-5 bg-violet-100 text-violet-700 border-0">
-                  потенциал {p.ai_potential}/10
+                <Icon name="TriangleAlert" size={14} className="text-amber-600" />
+                <span className="text-sm font-semibold text-slate-900">Основание группировки</span>
+                <Badge variant="outline" className="ml-auto text-[10px] h-5 border-amber-300 text-amber-700">
+                  уверенность: {CONFIDENCE_LABEL[p.confidence] || p.confidence}
                 </Badge>
               </div>
-              <p className="text-sm text-slate-700 leading-relaxed">{p.ai_opportunity}</p>
+              <p className="text-xs text-amber-900 leading-relaxed">{p.grouping_basis}</p>
             </div>
           )}
 
-          {/* Участники */}
+          {p.purpose && (
+            <div className="bg-slate-50 rounded-xl p-4">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Предполагаемое назначение</p>
+              <p className="text-sm text-slate-700 mt-1">{p.purpose}</p>
+              <p className="text-[10px] text-slate-400 mt-2">Формулировка ИИ. Не подтверждена документом.</p>
+            </div>
+          )}
+
+          {p.archive_reason && (
+            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+              <div className="flex items-center gap-2 mb-1.5">
+                <Icon name="EyeOff" size={13} className="text-slate-500" />
+                <span className="text-xs font-semibold text-slate-700">Скрытые сведения</span>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">{p.archive_reason}</p>
+            </div>
+          )}
+
           {p.units && p.units.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Участники процесса</p>
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">
+                Организационные единицы — источник: положение о подразделении
+              </p>
               <div className="space-y-1.5">
                 {p.units.map((u) => (
                   <div key={u.code} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2">
@@ -211,26 +137,28 @@ function DetailPanel({ proc, mode, onClose }: { proc: MacroProcess; mode: ViewMo
             </div>
           )}
 
-          {/* Функции */}
           {p.functions && p.functions.length > 0 && (
             <div>
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">
-                Функции в процессе ({p.functions.length})
+                Функции из документов ({p.functions.length})
               </p>
-              <div className="space-y-1">
-                {p.functions.slice(0, 12).map((f) => (
-                  <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50">
-                    <span className="text-xs text-slate-600 flex-1 leading-tight">{f.title}</span>
-                    {f.ai_score > 0 && (
-                      <span className={`text-[10px] font-bold flex-shrink-0 ${f.ai_score >= 7 ? "text-violet-600" : "text-slate-400"}`}>
-                        {f.ai_score}
+              <div className="space-y-1.5">
+                {p.functions.map((f) => (
+                  <div key={f.id} className="border border-slate-200 rounded-lg px-3 py-2">
+                    <p className="text-xs text-slate-700 leading-snug">{f.title}</p>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      {f.source_section && (
+                        <span className="text-[9px] font-mono text-slate-400">п. {f.source_section}</span>
+                      )}
+                      <span className="text-[9px] text-slate-400">
+                        связь: {f.link_basis === "org_unit_inference" ? "по оргединице (гипотеза)" : f.link_basis}
                       </span>
-                    )}
+                      {!f.is_confirmed && (
+                        <span className="text-[9px] text-amber-600">не подтверждена</span>
+                      )}
+                    </div>
                   </div>
                 ))}
-                {p.functions.length > 12 && (
-                  <p className="text-[11px] text-slate-400 px-3 pt-1">и ещё {p.functions.length - 12}</p>
-                )}
               </div>
             </div>
           )}
@@ -241,11 +169,12 @@ function DetailPanel({ proc, mode, onClose }: { proc: MacroProcess; mode: ViewMo
 }
 
 export default function ProcessMapPage() {
-  const [mode, setMode] = useState<ViewMode>("current");
   const [processes, setProcesses] = useState<MacroProcess[]>([]);
   const [summary, setSummary] = useState<ProcessMapSummary | null>(null);
+  const [uncovered, setUncovered] = useState<UncoveredFunction[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MacroProcess | null>(null);
+  const [showUncovered, setShowUncovered] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -260,8 +189,9 @@ export default function ProcessMapPage() {
       const d = await processMapApi.list(polygon.id);
       setProcesses(d.processes || []);
       setSummary(d.summary || null);
+      setUncovered(d.uncovered_functions || []);
     } catch (e) {
-      toast({ title: "Ошибка загрузки карты", description: (e as Error).message, variant: "destructive" });
+      toast({ title: "Ошибка загрузки", description: (e as Error).message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -274,113 +204,132 @@ export default function ProcessMapPage() {
 
   return (
     <Layout>
-      <div className="px-4 lg:px-6 py-6 max-w-6xl mx-auto space-y-6">
+      <div className="px-4 lg:px-6 py-6 max-w-6xl mx-auto space-y-5">
 
-        {/* Header */}
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center flex-shrink-0">
-            <Icon name="Network" size={20} className="text-white" />
+          <div className="w-10 h-10 rounded-xl bg-slate-200 flex items-center justify-center flex-shrink-0">
+            <Icon name="FileSearch" size={20} className="text-slate-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold text-slate-900">Карта процессов</h1>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Черновая карта деятельности Департамента финансового мониторинга
+            </h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              Верхний уровень: макропроцессы подразделения, их состояние и целевая картина
+              Функции из положения о подразделении с неподтверждённой группировкой
             </p>
           </div>
         </div>
 
-        {/* Mode switch */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="inline-flex bg-slate-100 rounded-xl p-1">
-            <button
-              onClick={() => setMode("current")}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                mode === "current" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Как есть
-            </button>
-            <button
-              onClick={() => setMode("target")}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                mode === "target" ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Целевая
-            </button>
-          </div>
-          {summary && (
-            <div className="flex gap-2 flex-wrap text-xs">
-              <span className="border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
-                <b className="text-slate-800">{summary.total}</b> <span className="text-slate-500">процессов</span>
-              </span>
-              <span className="border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
-                <b className="text-slate-800">{summary.functions_total}</b> <span className="text-slate-500">функций внутри</span>
-              </span>
-              <span className="border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
-                <b className="text-violet-600">{summary.high_ai}</b> <span className="text-slate-500">с высоким AI-потенциалом</span>
-              </span>
-              <span className="border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white">
-                <span className="text-slate-500">зрелость</span> <b className="text-slate-800">{summary.avg_maturity_current}</b>
-                <span className="text-slate-400"> → </span>
-                <b className="text-emerald-600">{summary.avg_maturity_target}</b>
-              </span>
+        <div className="border-2 border-amber-300 bg-amber-50 rounded-xl px-4 py-3.5">
+          <div className="flex items-start gap-2.5">
+            <Icon name="TriangleAlert" size={17} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-amber-900 leading-relaxed">
+              <p className="font-semibold mb-1">Это не карта процессов, а черновая AI-гипотеза</p>
+              <p className="text-xs">
+                Функции извлечены из положения о подразделении. Группировка выполнена механически
+                по владеющей организационной единице. Реальные последовательности действий,
+                инициирующие события, контрольные точки и потребители результата не восстанавливались.
+                Требуется проверка владельцами деятельности.
+              </p>
+              <p className="text-xs mt-1.5">
+                Ранее показанные описания текущего состояния были сформированы из типовой банковской
+                практики и убраны из представления — они не отражают фактическое положение дел
+                в организации.
+              </p>
             </div>
-          )}
+          </div>
         </div>
+
+        {summary && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+            <div className="border border-slate-200 rounded-xl px-3 py-2.5 bg-white">
+              <p className="text-lg font-bold text-slate-900">{summary.functions_total}</p>
+              <p className="text-[11px] text-slate-500 leading-tight">функций из документов</p>
+            </div>
+            <div className="border border-slate-200 rounded-xl px-3 py-2.5 bg-white">
+              <p className="text-lg font-bold text-slate-900">{summary.functions_covered}</p>
+              <p className="text-[11px] text-slate-500 leading-tight">попало в группировку</p>
+            </div>
+            <button
+              onClick={() => setShowUncovered((v) => !v)}
+              className={`border rounded-xl px-3 py-2.5 text-left transition-colors ${
+                summary.functions_uncovered > 0
+                  ? "border-rose-200 bg-rose-50 hover:bg-rose-100"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <p className={`text-lg font-bold ${summary.functions_uncovered > 0 ? "text-rose-600" : "text-slate-900"}`}>
+                {summary.functions_uncovered}
+              </p>
+              <p className="text-[11px] text-slate-500 leading-tight">не вошло никуда</p>
+            </button>
+            <div className="border border-slate-200 rounded-xl px-3 py-2.5 bg-white">
+              <p className="text-lg font-bold text-emerald-600">{summary.confirmed_groups}</p>
+              <p className="text-[11px] text-slate-500 leading-tight">
+                подтверждено из {summary.total}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {summary && summary.multi_assigned > 0 && (
+          <p className="text-[11px] text-slate-500">
+            <Icon name="Info" size={11} className="inline mr-1" />
+            {summary.multi_assigned} связей приходится на функции, отнесённые более чем к одной группе —
+            это следствие механической группировки и требует разбора.
+          </p>
+        )}
+
+        {showUncovered && uncovered.length > 0 && (
+          <div className="border border-rose-200 rounded-xl bg-rose-50/50 p-4">
+            <p className="text-xs font-semibold text-rose-700 mb-2.5">
+              Функции, не вошедшие ни в одну группу ({uncovered.length})
+            </p>
+            <div className="space-y-1.5">
+              {uncovered.map((f) => (
+                <div key={f.id} className="text-xs text-slate-700 bg-white rounded-lg px-3 py-2 leading-snug">
+                  {f.title}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[...Array(6)].map((_, i) => <div key={i} className="h-44 bg-slate-100 rounded-xl animate-pulse" />)}
+            {[...Array(6)].map((_, i) => <div key={i} className="h-32 bg-slate-100 rounded-xl animate-pulse" />)}
           </div>
         ) : processes.length === 0 ? (
           <div className="text-center py-16 border border-dashed border-slate-200 rounded-xl">
-            <Icon name="Network" size={30} className="text-slate-300 mx-auto mb-2" />
-            <p className="text-sm text-slate-500">Карта процессов пока не построена</p>
+            <Icon name="FileSearch" size={30} className="text-slate-300 mx-auto mb-2" />
+            <p className="text-sm text-slate-500">Данные пока не загружены</p>
           </div>
         ) : (
           <>
-            {/* Основные процессы */}
             <div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="w-1 h-4 bg-blue-500 rounded-full" />
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                  Основные процессы — цепочка создания результата
-                </p>
-              </div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                Предполагаемые группы функций — основная деятельность
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {core.map((p) => (
-                  <ProcessCard key={p.id} proc={p} mode={mode} onOpen={setSelected} />
-                ))}
+                {core.map((p) => <GroupCard key={p.id} proc={p} onOpen={setSelected} />)}
               </div>
             </div>
 
-            {/* Обеспечивающие */}
             {enabling.length > 0 && (
               <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="w-1 h-4 bg-slate-400 rounded-full" />
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                    Обеспечивающие процессы
-                  </p>
-                </div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                  Предполагаемые группы функций — обеспечивающая деятельность
+                </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {enabling.map((p) => (
-                    <ProcessCard key={p.id} proc={p} mode={mode} onOpen={setSelected} />
-                  ))}
+                  {enabling.map((p) => <GroupCard key={p.id} proc={p} onOpen={setSelected} />)}
                 </div>
               </div>
             )}
-
-            <p className="text-[11px] text-slate-400 pt-2">
-              Нажмите на процесс, чтобы увидеть детали, болевые точки, целевое состояние и функции внутри.
-              Данные собраны из положений о подразделении и требуют вашей проверки.
-            </p>
           </>
         )}
       </div>
 
-      {selected && <DetailPanel proc={selected} mode={mode} onClose={() => setSelected(null)} />}
+      {selected && <DetailPanel proc={selected} onClose={() => setSelected(null)} />}
     </Layout>
   );
 }

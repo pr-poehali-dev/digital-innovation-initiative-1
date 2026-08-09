@@ -162,7 +162,19 @@ def get_current_user(conn, session_id):
 TERM_FIELDS = """t.id, t.term, t.aliases, t.short_definition, t.plain_explanation,
     t.why_matters, t.example, t.category, t.scope, t.is_ai_generated, t.is_verified,
     t.view_count, t.created_at,
-    COALESCE(m.is_favorite, FALSE), COALESCE(m.is_learned, FALSE), m.personal_note"""
+    COALESCE(m.is_favorite, FALSE), COALESCE(m.is_learned, FALSE), m.personal_note,
+    t.status, COALESCE(t.source_document, ''), COALESCE(t.source_edition, ''),
+    t.actual_date, COALESCE(t.scope_of_use, '')"""
+
+STATUS_LABELS = {
+    "ai_draft": "AI-черновик",
+    "user_draft": "Черновик пользователя",
+    "in_review": "На проверке",
+    "confirmed": "Подтверждённый термин",
+    "official": "Официальный термин",
+    "needs_update": "Требует актуализации",
+    "archived": "Архивный термин",
+}
 
 
 def row_to_term(r):
@@ -173,6 +185,9 @@ def row_to_term(r):
         "scope": r[8], "is_ai_generated": r[9], "is_verified": r[10],
         "view_count": r[11], "created_at": str(r[12]),
         "is_favorite": r[13], "is_learned": r[14], "personal_note": r[15],
+        "status": r[16], "status_label": STATUS_LABELS.get(r[16], r[16]),
+        "source_document": r[17], "source_edition": r[18],
+        "actual_date": str(r[19]) if r[19] else "", "scope_of_use": r[20],
     }
 
 
@@ -348,6 +363,12 @@ def handle_explain(conn, user, body, request_id, origin=None):
             "is_favorite": False,
             "is_learned": False,
             "personal_note": None,
+            "status": "ai_draft",
+            "status_label": STATUS_LABELS["ai_draft"],
+            "source_document": "",
+            "source_edition": "",
+            "actual_date": "",
+            "scope_of_use": "",
         },
         "was_existing": False,
     }, request_id, origin=origin)
@@ -387,12 +408,37 @@ def handle_update(conn, user, body, request_id, origin=None):
     if not term_id:
         return err_response("validation_error", "Поле term_id обязательно", 400, request_id, origin=origin)
 
-    allowed = ["term", "aliases", "short_definition", "plain_explanation", "why_matters", "example", "category"]
+    allowed = ["term", "aliases", "short_definition", "plain_explanation", "why_matters",
+               "example", "category", "status", "source_document", "source_edition",
+               "actual_date", "scope_of_use"]
+    # Статус «официальный»/«подтверждённый» требует указания источника
+    new_status = body.get("status")
+    if new_status in ("official", "confirmed"):
+        schema_check = get_schema()
+        cur_check = conn.cursor()
+        cur_check.execute(
+            f"SELECT COALESCE(source_document, '') FROM {schema_check}.glossary_terms WHERE id = %s",
+            (int(term_id),),
+        )
+        row_check = cur_check.fetchone()
+        existing_source = row_check[0] if row_check else ""
+        provided_source = (body.get("source_document") or "").strip()
+        if not provided_source and not existing_source:
+            return err_response(
+                "source_required",
+                "Статус «официальный» или «подтверждённый» требует указания источника (документ, редакция, дата)",
+                400, request_id, origin=origin,
+            )
+
     sets, params = [], []
     for field in allowed:
         if field in body:
             value = body[field]
             if field == "category" and value not in CATEGORIES:
+                continue
+            if field == "status" and value not in STATUS_LABELS:
+                continue
+            if field == "actual_date" and not value:
                 continue
             sets.append(f"{field} = %s")
             params.append(value)

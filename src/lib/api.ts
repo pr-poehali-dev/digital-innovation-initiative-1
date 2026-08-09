@@ -165,6 +165,12 @@ export interface GlossaryTerm {
   is_favorite: boolean;
   is_learned: boolean;
   personal_note: string | null;
+  status: string;
+  status_label: string;
+  source_document: string;
+  source_edition: string;
+  actual_date: string;
+  scope_of_use: string;
 }
 
 export interface GlossaryCategory {
@@ -202,8 +208,15 @@ export interface ProcessFunction {
   title: string;
   category: string;
   priority: number;
-  status: string;
-  ai_score: number;
+  link_basis: string;
+  confidence: string;
+  is_confirmed: boolean;
+  source_section: string;
+}
+
+export interface UncoveredFunction {
+  id: number;
+  title: string;
 }
 
 export interface MacroProcess {
@@ -212,24 +225,16 @@ export interface MacroProcess {
   name: string;
   stage: string;
   purpose: string;
-  trigger_event: string;
-  result_output: string;
   owner_unit_code: string;
-  current_state: string;
-  pain_points: string;
-  target_state: string;
-  target_effect: string;
-  ai_opportunity: string;
-  maturity_current: number;
-  maturity_target: number;
-  ai_potential: number;
-  priority: number;
-  horizon: string;
   sort_order: number;
+  verification_status: string;
+  source_type: string;
+  confidence: string;
+  grouping_basis: string;
+  archive_reason: string;
+  display_mode: string;
   function_count: number;
-  automated_count: number;
-  partial_count: number;
-  gap: number;
+  confirmed_count: number;
   units: ProcessUnit[];
   functions?: ProcessFunction[];
 }
@@ -239,13 +244,21 @@ export interface ProcessMapSummary {
   core: number;
   enabling: number;
   functions_total: number;
-  high_ai: number;
-  avg_maturity_current: number;
-  avg_maturity_target: number;
+  functions_covered: number;
+  functions_uncovered: number;
+  links_total: number;
+  multi_assigned: number;
+  confirmed_groups: number;
+  is_hypothesis: boolean;
+  disclaimer: string;
 }
 
 export const processMapApi = {
-  list: (projectId: number): Promise<{ processes: MacroProcess[]; summary: ProcessMapSummary }> =>
+  list: (projectId: number): Promise<{
+    processes: MacroProcess[];
+    summary: ProcessMapSummary;
+    uncovered_functions: UncoveredFunction[];
+  }> =>
     request(URLS.processMap, "/", "POST", { action: "process_map.list", project_id: projectId }),
   get: (processId: number): Promise<{ process: MacroProcess }> =>
     request(URLS.processMap, "/", "POST", { action: "process_map.get", process_id: processId }),

@@ -18,6 +18,16 @@ const CATEGORY_STYLE: Record<string, { color: string; icon: string }> = {
   general: { color: "bg-slate-100 text-slate-700", icon: "BookOpen" },
 };
 
+const TERM_STATUS_STYLE: Record<string, string> = {
+  ai_draft: "bg-amber-100 text-amber-800",
+  user_draft: "bg-slate-100 text-slate-700",
+  in_review: "bg-blue-100 text-blue-700",
+  confirmed: "bg-emerald-100 text-emerald-700",
+  official: "bg-emerald-600 text-white",
+  needs_update: "bg-rose-100 text-rose-700",
+  archived: "bg-slate-200 text-slate-500",
+};
+
 function TermCard({ term, onToggleFavorite }: { term: GlossaryTerm; onToggleFavorite: (t: GlossaryTerm) => void }) {
   const [open, setOpen] = useState(false);
   const style = CATEGORY_STYLE[term.category] || CATEGORY_STYLE.general;
@@ -34,11 +44,9 @@ function TermCard({ term, onToggleFavorite }: { term: GlossaryTerm; onToggleFavo
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-900 text-[15px]">{term.term}</span>
-            {term.is_ai_generated && (
-              <Badge variant="outline" className="text-[10px] h-5 text-violet-600 border-violet-200">
-                AI
-              </Badge>
-            )}
+            <Badge className={`text-[10px] h-5 border-0 ${TERM_STATUS_STYLE[term.status] || TERM_STATUS_STYLE.ai_draft}`}>
+              {term.status_label || "AI-черновик"}
+            </Badge>
           </span>
           {term.aliases && <span className="block text-[11px] text-slate-400 mt-0.5">{term.aliases}</span>}
           <span className="block text-sm text-slate-600 mt-1 leading-snug">{term.short_definition}</span>
@@ -80,6 +88,26 @@ function TermCard({ term, onToggleFavorite }: { term: GlossaryTerm; onToggleFavo
               <p className="text-sm text-slate-600 leading-relaxed">{term.example}</p>
             </div>
           )}
+          <div className="border border-slate-200 rounded-lg px-3 py-2.5 bg-white">
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Источник</p>
+            {term.source_document ? (
+              <>
+                <p className="text-xs text-slate-700 leading-relaxed">{term.source_document}</p>
+                {term.source_edition && (
+                  <p className="text-[11px] text-slate-500 mt-0.5">Редакция: {term.source_edition}</p>
+                )}
+                {term.actual_date && (
+                  <p className="text-[11px] text-slate-500">Актуально на: {term.actual_date}</p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Источник не указан. Определение сформировано ИИ и требует проверки перед
+                использованием в документах.
+              </p>
+            )}
+          </div>
+
           <Badge className={`text-[10px] border-0 ${(CATEGORY_STYLE[term.category] || CATEGORY_STYLE.general).color}`}>
             {term.category_label}
           </Badge>
@@ -149,7 +177,10 @@ export default function GlossaryPage() {
       if (d.was_existing) {
         toast({ title: "Этот термин уже есть в глоссарии", description: d.term.term });
       } else {
-        toast({ title: "Термин добавлен в глоссарий", description: d.term.term });
+        toast({
+          title: "Добавлен как AI-черновик",
+          description: `${d.term.term} — требует проверки и указания источника`,
+        });
       }
       setActiveCat("all");
       setOnlyFav(false);
@@ -203,7 +234,8 @@ export default function GlossaryPage() {
             </Button>
           </div>
           <p className="text-[11px] text-slate-500 mt-2">
-            AI объяснит термин с учётом вашей роли и сохранит его в глоссарий. Проверяйте важные формулировки — AI может ошибаться.
+            AI объяснит термин с учётом вашей роли и сохранит его как <b>AI-черновик</b>. Такое определение
+            нельзя использовать в документах без проверки и указания источника.
           </p>
         </div>
 

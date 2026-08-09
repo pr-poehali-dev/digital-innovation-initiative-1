@@ -65,7 +65,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Кабинет руководителя",
     icon: "Crown",
     items: [
-      { id: "chief.processMap", label: "Карта процессов", icon: "Network", href: ROUTES.processMap, active: true, badge: { text: "Новое", tone: "success" } },
+      { id: "chief.processMap", label: "Черновая карта ДФМ", icon: "FileSearch", href: ROUTES.processMap, active: true, badge: { text: "Черновик", tone: "neutral" } },
       { id: "chief.glossary", label: "Глоссарий", icon: "BookOpen", href: ROUTES.glossary, active: true },
     ],
   },

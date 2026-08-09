@@ -1,6 +1,13 @@
 """
-Карта макропроцессов подразделения: верхний читаемый уровень над функциями.
-Показывает состояние «как есть» и целевое состояние, разрыв между ними.
+Черновая карта деятельности подразделения.
+
+ВАЖНО: это НЕ карта процессов. Группировка функций — неподтверждённая AI-гипотеза,
+построенная механически по владеющей организационной единице из положения.
+Реальные последовательности действий не восстанавливались.
+
+Отображаются только сведения, подтверждённые внутренними документами.
+Описания из типовой банковской практики перенесены в архивный слой
+и НЕ показываются как фактическое состояние (AS IS).
 
 ВСЕ запросы: POST / с обязательным полем action.
 Поддерживаемые action:
@@ -109,19 +116,17 @@ def check_access(cur, schema, project_id, user_id):
     return row[0] if row else None
 
 
-PROC_FIELDS = """id, code, name, stage, purpose, trigger_event, result_output, owner_unit_code,
-    current_state, pain_points, target_state, target_effect, ai_opportunity,
-    maturity_current, maturity_target, ai_potential, priority, horizon, sort_order"""
+PROC_FIELDS = """id, code, name, stage, purpose, owner_unit_code, sort_order,
+    verification_status, source_type, confidence, grouping_basis,
+    archive_reason, display_mode"""
 
 
 def row_to_proc(r):
     return {
         "id": r[0], "code": r[1], "name": r[2], "stage": r[3],
-        "purpose": r[4], "trigger_event": r[5], "result_output": r[6],
-        "owner_unit_code": r[7], "current_state": r[8], "pain_points": r[9],
-        "target_state": r[10], "target_effect": r[11], "ai_opportunity": r[12],
-        "maturity_current": r[13], "maturity_target": r[14],
-        "ai_potential": r[15], "priority": r[16], "horizon": r[17], "sort_order": r[18],
+        "purpose": r[4], "owner_unit_code": r[5], "sort_order": r[6],
+        "verification_status": r[7], "source_type": r[8], "confidence": r[9],
+        "grouping_basis": r[10], "archive_reason": r[11], "display_mode": r[12],
     }
 
 
@@ -148,15 +153,13 @@ def handle_list(conn, user, body, request_id, origin=None):
 
     cur.execute(
         f"""SELECT mpf.macro_process_id, COUNT(*),
-                   SUM(CASE WHEN a.current_status = 'automated' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN a.current_status = 'partial' THEN 1 ELSE 0 END)
+                   SUM(CASE WHEN mpf.is_confirmed THEN 1 ELSE 0 END)
             FROM {schema}.macro_process_functions mpf
-            LEFT JOIN {schema}.dept_automation a ON a.function_id = mpf.function_id
             WHERE mpf.macro_process_id = ANY(%s)
             GROUP BY mpf.macro_process_id""",
         (proc_ids,),
     )
-    fn_stats = {r[0]: {"functions": r[1], "automated": r[2] or 0, "partial": r[3] or 0} for r in cur.fetchall()}
+    fn_stats = {r[0]: {"functions": r[1], "confirmed": r[2] or 0} for r in cur.fetchall()}
 
     cur.execute(
         f"""SELECT mpu.macro_process_id, u.code, u.name, u.type, mpu.role
@@ -171,24 +174,68 @@ def handle_list(conn, user, body, request_id, origin=None):
         units_map.setdefault(r[0], []).append({"code": r[1], "name": r[2], "type": r[3], "role": r[4]})
 
     for p in procs:
-        stats = fn_stats.get(p["id"], {"functions": 0, "automated": 0, "partial": 0})
+        stats = fn_stats.get(p["id"], {"functions": 0, "confirmed": 0})
         p["function_count"] = stats["functions"]
-        p["automated_count"] = stats["automated"]
-        p["partial_count"] = stats["partial"]
+        p["confirmed_count"] = stats["confirmed"]
         p["units"] = units_map.get(p["id"], [])
-        p["gap"] = p["maturity_target"] - p["maturity_current"]
+
+    # Честное покрытие: сколько функций из документов реально попало в группировку
+    cur.execute(
+        f"""SELECT COUNT(*) FROM {schema}.dept_functions
+            WHERE project_id = %s AND dept_name NOT LIKE '%%SMOKETEST%%'""",
+        (project_id,),
+    )
+    fns_total = cur.fetchone()[0]
+
+    cur.execute(
+        f"""SELECT COUNT(DISTINCT mpf.function_id)
+            FROM {schema}.macro_process_functions mpf
+            WHERE mpf.macro_process_id = ANY(%s)""",
+        (proc_ids,),
+    )
+    fns_covered = cur.fetchone()[0]
+
+    cur.execute(
+        f"""SELECT df.id, df.title FROM {schema}.dept_functions df
+            WHERE df.project_id = %s AND df.dept_name NOT LIKE '%%SMOKETEST%%'
+              AND df.id NOT IN (
+                  SELECT function_id FROM {schema}.macro_process_functions
+              )
+            ORDER BY df.id""",
+        (project_id,),
+    )
+    uncovered = [{"id": r[0], "title": r[1]} for r in cur.fetchall()]
+
+    cur.execute(
+        f"""SELECT COUNT(*) FROM {schema}.macro_process_functions mpf
+            WHERE mpf.macro_process_id = ANY(%s)""",
+        (proc_ids,),
+    )
+    links_total = cur.fetchone()[0]
 
     summary = {
         "total": len(procs),
         "core": len([p for p in procs if p["stage"] == "core"]),
         "enabling": len([p for p in procs if p["stage"] == "enabling"]),
-        "functions_total": sum(p["function_count"] for p in procs),
-        "high_ai": len([p for p in procs if p["ai_potential"] >= 8]),
-        "avg_maturity_current": round(sum(p["maturity_current"] for p in procs) / len(procs), 1),
-        "avg_maturity_target": round(sum(p["maturity_target"] for p in procs) / len(procs), 1),
+        "functions_total": fns_total,
+        "functions_covered": fns_covered,
+        "functions_uncovered": fns_total - fns_covered,
+        "links_total": links_total,
+        "multi_assigned": links_total - fns_covered,
+        "confirmed_groups": len([p for p in procs if p["verification_status"] == "confirmed"]),
+        "is_hypothesis": True,
+        "disclaimer": (
+            "Черновая AI-гипотеза группировки функций. Функции извлечены из положения "
+            "о подразделении. Группировка выполнена механически по владеющей "
+            "организационной единице и НЕ является описанием процессов. "
+            "Требует проверки владельцами деятельности."
+        ),
     }
 
-    return ok_response({"processes": procs, "summary": summary}, request_id, origin=origin)
+    return ok_response(
+        {"processes": procs, "summary": summary, "uncovered_functions": uncovered},
+        request_id, origin=origin,
+    )
 
 
 def handle_get(conn, user, body, request_id, origin=None):
@@ -206,24 +253,26 @@ def handle_get(conn, user, body, request_id, origin=None):
     row = cur.fetchone()
     if not row:
         return err_response("not_found", "Процесс не найден", 404, request_id, origin=origin)
-    if not check_access(cur, schema, row[19], user["id"]):
+    if not check_access(cur, schema, row[13], user["id"]):
         return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
 
     proc = row_to_proc(row)
 
+    # Только функции из документов + основание связи и уровень уверенности
     cur.execute(
         f"""SELECT df.id, df.title, df.category, df.priority,
-                   COALESCE(a.current_status, 'manual'), COALESCE(a.ai_potential_score, 0)
+                   mpf.link_basis, mpf.confidence, mpf.is_confirmed,
+                   COALESCE(df.source_section_code, '')
             FROM {schema}.macro_process_functions mpf
             JOIN {schema}.dept_functions df ON df.id = mpf.function_id
-            LEFT JOIN {schema}.dept_automation a ON a.function_id = df.id
             WHERE mpf.macro_process_id = %s
-            ORDER BY COALESCE(a.ai_potential_score, 0) DESC, df.title""",
+            ORDER BY df.id""",
         (process_id,),
     )
     proc["functions"] = [
         {"id": r[0], "title": r[1], "category": r[2], "priority": r[3],
-         "status": r[4], "ai_score": r[5]}
+         "link_basis": r[4], "confidence": r[5], "is_confirmed": r[6],
+         "source_section": r[7]}
         for r in cur.fetchall()
     ]
 
@@ -255,9 +304,7 @@ def handle_update(conn, user, body, request_id, origin=None):
     if role not in ("owner", "admin"):
         return err_response("access_denied", "Только владелец проекта может менять карту", 403, request_id, origin=origin)
 
-    allowed = ["name", "purpose", "trigger_event", "result_output", "current_state",
-               "pain_points", "target_state", "target_effect", "ai_opportunity",
-               "maturity_current", "maturity_target", "ai_potential", "priority", "horizon"]
+    allowed = ["name", "purpose", "grouping_basis", "verification_status", "confidence"]
     sets, params = [], []
     for field in allowed:
         if field in body:
