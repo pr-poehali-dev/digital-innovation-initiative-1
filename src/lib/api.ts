@@ -25,6 +25,7 @@ const URLS = {
   deptFunctions: "https://functions.poehali.dev/7e9accad-43d6-44e2-b388-14d15b7a8153",
   solutionsRegistry: "https://functions.poehali.dev/da6fac65-f14d-490d-8abd-2b8654237370",
   notifications: "https://functions.poehali.dev/2853134d-9e44-4adb-9b07-64cf43b26149",
+  glossary: "https://functions.poehali.dev/b4008710-65c7-411a-b175-7d28f7248be3",
 };
 
 function getSession(): string {
@@ -143,6 +144,49 @@ export const notificationsApi = {
     request(URLS.notifications, "/", "POST", { action: "notification.mark_read", notification_id: notificationId }),
   markAllRead: () =>
     request(URLS.notifications, "/", "POST", { action: "notification.mark_all_read" }),
+};
+
+export interface GlossaryTerm {
+  id: number;
+  term: string;
+  aliases: string;
+  short_definition: string;
+  plain_explanation: string;
+  why_matters: string;
+  example: string;
+  category: string;
+  category_label: string;
+  scope: string;
+  is_ai_generated: boolean;
+  is_verified: boolean;
+  view_count: number;
+  created_at: string;
+  is_favorite: boolean;
+  is_learned: boolean;
+  personal_note: string | null;
+}
+
+export interface GlossaryCategory {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export const glossaryApi = {
+  list: (params?: { category?: string; search?: string; only_favorites?: boolean }): Promise<{ items: GlossaryTerm[] }> =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.list", ...params }),
+  categories: (): Promise<{ categories: GlossaryCategory[]; total: number; favorites: number }> =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.categories" }),
+  get: (termId: number): Promise<{ term: GlossaryTerm }> =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.get", term_id: termId }),
+  explain: (term: string): Promise<{ term: GlossaryTerm; was_existing: boolean }> =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.explain", term }),
+  create: (data: Partial<GlossaryTerm>) =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.create", ...data }),
+  update: (termId: number, data: Partial<GlossaryTerm>) =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.update", term_id: termId, ...data }),
+  mark: (termId: number, data: { is_favorite?: boolean; is_learned?: boolean; personal_note?: string }) =>
+    request(URLS.glossary, "/", "POST", { action: "glossary.mark", term_id: termId, ...data }),
 };
 
 export const projectsApi = {

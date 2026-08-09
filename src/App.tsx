@@ -59,6 +59,7 @@ import CompetencyMapPage from "./pages/CompetencyMapPage";
 import GuidePage from "./pages/GuidePage";
 import GoalsPage from "./pages/GoalsPage";
 import SolutionsPage from "./pages/SolutionsPage";
+import GlossaryPage from "./pages/GlossaryPage";
 import PresentationPage from "./pages/PresentationPage";
 import AdminPresentationPage from "./pages/admin/AdminPresentationPage";
 
@@ -126,6 +127,7 @@ const App = () => (
               <Route path="/cabinet/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
               <Route path="/cabinet/goals" element={<ProtectedRoute><GoalsPage /></ProtectedRoute>} />
               <Route path="/cabinet/solutions" element={<ProtectedRoute><SolutionsPage /></ProtectedRoute>} />
+              <Route path="/cabinet/glossary" element={<ProtectedRoute><GlossaryPage /></ProtectedRoute>} />
               <Route path="/cabinet/profile" element={<ProtectedRoute><ProfessionalPassportPage /></ProtectedRoute>} />
               <Route path="/cabinet/growth" element={<ProtectedRoute><GrowthNavigatorPage /></ProtectedRoute>} />
               <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />

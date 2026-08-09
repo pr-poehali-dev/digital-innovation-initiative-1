@@ -13,13 +13,14 @@ export const ROUTES = {
   competencyMap:  "/cabinet/competency-map",
   goals:          "/cabinet/goals",
   solutions:      "/cabinet/solutions",
+  glossary:       "/cabinet/glossary",
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;
 
 // ── Секции sidebar ─────────────────────────────────────────────────────────
 
-export type NavSectionKey = "overview" | "workbench" | "solutions" | "profile" | "growth" | "learning";
+export type NavSectionKey = "overview" | "workbench" | "chief" | "solutions" | "profile" | "growth" | "learning";
 
 export interface NavItem {
   id: string;
@@ -56,6 +57,14 @@ export const NAV_SECTIONS: NavSection[] = [
     singleItem: true,
     items: [
       { id: "workbench", label: "Рабочий кабинет", icon: "Briefcase", href: ROUTES.workbench, active: true },
+    ],
+  },
+  {
+    key: "chief",
+    label: "Кабинет руководителя",
+    icon: "Crown",
+    items: [
+      { id: "chief.glossary", label: "Глоссарий", icon: "BookOpen", href: ROUTES.glossary, active: true, badge: { text: "Новое", tone: "success" } },
     ],
   },
   {

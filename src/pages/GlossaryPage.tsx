@@ -8,6 +8,7 @@ import { toast } from "@/components/ui/use-toast";
 import { glossaryApi, type GlossaryTerm, type GlossaryCategory } from "@/lib/api";
 
 const CATEGORY_STYLE: Record<string, { color: string; icon: string }> = {
+  org: { color: "bg-indigo-100 text-indigo-700", icon: "Building2" },
   internal_control: { color: "bg-blue-100 text-blue-700", icon: "ShieldCheck" },
   digital: { color: "bg-violet-100 text-violet-700", icon: "Cpu" },
   ai: { color: "bg-emerald-100 text-emerald-700", icon: "Sparkles" },
