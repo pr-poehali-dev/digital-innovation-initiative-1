@@ -206,12 +206,19 @@ def handle_list(conn, user, body, request_id, origin=None):
     )
     uncovered = [{"id": r[0], "title": r[1]} for r in cur.fetchall()]
 
+    # Раздельные показатели вместо одного неоднозначного числа
     cur.execute(
-        f"""SELECT COUNT(*) FROM {schema}.macro_process_functions mpf
-            WHERE mpf.macro_process_id = ANY(%s)""",
+        f"""SELECT COUNT(*), COALESCE(SUM(n), 0), COALESCE(SUM(n - 1), 0),
+                   COUNT(*) FILTER (WHERE n > 1), COALESCE(MAX(n), 0)
+            FROM (
+                SELECT function_id, COUNT(*) AS n
+                FROM {schema}.macro_process_functions
+                WHERE macro_process_id = ANY(%s)
+                GROUP BY function_id
+            ) c""",
         (proc_ids,),
     )
-    links_total = cur.fetchone()[0]
+    _in_groups, links_total, links_redundant, fns_multi, max_per_fn = cur.fetchone()
 
     summary = {
         "total": len(procs),
@@ -220,8 +227,10 @@ def handle_list(conn, user, body, request_id, origin=None):
         "functions_total": fns_total,
         "functions_covered": fns_covered,
         "functions_uncovered": fns_total - fns_covered,
-        "links_total": links_total,
-        "multi_assigned": links_total - fns_covered,
+        "links_total": int(links_total),
+        "links_redundant": int(links_redundant),
+        "functions_multi_assigned": int(fns_multi),
+        "max_groups_per_function": int(max_per_fn),
         "confirmed_groups": len([p for p in procs if p["verification_status"] == "confirmed"]),
         "is_hypothesis": True,
         "disclaimer": (
@@ -253,7 +262,8 @@ def handle_get(conn, user, body, request_id, origin=None):
     row = cur.fetchone()
     if not row:
         return err_response("not_found", "Процесс не найден", 404, request_id, origin=origin)
-    if not check_access(cur, schema, row[13], user["id"]):
+    role = check_access(cur, schema, row[13], user["id"])
+    if not role:
         return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
 
     proc = row_to_proc(row)
@@ -284,6 +294,29 @@ def handle_get(conn, user, body, request_id, origin=None):
         (process_id,),
     )
     proc["units"] = [{"code": r[0], "name": r[1], "type": r[2], "role": r[3]} for r in cur.fetchall()]
+
+    # Режим аудита: архивные сведения из типовой практики доступны ТОЛЬКО владельцу
+    # проекта и только по явному запросу. Никогда не отображаются как AS IS.
+    if body.get("audit_mode") and role in ("owner", "admin"):
+        cur.execute(
+            f"""SELECT archived_current_state, archived_pain_points, archived_target_state,
+                       archived_target_effect, archived_ai_opportunity, archived_at
+                FROM {schema}.macro_processes WHERE id = %s""",
+            (process_id,),
+        )
+        a = cur.fetchone()
+        if a and a[5]:
+            proc["archived_data"] = {
+                "current_state": a[0], "pain_points": a[1], "target_state": a[2],
+                "target_effect": a[3], "ai_opportunity": a[4], "archived_at": str(a[5]),
+                "warning": (
+                    "АРХИВ. Сформировано ИИ из типовой банковской практики, "
+                    "НЕ из документов организации. Не является описанием "
+                    "фактического состояния (AS IS). Только для аудита."
+                ),
+            }
+    proc["has_archived_data"] = True
+    proc["audit_access"] = role in ("owner", "admin")
 
     return ok_response({"process": proc}, request_id, origin=origin)
 

@@ -18,12 +18,13 @@ const CATEGORY_STYLE: Record<string, { color: string; icon: string }> = {
   general: { color: "bg-slate-100 text-slate-700", icon: "BookOpen" },
 };
 
+// Единый справочник статусов жизненного цикла — совпадает с картой деятельности
 const TERM_STATUS_STYLE: Record<string, string> = {
   ai_draft: "bg-amber-100 text-amber-800",
   user_draft: "bg-slate-100 text-slate-700",
   in_review: "bg-blue-100 text-blue-700",
   confirmed: "bg-emerald-100 text-emerald-700",
-  official: "bg-emerald-600 text-white",
+  approved: "bg-emerald-600 text-white",
   needs_update: "bg-rose-100 text-rose-700",
   archived: "bg-slate-200 text-slate-500",
 };

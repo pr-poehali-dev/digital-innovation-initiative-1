@@ -272,12 +272,34 @@ export default function ProcessMapPage() {
           </div>
         )}
 
-        {summary && summary.multi_assigned > 0 && (
-          <p className="text-[11px] text-slate-500">
-            <Icon name="Info" size={11} className="inline mr-1" />
-            {summary.multi_assigned} связей приходится на функции, отнесённые более чем к одной группе —
-            это следствие механической группировки и требует разбора.
-          </p>
+        {summary && summary.functions_multi_assigned > 0 && (
+          <div className="border border-slate-200 rounded-xl bg-white px-4 py-3">
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Качество группировки
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-xs">
+              <div>
+                <span className="font-bold text-slate-900">{summary.functions_multi_assigned}</span>
+                <span className="text-slate-500 ml-1">функций в нескольких группах</span>
+              </div>
+              <div>
+                <span className="font-bold text-slate-900">{summary.links_total}</span>
+                <span className="text-slate-500 ml-1">связей всего</span>
+              </div>
+              <div>
+                <span className="font-bold text-amber-600">{summary.links_redundant}</span>
+                <span className="text-slate-500 ml-1">избыточных связей</span>
+              </div>
+              <div>
+                <span className="font-bold text-slate-900">{summary.max_groups_per_function}</span>
+                <span className="text-slate-500 ml-1">максимум групп на функцию</span>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-2">
+              Избыточные связи — следствие механической группировки по оргединице. Требуют разбора
+              владельцами деятельности.
+            </p>
+          </div>
         )}
 
         {showUncovered && uncovered.length > 0 && (

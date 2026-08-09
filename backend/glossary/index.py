@@ -166,15 +166,31 @@ TERM_FIELDS = """t.id, t.term, t.aliases, t.short_definition, t.plain_explanatio
     t.status, COALESCE(t.source_document, ''), COALESCE(t.source_edition, ''),
     t.actual_date, COALESCE(t.scope_of_use, '')"""
 
-STATUS_LABELS = {
+# ЕДИНЫЙ справочник статусов жизненного цикла — общий для всей системы.
+# Показывает СТЕПЕНЬ ПРОВЕРКИ. Не смешивать с типом/происхождением.
+LIFECYCLE_STATUSES = {
     "ai_draft": "AI-черновик",
     "user_draft": "Черновик пользователя",
     "in_review": "На проверке",
-    "confirmed": "Подтверждённый термин",
-    "official": "Официальный термин",
+    "confirmed": "Подтверждено владельцем",
+    "approved": "Утверждено",
     "needs_update": "Требует актуализации",
-    "archived": "Архивный термин",
+    "archived": "Архив",
 }
+
+# Отдельная ось: ТИП (происхождение) термина. Не является статусом.
+TERM_TYPES = {
+    "normative": "Нормативный",
+    "official_internal": "Официальный внутренний",
+    "professional": "Профессиональный",
+    "internal_working": "Внутренний рабочий",
+    "abbreviation": "Аббревиатура",
+    "technological": "Технологический",
+    "ai_suggestion": "AI-предложение",
+}
+
+# Обратная совместимость имени
+STATUS_LABELS = LIFECYCLE_STATUSES
 
 
 def row_to_term(r):
@@ -411,9 +427,9 @@ def handle_update(conn, user, body, request_id, origin=None):
     allowed = ["term", "aliases", "short_definition", "plain_explanation", "why_matters",
                "example", "category", "status", "source_document", "source_edition",
                "actual_date", "scope_of_use"]
-    # Статус «официальный»/«подтверждённый» требует указания источника
+    # Статусы «подтверждено владельцем»/«утверждено» требуют указания источника
     new_status = body.get("status")
-    if new_status in ("official", "confirmed"):
+    if new_status in ("confirmed", "approved"):
         schema_check = get_schema()
         cur_check = conn.cursor()
         cur_check.execute(
@@ -426,7 +442,7 @@ def handle_update(conn, user, body, request_id, origin=None):
         if not provided_source and not existing_source:
             return err_response(
                 "source_required",
-                "Статус «официальный» или «подтверждённый» требует указания источника (документ, редакция, дата)",
+                "Статус «подтверждено владельцем» или «утверждено» требует указания источника (документ, редакция, дата)",
                 400, request_id, origin=origin,
             )
 

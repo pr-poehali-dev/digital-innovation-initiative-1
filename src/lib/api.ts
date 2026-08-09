@@ -247,7 +247,9 @@ export interface ProcessMapSummary {
   functions_covered: number;
   functions_uncovered: number;
   links_total: number;
-  multi_assigned: number;
+  links_redundant: number;
+  functions_multi_assigned: number;
+  max_groups_per_function: number;
   confirmed_groups: number;
   is_hypothesis: boolean;
   disclaimer: string;
