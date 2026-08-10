@@ -3,6 +3,15 @@ import { useAdmin } from "@/lib/admin-context";
 import Icon from "@/components/ui/icon";
 import SeoMeta from "@/components/SeoMeta";
 
+const CABINET_NAV = [
+  { label: "Мой фокус",    icon: "Crosshair",       href: "/admin/exec" },
+  { label: "Инициативы",   icon: "Rocket",          href: "/admin/exec/initiatives" },
+  { label: "Стейкхолдеры", icon: "Users",           href: "/admin/exec/stakeholders" },
+  { label: "Решения",      icon: "GitPullRequest",  href: "/admin/exec/decisions" },
+  { label: "Полномочия",   icon: "Shield",          href: "/admin/exec/authority" },
+  { label: "Диагностика",  icon: "Stethoscope",     href: "/admin/exec/diagnostics" },
+];
+
 const NAV = [
   { label: "Дашборд",     icon: "LayoutDashboard", href: "/admin" },
   { label: "Пользователи", icon: "Users",           href: "/admin/users" },
@@ -46,7 +55,31 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <span className="ml-auto text-xs text-gray-600 font-medium">admin</span>
         </div>
 
-        <nav className="flex-1 py-4 px-2 space-y-0.5">
+        <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto">
+          <p className="px-3 pb-1.5 pt-1 text-[10px] font-semibold text-orange-500/80 uppercase tracking-wider">
+            Кабинет руководителя
+          </p>
+          {CABINET_NAV.map(item => (
+            <NavLink
+              key={item.href}
+              to={item.href}
+              end={item.href === "/admin/exec"}
+              className={({ isActive }) =>
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  isActive
+                    ? "bg-orange-500/15 text-orange-300 font-medium"
+                    : "text-gray-400 hover:text-white hover:bg-gray-900"
+                }`
+              }
+            >
+              <Icon name={item.icon} size={16} />
+              {item.label}
+            </NavLink>
+          ))}
+
+          <p className="px-3 pb-1.5 pt-4 text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
+            Платформа
+          </p>
           {NAV.map(item => (
             <NavLink
               key={item.href}

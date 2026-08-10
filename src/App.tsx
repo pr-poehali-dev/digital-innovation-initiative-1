@@ -30,6 +30,13 @@ import AdminContentPage from "./pages/admin/AdminContentPage";
 import AdminCompetenciesPage from "./pages/admin/AdminCompetenciesPage";
 import AdminAdoptionPage from "./pages/admin/AdminAdoptionPage";
 import AdminBenchmarkPage from "./pages/admin/AdminBenchmarkPage";
+import ExecFocusPage from "./pages/admin/exec/ExecFocusPage";
+import ExecInitiativesPage from "./pages/admin/exec/ExecInitiativesPage";
+import ExecInitiativeDetailPage from "./pages/admin/exec/ExecInitiativeDetailPage";
+import ExecStakeholdersPage from "./pages/admin/exec/ExecStakeholdersPage";
+import ExecDecisionsPage from "./pages/admin/exec/ExecDecisionsPage";
+import ExecAuthorityPage from "./pages/admin/exec/ExecAuthorityPage";
+import ExecDiagnosticsPage from "./pages/admin/exec/ExecDiagnosticsPage";
 import Index from "./pages/Index";
 import WelcomePage from "./pages/WelcomePage";
 import NotFound from "./pages/NotFound";
@@ -108,6 +115,13 @@ const App = () => (
               <Route path="/admin/analytics/competency-map" element={<AdminRoute><AdminAdoptionPage /></AdminRoute>} />
               <Route path="/admin/benchmark" element={<AdminRoute><AdminBenchmarkPage /></AdminRoute>} />
               <Route path="/admin/presentation" element={<AdminRoute><AdminPresentationPage /></AdminRoute>} />
+              <Route path="/admin/exec" element={<AdminRoute><ExecFocusPage /></AdminRoute>} />
+              <Route path="/admin/exec/initiatives" element={<AdminRoute><ExecInitiativesPage /></AdminRoute>} />
+              <Route path="/admin/exec/initiatives/:id" element={<AdminRoute><ExecInitiativeDetailPage /></AdminRoute>} />
+              <Route path="/admin/exec/stakeholders" element={<AdminRoute><ExecStakeholdersPage /></AdminRoute>} />
+              <Route path="/admin/exec/decisions" element={<AdminRoute><ExecDecisionsPage /></AdminRoute>} />
+              <Route path="/admin/exec/authority" element={<AdminRoute><ExecAuthorityPage /></AdminRoute>} />
+              <Route path="/admin/exec/diagnostics" element={<AdminRoute><ExecDiagnosticsPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}

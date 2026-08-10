@@ -1,0 +1,59 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized focus",
+      "method": "GET",
+      "path": "/?action=focus",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized initiatives",
+      "method": "GET",
+      "path": "/?action=initiatives",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized stakeholders",
+      "method": "GET",
+      "path": "/?action=stakeholders",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized decisions",
+      "method": "GET",
+      "path": "/?action=decisions",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized diagnostics",
+      "method": "GET",
+      "path": "/?action=diagnostics",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save blocked",
+      "method": "POST",
+      "path": "/?action=save_initiative",
+      "body": {"title": "test"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
