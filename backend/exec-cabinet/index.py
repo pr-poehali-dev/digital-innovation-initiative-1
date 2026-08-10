@@ -678,8 +678,11 @@ def handler(event: dict, context) -> dict:
             cur.execute(f"""
                 SELECT l.id, l.entity_type, l.entity_id, l.action, l.actor,
                        l.after_json, l.reason, l.created_at,
-                       COALESCE(i.title, s_i.title, d_i.title, ra_i.title, p.display_name) AS subject_title,
-                       COALESCE(sp.display_name, dp.question) AS subject_detail
+                       COALESCE(i.title, s_i.title, d_i.title, ra_i.title, p.display_name,
+                                ms.title, iss.title, LEFT(rsk.description, 120),
+                                LEFT(act.description, 120), esc_sub.subj) AS subject_title,
+                       COALESCE(sp.display_name, dp.question, ms_i.title, iss_i.title,
+                                rsk_i.title) AS subject_detail
                 FROM {SCHEMA}.exec_audit_log l
                 LEFT JOIN {SCHEMA}.exec_initiative i
                        ON l.entity_type = 'initiative' AND i.id = l.entity_id
@@ -696,6 +699,24 @@ def handler(event: dict, context) -> dict:
                 LEFT JOIN {SCHEMA}.exec_initiative ra_i ON ra_i.id = ra.initiative_id
                 LEFT JOIN {SCHEMA}.exec_person p
                        ON l.entity_type = 'person' AND p.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_milestone ms
+                       ON l.entity_type = 'milestone' AND ms.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_initiative ms_i ON ms_i.id = ms.initiative_id
+                LEFT JOIN {SCHEMA}.exec_issue iss
+                       ON l.entity_type = 'issue' AND iss.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_initiative iss_i ON iss_i.id = iss.initiative_id
+                LEFT JOIN {SCHEMA}.exec_risk rsk
+                       ON l.entity_type = 'risk' AND rsk.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_initiative rsk_i ON rsk_i.id = rsk.initiative_id
+                LEFT JOIN {SCHEMA}.exec_action act
+                       ON l.entity_type = 'action' AND act.id = l.entity_id
+                LEFT JOIN LATERAL (
+                    SELECT COALESCE(ei.title, LEFT(er.description, 120)) AS subj
+                    FROM {SCHEMA}.exec_escalation e
+                    LEFT JOIN {SCHEMA}.exec_issue ei ON ei.id = e.issue_id
+                    LEFT JOIN {SCHEMA}.exec_risk er ON er.id = e.risk_id
+                    WHERE l.entity_type = 'escalation' AND e.id = l.entity_id
+                ) esc_sub ON true
                 {where}
                 ORDER BY l.created_at DESC LIMIT %s
             """, params)

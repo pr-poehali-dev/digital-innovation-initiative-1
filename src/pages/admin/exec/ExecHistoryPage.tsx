@@ -12,6 +12,11 @@ const ENTITY_LABELS: Record<string, { title: string; icon: string; path?: string
   decision: { title: "Решение", icon: "GitPullRequest", path: "/admin/exec/decisions" },
   role_assignment: { title: "Назначение роли", icon: "Shield" },
   person: { title: "Участник", icon: "Contact", path: "/admin/exec/persons" },
+  milestone: { title: "Контрольная точка", icon: "Flag", path: "/admin/exec/control" },
+  issue: { title: "Проблема", icon: "TriangleAlert", path: "/admin/exec/control" },
+  risk: { title: "Риск", icon: "ShieldAlert", path: "/admin/exec/control" },
+  action: { title: "Действие", icon: "ListChecks", path: "/admin/exec/control" },
+  escalation: { title: "Эскалация", icon: "ArrowUpCircle", path: "/admin/exec/control" },
 };
 
 const ACTION_LABELS: Record<string, { title: string; cls: string }> = {
@@ -20,6 +25,16 @@ const ACTION_LABELS: Record<string, { title: string; cls: string }> = {
   set_verification: {
     title: "Смена статуса",
     cls: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+  },
+  reschedule: { title: "Перенос срока", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  lift_block: { title: "Блокировка снята", cls: "bg-green-500/15 text-green-300 border-green-500/30" },
+  next_action_manual: {
+    title: "Действие задано вручную",
+    cls: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+  },
+  next_action_reset: {
+    title: "Возврат к авторасчёту",
+    cls: "bg-gray-500/15 text-gray-400 border-gray-600/30",
   },
 };
 
@@ -64,6 +79,33 @@ const FIELD_LABELS: Record<string, string> = {
   display_name: "Обозначение",
   position_title: "Должность",
   org_name: "Организация",
+  plan_date: "Плановая дата",
+  fact_date: "Фактическая дата",
+  milestone_type: "Тип точки",
+  achievement_criteria: "Критерий достижения",
+  achievement_evidence: "Подтверждающий результат",
+  reschedule_reason: "Причина переноса",
+  criticality: "Критичность",
+  detected_at: "Дата выявления",
+  root_cause: "Причина",
+  resolution_criteria: "Критерий устранения",
+  resolution_result: "Результат устранения",
+  resolved_at: "Дата устранения",
+  is_blocking: "Признак блокировки",
+  block_what: "Что заблокировано",
+  block_deadline: "Крайний срок снятия",
+  probability: "Вероятность",
+  impact: "Влияние",
+  trigger_indicator: "Индикатор наступления",
+  preventive_measures: "Предупреждающие меры",
+  response_plan: "План реагирования",
+  next_review_at: "Следующий пересмотр",
+  completion_criteria: "Критерий завершения",
+  delay_reason: "Причина просрочки",
+  level_code: "Уровень эскалации",
+  passed_at: "Дата передачи",
+  review_due_at: "Срок рассмотрения",
+  decision_text: "Принятое решение",
 };
 
 function fmtWhen(iso: string): string {

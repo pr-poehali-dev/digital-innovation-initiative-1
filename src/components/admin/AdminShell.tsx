@@ -7,6 +7,7 @@ import { useExecSettings } from "@/lib/execSettings";
 const CABINET_NAV = [
   { label: "Мой фокус",    icon: "Crosshair",       href: "/admin/exec" },
   { label: "Инициативы",   icon: "Rocket",          href: "/admin/exec/initiatives" },
+  { label: "Контроль",     icon: "Flag",            href: "/admin/exec/control" },
   { label: "Стейкхолдеры", icon: "Users",           href: "/admin/exec/stakeholders" },
   { label: "Решения",      icon: "GitPullRequest",  href: "/admin/exec/decisions" },
   { label: "Полномочия",   icon: "Shield",          href: "/admin/exec/authority" },

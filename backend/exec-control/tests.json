@@ -1,0 +1,68 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized control_focus",
+      "method": "GET",
+      "path": "/?action=control_focus",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized milestones",
+      "method": "GET",
+      "path": "/?action=milestones",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized issues",
+      "method": "GET",
+      "path": "/?action=issues",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized risks",
+      "method": "GET",
+      "path": "/?action=risks",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized escalations",
+      "method": "GET",
+      "path": "/?action=escalations",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_issue blocked",
+      "method": "POST",
+      "path": "/?action=save_issue",
+      "body": {"title": "test"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized lift_block blocked",
+      "method": "POST",
+      "path": "/?action=lift_block",
+      "body": {"kind": "issue", "id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
