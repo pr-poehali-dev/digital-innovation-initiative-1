@@ -9,6 +9,7 @@ const CABINET_NAV = [
   { label: "Стейкхолдеры", icon: "Users",           href: "/admin/exec/stakeholders" },
   { label: "Решения",      icon: "GitPullRequest",  href: "/admin/exec/decisions" },
   { label: "Полномочия",   icon: "Shield",          href: "/admin/exec/authority" },
+  { label: "Участники",    icon: "Contact",         href: "/admin/exec/persons" },
   { label: "Диагностика",  icon: "Stethoscope",     href: "/admin/exec/diagnostics" },
 ];
 

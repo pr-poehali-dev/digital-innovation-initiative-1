@@ -8,8 +8,10 @@ import {
   execApi,
   PARTICIPATION_LETTERS,
   Participation,
+  RefsData,
 } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import DecisionForm from "@/components/exec/DecisionForm";
 
 const ROUTE_ORDER = [
   "initiate",
@@ -32,17 +34,22 @@ export default function ExecDecisionsPage() {
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
+  const [refs, setRefs] = useState<RefsData | null>(null);
+  const [form, setForm] = useState<{ open: boolean; item: Decision | null }>({
+    open: false,
+    item: null,
+  });
 
   const load = () => {
     setLoading(true);
     setError("");
-    execApi
-      .decisions()
-      .then((r) => {
+    Promise.all([execApi.decisions(), execApi.refs()])
+      .then(([r, rf]) => {
         setItems(r.items);
         setParticipation(r.participation);
         setDependencies(r.dependencies);
         setDicts(r.dictionaries);
+        setRefs(rf);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -77,11 +84,20 @@ export default function ExecDecisionsPage() {
   return (
     <AdminShell>
       <div className="max-w-[1400px] space-y-5">
-        <header>
-          <h1 className="text-xl font-semibold text-white">Управленческие решения</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Журнал решений, маршруты принятия и зависимости между решениями
-          </p>
+        <header className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl font-semibold text-white">Управленческие решения</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Журнал решений, маршруты принятия и зависимости между решениями
+            </p>
+          </div>
+          <button
+            onClick={() => setForm({ open: true, item: null })}
+            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <Icon name="Plus" size={15} />
+            Новое решение
+          </button>
         </header>
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -261,9 +277,18 @@ export default function ExecDecisionsPage() {
                         </div>
                       )}
 
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-gray-500">Исполнение:</span>
-                        <Badge dicts={dicts} type="execution_status" code={d.execution_status} />
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-gray-500">Исполнение:</span>
+                          <Badge dicts={dicts} type="execution_status" code={d.execution_status} />
+                        </div>
+                        <button
+                          onClick={() => setForm({ open: true, item: d })}
+                          className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-orange-500/50 hover:text-orange-300 text-xs transition-colors flex items-center gap-1.5"
+                        >
+                          <Icon name="Pencil" size={13} />
+                          Редактировать
+                        </button>
                       </div>
                     </div>
                   )}
@@ -283,6 +308,22 @@ export default function ExecDecisionsPage() {
             ))}
           </div>
         </Card>
+
+        {form.open && refs && (
+          <DecisionForm
+            decision={form.item}
+            initiatives={refs.initiatives}
+            decisionTypes={refs.decision_types}
+            bodies={refs.bodies}
+            dicts={dicts}
+            persons={refs.persons}
+            onClose={() => setForm({ open: false, item: null })}
+            onSaved={() => {
+              setForm({ open: false, item: null });
+              load();
+            }}
+          />
+        )}
       </div>
     </AdminShell>
   );

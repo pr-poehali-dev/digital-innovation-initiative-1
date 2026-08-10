@@ -484,6 +484,43 @@ def handler(event: dict, context) -> dict:
         if action == "diagnostics":
             return cors({"ok": True, "data": {"issues": diagnostics(cur)}})
 
+        if action == "refs":
+            cur.execute(f"""
+                SELECT id, display_name, position_title, org_name
+                FROM {SCHEMA}.exec_person WHERE record_state = 'active' ORDER BY display_name
+            """)
+            persons = rows(cur)
+            cur.execute(f"""
+                SELECT code, title, category, stage, sort_order
+                FROM {SCHEMA}.exec_decision_type ORDER BY sort_order
+            """)
+            decision_types = rows(cur)
+            cur.execute(f"""
+                SELECT id, title FROM {SCHEMA}.exec_collegial_body
+                WHERE status = 'active' ORDER BY title
+            """)
+            bodies = rows(cur)
+            cur.execute(f"SELECT id, code, title FROM {SCHEMA}.exec_initiative ORDER BY title")
+            initiatives = rows(cur)
+            return cors({"ok": True, "data": {
+                "persons": persons, "decision_types": decision_types,
+                "bodies": bodies, "initiatives": initiatives,
+                "dictionaries": load_dictionaries(cur),
+            }})
+
+        if action == "create_person":
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_person (display_name, position_title, org_name, is_anonymized) "
+                f"VALUES (%s,%s,%s,true) RETURNING id",
+                (body.get("display_name"), body.get("position_title"), body.get("org_name")))
+            new_id = cur.fetchone()[0]
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+                f"VALUES (%s,%s,%s,%s,%s)",
+                ("person", new_id, "create", actor, json.dumps(body, ensure_ascii=False, default=str)))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
         if action == "persons":
             cur.execute(f"""
                 SELECT p.*, (SELECT COUNT(*) FROM {SCHEMA}.exec_stakeholder s WHERE s.person_id = p.id) AS stakeholder_count,
@@ -570,6 +607,64 @@ def handler(event: dict, context) -> dict:
                 ("decision", new_id, "update" if did else "create", actor, json.dumps(data, ensure_ascii=False, default=str)))
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "save_assignment":
+            aid = body.get("id")
+            fields = ["initiative_id", "role_code", "person_id", "date_from", "date_to",
+                      "authority_limits", "deputy_person_id", "status"]
+            data = {k: body.get(k) for k in fields if k in body}
+            if aid:
+                sets = ", ".join(f"{k} = %s" for k in data)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_role_assignment SET {sets}, updated_at = now() "
+                    f"WHERE id = %s RETURNING id", list(data.values()) + [aid])
+            else:
+                data.setdefault("created_by", actor)
+                cols = ", ".join(data.keys())
+                ph = ", ".join(["%s"] * len(data))
+                cur.execute(f"INSERT INTO {SCHEMA}.exec_role_assignment ({cols}) VALUES ({ph}) RETURNING id",
+                            list(data.values()))
+            new_id = cur.fetchone()[0]
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+                f"VALUES (%s,%s,%s,%s,%s)",
+                ("role_assignment", new_id, "update" if aid else "create", actor,
+                 json.dumps(data, ensure_ascii=False, default=str)))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "set_verification":
+            entity = body.get("entity")
+            eid = body.get("id")
+            status = body.get("verification_status")
+            allowed = {
+                "initiative": "exec_initiative",
+                "stakeholder": "exec_stakeholder",
+                "decision": "exec_decision_instance",
+                "role_assignment": "exec_role_assignment",
+            }
+            if entity not in allowed or not eid or not status:
+                return cors({"ok": False, "error": {"message": "Неверные параметры"}}, 400)
+            table = allowed[entity]
+            extra, params = "", [status]
+            if status == "confirmed":
+                extra = ", confirmed_by = %s, confirmed_at = now()" if entity == "role_assignment" else ""
+                if extra:
+                    params.append(actor)
+            params.append(eid)
+            cur.execute(
+                f"UPDATE {SCHEMA}.{table} SET verification_status = %s{extra} WHERE id = %s RETURNING id",
+                params)
+            row = cur.fetchone()
+            if not row:
+                return cors({"ok": False, "error": {"message": "Запись не найдена"}}, 404)
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json, reason) "
+                f"VALUES (%s,%s,%s,%s,%s,%s)",
+                (entity, eid, "set_verification", actor,
+                 json.dumps({"verification_status": status}, ensure_ascii=False), body.get("reason")))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": row[0], "verification_status": status}})
 
         if action == "audit_log":
             cur.execute(f"""

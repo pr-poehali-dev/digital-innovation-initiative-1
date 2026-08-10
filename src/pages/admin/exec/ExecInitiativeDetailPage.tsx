@@ -7,10 +7,15 @@ import {
   Dictionaries,
   execApi,
   Initiative,
+  RefsData,
   RoleAssignment,
   Stakeholder,
 } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, VerificationTag, fmtDate } from "@/components/exec/ExecUI";
+import { VerificationSelect } from "@/components/exec/ExecForm";
+import InitiativeForm from "@/components/exec/InitiativeForm";
+import StakeholderForm from "@/components/exec/StakeholderForm";
+import DecisionForm from "@/components/exec/DecisionForm";
 
 type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect";
 
@@ -38,27 +43,54 @@ export default function ExecInitiativeDetailPage() {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [assignments, setAssignments] = useState<RoleAssignment[]>([]);
   const [dicts, setDicts] = useState<Dictionaries>({});
+  const [refs, setRefs] = useState<RefsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("overview");
+  const [editInit, setEditInit] = useState(false);
+  const [shForm, setShForm] = useState<{ open: boolean; item: Stakeholder | null }>({
+    open: false,
+    item: null,
+  });
+  const [decForm, setDecForm] = useState<{ open: boolean; item: Decision | null }>({
+    open: false,
+    item: null,
+  });
+  const [statusSaving, setStatusSaving] = useState(false);
 
   const load = () => {
     setLoading(true);
     setError("");
-    execApi
-      .initiative(Number(id))
-      .then((r) => {
+    Promise.all([execApi.initiative(Number(id)), execApi.refs()])
+      .then(([r, rf]) => {
         setInitiative(r.initiative);
         setStakeholders(r.stakeholders);
         setDecisions(r.decisions);
         setAssignments(r.assignments);
         setDicts(r.dictionaries);
+        setRefs(rf);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, [id]);
+
+  const changeStatus = async (
+    entity: "initiative" | "stakeholder" | "decision",
+    entityId: number,
+    status: string,
+  ) => {
+    setStatusSaving(true);
+    try {
+      await execApi.setVerification({ entity, id: entityId, verification_status: status });
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStatusSaving(false);
+    }
+  };
 
   if (loading)
     return (
@@ -101,10 +133,26 @@ export default function ExecInitiativeDetailPage() {
               <h1 className="text-xl font-semibold text-white leading-snug">{i.title}</h1>
               {i.summary && <p className="text-sm text-gray-400 mt-2 max-w-3xl">{i.summary}</p>}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Badge dicts={dicts} type="priority" code={i.priority} />
-              <Badge dicts={dicts} type="initiative_status" code={i.status} />
-              <Badge dicts={dicts} type="initiative_stage" code={i.stage} />
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2">
+                <VerificationSelect
+                  value={i.verification_status}
+                  saving={statusSaving}
+                  onChange={(v) => changeStatus("initiative", i.id, v)}
+                />
+                <button
+                  onClick={() => setEditInit(true)}
+                  className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                >
+                  <Icon name="Pencil" size={13} />
+                  Редактировать
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <Badge dicts={dicts} type="priority" code={i.priority} />
+                <Badge dicts={dicts} type="initiative_status" code={i.status} />
+                <Badge dicts={dicts} type="initiative_stage" code={i.stage} />
+              </div>
             </div>
           </div>
 
@@ -184,7 +232,20 @@ export default function ExecInitiativeDetailPage() {
         )}
 
         {tab === "stakeholders" && (
-          <Card title="Стейкхолдеры инициативы" subtitle={`${stakeholders.length} участников`} icon="Users">
+          <Card
+            title="Стейкхолдеры инициативы"
+            subtitle={`${stakeholders.length} участников`}
+            icon="Users"
+            action={
+              <button
+                onClick={() => setShForm({ open: true, item: null })}
+                className="px-2.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+              >
+                <Icon name="Plus" size={13} />
+                Добавить
+              </button>
+            }
+          >
             {stakeholders.length === 0 ? (
               <Empty text="Стейкхолдеры не заведены" />
             ) : (
@@ -199,9 +260,18 @@ export default function ExecInitiativeDetailPage() {
                           {s.org_name && ` · ${s.org_name}`}
                         </p>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        <Badge dicts={dicts} type="participation_state" code={s.participation_state} />
-                        <Badge dicts={dicts} type="engagement_status" code={s.engagement_status} />
+                      <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge dicts={dicts} type="participation_state" code={s.participation_state} />
+                          <Badge dicts={dicts} type="engagement_status" code={s.engagement_status} />
+                        </div>
+                        <button
+                          onClick={() => setShForm({ open: true, item: s })}
+                          title="Редактировать"
+                          className="p-1.5 rounded-lg text-gray-500 hover:text-orange-400 hover:bg-gray-800 transition-colors"
+                        >
+                          <Icon name="Pencil" size={14} />
+                        </button>
                       </div>
                     </div>
 
@@ -257,7 +327,20 @@ export default function ExecInitiativeDetailPage() {
         )}
 
         {tab === "decisions" && (
-          <Card title="Управленческие решения" subtitle={`${decisions.length} по инициативе`} icon="GitPullRequest">
+          <Card
+            title="Управленческие решения"
+            subtitle={`${decisions.length} по инициативе`}
+            icon="GitPullRequest"
+            action={
+              <button
+                onClick={() => setDecForm({ open: true, item: null })}
+                className="px-2.5 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+              >
+                <Icon name="Plus" size={13} />
+                Добавить
+              </button>
+            }
+          >
             {decisions.length === 0 ? (
               <Empty text="Решения не заведены" />
             ) : (
@@ -274,7 +357,16 @@ export default function ExecInitiativeDetailPage() {
                         <p className="text-xs text-gray-500 mb-1">{dec.type_title}</p>
                         <p className="text-sm text-white leading-snug">{dec.question}</p>
                       </div>
-                      <Badge dicts={dicts} type="decision_status" code={dec.status} />
+                      <div className="flex items-center gap-2">
+                        <Badge dicts={dicts} type="decision_status" code={dec.status} />
+                        <button
+                          onClick={() => setDecForm({ open: true, item: dec })}
+                          title="Редактировать"
+                          className="p-1.5 rounded-lg text-gray-500 hover:text-orange-400 hover:bg-gray-800 transition-colors"
+                        >
+                          <Icon name="Pencil" size={14} />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid sm:grid-cols-3 gap-4 mt-3 pt-3 border-t border-gray-800">
@@ -376,6 +468,51 @@ export default function ExecInitiativeDetailPage() {
               </div>
             </Card>
           </div>
+        )}
+
+        {editInit && refs && (
+          <InitiativeForm
+            initiative={i}
+            dicts={dicts}
+            persons={refs.persons}
+            onClose={() => setEditInit(false)}
+            onSaved={() => {
+              setEditInit(false);
+              load();
+            }}
+          />
+        )}
+
+        {shForm.open && refs && (
+          <StakeholderForm
+            stakeholder={shForm.item}
+            initiativeId={i.id}
+            initiatives={refs.initiatives}
+            dicts={dicts}
+            persons={refs.persons}
+            onClose={() => setShForm({ open: false, item: null })}
+            onSaved={() => {
+              setShForm({ open: false, item: null });
+              load();
+            }}
+          />
+        )}
+
+        {decForm.open && refs && (
+          <DecisionForm
+            decision={decForm.item}
+            initiativeId={i.id}
+            initiatives={refs.initiatives}
+            decisionTypes={refs.decision_types}
+            bodies={refs.bodies}
+            dicts={dicts}
+            persons={refs.persons}
+            onClose={() => setDecForm({ open: false, item: null })}
+            onSaved={() => {
+              setDecForm({ open: false, item: null });
+              load();
+            }}
+          />
         )}
       </div>
     </AdminShell>

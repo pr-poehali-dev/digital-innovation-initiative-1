@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
-import { Dictionaries, execApi, Stakeholder } from "@/lib/execCabinetApi";
+import { Dictionaries, execApi, RefsData, Stakeholder } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import StakeholderForm from "@/components/exec/StakeholderForm";
 
 type View = "table" | "matrix1" | "matrix2" | "plan";
 
@@ -23,15 +24,20 @@ export default function ExecStakeholdersPage() {
   const [view, setView] = useState<View>("table");
   const [onlyOverdue, setOnlyOverdue] = useState(false);
   const [selected, setSelected] = useState<Stakeholder | null>(null);
+  const [refs, setRefs] = useState<RefsData | null>(null);
+  const [form, setForm] = useState<{ open: boolean; item: Stakeholder | null }>({
+    open: false,
+    item: null,
+  });
 
   const load = () => {
     setLoading(true);
     setError("");
-    execApi
-      .stakeholders()
-      .then((r) => {
+    Promise.all([execApi.stakeholders(), execApi.refs()])
+      .then(([r, rf]) => {
         setItems(r.items);
         setDicts(r.dictionaries);
+        setRefs(rf);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -76,11 +82,20 @@ export default function ExecStakeholdersPage() {
   return (
     <AdminShell>
       <div className="max-w-[1400px] space-y-5">
-        <header>
-          <h1 className="text-xl font-semibold text-white">Карта стейкхолдеров</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Участие определяется формальными полномочиями, а не субъективной оценкой
-          </p>
+        <header className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-xl font-semibold text-white">Карта стейкхолдеров</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Участие определяется формальными полномочиями, а не субъективной оценкой
+            </p>
+          </div>
+          <button
+            onClick={() => setForm({ open: true, item: null })}
+            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <Icon name="Plus" size={15} />
+            Добавить стейкхолдера
+          </button>
         </header>
 
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -281,9 +296,21 @@ export default function ExecStakeholdersPage() {
                   <p className="text-sm text-gray-500 mt-0.5">{selected.position_title}</p>
                   <p className="text-xs text-gray-600 mt-1">{selected.initiative_title}</p>
                 </div>
-                <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-white">
-                  <Icon name="X" size={18} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setForm({ open: true, item: selected });
+                      setSelected(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    <Icon name="Pencil" size={13} />
+                    Редактировать
+                  </button>
+                  <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-white">
+                    <Icon name="X" size={18} />
+                  </button>
+                </div>
               </header>
               <div className="p-5 space-y-4">
                 <div className="flex flex-wrap gap-1.5">
@@ -325,6 +352,20 @@ export default function ExecStakeholdersPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {form.open && refs && (
+          <StakeholderForm
+            stakeholder={form.item}
+            initiatives={refs.initiatives}
+            dicts={dicts}
+            persons={refs.persons}
+            onClose={() => setForm({ open: false, item: null })}
+            onSaved={() => {
+              setForm({ open: false, item: null });
+              load();
+            }}
+          />
         )}
       </div>
     </AdminShell>

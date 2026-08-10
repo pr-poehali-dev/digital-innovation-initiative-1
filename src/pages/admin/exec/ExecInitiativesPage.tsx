@@ -2,29 +2,30 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
-import { Dictionaries, execApi, Initiative } from "@/lib/execCabinetApi";
+import { Dictionaries, execApi, Initiative, PersonRef } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
+import InitiativeForm from "@/components/exec/InitiativeForm";
 
 export default function ExecInitiativesPage() {
   const [items, setItems] = useState<Initiative[]>([]);
   const [dicts, setDicts] = useState<Dictionaries>({});
+  const [persons, setPersons] = useState<PersonRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [priority, setPriority] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Initiative | null>(null);
 
   const load = () => {
     setLoading(true);
     setError("");
-    execApi
-      .initiatives()
-      .then((r) => {
+    Promise.all([execApi.initiatives(), execApi.refs()])
+      .then(([r, refs]) => {
         setItems(r.items);
         setDicts(r.dictionaries);
+        setPersons(refs.persons);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -44,19 +45,16 @@ export default function ExecInitiativesPage() {
     [items, q, status, priority],
   );
 
-  const create = async () => {
-    if (!newTitle.trim()) return;
-    setSaving(true);
-    try {
-      await execApi.saveInitiative({ title: newTitle.trim(), status: "idea", stage: "problem" });
-      setNewTitle("");
-      setCreating(false);
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+  const openNew = () => {
+    setEditing(null);
+    setFormOpen(true);
+  };
+
+  const openEdit = (e: React.MouseEvent, i: Initiative) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditing(i);
+    setFormOpen(true);
   };
 
   return (
@@ -70,35 +68,13 @@ export default function ExecInitiativesPage() {
             </p>
           </div>
           <button
-            onClick={() => setCreating((v) => !v)}
+            onClick={openNew}
             className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
           >
             <Icon name="Plus" size={15} />
             Новая инициатива
           </button>
         </header>
-
-        {creating && (
-          <Card title="Новая инициатива" icon="Plus">
-            <div className="flex gap-2">
-              <input
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && create()}
-                placeholder="Наименование инициативы"
-                autoFocus
-                className="flex-1 px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm placeholder:text-gray-600 focus:border-orange-500 outline-none"
-              />
-              <button
-                onClick={create}
-                disabled={saving || !newTitle.trim()}
-                className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white text-sm font-medium transition-colors"
-              >
-                {saving ? "Создаю…" : "Создать"}
-              </button>
-            </div>
-          </Card>
-        )}
 
         <div className="flex flex-wrap gap-2">
           <div className="relative flex-1 min-w-[220px]">
@@ -158,7 +134,16 @@ export default function ExecInitiativesPage() {
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <span className="text-[11px] font-mono text-gray-600">{i.code || `#${i.id}`}</span>
-                  <Badge dicts={dicts} type="priority" code={i.priority} />
+                  <div className="flex items-center gap-1.5">
+                    <Badge dicts={dicts} type="priority" code={i.priority} />
+                    <button
+                      onClick={(e) => openEdit(e, i)}
+                      title="Редактировать"
+                      className="p-1 rounded text-gray-600 hover:text-orange-400 hover:bg-gray-800 transition-colors"
+                    >
+                      <Icon name="Pencil" size={13} />
+                    </button>
+                  </div>
                 </div>
                 <h3 className="text-sm font-medium text-white leading-snug flex-1">{i.title}</h3>
                 <div className="flex flex-wrap gap-1.5 mt-3">
@@ -188,6 +173,19 @@ export default function ExecInitiativesPage() {
               </Link>
             ))}
           </div>
+        )}
+
+        {formOpen && (
+          <InitiativeForm
+            initiative={editing}
+            dicts={dicts}
+            persons={persons}
+            onClose={() => setFormOpen(false)}
+            onSaved={() => {
+              setFormOpen(false);
+              load();
+            }}
+          />
         )}
       </div>
     </AdminShell>

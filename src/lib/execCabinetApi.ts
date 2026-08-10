@@ -174,6 +174,21 @@ export interface RoleAssignment {
   verification_status: string;
 }
 
+export interface PersonRef {
+  id: number;
+  display_name: string;
+  position_title: string | null;
+  org_name: string | null;
+}
+
+export interface RefsData {
+  persons: PersonRef[];
+  decision_types: { code: string; title: string; category: string; stage: string }[];
+  bodies: { id: number; title: string }[];
+  initiatives: { id: number; code: string | null; title: string }[];
+  dictionaries: Dictionaries;
+}
+
 export interface FocusData {
   metrics: {
     initiatives_total: number;
@@ -255,6 +270,26 @@ export const execApi = {
 
   persons: (): Promise<{ items: { id: number; display_name: string; position_title: string; org_name: string }[] }> =>
     req("/?action=persons"),
+
+  refs: (): Promise<RefsData> => req("/?action=refs"),
+
+  createPerson: (payload: {
+    display_name: string;
+    position_title?: string;
+    org_name?: string;
+  }): Promise<{ id: number }> =>
+    req("/?action=create_person", { method: "POST", body: JSON.stringify(payload) }),
+
+  saveAssignment: (payload: Record<string, unknown>): Promise<{ id: number }> =>
+    req("/?action=save_assignment", { method: "POST", body: JSON.stringify(payload) }),
+
+  setVerification: (payload: {
+    entity: "initiative" | "stakeholder" | "decision" | "role_assignment";
+    id: number;
+    verification_status: string;
+    reason?: string;
+  }): Promise<{ id: number; verification_status: string }> =>
+    req("/?action=set_verification", { method: "POST", body: JSON.stringify(payload) }),
 
   saveInitiative: (payload: Record<string, unknown>): Promise<{ id: number }> =>
     req("/?action=save_initiative", { method: "POST", body: JSON.stringify(payload) }),
