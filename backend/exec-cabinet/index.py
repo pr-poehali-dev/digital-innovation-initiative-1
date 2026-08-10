@@ -667,10 +667,61 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": {"id": row[0], "verification_status": status}})
 
         if action == "audit_log":
+            limit = int(qs.get("limit", 200))
+            entity = qs.get("entity", "")
+            where = ""
+            params = []
+            if entity:
+                where = "WHERE l.entity_type = %s"
+                params.append(entity)
+            params.append(limit)
             cur.execute(f"""
-                SELECT * FROM {SCHEMA}.exec_audit_log ORDER BY created_at DESC LIMIT 200
+                SELECT l.id, l.entity_type, l.entity_id, l.action, l.actor,
+                       l.after_json, l.reason, l.created_at,
+                       COALESCE(i.title, s_i.title, d_i.title, ra_i.title, p.display_name) AS subject_title,
+                       COALESCE(sp.display_name, dp.question) AS subject_detail
+                FROM {SCHEMA}.exec_audit_log l
+                LEFT JOIN {SCHEMA}.exec_initiative i
+                       ON l.entity_type = 'initiative' AND i.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_stakeholder s
+                       ON l.entity_type = 'stakeholder' AND s.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_initiative s_i ON s_i.id = s.initiative_id
+                LEFT JOIN {SCHEMA}.exec_person sp ON sp.id = s.person_id
+                LEFT JOIN {SCHEMA}.exec_decision_instance d
+                       ON l.entity_type = 'decision' AND d.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_initiative d_i ON d_i.id = d.initiative_id
+                LEFT JOIN {SCHEMA}.exec_decision_instance dp ON dp.id = d.id
+                LEFT JOIN {SCHEMA}.exec_role_assignment ra
+                       ON l.entity_type = 'role_assignment' AND ra.id = l.entity_id
+                LEFT JOIN {SCHEMA}.exec_initiative ra_i ON ra_i.id = ra.initiative_id
+                LEFT JOIN {SCHEMA}.exec_person p
+                       ON l.entity_type = 'person' AND p.id = l.entity_id
+                {where}
+                ORDER BY l.created_at DESC LIMIT %s
+            """, params)
+            items = rows(cur)
+
+            cur.execute(f"""
+                SELECT entity_type, COUNT(*) AS cnt FROM {SCHEMA}.exec_audit_log
+                GROUP BY entity_type ORDER BY cnt DESC
             """)
-            return cors({"ok": True, "data": {"items": rows(cur)}})
+            by_entity = rows(cur)
+
+            cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_audit_log")
+            total = cur.fetchone()[0]
+            cur.execute(f"""
+                SELECT COUNT(*) FROM {SCHEMA}.exec_audit_log
+                WHERE created_at >= CURRENT_DATE
+            """)
+            today = cur.fetchone()[0]
+            cur.execute(f"SELECT COUNT(DISTINCT actor) FROM {SCHEMA}.exec_audit_log")
+            actors = cur.fetchone()[0]
+
+            return cors({"ok": True, "data": {
+                "items": items,
+                "by_entity": by_entity,
+                "metrics": {"total": total, "today": today, "actors": actors},
+            }})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
     finally:

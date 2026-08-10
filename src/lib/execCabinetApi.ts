@@ -189,6 +189,25 @@ export interface RefsData {
   dictionaries: Dictionaries;
 }
 
+export interface AuditEntry {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  action: string;
+  actor: string | null;
+  after_json: Record<string, unknown> | null;
+  reason: string | null;
+  created_at: string;
+  subject_title: string | null;
+  subject_detail: string | null;
+}
+
+export interface AuditData {
+  items: AuditEntry[];
+  by_entity: { entity_type: string; cnt: number }[];
+  metrics: { total: number; today: number; actors: number };
+}
+
 export interface FocusData {
   metrics: {
     initiatives_total: number;
@@ -300,7 +319,8 @@ export const execApi = {
   saveDecision: (payload: Record<string, unknown>): Promise<{ id: number }> =>
     req("/?action=save_decision", { method: "POST", body: JSON.stringify(payload) }),
 
-  auditLog: (): Promise<{ items: Record<string, unknown>[] }> => req("/?action=audit_log"),
+  auditLog: (entity = "", limit = 200): Promise<AuditData> =>
+    req(`/?action=audit_log&limit=${limit}${entity ? `&entity=${entity}` : ""}`),
 };
 
 export function dictTitle(dicts: Dictionaries, type: string, code: string | null): string {

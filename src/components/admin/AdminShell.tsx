@@ -1,7 +1,8 @@
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAdmin } from "@/lib/admin-context";
 import Icon from "@/components/ui/icon";
 import SeoMeta from "@/components/SeoMeta";
+import { useExecSettings } from "@/lib/execSettings";
 
 const CABINET_NAV = [
   { label: "Мой фокус",    icon: "Crosshair",       href: "/admin/exec" },
@@ -37,6 +38,19 @@ const NAV = [
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const { session, logout } = useAdmin();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [settings, setSettings] = useExecSettings();
+  const inCabinet = pathname.startsWith("/admin/exec");
+
+  const cabinetNav = settings.showHistory
+    ? [...CABINET_NAV, { label: "Журнал", icon: "History", href: "/admin/exec/history" }]
+    : CABINET_NAV;
+
+  const toggleHistory = () => {
+    const next = !settings.showHistory;
+    setSettings({ showHistory: next });
+    if (!next && pathname === "/admin/exec/history") navigate("/admin/exec");
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -60,7 +74,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <p className="px-3 pb-1.5 pt-1 text-[10px] font-semibold text-orange-500/80 uppercase tracking-wider">
             Кабинет руководителя
           </p>
-          {CABINET_NAV.map(item => (
+          {cabinetNav.map(item => (
             <NavLink
               key={item.href}
               to={item.href}
@@ -99,6 +113,34 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             </NavLink>
           ))}
         </nav>
+
+        {inCabinet && (
+          <div className="px-3 py-2.5 border-t border-gray-800">
+            <button
+              onClick={toggleHistory}
+              className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-900 transition-colors"
+              title={
+                settings.showHistory
+                  ? "Скрыть журнал изменений из меню"
+                  : "Показать журнал изменений в меню"
+              }
+            >
+              <Icon name={settings.showHistory ? "Eye" : "EyeOff"} size={15} />
+              <span className="flex-1 text-left">Журнал</span>
+              <span
+                className={`w-8 h-[18px] rounded-full flex items-center px-0.5 transition-colors ${
+                  settings.showHistory ? "bg-orange-500" : "bg-gray-700"
+                }`}
+              >
+                <span
+                  className={`w-3.5 h-3.5 rounded-full bg-white transition-transform ${
+                    settings.showHistory ? "translate-x-[14px]" : ""
+                  }`}
+                />
+              </span>
+            </button>
+          </div>
+        )}
 
         <div className="p-3 border-t border-gray-800">
           <div className="px-3 py-2 mb-1">

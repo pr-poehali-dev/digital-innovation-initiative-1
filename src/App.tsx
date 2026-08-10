@@ -38,6 +38,7 @@ import ExecDecisionsPage from "./pages/admin/exec/ExecDecisionsPage";
 import ExecAuthorityPage from "./pages/admin/exec/ExecAuthorityPage";
 import ExecDiagnosticsPage from "./pages/admin/exec/ExecDiagnosticsPage";
 import ExecPersonsPage from "./pages/admin/exec/ExecPersonsPage";
+import ExecHistoryPage from "./pages/admin/exec/ExecHistoryPage";
 import Index from "./pages/Index";
 import WelcomePage from "./pages/WelcomePage";
 import NotFound from "./pages/NotFound";
@@ -124,6 +125,7 @@ const App = () => (
               <Route path="/admin/exec/authority" element={<AdminRoute><ExecAuthorityPage /></AdminRoute>} />
               <Route path="/admin/exec/diagnostics" element={<AdminRoute><ExecDiagnosticsPage /></AdminRoute>} />
               <Route path="/admin/exec/persons" element={<AdminRoute><ExecPersonsPage /></AdminRoute>} />
+              <Route path="/admin/exec/history" element={<AdminRoute><ExecHistoryPage /></AdminRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}
