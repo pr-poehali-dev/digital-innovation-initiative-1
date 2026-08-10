@@ -295,28 +295,9 @@ def handle_get(conn, user, body, request_id, origin=None):
     )
     proc["units"] = [{"code": r[0], "name": r[1], "type": r[2], "role": r[3]} for r in cur.fetchall()]
 
-    # Режим аудита: архивные сведения из типовой практики доступны ТОЛЬКО владельцу
-    # проекта и только по явному запросу. Никогда не отображаются как AS IS.
-    if body.get("audit_mode") and role in ("owner", "admin"):
-        cur.execute(
-            f"""SELECT archived_current_state, archived_pain_points, archived_target_state,
-                       archived_target_effect, archived_ai_opportunity, archived_at
-                FROM {schema}.macro_processes WHERE id = %s""",
-            (process_id,),
-        )
-        a = cur.fetchone()
-        if a and a[5]:
-            proc["archived_data"] = {
-                "current_state": a[0], "pain_points": a[1], "target_state": a[2],
-                "target_effect": a[3], "ai_opportunity": a[4], "archived_at": str(a[5]),
-                "warning": (
-                    "АРХИВ. Сформировано ИИ из типовой банковской практики, "
-                    "НЕ из документов организации. Не является описанием "
-                    "фактического состояния (AS IS). Только для аудита."
-                ),
-            }
-    proc["has_archived_data"] = True
-    proc["audit_access"] = role in ("owner", "admin")
+    # Режим аудита отключён: выдача архивных сведений (archived_*) была
+    # реализована без согласования модели доступа. Параметр audit_mode
+    # не обрабатывается. Архивные данные в БД сохранены без изменений.
 
     return ok_response({"process": proc}, request_id, origin=origin)
 
