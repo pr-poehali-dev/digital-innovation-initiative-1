@@ -1,4 +1,4 @@
-import { getAdminToken } from "./admin-api";
+import { CabinetAccess, accessHeaders } from "./execAccess";
 
 const BASE = "https://functions.poehali.dev/662c8b92-fe3c-4b24-b1ee-50765f111ea4";
 
@@ -245,22 +245,43 @@ export interface ControlFocus {
   }[];
 }
 
+let lastWarning: string | null = null;
+
+export function takeWarning(): string | null {
+  const w = lastWarning;
+  lastWarning = null;
+  return w;
+}
+
 async function req(path: string, options: RequestInit = {}) {
-  const token = getAdminToken();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { "X-Admin-Token": token } : {}),
+      ...accessHeaders(),
       ...(options.headers || {}),
     },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) throw new Error(data?.error?.message || "Ошибка загрузки данных");
+  lastWarning = data.warning || null;
   return data.data;
 }
 
+export interface DemoStats {
+  milestones: number;
+  issues: number;
+  risks: number;
+  actions: number;
+  escalations: number;
+  real_milestones: number;
+  real_issues: number;
+  real_risks: number;
+}
+
 export const controlApi = {
+  whoami: (): Promise<CabinetAccess> => req("/?action=whoami"),
+
   focus: (): Promise<ControlFocus> => req("/?action=control_focus"),
 
   all: (
@@ -271,7 +292,16 @@ export const controlApi = {
     risks: Risk[];
     actions: ControlAction[];
     escalations: Escalation[];
+    access: CabinetAccess;
   }> => req(`/?action=all${initiativeId ? `&initiative_id=${initiativeId}` : ""}`),
+
+  demoStats: (): Promise<DemoStats> => req("/?action=demo_stats"),
+
+  clearDemo: (): Promise<{ deleted: Record<string, number> }> =>
+    req("/?action=clear_demo", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "УДАЛИТЬ ДЕМОДАННЫЕ" }),
+    }),
 
   saveMilestone: (p: Record<string, unknown>): Promise<{ id: number }> =>
     req("/?action=save_milestone", { method: "POST", body: JSON.stringify(p) }),

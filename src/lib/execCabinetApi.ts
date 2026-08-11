@@ -1,4 +1,4 @@
-import { getAdminToken } from "./admin-api";
+import { accessHeaders } from "./execAccess";
 
 const BASE = "https://functions.poehali.dev/2846d4ff-d9bc-4e86-864a-adbeba8dabcf";
 
@@ -228,12 +228,11 @@ export interface FocusData {
 }
 
 async function req(path: string, options: RequestInit = {}) {
-  const token = getAdminToken();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { "X-Admin-Token": token } : {}),
+      ...accessHeaders(),
       ...(options.headers || {}),
     },
   });

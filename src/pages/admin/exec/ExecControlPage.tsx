@@ -18,7 +18,9 @@ import {
   RISK_STATUS_LABEL,
   Risk,
   controlApi,
+  takeWarning,
 } from "@/lib/execControlApi";
+import { ACCESS_ROLE_LABEL, CabinetAccess } from "@/lib/execAccess";
 import { Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
 import MilestoneForm from "@/components/exec/MilestoneForm";
 import IssueForm from "@/components/exec/IssueForm";
@@ -58,7 +60,10 @@ export default function ExecControlPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [initFilter, setInitFilter] = useState("");
+  const [showClosed, setShowClosed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [access, setAccess] = useState<CabinetAccess | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const [msForm, setMsForm] = useState<{ open: boolean; item: Milestone | null }>({ open: false, item: null });
   const [issueForm, setIssueForm] = useState<{ open: boolean; item: Issue | null }>({ open: false, item: null });
@@ -88,6 +93,7 @@ export default function ExecControlPage() {
         setRisks(c.risks);
         setActions(c.actions);
         setEscalations(c.escalations);
+        setAccess(c.access);
         setRefs(rf);
         setDecisions(d.items.map((x) => ({ id: x.id, question: x.question })));
       })
@@ -102,9 +108,35 @@ export default function ExecControlPage() {
   const byInit = <T extends { initiative_id: number }>(list: T[]) =>
     initFilter ? list.filter((x) => String(x.initiative_id) === initFilter) : list;
 
-  const fMilestones = useMemo(() => byInit(milestones), [milestones, initFilter]);
-  const fIssues = useMemo(() => byInit(issues), [issues, initFilter]);
-  const fRisks = useMemo(() => byInit(risks), [risks, initFilter]);
+  const fMilestones = useMemo(
+    () =>
+      byInit(milestones).filter(
+        (m) => showClosed || !["achieved", "cancelled"].includes(m.status),
+      ),
+    [milestones, initFilter, showClosed],
+  );
+  const fIssues = useMemo(
+    () =>
+      byInit(issues).filter(
+        (i) => showClosed || !["resolved", "closed", "irrelevant"].includes(i.status),
+      ),
+    [issues, initFilter, showClosed],
+  );
+  const fRisks = useMemo(
+    () =>
+      byInit(risks).filter((r) => showClosed || !["closed", "irrelevant"].includes(r.status)),
+    [risks, initFilter, showClosed],
+  );
+  const fEscalations = useMemo(
+    () => escalations.filter((e) => showClosed || !["closed", "decided"].includes(e.status)),
+    [escalations, showClosed],
+  );
+
+  const hiddenCount =
+    byInit(milestones).length -
+    fMilestones.length +
+    (byInit(issues).length - fIssues.length) +
+    (byInit(risks).length - fRisks.length);
 
   const metrics = useMemo(
     () => ({
@@ -199,6 +231,21 @@ export default function ExecControlPage() {
               </button>
             ))}
           </nav>
+          <button
+            onClick={() => setShowClosed(!showClosed)}
+            className={`px-3 py-2 rounded-lg border text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${
+              showClosed
+                ? "bg-gray-800 border-gray-700 text-white"
+                : "bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200"
+            }`}
+            title="Показать устранённые, достигнутые и закрытые записи"
+          >
+            <Icon name={showClosed ? "Eye" : "EyeOff"} size={14} />
+            Завершённые
+            {!showClosed && hiddenCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-gray-800 text-xs">{hiddenCount}</span>
+            )}
+          </button>
           <select
             value={initFilter}
             onChange={(e) => setInitFilter(e.target.value)}
@@ -212,6 +259,28 @@ export default function ExecControlPage() {
             ))}
           </select>
         </div>
+
+        {warning && (
+          <div className="flex items-start gap-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+            <Icon name="TriangleAlert" size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-200 flex-1">{warning}</p>
+            <button onClick={() => setWarning(null)} className="text-amber-400 hover:text-amber-300">
+              <Icon name="X" size={14} />
+            </button>
+          </div>
+        )}
+
+        {access && access.role !== "head" && (
+          <div className="flex items-center gap-2.5 p-3 rounded-lg bg-gray-900 border border-gray-800">
+            <Icon name="Info" size={14} className="text-gray-500 flex-shrink-0" />
+            <p className="text-xs text-gray-400">
+              Ваша роль: {ACCESS_ROLE_LABEL[access.role]}.{" "}
+              {access.can_confirm
+                ? "Вы можете подтверждать достижение точек и устранение проблем."
+                : "Подтверждение достижений и устранений выполняет уполномоченное лицо."}
+            </p>
+          </div>
+        )}
 
         {loading ? (
           <Loading />
@@ -768,12 +837,12 @@ export default function ExecControlPage() {
             </Card>
           </div>
         ) : (
-          <Card title="История эскалаций" subtitle={`${escalations.length} записей`} icon="ArrowUpCircle">
-            {escalations.length === 0 ? (
+          <Card title="История эскалаций" subtitle={`${fEscalations.length} записей`} icon="ArrowUpCircle">
+            {fEscalations.length === 0 ? (
               <Empty text="Эскалаций не было" icon="ArrowUpCircle" />
             ) : (
               <div className="space-y-2">
-                {escalations.map((e) => (
+                {fEscalations.map((e) => (
                   <div
                     key={e.id}
                     onClick={() =>
@@ -837,6 +906,7 @@ export default function ExecControlPage() {
             onClose={() => setMsForm({ open: false, item: null })}
             onSaved={() => {
               setMsForm({ open: false, item: null });
+              setWarning(takeWarning());
               load();
             }}
           />
@@ -851,6 +921,7 @@ export default function ExecControlPage() {
             onClose={() => setIssueForm({ open: false, item: null })}
             onSaved={() => {
               setIssueForm({ open: false, item: null });
+              setWarning(takeWarning());
               load();
             }}
           />
@@ -906,6 +977,7 @@ export default function ExecControlPage() {
             onClose={() => setLiftForm({ open: false, target: null })}
             onSaved={() => {
               setLiftForm({ open: false, target: null });
+              setWarning(takeWarning());
               load();
             }}
           />

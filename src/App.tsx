@@ -40,6 +40,7 @@ import ExecDiagnosticsPage from "./pages/admin/exec/ExecDiagnosticsPage";
 import ExecPersonsPage from "./pages/admin/exec/ExecPersonsPage";
 import ExecHistoryPage from "./pages/admin/exec/ExecHistoryPage";
 import ExecControlPage from "./pages/admin/exec/ExecControlPage";
+import ExecRoute from "./components/exec/ExecRoute";
 import Index from "./pages/Index";
 import WelcomePage from "./pages/WelcomePage";
 import NotFound from "./pages/NotFound";
@@ -104,7 +105,7 @@ const App = () => (
               <Route path="/admin/activity" element={<AdminRoute><AdminActivityPage /></AdminRoute>} />
               <Route path="/admin/plan" element={<AdminRoute><AdminPlanPage /></AdminRoute>} />
               <Route path="/admin/strategy" element={<AdminRoute><AdminStrategyPage /></AdminRoute>} />
-              <Route path="/admin/execution" element={<AdminRoute><AdminExecutionPage /></AdminRoute>} />
+              <Route path="/admin/execution" element={<ExecRoute><AdminExecutionPage /></ExecRoute>} />
               <Route path="/admin/hq" element={<AdminRoute><AdminHQPage /></AdminRoute>} />
               <Route path="/admin/project" element={<AdminRoute><AdminProjectPage /></AdminRoute>} />
               <Route path="/admin/passport" element={<AdminRoute><AdminPassportPage /></AdminRoute>} />
@@ -118,16 +119,16 @@ const App = () => (
               <Route path="/admin/analytics/competency-map" element={<AdminRoute><AdminAdoptionPage /></AdminRoute>} />
               <Route path="/admin/benchmark" element={<AdminRoute><AdminBenchmarkPage /></AdminRoute>} />
               <Route path="/admin/presentation" element={<AdminRoute><AdminPresentationPage /></AdminRoute>} />
-              <Route path="/admin/exec" element={<AdminRoute><ExecFocusPage /></AdminRoute>} />
-              <Route path="/admin/exec/initiatives" element={<AdminRoute><ExecInitiativesPage /></AdminRoute>} />
-              <Route path="/admin/exec/initiatives/:id" element={<AdminRoute><ExecInitiativeDetailPage /></AdminRoute>} />
-              <Route path="/admin/exec/control" element={<AdminRoute><ExecControlPage /></AdminRoute>} />
-              <Route path="/admin/exec/stakeholders" element={<AdminRoute><ExecStakeholdersPage /></AdminRoute>} />
-              <Route path="/admin/exec/decisions" element={<AdminRoute><ExecDecisionsPage /></AdminRoute>} />
-              <Route path="/admin/exec/authority" element={<AdminRoute><ExecAuthorityPage /></AdminRoute>} />
-              <Route path="/admin/exec/diagnostics" element={<AdminRoute><ExecDiagnosticsPage /></AdminRoute>} />
-              <Route path="/admin/exec/persons" element={<AdminRoute><ExecPersonsPage /></AdminRoute>} />
-              <Route path="/admin/exec/history" element={<AdminRoute><ExecHistoryPage /></AdminRoute>} />
+              <Route path="/admin/exec" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
+              <Route path="/admin/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />
+              <Route path="/admin/exec/initiatives/:id" element={<ExecRoute><ExecInitiativeDetailPage /></ExecRoute>} />
+              <Route path="/admin/exec/control" element={<ExecRoute><ExecControlPage /></ExecRoute>} />
+              <Route path="/admin/exec/stakeholders" element={<ExecRoute><ExecStakeholdersPage /></ExecRoute>} />
+              <Route path="/admin/exec/decisions" element={<ExecRoute><ExecDecisionsPage /></ExecRoute>} />
+              <Route path="/admin/exec/authority" element={<ExecRoute><ExecAuthorityPage /></ExecRoute>} />
+              <Route path="/admin/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
+              <Route path="/admin/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
+              <Route path="/admin/exec/history" element={<ExecRoute><ExecHistoryPage /></ExecRoute>} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}

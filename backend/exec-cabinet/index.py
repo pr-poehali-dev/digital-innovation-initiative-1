@@ -36,6 +36,37 @@ def get_admin(conn, token: str):
     return row[0] if row else None
 
 
+def get_cabinet_user(conn, session_id: str):
+    """Обычная сессия пользователя + список доступа к кабинету."""
+    if not session_id:
+        return None
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT u.email, a.access_role, a.can_confirm "
+            f"FROM {SCHEMA}.sessions s "
+            f"JOIN {SCHEMA}.users u ON u.id = s.user_id "
+            f"JOIN {SCHEMA}.exec_cabinet_access a ON LOWER(a.email) = LOWER(u.email) "
+            f"LEFT JOIN {SCHEMA}.admin_user_flags fl ON fl.user_id = u.id "
+            f"WHERE s.id = %s AND s.expires_at > NOW() "
+            f"AND a.is_active = true AND COALESCE(fl.is_blocked, false) = false LIMIT 1",
+            (session_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"email": row[0], "role": row[1], "can_confirm": row[2]}
+
+
+def authenticate(conn, headers: dict):
+    """Админ-токен или обычная сессия из списка доступа."""
+    token = headers.get("x-admin-token") or headers.get("X-Admin-Token", "")
+    email = get_admin(conn, token)
+    if email:
+        return {"email": email, "role": "head", "can_confirm": True}
+    sid = headers.get("x-session-id") or headers.get("X-Session-Id", "")
+    return get_cabinet_user(conn, sid)
+
+
 def rows(cur):
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -313,13 +344,13 @@ def handler(event: dict, context) -> dict:
         return cors({})
 
     headers = event.get("headers") or {}
-    token = headers.get("x-admin-token") or headers.get("X-Admin-Token", "")
 
     conn = psycopg2.connect(DB)
     try:
-        actor = get_admin(conn, token)
-        if not actor:
+        user = authenticate(conn, headers)
+        if not user:
             return cors({"ok": False, "error": {"message": "Не авторизован"}}, 401)
+        actor = user["email"]
 
         qs = event.get("queryStringParameters") or {}
         action = qs.get("action", "focus")

@@ -8,6 +8,7 @@ import SeoMeta from "@/components/SeoMeta";
 import AiChatPanel from "@/components/AiChatPanel";
 import NotificationBell from "@/components/NotificationBell";
 import PullToRefresh from "@/components/PullToRefresh";
+import { controlApi } from "@/lib/execControlApi";
 import { BUILD_HASH } from "@/lib/build-info";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -200,6 +201,18 @@ function SectionGroup({
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
+  const [hasExecAccess, setHasExecAccess] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setHasExecAccess(false);
+      return;
+    }
+    controlApi
+      .whoami()
+      .then(() => setHasExecAccess(true))
+      .catch(() => setHasExecAccess(false));
+  }, [user]);
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
@@ -287,6 +300,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Primary nav */}
         <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
+          {hasExecAccess && (
+            <Link
+              to="/admin/exec"
+              className={`flex items-center gap-2.5 px-2.5 py-2 mb-1 rounded-lg text-sm font-medium transition-colors ${
+                collapsed ? "justify-center" : ""
+              } bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100`}
+              title={collapsed ? "Кабинет руководителя" : undefined}
+            >
+              <Icon name="Crosshair" size={16} className="flex-shrink-0" />
+              {!collapsed && <span className="truncate">Кабинет руководителя</span>}
+            </Link>
+          )}
           {NAV_SECTIONS.map(section => (
             <SectionGroup
               key={section.key}

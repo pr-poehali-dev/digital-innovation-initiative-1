@@ -36,6 +36,37 @@ def get_admin(conn, token: str):
     return row[0] if row else None
 
 
+def get_cabinet_user(conn, session_id: str):
+    """Обычная сессия пользователя + проверка списка доступа к кабинету."""
+    if not session_id:
+        return None
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT u.email, a.access_role, a.can_confirm "
+            f"FROM {SCHEMA}.sessions s "
+            f"JOIN {SCHEMA}.users u ON u.id = s.user_id "
+            f"JOIN {SCHEMA}.exec_cabinet_access a ON LOWER(a.email) = LOWER(u.email) "
+            f"LEFT JOIN {SCHEMA}.admin_user_flags fl ON fl.user_id = u.id "
+            f"WHERE s.id = %s AND s.expires_at > NOW() "
+            f"AND a.is_active = true AND COALESCE(fl.is_blocked, false) = false LIMIT 1",
+            (session_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"email": row[0], "role": row[1], "can_confirm": row[2]}
+
+
+def authenticate(conn, headers: dict):
+    """Два способа входа: админ-токен или обычная сессия из списка доступа."""
+    token = headers.get("x-admin-token") or headers.get("X-Admin-Token", "")
+    email = get_admin(conn, token)
+    if email:
+        return {"email": email, "role": "head", "can_confirm": True}
+    sid = headers.get("x-session-id") or headers.get("X-Session-Id", "")
+    return get_cabinet_user(conn, sid)
+
+
 def rows(cur):
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -142,9 +173,14 @@ def log(cur, actor, entity, eid, action, payload=None, reason=None):
          json.dumps(payload, ensure_ascii=False, default=str) if payload else None, reason))
 
 
-def milestones(cur, initiative_id=None):
-    where = "WHERE m.initiative_id = %s" if initiative_id else ""
-    params = [initiative_id] if initiative_id else []
+def milestones(cur, initiative_id=None, include_closed=True):
+    conds, params = [], []
+    if initiative_id:
+        conds.append("m.initiative_id = %s")
+        params.append(initiative_id)
+    if not include_closed:
+        conds.append("m.status NOT IN ('achieved','cancelled')")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     cur.execute(f"""
         SELECT m.*, {OVERDUE_MS} AS is_overdue,
                i.title AS initiative_title, i.code AS initiative_code,
@@ -165,9 +201,14 @@ def milestones(cur, initiative_id=None):
     return rows(cur)
 
 
-def issues(cur, initiative_id=None):
-    where = "WHERE s.initiative_id = %s" if initiative_id else ""
-    params = [initiative_id] if initiative_id else []
+def issues(cur, initiative_id=None, include_closed=True):
+    conds, params = [], []
+    if initiative_id:
+        conds.append("s.initiative_id = %s")
+        params.append(initiative_id)
+    if not include_closed:
+        conds.append("s.status NOT IN ('resolved','closed','irrelevant')")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     cur.execute(f"""
         SELECT s.*, i.title AS initiative_title, i.code AS initiative_code,
                ow.display_name AS owner_name, re.display_name AS responsible_name,
@@ -188,9 +229,14 @@ def issues(cur, initiative_id=None):
     return rows(cur)
 
 
-def risks(cur, initiative_id=None):
-    where = "WHERE r.initiative_id = %s" if initiative_id else ""
-    params = [initiative_id] if initiative_id else []
+def risks(cur, initiative_id=None, include_closed=True):
+    conds, params = [], []
+    if initiative_id:
+        conds.append("r.initiative_id = %s")
+        params.append(initiative_id)
+    if not include_closed:
+        conds.append("r.status NOT IN ('closed','irrelevant')")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     cur.execute(f"""
         SELECT r.*, {RISK_LEVEL_SQL} AS risk_level,
                i.title AS initiative_title, i.code AS initiative_code,
@@ -433,19 +479,36 @@ def handler(event: dict, context) -> dict:
         return cors({})
 
     headers = event.get("headers") or {}
-    token = headers.get("x-admin-token") or headers.get("X-Admin-Token", "")
 
     conn = psycopg2.connect(DB)
     try:
-        actor = get_admin(conn, token)
-        if not actor:
+        user = authenticate(conn, headers)
+        if not user:
             return cors({"ok": False, "error": {"message": "Не авторизован"}}, 401)
+        actor = user["email"]
+        can_confirm = user["can_confirm"]
 
         qs = event.get("queryStringParameters") or {}
         action = qs.get("action", "control_focus")
         body = json.loads(event["body"]) if event.get("body") else {}
         cur = conn.cursor()
         iid = int(qs["initiative_id"]) if qs.get("initiative_id") else None
+
+        if action == "whoami":
+            return cors({"ok": True, "data": user})
+
+        warn = None
+        if not can_confirm:
+            confirming = {
+                "save_milestone": body.get("status") == "achieved",
+                "save_issue": body.get("status") in ("resolved", "closed"),
+                "save_risk": body.get("status") == "closed",
+                "lift_block": True,
+                "set_verification": True,
+            }
+            if confirming.get(action):
+                warn = ("У вас нет права подтверждения. Запись сохранена, "
+                        "но требует подтверждения уполномоченным лицом.")
 
         if action == "control_focus":
             return cors({"ok": True, "data": control_focus(cur)})
@@ -457,7 +520,43 @@ def handler(event: dict, context) -> dict:
                 "risks": risks(cur, iid),
                 "actions": actions(cur),
                 "escalations": escalations(cur),
+                "access": user,
             }})
+
+        if action == "demo_stats":
+            cur.execute(f"""
+                SELECT
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_milestone WHERE is_test_data) AS milestones,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_issue WHERE is_test_data) AS issues,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_risk WHERE is_test_data) AS risks,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_action WHERE is_test_data) AS actions,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_escalation WHERE is_test_data) AS escalations,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_milestone WHERE NOT is_test_data) AS real_milestones,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_issue WHERE NOT is_test_data) AS real_issues,
+                  (SELECT COUNT(*) FROM {SCHEMA}.exec_risk WHERE NOT is_test_data) AS real_risks
+            """)
+            return cors({"ok": True, "data": rows(cur)[0]})
+
+        if action == "clear_demo":
+            if user["role"] != "head":
+                return cors({"ok": False, "error": {
+                    "message": "Очистку демонстрационных данных выполняет руководитель"}}, 403)
+            if body.get("confirm") != "УДАЛИТЬ ДЕМОДАННЫЕ":
+                return cors({"ok": False, "error": {
+                    "message": "Для подтверждения введите: УДАЛИТЬ ДЕМОДАННЫЕ"}}, 400)
+            counts = {}
+            for tbl in ("exec_relation",):
+                cur.execute(f"""DELETE FROM {SCHEMA}.{tbl} WHERE
+                    src_issue_id IN (SELECT id FROM {SCHEMA}.exec_issue WHERE is_test_data)
+                    OR src_risk_id IN (SELECT id FROM {SCHEMA}.exec_risk WHERE is_test_data)
+                    OR src_milestone_id IN (SELECT id FROM {SCHEMA}.exec_milestone WHERE is_test_data)""")
+            for tbl in ("exec_escalation", "exec_action", "exec_milestone",
+                        "exec_risk", "exec_issue"):
+                cur.execute(f"DELETE FROM {SCHEMA}.{tbl} WHERE is_test_data = true")
+                counts[tbl] = cur.rowcount
+            log(cur, actor, "system", 0, "clear_demo", counts)
+            conn.commit()
+            return cors({"ok": True, "data": {"deleted": counts}})
 
         if action == "milestones":
             return cors({"ok": True, "data": {"items": milestones(cur, iid)}})
@@ -519,7 +618,7 @@ def handler(event: dict, context) -> dict:
             new_id = cur.fetchone()[0]
             log(cur, actor, "milestone", new_id, "update" if mid else "create", data)
             conn.commit()
-            return cors({"ok": True, "data": {"id": new_id}})
+            return cors({"ok": True, "data": {"id": new_id}, "warning": warn})
 
         if action == "save_issue":
             sid = body.get("id")
@@ -564,7 +663,7 @@ def handler(event: dict, context) -> dict:
             new_id = cur.fetchone()[0]
             log(cur, actor, "issue", new_id, "update" if sid else "create", data)
             conn.commit()
-            return cors({"ok": True, "data": {"id": new_id}})
+            return cors({"ok": True, "data": {"id": new_id}, "warning": warn})
 
         if action == "save_risk":
             rid = body.get("id")
@@ -597,7 +696,7 @@ def handler(event: dict, context) -> dict:
             new_id = cur.fetchone()[0]
             log(cur, actor, "risk", new_id, "update" if rid else "create", data)
             conn.commit()
-            return cors({"ok": True, "data": {"id": new_id}})
+            return cors({"ok": True, "data": {"id": new_id}, "warning": warn})
 
         if action == "save_action":
             aid = body.get("id")
@@ -674,7 +773,7 @@ def handler(event: dict, context) -> dict:
             log(cur, actor, kind, body.get("id"), "lift_block",
                 {"result": body.get("block_lift_result")})
             conn.commit()
-            return cors({"ok": True, "data": {"id": row[0]}})
+            return cors({"ok": True, "data": {"id": row[0]}, "warning": warn})
 
         if action == "set_next_action":
             init_id = body.get("initiative_id")
