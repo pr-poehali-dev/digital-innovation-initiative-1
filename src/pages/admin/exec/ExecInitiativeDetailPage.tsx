@@ -16,6 +16,8 @@ import { VerificationSelect } from "@/components/exec/ExecForm";
 import InitiativeForm from "@/components/exec/InitiativeForm";
 import StakeholderForm from "@/components/exec/StakeholderForm";
 import DecisionForm from "@/components/exec/DecisionForm";
+import QuickIssueForm from "@/components/exec/QuickIssueForm";
+import QuickRiskForm from "@/components/exec/QuickRiskForm";
 
 type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect";
 
@@ -57,6 +59,8 @@ export default function ExecInitiativeDetailPage() {
     item: null,
   });
   const [statusSaving, setStatusSaving] = useState(false);
+  const [quickIssue, setQuickIssue] = useState(false);
+  const [quickRisk, setQuickRisk] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -195,6 +199,29 @@ export default function ExecInitiativeDetailPage() {
 
         {tab === "overview" && (
           <div className="grid lg:grid-cols-2 gap-5">
+            <div className="lg:col-span-2 flex flex-wrap gap-2">
+              <button
+                onClick={() => setQuickIssue(true)}
+                className="px-3.5 py-2 rounded-lg border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/15 text-orange-300 text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Icon name="TriangleAlert" size={15} />
+                Завести проблему
+              </button>
+              <button
+                onClick={() => setQuickRisk(true)}
+                className="px-3.5 py-2 rounded-lg border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/15 text-orange-300 text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Icon name="ShieldAlert" size={15} />
+                Завести риск
+              </button>
+              <Link
+                to={`/admin/exec/control?initiative=${i.id}`}
+                className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <Icon name="ExternalLink" size={14} />
+                Все точки, проблемы и риски
+              </Link>
+            </div>
             <Card title="Проблема и цель" icon="Target">
               <div className="space-y-4">
                 <Field label="Проблема или потребность" value={i.problem} />
@@ -512,6 +539,24 @@ export default function ExecInitiativeDetailPage() {
               setDecForm({ open: false, item: null });
               load();
             }}
+          />
+        )}
+
+        {quickIssue && (
+          <QuickIssueForm
+            initiativeId={i.id}
+            initiatives={refs?.initiatives || []}
+            onClose={() => setQuickIssue(false)}
+            onDone={() => setQuickIssue(false)}
+          />
+        )}
+
+        {quickRisk && (
+          <QuickRiskForm
+            initiativeId={i.id}
+            initiatives={refs?.initiatives || []}
+            onClose={() => setQuickRisk(false)}
+            onDone={() => setQuickRisk(false)}
           />
         )}
       </div>

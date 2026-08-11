@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { PersonRef, RefsData, execApi } from "@/lib/execCabinetApi";
@@ -26,6 +27,8 @@ import EmptyGuide from "@/components/exec/EmptyGuide";
 import MilestoneForm from "@/components/exec/MilestoneForm";
 import IssueForm from "@/components/exec/IssueForm";
 import RiskForm from "@/components/exec/RiskForm";
+import QuickIssueForm from "@/components/exec/QuickIssueForm";
+import QuickRiskForm from "@/components/exec/QuickRiskForm";
 import {
   ActionForm,
   EscalationForm,
@@ -60,13 +63,16 @@ export default function ExecControlPage() {
   const [decisions, setDecisions] = useState<{ id: number; question: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [initFilter, setInitFilter] = useState("");
+  const [searchParams] = useSearchParams();
+  const [initFilter, setInitFilter] = useState(searchParams.get("initiative") || "");
   const [showClosed, setShowClosed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [access, setAccess] = useState<CabinetAccess | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
 
   const [msForm, setMsForm] = useState<{ open: boolean; item: Milestone | null }>({ open: false, item: null });
+  const [quickIssue, setQuickIssue] = useState(false);
+  const [quickRisk, setQuickRisk] = useState(false);
   const [issueForm, setIssueForm] = useState<{ open: boolean; item: Issue | null }>({ open: false, item: null });
   const [riskForm, setRiskForm] = useState<{ open: boolean; item: Risk | null }>({ open: false, item: null });
   const [actForm, setActForm] = useState<{
@@ -186,22 +192,40 @@ export default function ExecControlPage() {
               </button>
             )}
             {tab === "issues" && (
-              <button
-                onClick={() => setIssueForm({ open: true, item: null })}
-                className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
-              >
-                <Icon name="Plus" size={15} />
-                Проблема
-              </button>
+              <>
+                <button
+                  onClick={() => setQuickIssue(true)}
+                  className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <Icon name="Zap" size={15} />
+                  Быстро
+                </button>
+                <button
+                  onClick={() => setIssueForm({ open: true, item: null })}
+                  className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <Icon name="Plus" size={15} />
+                  Подробно
+                </button>
+              </>
             )}
             {tab === "risks" && (
-              <button
-                onClick={() => setRiskForm({ open: true, item: null })}
-                className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
-              >
-                <Icon name="Plus" size={15} />
-                Риск
-              </button>
+              <>
+                <button
+                  onClick={() => setQuickRisk(true)}
+                  className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <Icon name="Zap" size={15} />
+                  Быстро
+                </button>
+                <button
+                  onClick={() => setRiskForm({ open: true, item: null })}
+                  className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <Icon name="Plus" size={15} />
+                  Подробно
+                </button>
+              </>
             )}
           </div>
         </header>
@@ -398,7 +422,7 @@ export default function ExecControlPage() {
                 why="Проблема — то, что уже мешает работе. Если она блокирует продвижение, отметьте это: она поднимется в «Мой фокус» с высоким приоритетом."
                 example="«Не получено заключение ИБ» — блокирует запуск пилота, снять может представитель безопасности, крайний срок 15 августа."
                 actionLabel="Завести проблему"
-                onAction={() => setIssueForm({ open: true, item: null })}
+                onAction={() => setQuickIssue(true)}
                 disabled={initiatives.length === 0}
                 disabledHint="Сначала заведите инициативу в разделе «Инициативы»"
               />
@@ -697,7 +721,7 @@ export default function ExecControlPage() {
                   why="Риск — то, что ещё не случилось, но может помешать. Уровень считается сам: вероятность умножается на влияние."
                   example="«Ключевой исполнитель уйдёт в отпуск в период внедрения» — вероятность 4, влияние 3, уровень высокий."
                   actionLabel="Завести риск"
-                  onAction={() => setRiskForm({ open: true, item: null })}
+                  onAction={() => setQuickRisk(true)}
                   disabled={initiatives.length === 0}
                   disabledHint="Сначала заведите инициативу в разделе «Инициативы»"
                 />
@@ -951,6 +975,30 @@ export default function ExecControlPage() {
             onSaved={() => {
               setMsForm({ open: false, item: null });
               setWarning(takeWarning());
+              load();
+            }}
+          />
+        )}
+
+        {quickIssue && (
+          <QuickIssueForm
+            initiativeId={initFilter ? Number(initFilter) : undefined}
+            initiatives={initiatives}
+            onClose={() => setQuickIssue(false)}
+            onDone={() => {
+              setQuickIssue(false);
+              load();
+            }}
+          />
+        )}
+
+        {quickRisk && (
+          <QuickRiskForm
+            initiativeId={initFilter ? Number(initFilter) : undefined}
+            initiatives={initiatives}
+            onClose={() => setQuickRisk(false)}
+            onDone={() => {
+              setQuickRisk(false);
               load();
             }}
           />
