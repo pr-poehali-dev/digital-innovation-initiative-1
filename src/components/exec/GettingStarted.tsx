@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
+import QuickStartForm from "./QuickStartForm";
 
 interface StepDef {
   n: number;
@@ -25,13 +26,15 @@ export default function GettingStarted({
   onHide?: () => void;
 }) {
   const [open, setOpen] = useState(true);
+  const [quickStart, setQuickStart] = useState(false);
+  const navigate = useNavigate();
 
   const steps: StepDef[] = [
     {
       n: 1,
       title: "Завести инициативу",
       why: "Инициатива — это то, что вы продвигаете: проект, изменение, задача уровня департамента. Всё остальное крепится к ней.",
-      action: "Создать инициативу",
+      action: "Быстрый старт",
       href: "/admin/exec/initiatives",
       done: counts.initiatives > 0,
     },
@@ -126,7 +129,16 @@ export default function GettingStarted({
                 <p className="text-sm text-white font-medium">{s.title}</p>
                 <p className="text-xs text-gray-500 mt-1 leading-relaxed">{s.why}</p>
               </div>
-              {!s.done && (
+              {!s.done && s.n === 1 && (
+                <button
+                  onClick={() => setQuickStart(true)}
+                  className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0 flex items-center gap-1.5"
+                >
+                  <Icon name="Zap" size={12} />
+                  {s.action}
+                </button>
+              )}
+              {!s.done && s.n !== 1 && (
                 <Link
                   to={s.href}
                   className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0"
@@ -155,6 +167,13 @@ export default function GettingStarted({
             </button>
           )}
         </div>
+      )}
+
+      {quickStart && (
+        <QuickStartForm
+          onClose={() => setQuickStart(false)}
+          onDone={(id) => navigate(`/admin/exec/initiatives/${id}`)}
+        />
       )}
     </div>
   );

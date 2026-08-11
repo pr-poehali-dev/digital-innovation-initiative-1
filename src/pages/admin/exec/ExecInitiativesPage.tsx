@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { Dictionaries, execApi, Initiative, PersonRef } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
 import InitiativeForm from "@/components/exec/InitiativeForm";
+import QuickStartForm from "@/components/exec/QuickStartForm";
 
 export default function ExecInitiativesPage() {
+  const navigate = useNavigate();
+  const [quickStart, setQuickStart] = useState(false);
   const [items, setItems] = useState<Initiative[]>([]);
   const [dicts, setDicts] = useState<Dictionaries>({});
   const [persons, setPersons] = useState<PersonRef[]>([]);
@@ -67,14 +70,30 @@ export default function ExecInitiativesPage() {
               Инициативы Блока внутреннего контроля и создаваемые решения
             </p>
           </div>
-          <button
-            onClick={openNew}
-            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
-          >
-            <Icon name="Plus" size={15} />
-            Новая инициатива
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setQuickStart(true)}
+              className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Icon name="Zap" size={15} />
+              Быстрый старт
+            </button>
+            <button
+              onClick={openNew}
+              className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Icon name="Plus" size={15} />
+              Подробная форма
+            </button>
+          </div>
         </header>
+
+        {quickStart && (
+          <QuickStartForm
+            onClose={() => setQuickStart(false)}
+            onDone={(id) => navigate(`/admin/exec/initiatives/${id}`)}
+          />
+        )}
 
         <div className="flex flex-wrap gap-2">
           <div className="relative flex-1 min-w-[220px]">

@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AdminShell from "@/components/admin/AdminShell";
 import Icon from "@/components/ui/icon";
 import { execApi, FocusData } from "@/lib/execCabinetApi";
 import { CRITICALITY_LABEL, ControlFocus, RISK_LEVEL_LABEL, controlApi } from "@/lib/execControlApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate, daysLeft } from "@/components/exec/ExecUI";
 import GettingStarted from "@/components/exec/GettingStarted";
+import QuickStartForm from "@/components/exec/QuickStartForm";
 
 export default function ExecFocusPage() {
+  const navigate = useNavigate();
   const [data, setData] = useState<FocusData | null>(null);
   const [ctrl, setCtrl] = useState<ControlFocus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [quickStart, setQuickStart] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -67,16 +70,31 @@ export default function ExecFocusPage() {
               Что требует вашего внимания в управленческом контуре сегодня
             </p>
           </div>
-          <Link
-            to="/admin/exec/initiatives"
-            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
-          >
-            <Icon name="Plus" size={15} />
-            Инициативы
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setQuickStart(true)}
+              className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Icon name="Zap" size={15} />
+              Быстрый старт
+            </button>
+            <Link
+              to="/admin/exec/initiatives"
+              className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              Все инициативы
+            </Link>
+          </div>
         </header>
 
         {isEmpty && <GettingStarted counts={startCounts} />}
+
+        {quickStart && (
+          <QuickStartForm
+            onClose={() => setQuickStart(false)}
+            onDone={(id) => navigate(`/admin/exec/initiatives/${id}`)}
+          />
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
           <Metric label="Инициатив в работе" value={data.metrics.initiatives_total} icon="Rocket" />
