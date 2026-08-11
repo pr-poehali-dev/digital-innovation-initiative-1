@@ -300,22 +300,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Primary nav */}
         <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
-          {hasExecAccess && (
-            <Link
-              to="/admin/exec"
-              className={`flex items-center gap-2.5 px-2.5 py-2 mb-1 rounded-lg text-sm font-medium transition-colors ${
-                collapsed ? "justify-center" : ""
-              } bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100`}
-              title={collapsed ? "Кабинет руководителя" : undefined}
-            >
-              <Icon name="Crosshair" size={16} className="flex-shrink-0" />
-              {!collapsed && <span className="truncate">Кабинет руководителя</span>}
-            </Link>
-          )}
           {NAV_SECTIONS.map(section => (
             <SectionGroup
               key={section.key}
-              section={section}
+              section={
+                hasExecAccess
+                  ? section
+                  : { ...section, items: section.items.filter((i) => i.id !== "chief.exec") }
+              }
               collapsed={collapsed}
               isOpen={openSections[section.key] ?? true}
               onToggle={() => toggleSection(section.key)}

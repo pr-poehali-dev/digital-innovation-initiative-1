@@ -21,7 +21,8 @@ import {
   takeWarning,
 } from "@/lib/execControlApi";
 import { ACCESS_ROLE_LABEL, CabinetAccess } from "@/lib/execAccess";
-import { Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import { Card, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import EmptyGuide from "@/components/exec/EmptyGuide";
 import MilestoneForm from "@/components/exec/MilestoneForm";
 import IssueForm from "@/components/exec/IssueForm";
 import RiskForm from "@/components/exec/RiskForm";
@@ -289,7 +290,16 @@ export default function ExecControlPage() {
         ) : tab === "milestones" ? (
           <Card title="Контрольные точки" subtitle={`${fMilestones.length} точек`} icon="Flag">
             {fMilestones.length === 0 ? (
-              <Empty text="Контрольные точки не заведены" icon="Flag" />
+              <EmptyGuide
+                icon="Flag"
+                what="Контрольных точек пока нет"
+                why="Контрольная точка — проверяемый результат с датой. По ней видно, движется инициатива или стоит на месте."
+                example="«Согласована концепция решения» — 20 августа, ответственный Иванов. Критерий: получено письменное согласование владельца процесса."
+                actionLabel="Добавить контрольную точку"
+                onAction={() => setMsForm({ open: true, item: null })}
+                disabled={initiatives.length === 0}
+                disabledHint="Сначала заведите инициативу в разделе «Инициативы»"
+              />
             ) : (
               <div className="space-y-2">
                 {fMilestones.map((m) => (
@@ -382,7 +392,16 @@ export default function ExecControlPage() {
         ) : tab === "issues" ? (
           <Card title="Проблемы" subtitle={`${fIssues.length} записей`} icon="TriangleAlert">
             {fIssues.length === 0 ? (
-              <Empty text="Проблемы не заведены" icon="CircleCheck" />
+              <EmptyGuide
+                icon="TriangleAlert"
+                what="Проблем не зафиксировано"
+                why="Проблема — то, что уже мешает работе. Если она блокирует продвижение, отметьте это: она поднимется в «Мой фокус» с высоким приоритетом."
+                example="«Не получено заключение ИБ» — блокирует запуск пилота, снять может представитель безопасности, крайний срок 15 августа."
+                actionLabel="Завести проблему"
+                onAction={() => setIssueForm({ open: true, item: null })}
+                disabled={initiatives.length === 0}
+                disabledHint="Сначала заведите инициативу в разделе «Инициативы»"
+              />
             ) : (
               <div className="space-y-2">
                 {fIssues.map((s) => {
@@ -672,7 +691,16 @@ export default function ExecControlPage() {
 
             <Card title="Риски" subtitle={`${fRisks.length} записей`} icon="ShieldAlert">
               {fRisks.length === 0 ? (
-                <Empty text="Риски не заведены" icon="ShieldCheck" />
+                <EmptyGuide
+                  icon="ShieldAlert"
+                  what="Рисков не зафиксировано"
+                  why="Риск — то, что ещё не случилось, но может помешать. Уровень считается сам: вероятность умножается на влияние."
+                  example="«Ключевой исполнитель уйдёт в отпуск в период внедрения» — вероятность 4, влияние 3, уровень высокий."
+                  actionLabel="Завести риск"
+                  onAction={() => setRiskForm({ open: true, item: null })}
+                  disabled={initiatives.length === 0}
+                  disabledHint="Сначала заведите инициативу в разделе «Инициативы»"
+                />
               ) : (
                 <div className="space-y-2">
                   {fRisks.map((r) => {
@@ -839,7 +867,23 @@ export default function ExecControlPage() {
         ) : (
           <Card title="История эскалаций" subtitle={`${fEscalations.length} записей`} icon="ArrowUpCircle">
             {fEscalations.length === 0 ? (
-              <Empty text="Эскалаций не было" icon="ArrowUpCircle" />
+              <div className="py-8 px-4 text-center max-w-lg mx-auto">
+                <div className="w-12 h-12 rounded-xl bg-gray-900 border border-gray-800 flex items-center justify-center mx-auto mb-4">
+                  <Icon name="ArrowUpCircle" size={22} className="text-gray-600" />
+                </div>
+                <p className="text-sm text-white font-medium mb-2">Эскалаций не было</p>
+                <p className="text-sm text-gray-500 leading-relaxed mb-4">
+                  Эскалация — передача вопроса на уровень выше, когда своими силами он не
+                  решается. Создаётся из карточки проблемы или риска кнопкой «Эскалировать».
+                </p>
+                <div className="p-3 rounded-lg bg-gray-900/60 border border-gray-800 text-left">
+                  <p className="text-xs text-gray-600 mb-1">Например</p>
+                  <p className="text-sm text-gray-400 leading-relaxed">
+                    Проблема не решается на уровне команды — передаёте на Группу сопровождения,
+                    указываете срок рассмотрения и основание. Решение Группы фиксируется здесь же.
+                  </p>
+                </div>
+              </div>
             ) : (
               <div className="space-y-2">
                 {fEscalations.map((e) => (

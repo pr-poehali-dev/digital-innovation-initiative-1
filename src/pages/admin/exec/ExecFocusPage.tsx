@@ -5,6 +5,7 @@ import Icon from "@/components/ui/icon";
 import { execApi, FocusData } from "@/lib/execCabinetApi";
 import { CRITICALITY_LABEL, ControlFocus, RISK_LEVEL_LABEL, controlApi } from "@/lib/execControlApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate, daysLeft } from "@/components/exec/ExecUI";
+import GettingStarted from "@/components/exec/GettingStarted";
 
 export default function ExecFocusPage() {
   const [data, setData] = useState<FocusData | null>(null);
@@ -44,6 +45,18 @@ export default function ExecFocusPage() {
   const blocking = data.issues.filter((i) => i.level === "blocking");
   const warnings = data.issues.filter((i) => i.level === "warning");
 
+  const startCounts = {
+    initiatives: data.metrics.initiatives_total,
+    milestones:
+      (ctrl?.upcoming_milestones.length ?? 0) + (ctrl?.overdue_milestones.length ?? 0),
+    issues: ctrl?.metrics.critical_issues ?? 0,
+    risks: ctrl?.metrics.high_risks ?? 0,
+    decisions: data.metrics.decisions_open,
+  };
+  const isEmpty =
+    startCounts.initiatives === 0 ||
+    (startCounts.milestones === 0 && startCounts.issues === 0 && startCounts.risks === 0);
+
   return (
     <AdminShell>
       <div className="max-w-[1400px] space-y-5">
@@ -62,6 +75,8 @@ export default function ExecFocusPage() {
             Инициативы
           </Link>
         </header>
+
+        {isEmpty && <GettingStarted counts={startCounts} />}
 
         <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
           <Metric label="Инициатив в работе" value={data.metrics.initiatives_total} icon="Rocket" />
