@@ -34,6 +34,7 @@ const NAV = [
   { label: "Adoption",     icon: "BarChart2",          href: "/admin/analytics/competency-map" },
   { label: "Автоматизация", icon: "Zap",             href: "/admin/automations" },
   { label: "Контент",     icon: "FileText",         href: "/admin/content" },
+  { label: "Презентации", icon: "Presentation",     href: "/admin/presentations" },
 ];
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {

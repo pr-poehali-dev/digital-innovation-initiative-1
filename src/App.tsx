@@ -74,6 +74,10 @@ import GlossaryPage from "./pages/GlossaryPage";
 import ProcessMapPage from "./pages/ProcessMapPage";
 import PresentationPage from "./pages/PresentationPage";
 import AdminPresentationPage from "./pages/admin/AdminPresentationPage";
+import BizPresentationsHubPage from "./pages/admin/biz-presentation/BizPresentationsHubPage";
+import BizPresentationEditorPage from "./pages/admin/biz-presentation/BizPresentationEditorPage";
+import BizPresentationPresentPage from "./pages/admin/biz-presentation/BizPresentationPresentPage";
+import BizPresentationPublicPage from "./pages/BizPresentationPublicPage";
 
 const queryClient = new QueryClient();
 
@@ -119,6 +123,9 @@ const App = () => (
               <Route path="/admin/analytics/competency-map" element={<AdminRoute><AdminAdoptionPage /></AdminRoute>} />
               <Route path="/admin/benchmark" element={<AdminRoute><AdminBenchmarkPage /></AdminRoute>} />
               <Route path="/admin/presentation" element={<AdminRoute><AdminPresentationPage /></AdminRoute>} />
+              <Route path="/admin/presentations" element={<AdminRoute><BizPresentationsHubPage /></AdminRoute>} />
+              <Route path="/admin/presentations/:id" element={<AdminRoute><BizPresentationEditorPage /></AdminRoute>} />
+              <Route path="/admin/presentations/:id/present" element={<AdminRoute><BizPresentationPresentPage /></AdminRoute>} />
               <Route path="/admin/exec" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
               <Route path="/admin/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />
               <Route path="/admin/exec/initiatives/:id" element={<ExecRoute><ExecInitiativeDetailPage /></ExecRoute>} />
@@ -134,6 +141,7 @@ const App = () => (
               {/* App routes */}
               <Route path="/" element={<Index />} />
               <Route path="/presentation" element={<PresentationPage />} />
+              <Route path="/deck/:slug" element={<BizPresentationPublicPage />} />
               <Route path="/login" element={<AuthPage />} />
               <Route path="/cabinet" element={<ProtectedRoute><GrowthDashboard /></ProtectedRoute>} />
               <Route path="/cabinet/projects" element={<ProtectedRoute><CabinetPage /></ProtectedRoute>} />

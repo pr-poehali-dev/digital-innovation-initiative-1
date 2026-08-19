@@ -1,0 +1,7 @@
+{
+  "tests": [
+    { "name": "OPTIONS preflight",       "method": "OPTIONS", "path": "/",                     "expectedStatus": 200 },
+    { "name": "Unauthorized list",       "method": "GET",     "path": "/?action=list",         "expectedStatus": 401, "expectedBody": {"ok": false}, "bodyMatcher": "partial" },
+    { "name": "Public get missing slug", "method": "GET",     "path": "/?action=public_get&slug=none-existing", "expectedStatus": 404, "expectedBody": {"ok": false}, "bodyMatcher": "partial" }
+  ]
+}
