@@ -4,10 +4,27 @@
 """
 import json
 import os
+import re
 import base64
 import psycopg2
 import urllib.request
 import urllib.error
+
+
+def safe_s3_name(filename: str) -> str:
+    """Транслитерирует и очищает имя файла, чтобы получился валидный S3-ключ
+    (хранилище отклоняет ключи с кириллицей/пробелами кодом 400)."""
+    table = str.maketrans({
+        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+        "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+        "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+        "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+        "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    })
+    name = filename.lower().translate(table)
+    name = re.sub(r"[^a-z0-9._-]+", "_", name)
+    name = re.sub(r"_+", "_", name).strip("_")
+    return name[:180] or "file"
 
 
 def get_db():
@@ -255,7 +272,7 @@ def handler(event: dict, context) -> dict:
         ext = filename.split(".")[-1].lower() if "." in filename else media_type
 
         # Загружаем в S3
-        s3_key = f"media/{project_id}/{user['id']}_{filename}"
+        s3_key = f"media/{project_id}/{user['id']}_{safe_s3_name(filename)}"
         s3 = get_s3_client()
         content_type_map = {
             "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",

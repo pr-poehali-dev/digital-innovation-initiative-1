@@ -4,6 +4,7 @@
 """
 import json
 import os
+import re
 import base64
 import io
 import uuid
@@ -13,6 +14,22 @@ import boto3
 
 INDEXER_URL = os.environ.get("SEARCH_INDEXER_URL", "")
 INDEXER_TOKEN = os.environ.get("SEARCH_INDEXER_TOKEN", "")
+
+
+def safe_s3_name(filename: str) -> str:
+    """Транслитерирует и очищает имя файла, чтобы получился валидный S3-ключ
+    (хранилище отклоняет ключи с кириллицей/пробелами кодом 400)."""
+    table = str.maketrans({
+        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+        "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+        "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+        "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+        "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    })
+    name = filename.lower().translate(table)
+    name = re.sub(r"[^a-z0-9._-]+", "_", name)
+    name = re.sub(r"_+", "_", name).strip("_")
+    return name[:180] or "file"
 
 
 def get_db():
@@ -307,7 +324,7 @@ def handler(event: dict, context) -> dict:
             file_size = len(file_bytes)
 
             # Загрузить в S3
-            s3_key = f"documents/{project_id}/{user['id']}_{filename}"
+            s3_key = f"documents/{project_id}/{user['id']}_{safe_s3_name(filename)}"
             s3 = get_s3()
             content_types = {
                 "pdf": "application/pdf",
@@ -631,7 +648,7 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             session_id = "doc_" + uuid.uuid4().hex
-            s3_key = f"documents/{project_id}/{session_id}_{filename}"
+            s3_key = f"documents/{project_id}/{session_id}_{safe_s3_name(filename)}"
             return json_response({"session_id": session_id, "s3_key": s3_key}, origin=origin)
 
         # document.upload_chunk — загрузить один чанк
@@ -753,7 +770,7 @@ def handler(event: dict, context) -> dict:
                 return json_response({"error": "Нет доступа"}, 403, origin=origin)
 
             import uuid as _uuid
-            s3_key = f"documents/{project_id}/{_uuid.uuid4().hex}_{filename}"
+            s3_key = f"documents/{project_id}/{_uuid.uuid4().hex}_{safe_s3_name(filename)}"
             content_types = {
                 "pdf": "application/pdf",
                 "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
