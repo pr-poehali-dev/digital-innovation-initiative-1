@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import CookieBanner from "@/components/CookieBanner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { HelmetProvider } from "react-helmet-async";
 import { AuthProvider, useAuth } from "./lib/auth-context";
 import { AdminProvider } from "./lib/admin-context";
@@ -30,16 +30,16 @@ import AdminContentPage from "./pages/admin/AdminContentPage";
 import AdminCompetenciesPage from "./pages/admin/AdminCompetenciesPage";
 import AdminAdoptionPage from "./pages/admin/AdminAdoptionPage";
 import AdminBenchmarkPage from "./pages/admin/AdminBenchmarkPage";
-import ExecFocusPage from "./pages/admin/exec/ExecFocusPage";
-import ExecInitiativesPage from "./pages/admin/exec/ExecInitiativesPage";
-import ExecInitiativeDetailPage from "./pages/admin/exec/ExecInitiativeDetailPage";
-import ExecStakeholdersPage from "./pages/admin/exec/ExecStakeholdersPage";
-import ExecDecisionsPage from "./pages/admin/exec/ExecDecisionsPage";
-import ExecAuthorityPage from "./pages/admin/exec/ExecAuthorityPage";
-import ExecDiagnosticsPage from "./pages/admin/exec/ExecDiagnosticsPage";
-import ExecPersonsPage from "./pages/admin/exec/ExecPersonsPage";
-import ExecHistoryPage from "./pages/admin/exec/ExecHistoryPage";
-import ExecControlPage from "./pages/admin/exec/ExecControlPage";
+import ExecFocusPage from "./pages/cabinet/exec/ExecFocusPage";
+import ExecInitiativesPage from "./pages/cabinet/exec/ExecInitiativesPage";
+import ExecInitiativeDetailPage from "./pages/cabinet/exec/ExecInitiativeDetailPage";
+import ExecStakeholdersPage from "./pages/cabinet/exec/ExecStakeholdersPage";
+import ExecDecisionsPage from "./pages/cabinet/exec/ExecDecisionsPage";
+import ExecAuthorityPage from "./pages/cabinet/exec/ExecAuthorityPage";
+import ExecDiagnosticsPage from "./pages/cabinet/exec/ExecDiagnosticsPage";
+import ExecPersonsPage from "./pages/cabinet/exec/ExecPersonsPage";
+import ExecHistoryPage from "./pages/cabinet/exec/ExecHistoryPage";
+import ExecControlPage from "./pages/cabinet/exec/ExecControlPage";
 import ExecRoute from "./components/exec/ExecRoute";
 import Index from "./pages/Index";
 import WelcomePage from "./pages/WelcomePage";
@@ -88,6 +88,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function RedirectInitiativeDetail() {
+  const { id } = useParams();
+  return <Navigate to={`/cabinet/exec/initiatives/${id}`} replace />;
+}
+
 const App = () => (
   <HelmetProvider>
   <QueryClientProvider client={queryClient}>
@@ -126,16 +131,17 @@ const App = () => (
               <Route path="/admin/presentations" element={<AdminRoute><BizPresentationsHubPage /></AdminRoute>} />
               <Route path="/admin/presentations/:id" element={<AdminRoute><BizPresentationEditorPage /></AdminRoute>} />
               <Route path="/admin/presentations/:id/present" element={<AdminRoute><BizPresentationPresentPage /></AdminRoute>} />
-              <Route path="/admin/exec" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
-              <Route path="/admin/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />
-              <Route path="/admin/exec/initiatives/:id" element={<ExecRoute><ExecInitiativeDetailPage /></ExecRoute>} />
-              <Route path="/admin/exec/control" element={<ExecRoute><ExecControlPage /></ExecRoute>} />
-              <Route path="/admin/exec/stakeholders" element={<ExecRoute><ExecStakeholdersPage /></ExecRoute>} />
-              <Route path="/admin/exec/decisions" element={<ExecRoute><ExecDecisionsPage /></ExecRoute>} />
-              <Route path="/admin/exec/authority" element={<ExecRoute><ExecAuthorityPage /></ExecRoute>} />
-              <Route path="/admin/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
-              <Route path="/admin/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
-              <Route path="/admin/exec/history" element={<ExecRoute><ExecHistoryPage /></ExecRoute>} />
+              {/* Редиректы со старых admin/exec ссылок — кабинет руководителя переехал в основной кабинет */}
+              <Route path="/admin/exec" element={<Navigate to="/cabinet/exec" replace />} />
+              <Route path="/admin/exec/initiatives" element={<Navigate to="/cabinet/exec/initiatives" replace />} />
+              <Route path="/admin/exec/initiatives/:id" element={<RedirectInitiativeDetail />} />
+              <Route path="/admin/exec/control" element={<Navigate to="/cabinet/exec/control" replace />} />
+              <Route path="/admin/exec/stakeholders" element={<Navigate to="/cabinet/exec/stakeholders" replace />} />
+              <Route path="/admin/exec/decisions" element={<Navigate to="/cabinet/exec/decisions" replace />} />
+              <Route path="/admin/exec/authority" element={<Navigate to="/cabinet/exec/authority" replace />} />
+              <Route path="/admin/exec/diagnostics" element={<Navigate to="/cabinet/exec/diagnostics" replace />} />
+              <Route path="/admin/exec/persons" element={<Navigate to="/cabinet/exec/persons" replace />} />
+              <Route path="/admin/exec/history" element={<Navigate to="/cabinet/exec/history" replace />} />
               <Route path="/admin/*" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
               {/* App routes */}
@@ -163,6 +169,16 @@ const App = () => (
               <Route path="/cabinet/growth" element={<ProtectedRoute><GrowthNavigatorPage /></ProtectedRoute>} />
               <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />
               <Route path="/cabinet/competency-map" element={<ProtectedRoute><CompetencyMapPage /></ProtectedRoute>} />
+              <Route path="/cabinet/exec" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/initiatives/:id" element={<ExecRoute><ExecInitiativeDetailPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/control" element={<ExecRoute><ExecControlPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/stakeholders" element={<ExecRoute><ExecStakeholdersPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/decisions" element={<ExecRoute><ExecDecisionsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/authority" element={<ExecRoute><ExecAuthorityPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/history" element={<ExecRoute><ExecHistoryPage /></ExecRoute>} />
               <Route path="/cabinet/headquarters" element={<Navigate to="/cabinet" replace />} />
               <Route path="/welcome" element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
               <Route path="/guide" element={<GuidePage />} />

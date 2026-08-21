@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { execApi, FocusData } from "@/lib/execCabinetApi";
 import { CRITICALITY_LABEL, ControlFocus, RISK_LEVEL_LABEL, controlApi } from "@/lib/execControlApi";
@@ -32,16 +32,16 @@ export default function ExecFocusPage() {
 
   if (loading)
     return (
-      <AdminShell>
+      <Layout>
         <Loading />
-      </AdminShell>
+      </Layout>
     );
 
   if (error || !data)
     return (
-      <AdminShell>
+      <Layout>
         <ErrorBox message={error || "Нет данных"} onRetry={load} />
-      </AdminShell>
+      </Layout>
     );
 
   const d = data.dictionaries;
@@ -61,26 +61,26 @@ export default function ExecFocusPage() {
     (startCounts.milestones === 0 && startCounts.issues === 0 && startCounts.risks === 0);
 
   return (
-    <AdminShell>
-      <div className="max-w-[1400px] space-y-5">
+    <Layout>
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Мой фокус</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Мой фокус</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Что требует вашего внимания в управленческом контуре сегодня
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setQuickStart(true)}
-              className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
             >
               <Icon name="Zap" size={15} />
               Быстрый старт
             </button>
             <Link
-              to="/admin/exec/initiatives"
-              className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+              to="/cabinet/exec/initiatives"
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors flex items-center gap-2"
             >
               Все инициативы
             </Link>
@@ -92,7 +92,7 @@ export default function ExecFocusPage() {
         {quickStart && (
           <QuickStartForm
             onClose={() => setQuickStart(false)}
-            onDone={(id) => navigate(`/admin/exec/initiatives/${id}`)}
+            onDone={(id) => navigate(`/cabinet/exec/initiatives/${id}`)}
           />
         )}
 
@@ -143,7 +143,7 @@ export default function ExecFocusPage() {
             icon="Ban"
             className="border-red-500/30"
             action={
-              <Link to="/admin/exec/control" className="text-xs text-orange-400 hover:text-orange-300">
+              <Link to="/cabinet/exec/control" className="text-xs text-violet-600 hover:text-violet-700">
                 Все блокировки
               </Link>
             }
@@ -152,16 +152,16 @@ export default function ExecFocusPage() {
               {ctrl.blockers.map((b) => (
                 <Link
                   key={`${b.kind}-${b.id}`}
-                  to="/admin/exec/control"
+                  to="/cabinet/exec/control"
                   className="block p-3 rounded-lg border border-red-500/30 bg-red-500/10 hover:border-red-500/50 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div className="min-w-0">
-                      <p className="text-sm text-white leading-snug">{b.subject}</p>
-                      <p className="text-xs text-gray-400 mt-1">{b.block_what}</p>
-                      <p className="text-xs text-gray-600 mt-1 truncate">{b.initiative_title}</p>
+                      <p className="text-sm text-slate-900 leading-snug">{b.subject}</p>
+                      <p className="text-xs text-slate-500 mt-1">{b.block_what}</p>
+                      <p className="text-xs text-slate-400 mt-1 truncate">{b.initiative_title}</p>
                     </div>
-                    <span className={`text-xs ${b.is_overdue ? "text-red-400" : "text-gray-500"}`}>
+                    <span className={`text-xs ${b.is_overdue ? "text-red-600" : "text-slate-500"}`}>
                       до {fmtDate(b.block_deadline)}
                       {b.is_overdue && " · просрочено"}
                     </span>
@@ -178,7 +178,7 @@ export default function ExecFocusPage() {
             subtitle={`${ctrl.critical_issues.length} требуют внимания`}
             icon="TriangleAlert"
             action={
-              <Link to="/admin/exec/control" className="text-xs text-orange-400 hover:text-orange-300">
+              <Link to="/cabinet/exec/control" className="text-xs text-violet-600 hover:text-violet-700">
                 Все проблемы
               </Link>
             }
@@ -189,19 +189,19 @@ export default function ExecFocusPage() {
                 return (
                   <Link
                     key={p.id}
-                    to="/admin/exec/control"
-                    className="block p-3 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 transition-colors"
+                    to="/cabinet/exec/control"
+                    className="block p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="min-w-0">
-                        <p className="text-sm text-white leading-snug">{p.title}</p>
-                        <p className="text-xs text-gray-600 mt-1 truncate">{p.initiative_title}</p>
+                        <p className="text-sm text-slate-900 leading-snug">{p.title}</p>
+                        <p className="text-xs text-slate-400 mt-1 truncate">{p.initiative_title}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`text-xs px-2 py-0.5 rounded-md border ${crit.cls}`}>
                           {crit.title}
                         </span>
-                        <span className={`text-xs ${p.is_overdue ? "text-red-400" : "text-gray-500"}`}>
+                        <span className={`text-xs ${p.is_overdue ? "text-red-600" : "text-slate-500"}`}>
                           {fmtDate(p.due_at)}
                         </span>
                       </div>
@@ -228,12 +228,12 @@ export default function ExecFocusPage() {
                   {ctrl.overdue_milestones.map((m) => (
                     <Link
                       key={m.id}
-                      to="/admin/exec/control"
+                      to="/cabinet/exec/control"
                       className="block p-3 rounded-lg border border-red-500/25 bg-red-500/5 hover:border-red-500/40 transition-colors"
                     >
-                      <p className="text-sm text-white leading-snug">{m.title}</p>
-                      <p className="text-xs text-gray-600 mt-1 truncate">{m.initiative_title}</p>
-                      <p className="text-xs text-red-400 mt-1">
+                      <p className="text-sm text-slate-900 leading-snug">{m.title}</p>
+                      <p className="text-xs text-slate-400 mt-1 truncate">{m.initiative_title}</p>
+                      <p className="text-xs text-red-600 mt-1">
                         просрочено на {m.days_overdue} дн. · план {fmtDate(m.plan_date)}
                       </p>
                     </Link>
@@ -254,15 +254,15 @@ export default function ExecFocusPage() {
                   {ctrl.upcoming_milestones.map((m) => (
                     <Link
                       key={m.id}
-                      to="/admin/exec/control"
-                      className="block p-3 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 transition-colors"
+                      to="/cabinet/exec/control"
+                      className="block p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-sm text-white leading-snug">{m.title}</p>
-                          <p className="text-xs text-gray-600 mt-1 truncate">{m.initiative_title}</p>
+                          <p className="text-sm text-slate-900 leading-snug">{m.title}</p>
+                          <p className="text-xs text-slate-400 mt-1 truncate">{m.initiative_title}</p>
                         </div>
-                        <span className="text-xs text-gray-500 whitespace-nowrap">
+                        <span className="text-xs text-slate-500 whitespace-nowrap">
                           через {m.days_left} дн.
                         </span>
                       </div>
@@ -290,13 +290,13 @@ export default function ExecFocusPage() {
                     return (
                       <Link
                         key={r.id}
-                        to="/admin/exec/control"
-                        className="block p-3 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 transition-colors"
+                        to="/cabinet/exec/control"
+                        className="block p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-colors"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-sm text-white leading-snug">{r.description}</p>
-                            <p className="text-xs text-gray-600 mt-1 truncate">{r.initiative_title}</p>
+                            <p className="text-sm text-slate-900 leading-snug">{r.description}</p>
+                            <p className="text-xs text-slate-400 mt-1 truncate">{r.initiative_title}</p>
                           </div>
                           <span className={`text-xs px-2 py-0.5 rounded-md border ${lvl.cls}`}>
                             {lvl.title} · {r.risk_score}
@@ -321,16 +321,16 @@ export default function ExecFocusPage() {
                   {ctrl.my_escalations.map((e) => (
                     <Link
                       key={e.id}
-                      to="/admin/exec/control"
+                      to="/cabinet/exec/control"
                       className={`block p-3 rounded-lg border transition-colors ${
                         e.is_overdue
                           ? "border-red-500/30 bg-red-500/5 hover:border-red-500/50"
-                          : "border-gray-800 bg-gray-900/40 hover:border-gray-700"
+                          : "border-slate-200 bg-white hover:border-slate-300"
                       }`}
                     >
-                      <p className="text-sm text-white leading-snug">{e.subject}</p>
-                      <p className="text-xs text-gray-600 mt-1 truncate">{e.initiative_title}</p>
-                      <p className={`text-xs mt-1 ${e.is_overdue ? "text-red-400" : "text-gray-500"}`}>
+                      <p className="text-sm text-slate-900 leading-snug">{e.subject}</p>
+                      <p className="text-xs text-slate-400 mt-1 truncate">{e.initiative_title}</p>
+                      <p className={`text-xs mt-1 ${e.is_overdue ? "text-red-600" : "text-slate-500"}`}>
                         передано {fmtDate(e.passed_at)}
                         {e.review_due_at && ` · срок ${fmtDate(e.review_due_at)}`}
                         {e.is_overdue && " · просрочено"}
@@ -353,22 +353,22 @@ export default function ExecFocusPage() {
               {ctrl.stalled_initiatives.map((s) => (
                 <Link
                   key={s.id}
-                  to={`/admin/exec/initiatives/${s.id}`}
+                  to={`/cabinet/exec/initiatives/${s.id}`}
                   className="block p-3 rounded-lg border border-amber-500/25 bg-amber-500/5 hover:border-amber-500/40 transition-colors"
                 >
-                  <p className="text-sm text-white leading-snug">{s.title}</p>
+                  <p className="text-sm text-slate-900 leading-snug">{s.title}</p>
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {s.reasons.map((r) => (
                       <span
                         key={r}
-                        className="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                        className="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-700 border border-amber-500/30"
                       >
                         {r}
                       </span>
                     ))}
                   </div>
                   {s.computed_next && (
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-slate-500 mt-2">
                       Ближайшее по данным системы: {s.computed_next.text} · {fmtDate(s.computed_next.due)}
                     </p>
                   )}
@@ -384,7 +384,7 @@ export default function ExecFocusPage() {
             subtitle="Требуют решения до продолжения работы"
             icon="OctagonAlert"
             action={
-              <Link to="/admin/exec/diagnostics" className="text-xs text-orange-400 hover:text-orange-300">
+              <Link to="/cabinet/exec/diagnostics" className="text-xs text-violet-600 hover:text-violet-700">
                 Вся диагностика
               </Link>
             }
@@ -395,12 +395,12 @@ export default function ExecFocusPage() {
                   key={idx}
                   className="flex items-start gap-3 p-3 rounded-lg border border-red-500/25 bg-red-500/5"
                 >
-                  <span className="text-[10px] font-mono text-red-400 bg-red-500/15 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+                  <span className="text-[10px] font-mono text-red-600 bg-red-500/15 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
                     {iss.code}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm text-red-200 font-medium">{iss.title}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{iss.detail}</p>
+                    <p className="text-sm text-red-800 font-medium">{iss.title}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{iss.detail}</p>
                   </div>
                 </div>
               ))}
@@ -414,7 +414,7 @@ export default function ExecFocusPage() {
             subtitle={`${data.pending_decisions.length} в работе`}
             icon="GitPullRequest"
             action={
-              <Link to="/admin/exec/decisions" className="text-xs text-orange-400 hover:text-orange-300">
+              <Link to="/cabinet/exec/decisions" className="text-xs text-violet-600 hover:text-violet-700">
                 Все решения
               </Link>
             }
@@ -428,18 +428,18 @@ export default function ExecFocusPage() {
                   return (
                     <Link
                       key={dec.id}
-                      to={`/admin/exec/initiatives/${dec.initiative_id}`}
-                      className="block p-3 rounded-lg border border-gray-800 hover:border-gray-700 bg-gray-900/40 transition-colors"
+                      to={`/cabinet/exec/initiatives/${dec.initiative_id}`}
+                      className="block p-3 rounded-lg border border-slate-200 hover:border-slate-300 bg-white transition-colors"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-sm text-white leading-snug">{dec.question}</p>
-                          <p className="text-xs text-gray-500 mt-1 truncate">{dec.initiative_title}</p>
+                          <p className="text-sm text-slate-900 leading-snug">{dec.question}</p>
+                          <p className="text-xs text-slate-500 mt-1 truncate">{dec.initiative_title}</p>
                         </div>
                         <Badge dicts={d} type="decision_status" code={dec.status} />
                       </div>
                       <div className="flex items-center gap-3 mt-2 text-xs">
-                        <span className={dec.is_overdue ? "text-red-400" : "text-gray-500"}>
+                        <span className={dec.is_overdue ? "text-red-600" : "text-slate-500"}>
                           <Icon name="Clock" size={11} className="inline mr-1" />
                           {fmtDate(dec.due_at)}
                           {left !== null && !dec.is_overdue && ` · через ${left} дн.`}
@@ -458,7 +458,7 @@ export default function ExecFocusPage() {
             subtitle="Ближайшие и просроченные"
             icon="Users"
             action={
-              <Link to="/admin/exec/stakeholders" className="text-xs text-orange-400 hover:text-orange-300">
+              <Link to="/cabinet/exec/stakeholders" className="text-xs text-violet-600 hover:text-violet-700">
                 Карта
               </Link>
             }
@@ -470,19 +470,19 @@ export default function ExecFocusPage() {
                 {data.stakeholder_actions.slice(0, 6).map((s) => (
                   <div
                     key={s.id}
-                    className={`p-3 rounded-lg border bg-gray-900/40 ${
-                      s.is_overdue ? "border-red-500/30" : "border-gray-800"
+                    className={`p-3 rounded-lg border bg-white ${
+                      s.is_overdue ? "border-red-500/30" : "border-slate-200"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm text-white">{s.display_name}</p>
-                        <p className="text-xs text-gray-500 truncate">{s.position_title}</p>
+                        <p className="text-sm text-slate-900">{s.display_name}</p>
+                        <p className="text-xs text-slate-500 truncate">{s.position_title}</p>
                       </div>
                       <Badge dicts={d} type="engagement_status" code={s.engagement_status} />
                     </div>
-                    <p className="text-xs text-gray-400 mt-2 leading-snug">{s.next_action}</p>
-                    <p className={`text-xs mt-1 ${s.is_overdue ? "text-red-400" : "text-gray-500"}`}>
+                    <p className="text-xs text-slate-500 mt-2 leading-snug">{s.next_action}</p>
+                    <p className={`text-xs mt-1 ${s.is_overdue ? "text-red-600" : "text-slate-500"}`}>
                       <Icon name="Calendar" size={11} className="inline mr-1" />
                       {fmtDate(s.next_action_due)}
                       {s.is_overdue && " · просрочено"}
@@ -505,15 +505,15 @@ export default function ExecFocusPage() {
             ) : (
               <ol className="space-y-2">
                 {ctrl.group_agenda.map((g, i) => (
-                  <li key={g.id} className="flex items-start gap-3 p-2.5 rounded-lg bg-gray-900/50">
-                    <span className="w-5 h-5 rounded-md bg-orange-500/15 text-orange-400 text-xs font-medium flex items-center justify-center flex-shrink-0">
+                  <li key={g.id} className="flex items-start gap-3 p-2.5 rounded-lg bg-slate-50">
+                    <span className="w-5 h-5 rounded-md bg-violet-100 text-violet-600 text-xs font-medium flex items-center justify-center flex-shrink-0">
                       {i + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-white leading-snug">{g.question}</p>
-                      <p className="text-xs text-gray-500 mt-0.5 truncate">{g.initiative_title}</p>
+                      <p className="text-sm text-slate-900 leading-snug">{g.question}</p>
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">{g.initiative_title}</p>
                       {g.review_target_date && (
-                        <p className="text-xs text-gray-600 mt-0.5">
+                        <p className="text-xs text-slate-400 mt-0.5">
                           рассмотрение {fmtDate(g.review_target_date)}
                         </p>
                       )}
@@ -534,12 +534,12 @@ export default function ExecFocusPage() {
                     key={idx}
                     className="flex items-start gap-3 p-2.5 rounded-lg border border-amber-500/20 bg-amber-500/5"
                   >
-                    <span className="text-[10px] font-mono text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
+                    <span className="text-[10px] font-mono text-amber-600 bg-amber-500/15 px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5">
                       {w.code}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-sm text-amber-200/90">{w.title}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{w.detail}</p>
+                      <p className="text-sm text-amber-800">{w.title}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{w.detail}</p>
                     </div>
                   </div>
                 ))}
@@ -553,7 +553,7 @@ export default function ExecFocusPage() {
           subtitle={`${data.initiatives.length} активных`}
           icon="Rocket"
           action={
-            <Link to="/admin/exec/initiatives" className="text-xs text-orange-400 hover:text-orange-300">
+            <Link to="/cabinet/exec/initiatives" className="text-xs text-violet-600 hover:text-violet-700">
               Весь портфель
             </Link>
           }
@@ -565,12 +565,12 @@ export default function ExecFocusPage() {
               {data.initiatives.map((i) => (
                 <Link
                   key={i.id}
-                  to={`/admin/exec/initiatives/${i.id}`}
-                  className="flex items-center gap-4 p-3 rounded-lg border border-gray-800 hover:border-gray-700 bg-gray-900/40 transition-colors"
+                  to={`/cabinet/exec/initiatives/${i.id}`}
+                  className="flex items-center gap-4 p-3 rounded-lg border border-slate-200 hover:border-slate-300 bg-white transition-colors"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-white leading-snug">{i.title}</p>
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-sm text-slate-900 leading-snug">{i.title}</p>
+                    <p className="text-xs text-slate-500 mt-1">
                       {i.owner_name ? `Владелец: ${i.owner_name}` : "Владелец не назначен"}
                       {i.plan_end && ` · до ${fmtDate(i.plan_end)}`}
                     </p>
@@ -585,6 +585,6 @@ export default function ExecFocusPage() {
           )}
         </Card>
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

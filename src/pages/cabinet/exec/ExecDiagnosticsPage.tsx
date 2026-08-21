@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { execApi, Issue } from "@/lib/execCabinetApi";
 import { Card, ErrorBox, Loading, Metric } from "@/components/exec/ExecUI";
@@ -55,11 +55,11 @@ export default function ExecDiagnosticsPage() {
   }, [filtered]);
 
   return (
-    <AdminShell>
-      <div className="max-w-[1200px] space-y-5">
+    <Layout>
+      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header>
-          <h1 className="text-xl font-semibold text-white">Диагностика полномочий</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-xl font-semibold text-slate-900">Диагностика полномочий</h1>
+          <p className="text-sm text-slate-500 mt-1">
             Детерминированные проверки по формальным правилам. Без ИИ-оценок и предположений.
           </p>
         </header>
@@ -90,8 +90,8 @@ export default function ExecDiagnosticsPage() {
           <Card title="Результат проверки" icon="CircleCheck">
             <div className="py-10 text-center">
               <Icon name="CircleCheck" size={36} className="text-green-500 mx-auto mb-3" />
-              <p className="text-sm text-white font-medium">Нарушений не обнаружено</p>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-sm text-slate-900 font-medium">Нарушений не обнаружено</p>
+              <p className="text-xs text-slate-500 mt-1">
                 Все проверки полномочий пройдены успешно
               </p>
             </div>
@@ -111,8 +111,8 @@ export default function ExecDiagnosticsPage() {
                     <span
                       className={`text-[11px] font-mono px-2 py-0.5 rounded ${
                         isBlocking
-                          ? "bg-red-500/15 text-red-400"
-                          : "bg-amber-500/15 text-amber-400"
+                          ? "bg-red-500/15 text-red-600"
+                          : "bg-amber-500/15 text-amber-600"
                       }`}
                     >
                       {code} · {list.length}
@@ -129,11 +129,11 @@ export default function ExecDiagnosticsPage() {
                             : "border-amber-500/15 bg-amber-500/5"
                         }`}
                       >
-                        <p className="text-sm text-gray-300 leading-snug">{iss.detail}</p>
+                        <p className="text-sm text-slate-700 leading-snug">{iss.detail}</p>
                         {iss.initiative_id && (
                           <Link
-                            to={`/admin/exec/initiatives/${iss.initiative_id}`}
-                            className="text-xs text-orange-400 hover:text-orange-300 whitespace-nowrap flex items-center gap-1 flex-shrink-0"
+                            to={`/cabinet/exec/initiatives/${iss.initiative_id}`}
+                            className="text-xs text-violet-600 hover:text-violet-700 whitespace-nowrap flex items-center gap-1 flex-shrink-0"
                           >
                             Открыть
                             <Icon name="ArrowRight" size={12} />
@@ -156,18 +156,18 @@ export default function ExecDiagnosticsPage() {
               return (
                 <div
                   key={code}
-                  className="flex items-start gap-2.5 p-2.5 rounded-lg bg-gray-900/50 border border-gray-800"
+                  className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-50 border border-slate-200"
                 >
                   <span
                     className={`text-[10px] font-mono px-1.5 py-0.5 rounded flex-shrink-0 ${
-                      isBlocking ? "bg-red-500/15 text-red-400" : "bg-amber-500/15 text-amber-400"
+                      isBlocking ? "bg-red-500/15 text-red-600" : "bg-amber-500/15 text-amber-600"
                     }`}
                   >
                     {code}
                   </span>
-                  <p className="text-xs text-gray-400 leading-snug flex-1">{desc}</p>
+                  <p className="text-xs text-slate-500 leading-snug flex-1">{desc}</p>
                   {count > 0 ? (
-                    <span className="text-xs text-gray-500 flex-shrink-0">{count}</span>
+                    <span className="text-xs text-slate-500 flex-shrink-0">{count}</span>
                   ) : (
                     <Icon name="Check" size={12} className="text-green-500 flex-shrink-0 mt-0.5" />
                   )}
@@ -177,6 +177,6 @@ export default function ExecDiagnosticsPage() {
           </div>
         </Card>
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

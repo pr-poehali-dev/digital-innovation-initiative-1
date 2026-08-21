@@ -7,8 +7,8 @@ import { CabinetAccess } from "@/lib/execAccess";
 import { controlApi } from "@/lib/execControlApi";
 
 const Spinner = () => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-950">
-    <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+  <div className="min-h-screen flex items-center justify-center bg-white">
+    <div className="w-8 h-8 border-2 border-violet-600 border-t-transparent rounded-full animate-spin" />
   </div>
 );
 
@@ -43,21 +43,21 @@ export default function ExecRoute({ children }: { children: React.ReactNode }) {
 
   if (denied || (!access && user)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950 px-6">
+      <div className="min-h-screen flex items-center justify-center bg-white px-6">
         <div className="max-w-md text-center">
-          <div className="w-14 h-14 rounded-2xl bg-gray-900 border border-gray-800 flex items-center justify-center mx-auto mb-5">
-            <Icon name="Lock" size={24} className="text-gray-600" />
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto mb-5">
+            <Icon name="Lock" size={24} className="text-slate-400" />
           </div>
-          <h1 className="text-lg font-semibold text-white mb-2">
+          <h1 className="text-lg font-semibold text-slate-900 mb-2">
             Кабинет руководителя недоступен
           </h1>
-          <p className="text-sm text-gray-500 leading-relaxed mb-6">
+          <p className="text-sm text-slate-500 leading-relaxed mb-6">
             Ваша учётная запись не включена в список лиц, допущенных к кабинету. Обратитесь к
             руководителю Группы сопровождения и продвижения инициатив.
           </p>
           <Link
             to="/"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 border border-gray-800 text-gray-300 hover:border-gray-700 text-sm transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-slate-200 text-slate-700 hover:border-slate-300 text-sm transition-colors"
           >
             <Icon name="ArrowLeft" size={14} />
             На главную

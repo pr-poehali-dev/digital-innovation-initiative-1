@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Dictionaries, execApi, Initiative, PersonRef } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
@@ -61,26 +61,26 @@ export default function ExecInitiativesPage() {
   };
 
   return (
-    <AdminShell>
-      <div className="max-w-[1400px] space-y-5">
+    <Layout>
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Портфель инициатив</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Портфель инициатив</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Инициативы Блока внутреннего контроля и создаваемые решения
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setQuickStart(true)}
-              className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
             >
               <Icon name="Zap" size={15} />
               Быстрый старт
             </button>
             <button
               onClick={openNew}
-              className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors flex items-center gap-2"
             >
               <Icon name="Plus" size={15} />
               Подробная форма
@@ -91,7 +91,7 @@ export default function ExecInitiativesPage() {
         {quickStart && (
           <QuickStartForm
             onClose={() => setQuickStart(false)}
-            onDone={(id) => navigate(`/admin/exec/initiatives/${id}`)}
+            onDone={(id) => navigate(`/cabinet/exec/initiatives/${id}`)}
           />
         )}
 
@@ -100,19 +100,19 @@ export default function ExecInitiativesPage() {
             <Icon
               name="Search"
               size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Поиск по названию или владельцу"
-              className="w-full pl-9 pr-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-white text-sm placeholder:text-gray-600 focus:border-gray-700 outline-none"
+              className="w-full pl-9 pr-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm placeholder:text-slate-400 focus:border-slate-200 outline-none"
             />
           </div>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-white text-sm outline-none focus:border-gray-700"
+            className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm outline-none focus:border-slate-200"
           >
             <option value="">Все статусы</option>
             {(dicts.initiative_status || []).map((v) => (
@@ -124,7 +124,7 @@ export default function ExecInitiativesPage() {
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-white text-sm outline-none focus:border-gray-700"
+            className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm outline-none focus:border-slate-200"
           >
             <option value="">Любой приоритет</option>
             {(dicts.priority || []).map((v) => (
@@ -148,37 +148,37 @@ export default function ExecInitiativesPage() {
             {filtered.map((i) => (
               <Link
                 key={i.id}
-                to={`/admin/exec/initiatives/${i.id}`}
-                className="rounded-xl border border-gray-800 bg-gray-900/40 p-4 hover:border-gray-700 transition-colors flex flex-col"
+                to={`/cabinet/exec/initiatives/${i.id}`}
+                className="rounded-xl border border-slate-200 bg-white p-4 hover:border-slate-300 transition-colors flex flex-col"
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
-                  <span className="text-[11px] font-mono text-gray-600">{i.code || `#${i.id}`}</span>
+                  <span className="text-[11px] font-mono text-slate-400">{i.code || `#${i.id}`}</span>
                   <div className="flex items-center gap-1.5">
                     <Badge dicts={dicts} type="priority" code={i.priority} />
                     <button
                       onClick={(e) => openEdit(e, i)}
                       title="Редактировать"
-                      className="p-1 rounded text-gray-600 hover:text-orange-400 hover:bg-gray-800 transition-colors"
+                      className="p-1 rounded text-slate-400 hover:text-violet-600 hover:bg-slate-100 transition-colors"
                     >
                       <Icon name="Pencil" size={13} />
                     </button>
                   </div>
                 </div>
-                <h3 className="text-sm font-medium text-white leading-snug flex-1">{i.title}</h3>
+                <h3 className="text-sm font-medium text-slate-900 leading-snug flex-1">{i.title}</h3>
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   <Badge dicts={dicts} type="initiative_status" code={i.status} />
                   <Badge dicts={dicts} type="initiative_stage" code={i.stage} />
                 </div>
-                <div className="mt-3 pt-3 border-t border-gray-800 space-y-1">
-                  <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                <div className="mt-3 pt-3 border-t border-slate-200 space-y-1">
+                  <p className="text-xs text-slate-500 flex items-center gap-1.5">
                     <Icon name="User" size={11} />
-                    {i.owner_name || <span className="text-red-400">владелец не назначен</span>}
+                    {i.owner_name || <span className="text-red-600">владелец не назначен</span>}
                   </p>
-                  <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                  <p className="text-xs text-slate-500 flex items-center gap-1.5">
                     <Icon name="Calendar" size={11} />
                     {fmtDate(i.plan_end)}
                   </p>
-                  <div className="flex items-center gap-3 text-xs text-gray-500 pt-1">
+                  <div className="flex items-center gap-3 text-xs text-slate-500 pt-1">
                     <span className="flex items-center gap-1">
                       <Icon name="Users" size={11} />
                       {i.stakeholders_count ?? 0}
@@ -207,6 +207,6 @@ export default function ExecInitiativesPage() {
           />
         )}
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

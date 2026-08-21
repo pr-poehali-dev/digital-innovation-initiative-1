@@ -326,9 +326,9 @@ export function LiftBlockForm({
       saveLabel="Снять блокировку"
       canSave={!!result.trim()}
     >
-      <div className="p-3 rounded-lg border border-gray-800 bg-gray-900">
-        <p className="text-xs text-gray-500 mb-1">Было заблокировано</p>
-        <p className="text-sm text-gray-300">{target.blockWhat}</p>
+      <div className="p-3 rounded-lg border border-slate-200 bg-white">
+        <p className="text-xs text-slate-500 mb-1">Было заблокировано</p>
+        <p className="text-sm text-slate-700">{target.blockWhat}</p>
       </div>
       <DateField label="Дата снятия" value={date} onChange={setDate} />
       <TextArea
@@ -339,8 +339,8 @@ export function LiftBlockForm({
         hint="Что было сделано для снятия блокировки"
       />
       <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
-        <Icon name="Info" size={14} className="text-blue-400 flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-gray-400 leading-relaxed">
+        <Icon name="Info" size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-slate-500 leading-relaxed">
           Снятие блокировки не переводит проблему в статус «Устранена». Это отдельное действие.
         </p>
       </div>

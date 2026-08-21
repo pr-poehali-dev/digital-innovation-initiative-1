@@ -229,7 +229,7 @@ export default function RiskForm({
         />
         {isMaterialized && (
           <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/5 space-y-3">
-            <p className="text-xs text-red-300 flex items-center gap-1.5">
+            <p className="text-xs text-red-700 flex items-center gap-1.5">
               <Icon name="TriangleAlert" size={13} />
               Риск реализовался — обязательно укажите возникшую проблему
             </p>

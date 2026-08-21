@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import {
   Decision,
@@ -82,18 +82,18 @@ export default function ExecDecisionsPage() {
     dependencies.filter((dd) => dd.dependent_id === decisionId);
 
   return (
-    <AdminShell>
-      <div className="max-w-[1400px] space-y-5">
+    <Layout>
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Управленческие решения</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Управленческие решения</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Журнал решений, маршруты принятия и зависимости между решениями
             </p>
           </div>
           <button
             onClick={() => setForm({ open: true, item: null })}
-            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+            className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
           >
             <Icon name="Plus" size={15} />
             Новое решение
@@ -112,7 +112,7 @@ export default function ExecDecisionsPage() {
           <button
             onClick={() => setStatusFilter("")}
             className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
-              !statusFilter ? "border-orange-500/40 bg-orange-500/10 text-orange-300" : "border-gray-800 text-gray-500 hover:text-gray-300"
+              !statusFilter ? "border-violet-600/40 bg-violet-100 text-violet-700" : "border-slate-200 text-slate-500 hover:text-slate-700"
             }`}
           >
             Все
@@ -123,8 +123,8 @@ export default function ExecDecisionsPage() {
               onClick={() => setStatusFilter(s.code)}
               className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
                 statusFilter === s.code
-                  ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
-                  : "border-gray-800 text-gray-500 hover:text-gray-300"
+                  ? "border-violet-600/40 bg-violet-100 text-violet-700"
+                  : "border-slate-200 text-slate-500 hover:text-slate-700"
               }`}
             >
               {s.title}
@@ -151,43 +151,43 @@ export default function ExecDecisionsPage() {
                 <div
                   key={d.id}
                   className={`rounded-xl border overflow-hidden transition-colors ${
-                    d.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-gray-800 bg-gray-900/40"
+                    d.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-slate-200 bg-white"
                   }`}
                 >
                   <button
                     onClick={() => setOpenId(isOpen ? null : d.id)}
-                    className="w-full text-left p-4 hover:bg-gray-900/60 transition-colors"
+                    className="w-full text-left p-4 hover:bg-slate-50 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="text-xs text-gray-500">{d.type_title}</span>
+                          <span className="text-xs text-slate-500">{d.type_title}</span>
                           {blockedBy.length > 0 && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-300 border border-orange-500/30">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 border border-violet-600/30">
                               заблокировано
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-white leading-snug">{d.question}</p>
-                        <p className="text-xs text-gray-600 mt-1 truncate">{d.initiative_title}</p>
+                        <p className="text-sm text-slate-900 leading-snug">{d.question}</p>
+                        <p className="text-xs text-slate-400 mt-1 truncate">{d.initiative_title}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Badge dicts={dicts} type="decision_status" code={d.status} />
                         <Icon
                           name={isOpen ? "ChevronUp" : "ChevronDown"}
                           size={16}
-                          className="text-gray-600"
+                          className="text-slate-400"
                         />
                       </div>
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-xs">
-                      <span className={d.is_overdue ? "text-red-400" : "text-gray-500"}>
+                      <span className={d.is_overdue ? "text-red-600" : "text-slate-500"}>
                         <Icon name="Clock" size={11} className="inline mr-1" />
                         {fmtDate(d.due_at)}
                         {d.is_overdue && " · просрочено"}
                       </span>
                       {(d.body_title || d.decided_by_name) && (
-                        <span className="text-gray-500 truncate">
+                        <span className="text-slate-500 truncate">
                           <Icon name="Gavel" size={11} className="inline mr-1" />
                           {d.body_title || d.decided_by_name}
                         </span>
@@ -196,18 +196,18 @@ export default function ExecDecisionsPage() {
                   </button>
 
                   {isOpen && (
-                    <div className="px-4 pb-4 space-y-4 border-t border-gray-800 pt-4">
+                    <div className="px-4 pb-4 space-y-4 border-t border-slate-200 pt-4">
                       {blockedBy.length > 0 && (
-                        <div className="p-3 rounded-lg border border-orange-500/30 bg-orange-500/5">
-                          <p className="text-xs text-orange-300 font-medium mb-2">
+                        <div className="p-3 rounded-lg border border-violet-600/30 bg-violet-50">
+                          <p className="text-xs text-violet-700 font-medium mb-2">
                             <Icon name="Link2Off" size={12} className="inline mr-1" />
                             Требуются предшествующие решения
                           </p>
                           {blockedBy.map((dd) => (
-                            <p key={dd.id} className="text-xs text-gray-400 leading-relaxed">
+                            <p key={dd.id} className="text-xs text-slate-500 leading-relaxed">
                               → {dd.predecessor_question}
                               {dd.condition_text && (
-                                <span className="block text-gray-600 mt-0.5">{dd.condition_text}</span>
+                                <span className="block text-slate-400 mt-0.5">{dd.condition_text}</span>
                               )}
                             </p>
                           ))}
@@ -216,7 +216,7 @@ export default function ExecDecisionsPage() {
 
                       {route.length > 0 && (
                         <div>
-                          <p className="text-xs text-gray-500 mb-2">Маршрут принятия решения</p>
+                          <p className="text-xs text-slate-500 mb-2">Маршрут принятия решения</p>
                           <div className="flex flex-wrap items-center gap-1.5">
                             {route.map((p, idx) => {
                               const meta = PARTICIPATION_LETTERS[p.participation_kind];
@@ -227,24 +227,24 @@ export default function ExecDecisionsPage() {
                                     className={`px-2.5 py-1.5 rounded-lg border text-xs ${
                                       isDecide
                                         ? "border-red-500/40 bg-red-500/10"
-                                        : "border-gray-800 bg-gray-900"
+                                        : "border-slate-200 bg-white"
                                     }`}
                                     title={meta?.title}
                                   >
                                     <span
                                       className={`font-mono font-semibold mr-1.5 ${
-                                        isDecide ? "text-red-400" : "text-orange-400"
+                                        isDecide ? "text-red-600" : "text-violet-600"
                                       }`}
                                     >
                                       {meta?.letter}
                                     </span>
-                                    <span className="text-gray-300">{p.role_title}</span>
+                                    <span className="text-slate-700">{p.role_title}</span>
                                     {p.display_name && (
-                                      <span className="text-gray-600 ml-1.5">· {p.display_name}</span>
+                                      <span className="text-slate-400 ml-1.5">· {p.display_name}</span>
                                     )}
                                   </div>
                                   {idx < route.length - 1 && (
-                                    <Icon name="ChevronRight" size={12} className="text-gray-700" />
+                                    <Icon name="ChevronRight" size={12} className="text-slate-600" />
                                   )}
                                 </div>
                               );
@@ -255,21 +255,21 @@ export default function ExecDecisionsPage() {
 
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div>
-                          <p className="text-xs text-gray-500 mb-1">Основание</p>
-                          <p className="text-sm text-gray-300">{d.basis || "—"}</p>
+                          <p className="text-xs text-slate-500 mb-1">Основание</p>
+                          <p className="text-sm text-slate-700">{d.basis || "—"}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-gray-500 mb-1">Предлагаемый вариант</p>
-                          <p className="text-sm text-gray-300">{d.proposed_option || "—"}</p>
+                          <p className="text-xs text-slate-500 mb-1">Предлагаемый вариант</p>
+                          <p className="text-sm text-slate-700">{d.proposed_option || "—"}</p>
                         </div>
                       </div>
 
                       {d.final_decision && (
                         <div className="p-3 rounded-lg border border-green-500/25 bg-green-500/5">
-                          <p className="text-xs text-gray-500 mb-1">Принятое решение</p>
-                          <p className="text-sm text-green-200">{d.final_decision}</p>
+                          <p className="text-xs text-slate-500 mb-1">Принятое решение</p>
+                          <p className="text-sm text-green-800">{d.final_decision}</p>
                           {d.result_document && (
-                            <p className="text-xs text-gray-500 mt-1.5">
+                            <p className="text-xs text-slate-500 mt-1.5">
                               <Icon name="FileText" size={11} className="inline mr-1" />
                               {d.result_document} · {fmtDate(d.decided_at)}
                             </p>
@@ -279,12 +279,12 @@ export default function ExecDecisionsPage() {
 
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-3">
-                          <span className="text-xs text-gray-500">Исполнение:</span>
+                          <span className="text-xs text-slate-500">Исполнение:</span>
                           <Badge dicts={dicts} type="execution_status" code={d.execution_status} />
                         </div>
                         <button
                           onClick={() => setForm({ open: true, item: d })}
-                          className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-orange-500/50 hover:text-orange-300 text-xs transition-colors flex items-center gap-1.5"
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:border-violet-600/50 hover:text-violet-700 text-xs transition-colors flex items-center gap-1.5"
                         >
                           <Icon name="Pencil" size={13} />
                           Редактировать
@@ -301,9 +301,9 @@ export default function ExecDecisionsPage() {
         <Card title="Обозначения видов участия" icon="Info">
           <div className="flex flex-wrap gap-2">
             {Object.entries(PARTICIPATION_LETTERS).map(([code, m]) => (
-              <div key={code} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900 border border-gray-800">
-                <span className="font-mono font-semibold text-orange-400 text-xs">{m.letter}</span>
-                <span className="text-xs text-gray-400">— {m.title}</span>
+              <div key={code} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200">
+                <span className="font-mono font-semibold text-violet-600 text-xs">{m.letter}</span>
+                <span className="text-xs text-slate-500">— {m.title}</span>
               </div>
             ))}
           </div>
@@ -325,6 +325,6 @@ export default function ExecDecisionsPage() {
           />
         )}
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

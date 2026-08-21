@@ -155,15 +155,15 @@ export default function MilestoneForm({
 
       <Section title="Сроки">
         {m?.plan_date_original && (
-          <div className="p-3 rounded-lg bg-gray-900 border border-gray-800 flex items-center gap-4 flex-wrap">
+          <div className="p-3 rounded-lg bg-white border border-slate-200 flex items-center gap-4 flex-wrap">
             <div>
-              <p className="text-xs text-gray-500">Первоначальная дата</p>
-              <p className="text-sm text-gray-300">
+              <p className="text-xs text-slate-500">Первоначальная дата</p>
+              <p className="text-sm text-slate-700">
                 {new Date(m.plan_date_original).toLocaleDateString("ru-RU")}
               </p>
             </div>
             {m.reschedule_count > 0 && (
-              <span className="text-xs px-2 py-1 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+              <span className="text-xs px-2 py-1 rounded bg-amber-500/15 text-amber-700 border border-amber-500/30">
                 переносов: {m.reschedule_count}
               </span>
             )}
@@ -175,7 +175,7 @@ export default function MilestoneForm({
         </div>
         {dateChanged && (
           <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-3">
-            <p className="text-xs text-amber-300 flex items-center gap-1.5">
+            <p className="text-xs text-amber-700 flex items-center gap-1.5">
               <Icon name="CalendarClock" size={13} />
               Срок переносится — укажите основание
             </p>

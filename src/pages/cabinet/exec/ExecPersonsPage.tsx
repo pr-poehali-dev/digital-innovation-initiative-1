@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { execApi } from "@/lib/execCabinetApi";
 import { Card, Empty, ErrorBox, Loading, Metric } from "@/components/exec/ExecUI";
@@ -72,18 +72,18 @@ export default function ExecPersonsPage() {
   };
 
   return (
-    <AdminShell>
-      <div className="max-w-[1200px] space-y-5">
+    <Layout>
+      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Справочник участников</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Справочник участников</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Единая карточка лица — используется во всех инициативах и решениях
             </p>
           </div>
           <button
             onClick={() => setOpen(true)}
-            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+            className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
           >
             <Icon name="Plus" size={15} />
             Добавить участника
@@ -110,12 +110,12 @@ export default function ExecPersonsPage() {
         </div>
 
         <div className="relative">
-          <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" />
+          <Icon name="Search" size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Поиск по обозначению, должности или организации"
-            className="w-full pl-9 pr-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-white text-sm placeholder:text-gray-600 focus:border-gray-700 outline-none"
+            className="w-full pl-9 pr-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm placeholder:text-slate-400 focus:border-slate-200 outline-none"
           />
         </div>
 
@@ -131,7 +131,7 @@ export default function ExecPersonsPage() {
               <div className="overflow-x-auto -mx-4 px-4">
                 <table className="w-full text-sm min-w-[700px]">
                   <thead>
-                    <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
+                    <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
                       <th className="pb-2 font-medium">Обозначение</th>
                       <th className="pb-2 font-medium">Должность</th>
                       <th className="pb-2 font-medium">Организация</th>
@@ -139,26 +139,26 @@ export default function ExecPersonsPage() {
                       <th className="pb-2 font-medium text-center">Ролей</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800/60">
+                  <tbody className="divide-y divide-slate-200">
                     {filtered.map((p) => (
-                      <tr key={p.id} className="hover:bg-gray-900/40 transition-colors">
+                      <tr key={p.id} className="hover:bg-slate-100 transition-colors">
                         <td className="py-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-200">{p.display_name}</span>
+                            <span className="text-slate-800">{p.display_name}</span>
                             {p.is_anonymized && (
                               <span
                                 title="Обезличенная запись"
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/40 text-gray-400"
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"
                               >
                                 обезличено
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="py-3 text-gray-400 text-xs">{p.position_title || "—"}</td>
-                        <td className="py-3 text-gray-500 text-xs">{p.org_name || "—"}</td>
-                        <td className="py-3 text-center text-gray-400">{p.stakeholder_count}</td>
-                        <td className="py-3 text-center text-gray-400">{p.role_count}</td>
+                        <td className="py-3 text-slate-500 text-xs">{p.position_title || "—"}</td>
+                        <td className="py-3 text-slate-500 text-xs">{p.org_name || "—"}</td>
+                        <td className="py-3 text-center text-slate-500">{p.stakeholder_count}</td>
+                        <td className="py-3 text-center text-slate-500">{p.role_count}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -169,7 +169,7 @@ export default function ExecPersonsPage() {
         )}
 
         <Card title="Правило обезличивания" icon="ShieldCheck">
-          <p className="text-sm text-gray-400 leading-relaxed">
+          <p className="text-sm text-slate-500 leading-relaxed">
             До согласования вопросов информационной безопасности используйте условные обозначения
             («Участник А», «Руководитель Группы»), должности и подразделения. Реальные фамилии и
             персональные контакты не заводите.
@@ -209,6 +209,6 @@ export default function ExecPersonsPage() {
           </Modal>
         )}
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

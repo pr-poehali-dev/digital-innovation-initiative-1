@@ -1,40 +1,40 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { AuditData, AuditEntry, execApi } from "@/lib/execCabinetApi";
 import { Card, Empty, ErrorBox, Loading, Metric } from "@/components/exec/ExecUI";
 import { useExecSettings } from "@/lib/execSettings";
 
 const ENTITY_LABELS: Record<string, { title: string; icon: string; path?: string }> = {
-  initiative: { title: "Инициатива", icon: "Rocket", path: "/admin/exec/initiatives" },
-  stakeholder: { title: "Стейкхолдер", icon: "Users", path: "/admin/exec/stakeholders" },
-  decision: { title: "Решение", icon: "GitPullRequest", path: "/admin/exec/decisions" },
+  initiative: { title: "Инициатива", icon: "Rocket", path: "/cabinet/exec/initiatives" },
+  stakeholder: { title: "Стейкхолдер", icon: "Users", path: "/cabinet/exec/stakeholders" },
+  decision: { title: "Решение", icon: "GitPullRequest", path: "/cabinet/exec/decisions" },
   role_assignment: { title: "Назначение роли", icon: "Shield" },
-  person: { title: "Участник", icon: "Contact", path: "/admin/exec/persons" },
-  milestone: { title: "Контрольная точка", icon: "Flag", path: "/admin/exec/control" },
-  issue: { title: "Проблема", icon: "TriangleAlert", path: "/admin/exec/control" },
-  risk: { title: "Риск", icon: "ShieldAlert", path: "/admin/exec/control" },
-  action: { title: "Действие", icon: "ListChecks", path: "/admin/exec/control" },
-  escalation: { title: "Эскалация", icon: "ArrowUpCircle", path: "/admin/exec/control" },
+  person: { title: "Участник", icon: "Contact", path: "/cabinet/exec/persons" },
+  milestone: { title: "Контрольная точка", icon: "Flag", path: "/cabinet/exec/control" },
+  issue: { title: "Проблема", icon: "TriangleAlert", path: "/cabinet/exec/control" },
+  risk: { title: "Риск", icon: "ShieldAlert", path: "/cabinet/exec/control" },
+  action: { title: "Действие", icon: "ListChecks", path: "/cabinet/exec/control" },
+  escalation: { title: "Эскалация", icon: "ArrowUpCircle", path: "/cabinet/exec/control" },
 };
 
 const ACTION_LABELS: Record<string, { title: string; cls: string }> = {
-  create: { title: "Создано", cls: "bg-green-500/15 text-green-300 border-green-500/30" },
-  update: { title: "Изменено", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  create: { title: "Создано", cls: "bg-green-500/15 text-green-700 border-green-500/30" },
+  update: { title: "Изменено", cls: "bg-blue-500/15 text-blue-700 border-blue-500/30" },
   set_verification: {
     title: "Смена статуса",
-    cls: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    cls: "bg-purple-500/15 text-purple-700 border-purple-500/30",
   },
-  reschedule: { title: "Перенос срока", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
-  lift_block: { title: "Блокировка снята", cls: "bg-green-500/15 text-green-300 border-green-500/30" },
+  reschedule: { title: "Перенос срока", cls: "bg-amber-500/15 text-amber-700 border-amber-500/30" },
+  lift_block: { title: "Блокировка снята", cls: "bg-green-500/15 text-green-700 border-green-500/30" },
   next_action_manual: {
     title: "Действие задано вручную",
-    cls: "bg-blue-500/15 text-blue-300 border-blue-500/30",
+    cls: "bg-blue-500/15 text-blue-700 border-blue-500/30",
   },
   next_action_reset: {
     title: "Возврат к авторасчёту",
-    cls: "bg-gray-500/15 text-gray-400 border-gray-600/30",
+    cls: "bg-slate-100 text-slate-500 border-slate-300",
   },
 };
 
@@ -154,26 +154,26 @@ export default function ExecHistoryPage() {
 
   if (!settings.showHistory)
     return (
-      <AdminShell>
-        <div className="max-w-[900px] space-y-5">
+      <Layout>
+        <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-6 space-y-5">
           <header>
-            <h1 className="text-xl font-semibold text-white">Журнал изменений</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Журнал изменений</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Кто и что менял в кабинете руководителя
             </p>
           </header>
 
           <Card title="Журнал отключён" icon="EyeOff">
             <div className="py-8 text-center">
-              <Icon name="History" size={34} className="text-gray-700 mx-auto mb-3" />
-              <p className="text-sm text-white font-medium">Журнал сейчас не отображается</p>
-              <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto leading-relaxed">
+              <Icon name="History" size={34} className="text-slate-600 mx-auto mb-3" />
+              <p className="text-sm text-slate-900 font-medium">Журнал сейчас не отображается</p>
+              <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
                 Изменения всё равно записываются в фоне. Включите журнал, когда понадобится
                 посмотреть историю — и выключите обратно, чтобы он не отвлекал.
               </p>
               <button
                 onClick={() => setSettings({ showHistory: true })}
-                className="mt-5 px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors inline-flex items-center gap-2"
+                className="mt-5 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors inline-flex items-center gap-2"
               >
                 <Icon name="Eye" size={15} />
                 Включить журнал
@@ -181,20 +181,20 @@ export default function ExecHistoryPage() {
             </div>
           </Card>
         </div>
-      </AdminShell>
+      </Layout>
     );
 
   return (
-    <AdminShell>
-      <div className="max-w-[1100px] space-y-5">
+    <Layout>
+      <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Журнал изменений</h1>
-            <p className="text-sm text-gray-500 mt-1">Кто и что менял в кабинете руководителя</p>
+            <h1 className="text-xl font-semibold text-slate-900">Журнал изменений</h1>
+            <p className="text-sm text-slate-500 mt-1">Кто и что менял в кабинете руководителя</p>
           </div>
           <button
             onClick={() => setSettings({ showHistory: false })}
-            className="px-3.5 py-2 rounded-lg border border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white text-sm transition-colors flex items-center gap-2"
+            className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-400 hover:text-slate-900 text-sm transition-colors flex items-center gap-2"
           >
             <Icon name="EyeOff" size={15} />
             Скрыть журнал
@@ -214,8 +214,8 @@ export default function ExecHistoryPage() {
             onClick={() => setEntity("")}
             className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
               !entity
-                ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
-                : "border-gray-800 text-gray-500 hover:text-gray-300"
+                ? "border-violet-600/40 bg-violet-100 text-violet-700"
+                : "border-slate-200 text-slate-500 hover:text-slate-700"
             }`}
           >
             Все разделы
@@ -228,13 +228,13 @@ export default function ExecHistoryPage() {
                 onClick={() => setEntity(code)}
                 className={`px-3 py-1.5 rounded-lg text-xs border transition-colors flex items-center gap-1.5 ${
                   entity === code
-                    ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
-                    : "border-gray-800 text-gray-500 hover:text-gray-300"
+                    ? "border-violet-600/40 bg-violet-100 text-violet-700"
+                    : "border-slate-200 text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <Icon name={meta.icon} size={12} />
                 {meta.title}
-                {cnt ? <span className="text-gray-600">{cnt}</span> : null}
+                {cnt ? <span className="text-slate-400">{cnt}</span> : null}
               </button>
             );
           })}
@@ -265,7 +265,7 @@ export default function ExecHistoryPage() {
                 };
                 const act = ACTION_LABELS[e.action] || {
                   title: e.action,
-                  cls: "bg-gray-500/15 text-gray-400 border-gray-600/30",
+                  cls: "bg-slate-100 text-slate-500 border-slate-300",
                 };
                 const fields = changedFields(e);
                 const isOpen = expanded === e.id;
@@ -274,15 +274,15 @@ export default function ExecHistoryPage() {
                 return (
                   <div
                     key={e.id}
-                    className="rounded-lg border border-gray-800 bg-gray-900/40 overflow-hidden"
+                    className="rounded-lg border border-slate-200 bg-white overflow-hidden"
                   >
                     <button
                       onClick={() => setExpanded(isOpen ? null : e.id)}
-                      className="w-full text-left p-3.5 hover:bg-gray-900/60 transition-colors"
+                      className="w-full text-left p-3.5 hover:bg-slate-50 transition-colors"
                     >
                       <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center flex-shrink-0">
-                          <Icon name={meta.icon} size={15} className="text-gray-400" />
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                          <Icon name={meta.icon} size={15} className="text-slate-500" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -291,17 +291,17 @@ export default function ExecHistoryPage() {
                             >
                               {act.title}
                             </span>
-                            <span className="text-xs text-gray-500">{meta.title}</span>
+                            <span className="text-xs text-slate-500">{meta.title}</span>
                           </div>
-                          <p className="text-sm text-white mt-1 leading-snug">
+                          <p className="text-sm text-slate-900 mt-1 leading-snug">
                             {e.subject_title || `Запись №${e.entity_id}`}
                           </p>
                           {e.subject_detail && e.subject_detail !== e.subject_title && (
-                            <p className="text-xs text-gray-500 mt-0.5 truncate">
+                            <p className="text-xs text-slate-500 mt-0.5 truncate">
                               {e.subject_detail}
                             </p>
                           )}
-                          <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-600 flex-wrap">
+                          <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-400 flex-wrap">
                             <span>
                               <Icon name="User" size={11} className="inline mr-1" />
                               {e.actor || "система"}
@@ -311,7 +311,7 @@ export default function ExecHistoryPage() {
                               {fmtWhen(e.created_at)}
                             </span>
                             {fields.length > 0 && (
-                              <span className="text-gray-600">
+                              <span className="text-slate-400">
                                 {fields.length} {fields.length === 1 ? "поле" : "полей"}
                               </span>
                             )}
@@ -320,27 +320,27 @@ export default function ExecHistoryPage() {
                         <Icon
                           name={isOpen ? "ChevronUp" : "ChevronDown"}
                           size={15}
-                          className="text-gray-700 flex-shrink-0 mt-1"
+                          className="text-slate-600 flex-shrink-0 mt-1"
                         />
                       </div>
                     </button>
 
                     {isOpen && (
-                      <div className="px-3.5 pb-3.5 pt-3 border-t border-gray-800 space-y-3">
+                      <div className="px-3.5 pb-3.5 pt-3 border-t border-slate-200 space-y-3">
                         {newStatus && (
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">Новый статус достоверности</p>
-                            <p className="text-sm text-gray-200">{newStatus}</p>
+                            <p className="text-xs text-slate-500 mb-1">Новый статус достоверности</p>
+                            <p className="text-sm text-slate-800">{newStatus}</p>
                           </div>
                         )}
                         {fields.length > 0 && (
                           <div>
-                            <p className="text-xs text-gray-500 mb-1.5">Затронутые поля</p>
+                            <p className="text-xs text-slate-500 mb-1.5">Затронутые поля</p>
                             <div className="flex flex-wrap gap-1.5">
                               {fields.map((f) => (
                                 <span
                                   key={f}
-                                  className="text-xs px-2 py-0.5 rounded bg-gray-800 text-gray-300"
+                                  className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700"
                                 >
                                   {f}
                                 </span>
@@ -350,22 +350,22 @@ export default function ExecHistoryPage() {
                         )}
                         {e.reason && (
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">Основание</p>
-                            <p className="text-sm text-gray-300">{e.reason}</p>
+                            <p className="text-xs text-slate-500 mb-1">Основание</p>
+                            <p className="text-sm text-slate-700">{e.reason}</p>
                           </div>
                         )}
                         <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <p className="text-xs text-gray-600">
+                          <p className="text-xs text-slate-400">
                             {new Date(e.created_at).toLocaleString("ru-RU")}
                           </p>
                           {meta.path && (
                             <Link
                               to={
                                 e.entity_type === "initiative"
-                                  ? `/admin/exec/initiatives/${e.entity_id}`
+                                  ? `/cabinet/exec/initiatives/${e.entity_id}`
                                   : meta.path
                               }
-                              className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                              className="text-xs text-violet-600 hover:text-violet-700 flex items-center gap-1"
                             >
                               Открыть раздел
                               <Icon name="ArrowRight" size={12} />
@@ -381,6 +381,6 @@ export default function ExecHistoryPage() {
           </Card>
         )}
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

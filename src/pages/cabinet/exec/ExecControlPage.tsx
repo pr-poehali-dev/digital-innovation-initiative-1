@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { PersonRef, RefsData, execApi } from "@/lib/execCabinetApi";
 import {
@@ -172,12 +172,12 @@ export default function ExecControlPage() {
   }, [fRisks]);
 
   return (
-    <AdminShell>
-      <div className="max-w-[1500px] space-y-5">
+    <Layout>
+      <div className="max-w-[1500px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Контроль и продвижение</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Контроль и продвижение</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Контрольные точки, проблемы, риски, действия и эскалации по инициативам
             </p>
           </div>
@@ -185,7 +185,7 @@ export default function ExecControlPage() {
             {tab === "milestones" && (
               <button
                 onClick={() => setMsForm({ open: true, item: null })}
-                className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+                className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
               >
                 <Icon name="Plus" size={15} />
                 Контрольная точка
@@ -195,14 +195,14 @@ export default function ExecControlPage() {
               <>
                 <button
                   onClick={() => setQuickIssue(true)}
-                  className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
                 >
                   <Icon name="Zap" size={15} />
                   Быстро
                 </button>
                 <button
                   onClick={() => setIssueForm({ open: true, item: null })}
-                  className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors flex items-center gap-2"
                 >
                   <Icon name="Plus" size={15} />
                   Подробно
@@ -213,14 +213,14 @@ export default function ExecControlPage() {
               <>
                 <button
                   onClick={() => setQuickRisk(true)}
-                  className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
                 >
                   <Icon name="Zap" size={15} />
                   Быстро
                 </button>
                 <button
                   onClick={() => setRiskForm({ open: true, item: null })}
-                  className="px-3.5 py-2 rounded-lg border border-gray-800 text-gray-300 hover:border-gray-700 text-sm font-medium transition-colors flex items-center gap-2"
+                  className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors flex items-center gap-2"
                 >
                   <Icon name="Plus" size={15} />
                   Подробно
@@ -240,15 +240,15 @@ export default function ExecControlPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <nav className="flex gap-1 border-b border-gray-800 flex-1 overflow-x-auto">
+          <nav className="flex gap-1 border-b border-slate-200 flex-1 overflow-x-auto">
             {TABS.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap transition-colors ${
                   tab === t.id
-                    ? "border-orange-500 text-white font-medium"
-                    : "border-transparent text-gray-500 hover:text-gray-300"
+                    ? "border-violet-600 text-slate-900 font-medium"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <Icon name={t.icon} size={14} />
@@ -260,21 +260,21 @@ export default function ExecControlPage() {
             onClick={() => setShowClosed(!showClosed)}
             className={`px-3 py-2 rounded-lg border text-sm transition-colors flex items-center gap-2 whitespace-nowrap ${
               showClosed
-                ? "bg-gray-800 border-gray-700 text-white"
-                : "bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200"
+                ? "bg-slate-100 border-slate-200 text-slate-900"
+                : "bg-white border-slate-200 text-slate-500 hover:text-slate-800"
             }`}
             title="Показать устранённые, достигнутые и закрытые записи"
           >
             <Icon name={showClosed ? "Eye" : "EyeOff"} size={14} />
             Завершённые
             {!showClosed && hiddenCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded bg-gray-800 text-xs">{hiddenCount}</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-xs">{hiddenCount}</span>
             )}
           </button>
           <select
             value={initFilter}
             onChange={(e) => setInitFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-gray-900 border border-gray-800 text-white text-sm outline-none focus:border-gray-700"
+            className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm outline-none focus:border-slate-200"
           >
             <option value="">Все инициативы</option>
             {initiatives.map((i) => (
@@ -287,18 +287,18 @@ export default function ExecControlPage() {
 
         {warning && (
           <div className="flex items-start gap-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
-            <Icon name="TriangleAlert" size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-amber-200 flex-1">{warning}</p>
-            <button onClick={() => setWarning(null)} className="text-amber-400 hover:text-amber-300">
+            <Icon name="TriangleAlert" size={15} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-800 flex-1">{warning}</p>
+            <button onClick={() => setWarning(null)} className="text-amber-600 hover:text-amber-700">
               <Icon name="X" size={14} />
             </button>
           </div>
         )}
 
         {access && access.role !== "head" && (
-          <div className="flex items-center gap-2.5 p-3 rounded-lg bg-gray-900 border border-gray-800">
-            <Icon name="Info" size={14} className="text-gray-500 flex-shrink-0" />
-            <p className="text-xs text-gray-400">
+          <div className="flex items-center gap-2.5 p-3 rounded-lg bg-white border border-slate-200">
+            <Icon name="Info" size={14} className="text-slate-500 flex-shrink-0" />
+            <p className="text-xs text-slate-500">
               Ваша роль: {ACCESS_ROLE_LABEL[access.role]}.{" "}
               {access.can_confirm
                 ? "Вы можете подтверждать достижение точек и устранение проблем."
@@ -334,7 +334,7 @@ export default function ExecControlPage() {
                         ? "border-red-500/30 bg-red-500/5"
                         : m.status === "achieved"
                           ? "border-green-500/25 bg-green-500/5"
-                          : "border-gray-800 bg-gray-900/40"
+                          : "border-slate-200 bg-white"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -344,68 +344,68 @@ export default function ExecControlPage() {
                             label={MILESTONE_STATUS_LABEL[m.status] || m.status}
                             cls={
                               m.status === "achieved"
-                                ? "bg-green-500/15 text-green-300 border-green-500/30"
-                                : "bg-gray-500/15 text-gray-400 border-gray-600/30"
+                                ? "bg-green-500/15 text-green-700 border-green-500/30"
+                                : "bg-slate-100 text-slate-500 border-slate-300"
                             }
                           />
                           {m.is_overdue && (
-                            <Tag label="Просрочено" cls="bg-red-500/15 text-red-300 border-red-500/30" />
+                            <Tag label="Просрочено" cls="bg-red-500/15 text-red-700 border-red-500/30" />
                           )}
                           {m.reschedule_count > 0 && (
                             <Tag
                               label={`переносов: ${m.reschedule_count}`}
-                              cls="bg-amber-500/15 text-amber-300 border-amber-500/30"
+                              cls="bg-amber-500/15 text-amber-700 border-amber-500/30"
                             />
                           )}
                           {m.milestone_type && (
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-slate-500">
                               {MILESTONE_TYPES.find((t) => t.code === m.milestone_type)?.title}
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-white leading-snug">{m.title}</p>
-                        <p className="text-xs text-gray-600 mt-1 truncate">{m.initiative_title}</p>
+                        <p className="text-sm text-slate-900 leading-snug">{m.title}</p>
+                        <p className="text-xs text-slate-400 mt-1 truncate">{m.initiative_title}</p>
                       </div>
                       <button
                         onClick={() => setMsForm({ open: true, item: m })}
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-orange-400 hover:bg-gray-800 transition-colors"
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-violet-600 hover:bg-slate-100 transition-colors"
                       >
                         <Icon name="Pencil" size={14} />
                       </button>
                     </div>
 
-                    <div className="grid sm:grid-cols-4 gap-3 mt-3 pt-3 border-t border-gray-800 text-xs">
+                    <div className="grid sm:grid-cols-4 gap-3 mt-3 pt-3 border-t border-slate-200 text-xs">
                       <div>
-                        <p className="text-gray-500">План</p>
-                        <p className={m.is_overdue ? "text-red-400" : "text-gray-300"}>
+                        <p className="text-slate-500">План</p>
+                        <p className={m.is_overdue ? "text-red-600" : "text-slate-700"}>
                           {fmtDate(m.plan_date)}
                         </p>
                       </div>
                       {m.plan_date_original && m.plan_date_original !== m.plan_date && (
                         <div>
-                          <p className="text-gray-500">Первоначально</p>
-                          <p className="text-gray-500 line-through">{fmtDate(m.plan_date_original)}</p>
+                          <p className="text-slate-500">Первоначально</p>
+                          <p className="text-slate-500 line-through">{fmtDate(m.plan_date_original)}</p>
                         </div>
                       )}
                       <div>
-                        <p className="text-gray-500">Факт</p>
-                        <p className="text-gray-300">{fmtDate(m.fact_date)}</p>
+                        <p className="text-slate-500">Факт</p>
+                        <p className="text-slate-700">{fmtDate(m.fact_date)}</p>
                       </div>
                       <div>
-                        <p className="text-gray-500">Ответственный</p>
-                        <p className="text-gray-300">{m.responsible_name || "—"}</p>
+                        <p className="text-slate-500">Ответственный</p>
+                        <p className="text-slate-700">{m.responsible_name || "—"}</p>
                       </div>
                     </div>
 
                     {m.depends_on_title && (
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-xs text-slate-500 mt-2">
                         <Icon name="Link" size={11} className="inline mr-1" />
                         Зависит от: {m.depends_on_title}
                       </p>
                     )}
                     {m.achievement_criteria && (
-                      <p className="text-xs text-gray-500 mt-1.5">
-                        <span className="text-gray-600">Критерий:</span> {m.achievement_criteria}
+                      <p className="text-xs text-slate-500 mt-1.5">
+                        <span className="text-slate-400">Критерий:</span> {m.achievement_criteria}
                       </p>
                     )}
                   </div>
@@ -440,74 +440,74 @@ export default function ExecControlPage() {
                       className={`rounded-lg border overflow-hidden ${
                         s.block_active
                           ? "border-red-500/40 bg-red-500/5"
-                          : "border-gray-800 bg-gray-900/40"
+                          : "border-slate-200 bg-white"
                       }`}
                     >
                       <button
                         onClick={() => setExpanded(isOpen ? null : key)}
-                        className="w-full text-left p-4 hover:bg-gray-900/60 transition-colors"
+                        className="w-full text-left p-4 hover:bg-slate-50 transition-colors"
                       >
                         <div className="flex items-start justify-between gap-4 flex-wrap">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap mb-1">
                               <Tag label={crit.title} cls={crit.cls} />
-                              <span className="text-xs text-gray-500">
+                              <span className="text-xs text-slate-500">
                                 {ISSUE_STATUS_LABEL[s.status]}
                               </span>
                               {s.block_active && (
-                                <Tag label="Блокирует" cls="bg-red-500/20 text-red-300 border-red-500/40" />
+                                <Tag label="Блокирует" cls="bg-red-500/20 text-red-700 border-red-500/40" />
                               )}
                               {s.criticality_auto_raised && (
-                                <span className="text-[10px] text-gray-600">повышено системой</span>
+                                <span className="text-[10px] text-slate-400">повышено системой</span>
                               )}
                               {s.is_overdue && (
-                                <Tag label="Просрочено" cls="bg-red-500/15 text-red-300 border-red-500/30" />
+                                <Tag label="Просрочено" cls="bg-red-500/15 text-red-700 border-red-500/30" />
                               )}
                             </div>
-                            <p className="text-sm text-white leading-snug">{s.title}</p>
-                            <p className="text-xs text-gray-600 mt-1 truncate">{s.initiative_title}</p>
+                            <p className="text-sm text-slate-900 leading-snug">{s.title}</p>
+                            <p className="text-xs text-slate-400 mt-1 truncate">{s.initiative_title}</p>
                           </div>
                           <div className="flex items-center gap-2">
                             {acts.length > 0 && (
-                              <span className="text-xs text-gray-600">{acts.length} действий</span>
+                              <span className="text-xs text-slate-400">{acts.length} действий</span>
                             )}
                             {escs.length > 0 && (
                               <span className="text-xs text-amber-500">{escs.length} эскал.</span>
                             )}
-                            <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={16} className="text-gray-600" />
+                            <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400" />
                           </div>
                         </div>
                       </button>
 
                       {isOpen && (
-                        <div className="px-4 pb-4 pt-3 border-t border-gray-800 space-y-4">
-                          {s.description && <p className="text-sm text-gray-300">{s.description}</p>}
+                        <div className="px-4 pb-4 pt-3 border-t border-slate-200 space-y-4">
+                          {s.description && <p className="text-sm text-slate-700">{s.description}</p>}
 
                           <div className="grid sm:grid-cols-4 gap-3 text-xs">
                             <div>
-                              <p className="text-gray-500">Выявлена</p>
-                              <p className="text-gray-300">{fmtDate(s.detected_at)}</p>
+                              <p className="text-slate-500">Выявлена</p>
+                              <p className="text-slate-700">{fmtDate(s.detected_at)}</p>
                             </div>
                             <div>
-                              <p className="text-gray-500">Срок</p>
-                              <p className={s.is_overdue ? "text-red-400" : "text-gray-300"}>
+                              <p className="text-slate-500">Срок</p>
+                              <p className={s.is_overdue ? "text-red-600" : "text-slate-700"}>
                                 {fmtDate(s.due_at)}
                               </p>
                             </div>
                             <div>
-                              <p className="text-gray-500">Владелец</p>
-                              <p className="text-gray-300">{s.owner_name || "—"}</p>
+                              <p className="text-slate-500">Владелец</p>
+                              <p className="text-slate-700">{s.owner_name || "—"}</p>
                             </div>
                             <div>
-                              <p className="text-gray-500">Ответственный</p>
-                              <p className="text-gray-300">{s.responsible_name || "—"}</p>
+                              <p className="text-slate-500">Ответственный</p>
+                              <p className="text-slate-700">{s.responsible_name || "—"}</p>
                             </div>
                           </div>
 
                           {s.block_active && (
                             <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/10 space-y-2">
                               <div className="flex items-center justify-between gap-3 flex-wrap">
-                                <p className="text-xs text-red-300 font-medium">
+                                <p className="text-xs text-red-700 font-medium">
                                   <Icon name="Ban" size={12} className="inline mr-1" />
                                   Блокировка активна с {fmtDate(s.block_since)}
                                 </p>
@@ -523,38 +523,38 @@ export default function ExecControlPage() {
                                       },
                                     })
                                   }
-                                  className="px-2.5 py-1 rounded-lg bg-green-500/15 text-green-300 border border-green-500/30 text-xs hover:bg-green-500/25 transition-colors"
+                                  className="px-2.5 py-1 rounded-lg bg-green-500/15 text-green-700 border border-green-500/30 text-xs hover:bg-green-500/25 transition-colors"
                                 >
                                   Снять блокировку
                                 </button>
                               </div>
-                              <p className="text-sm text-gray-300">{s.block_what}</p>
+                              <p className="text-sm text-slate-700">{s.block_what}</p>
                               <div className="grid sm:grid-cols-2 gap-2 text-xs">
-                                <p className="text-gray-400">
-                                  <span className="text-gray-600">Снять может:</span> {s.block_who_can_lift}
+                                <p className="text-slate-500">
+                                  <span className="text-slate-400">Снять может:</span> {s.block_who_can_lift}
                                 </p>
-                                <p className="text-gray-400">
-                                  <span className="text-gray-600">Крайний срок:</span> {fmtDate(s.block_deadline)}
+                                <p className="text-slate-500">
+                                  <span className="text-slate-400">Крайний срок:</span> {fmtDate(s.block_deadline)}
                                 </p>
                               </div>
-                              <p className="text-xs text-gray-400">
-                                <span className="text-gray-600">Требуется:</span> {s.block_requirements}
+                              <p className="text-xs text-slate-500">
+                                <span className="text-slate-400">Требуется:</span> {s.block_requirements}
                               </p>
                             </div>
                           )}
 
                           {s.block_status === "lifted" && (
                             <div className="p-3 rounded-lg border border-green-500/25 bg-green-500/5">
-                              <p className="text-xs text-green-300">
+                              <p className="text-xs text-green-700">
                                 Блокировка снята {fmtDate(s.block_lifted_at)} · {s.block_lifted_by}
                               </p>
-                              <p className="text-sm text-gray-300 mt-1">{s.block_lift_result}</p>
+                              <p className="text-sm text-slate-700 mt-1">{s.block_lift_result}</p>
                             </div>
                           )}
 
                           {acts.length > 0 && (
                             <div>
-                              <p className="text-xs text-gray-500 mb-2">Действия по устранению</p>
+                              <p className="text-xs text-slate-500 mb-2">Действия по устранению</p>
                               <div className="space-y-1.5">
                                 {acts.map((a) => (
                                   <div
@@ -566,17 +566,17 @@ export default function ExecControlPage() {
                                         target: { kind: "issue", id: s.id, title: s.title },
                                       })
                                     }
-                                    className={`p-2.5 rounded-lg border cursor-pointer hover:border-gray-700 transition-colors ${
-                                      a.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-gray-800 bg-gray-900"
+                                    className={`p-2.5 rounded-lg border cursor-pointer hover:border-slate-300 transition-colors ${
+                                      a.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-slate-200 bg-white"
                                     }`}
                                   >
                                     <div className="flex items-start justify-between gap-3">
-                                      <p className="text-sm text-gray-300">{a.description}</p>
-                                      <span className="text-xs text-gray-500 whitespace-nowrap">
+                                      <p className="text-sm text-slate-700">{a.description}</p>
+                                      <span className="text-xs text-slate-500 whitespace-nowrap">
                                         {ACTION_STATUS_LABEL[a.status]}
                                       </span>
                                     </div>
-                                    <p className="text-xs text-gray-600 mt-1">
+                                    <p className="text-xs text-slate-400 mt-1">
                                       {a.responsible_name || "не назначен"} · {fmtDate(a.due_at)}
                                     </p>
                                   </div>
@@ -587,25 +587,25 @@ export default function ExecControlPage() {
 
                           {escs.length > 0 && (
                             <div>
-                              <p className="text-xs text-gray-500 mb-2">История эскалации</p>
+                              <p className="text-xs text-slate-500 mb-2">История эскалации</p>
                               <div className="space-y-1.5">
                                 {escs.map((e) => (
-                                  <div key={e.id} className="p-2.5 rounded-lg border border-gray-800 bg-gray-900">
+                                  <div key={e.id} className="p-2.5 rounded-lg border border-slate-200 bg-white">
                                     <div className="flex items-center justify-between gap-3 flex-wrap">
-                                      <p className="text-sm text-gray-300">
+                                      <p className="text-sm text-slate-700">
                                         {ESCALATION_LEVELS.find((l) => l.code === e.level_code)?.title ||
                                           e.level_code}
                                       </p>
-                                      <span className="text-xs text-gray-500">
+                                      <span className="text-xs text-slate-500">
                                         {ESCALATION_STATUS_LABEL[e.status]}
                                       </span>
                                     </div>
-                                    <p className="text-xs text-gray-600 mt-1">
+                                    <p className="text-xs text-slate-400 mt-1">
                                       передано {fmtDate(e.passed_at)}
                                       {e.review_due_at && ` · срок ${fmtDate(e.review_due_at)}`}
                                     </p>
                                     {e.decision_text && (
-                                      <p className="text-xs text-green-300 mt-1">{e.decision_text}</p>
+                                      <p className="text-xs text-green-700 mt-1">{e.decision_text}</p>
                                     )}
                                   </div>
                                 ))}
@@ -616,7 +616,7 @@ export default function ExecControlPage() {
                           <div className="flex flex-wrap gap-2 pt-1">
                             <button
                               onClick={() => setIssueForm({ open: true, item: s })}
-                              className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-orange-500/50 hover:text-orange-300 text-xs transition-colors flex items-center gap-1.5"
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:border-violet-600/50 hover:text-violet-700 text-xs transition-colors flex items-center gap-1.5"
                             >
                               <Icon name="Pencil" size={12} />
                               Редактировать
@@ -629,7 +629,7 @@ export default function ExecControlPage() {
                                   target: { kind: "issue", id: s.id, title: s.title },
                                 })
                               }
-                              className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-gray-600 text-xs transition-colors flex items-center gap-1.5"
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-400 text-xs transition-colors flex items-center gap-1.5"
                             >
                               <Icon name="Plus" size={12} />
                               Действие
@@ -642,7 +642,7 @@ export default function ExecControlPage() {
                                   target: { kind: "issue", id: s.id, title: s.title },
                                 })
                               }
-                              className="px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-300 hover:bg-amber-500/10 text-xs transition-colors flex items-center gap-1.5"
+                              className="px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-700 hover:bg-amber-500/10 text-xs transition-colors flex items-center gap-1.5"
                             >
                               <Icon name="ArrowUpCircle" size={12} />
                               Эскалировать
@@ -668,7 +668,7 @@ export default function ExecControlPage() {
                   <tbody>
                     {[5, 4, 3, 2, 1].map((p) => (
                       <tr key={p}>
-                        <td className="text-xs text-gray-500 pr-2 text-right whitespace-nowrap">
+                        <td className="text-xs text-slate-500 pr-2 text-right whitespace-nowrap">
                           {p === 5 ? "Вероятность 5" : p}
                         </td>
                         {[1, 2, 3, 4, 5].map((i) => {
@@ -679,20 +679,20 @@ export default function ExecControlPage() {
                           const bg = {
                             low: "bg-green-500/10 border-green-500/20",
                             medium: "bg-amber-500/10 border-amber-500/20",
-                            high: "bg-orange-500/10 border-orange-500/25",
+                            high: "bg-violet-100 border-violet-600/25",
                             critical: "bg-red-500/10 border-red-500/30",
                           }[lvl];
                           return (
                             <td key={i} className={`border ${bg} p-1.5 align-top w-[110px] h-[70px]`}>
-                              <span className="text-[10px] text-gray-600">{score}</span>
+                              <span className="text-[10px] text-slate-400">{score}</span>
                               {cell.map((r) => (
                                 <div
                                   key={r.id}
                                   onClick={() => setRiskForm({ open: true, item: r })}
                                   title={r.description}
-                                  className="mt-1 px-1.5 py-1 rounded bg-gray-900/80 cursor-pointer hover:bg-gray-800 transition-colors"
+                                  className="mt-1 px-1.5 py-1 rounded bg-white cursor-pointer hover:bg-slate-100 transition-colors"
                                 >
-                                  <p className="text-[11px] text-gray-300 truncate">{r.description}</p>
+                                  <p className="text-[11px] text-slate-700 truncate">{r.description}</p>
                                 </div>
                               ))}
                             </td>
@@ -703,7 +703,7 @@ export default function ExecControlPage() {
                     <tr>
                       <td />
                       {[1, 2, 3, 4, 5].map((i) => (
-                        <td key={i} className="text-xs text-gray-500 text-center pt-1">
+                        <td key={i} className="text-xs text-slate-500 text-center pt-1">
                           {i === 5 ? "5 Влияние" : i}
                         </td>
                       ))}
@@ -733,92 +733,92 @@ export default function ExecControlPage() {
                     const lvl = RISK_LEVEL_LABEL[r.risk_level];
                     const acts = actionsFor("risk", r.id);
                     return (
-                      <div key={r.id} className="rounded-lg border border-gray-800 bg-gray-900/40 overflow-hidden">
+                      <div key={r.id} className="rounded-lg border border-slate-200 bg-white overflow-hidden">
                         <button
                           onClick={() => setExpanded(isOpen ? null : key)}
-                          className="w-full text-left p-4 hover:bg-gray-900/60 transition-colors"
+                          className="w-full text-left p-4 hover:bg-slate-50 transition-colors"
                         >
                           <div className="flex items-start justify-between gap-4 flex-wrap">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap mb-1">
                                 <Tag label={`${lvl.title} · ${r.risk_score}`} cls={lvl.cls} />
-                                <span className="text-xs text-gray-500">
+                                <span className="text-xs text-slate-500">
                                   {RISK_STATUS_LABEL[r.status]}
                                 </span>
                                 {r.review_overdue && (
                                   <Tag
                                     label="Пересмотр просрочен"
-                                    cls="bg-amber-500/15 text-amber-300 border-amber-500/30"
+                                    cls="bg-amber-500/15 text-amber-700 border-amber-500/30"
                                   />
                                 )}
                               </div>
-                              <p className="text-sm text-white leading-snug">{r.description}</p>
-                              <p className="text-xs text-gray-600 mt-1 truncate">{r.initiative_title}</p>
+                              <p className="text-sm text-slate-900 leading-snug">{r.description}</p>
+                              <p className="text-xs text-slate-400 mt-1 truncate">{r.initiative_title}</p>
                             </div>
-                            <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={16} className="text-gray-600" />
+                            <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400" />
                           </div>
                         </button>
 
                         {isOpen && (
-                          <div className="px-4 pb-4 pt-3 border-t border-gray-800 space-y-3">
+                          <div className="px-4 pb-4 pt-3 border-t border-slate-200 space-y-3">
                             <div className="grid sm:grid-cols-2 gap-3 text-sm">
                               <div>
-                                <p className="text-xs text-gray-500">Причина</p>
-                                <p className="text-gray-300">{r.cause || "—"}</p>
+                                <p className="text-xs text-slate-500">Причина</p>
+                                <p className="text-slate-700">{r.cause || "—"}</p>
                               </div>
                               <div>
-                                <p className="text-xs text-gray-500">Возможное последствие</p>
-                                <p className="text-gray-300">{r.consequence || "—"}</p>
+                                <p className="text-xs text-slate-500">Возможное последствие</p>
+                                <p className="text-slate-700">{r.consequence || "—"}</p>
                               </div>
                               <div>
-                                <p className="text-xs text-gray-500">Индикатор наступления</p>
-                                <p className="text-gray-300">{r.trigger_indicator || "—"}</p>
+                                <p className="text-xs text-slate-500">Индикатор наступления</p>
+                                <p className="text-slate-700">{r.trigger_indicator || "—"}</p>
                               </div>
                               <div>
-                                <p className="text-xs text-gray-500">Владелец риска</p>
-                                <p className="text-gray-300">{r.owner_name || "—"}</p>
+                                <p className="text-xs text-slate-500">Владелец риска</p>
+                                <p className="text-slate-700">{r.owner_name || "—"}</p>
                               </div>
                               <div>
-                                <p className="text-xs text-gray-500">Предупреждающие меры</p>
-                                <p className="text-gray-300">{r.preventive_measures || "—"}</p>
+                                <p className="text-xs text-slate-500">Предупреждающие меры</p>
+                                <p className="text-slate-700">{r.preventive_measures || "—"}</p>
                               </div>
                               <div>
-                                <p className="text-xs text-gray-500">План реагирования</p>
-                                <p className="text-gray-300">{r.response_plan || "—"}</p>
+                                <p className="text-xs text-slate-500">План реагирования</p>
+                                <p className="text-slate-700">{r.response_plan || "—"}</p>
                               </div>
                             </div>
 
-                            <div className="grid sm:grid-cols-4 gap-3 text-xs pt-2 border-t border-gray-800">
+                            <div className="grid sm:grid-cols-4 gap-3 text-xs pt-2 border-t border-slate-200">
                               <div>
-                                <p className="text-gray-500">Выявлен</p>
-                                <p className="text-gray-300">{fmtDate(r.detected_at)}</p>
+                                <p className="text-slate-500">Выявлен</p>
+                                <p className="text-slate-700">{fmtDate(r.detected_at)}</p>
                               </div>
                               <div>
-                                <p className="text-gray-500">Последняя оценка</p>
-                                <p className="text-gray-300">{fmtDate(r.last_assessed_at)}</p>
+                                <p className="text-slate-500">Последняя оценка</p>
+                                <p className="text-slate-700">{fmtDate(r.last_assessed_at)}</p>
                               </div>
                               <div>
-                                <p className="text-gray-500">Следующий пересмотр</p>
-                                <p className={r.review_overdue ? "text-amber-400" : "text-gray-300"}>
+                                <p className="text-slate-500">Следующий пересмотр</p>
+                                <p className={r.review_overdue ? "text-amber-600" : "text-slate-700"}>
                                   {fmtDate(r.next_review_at)}
                                 </p>
                               </div>
                               <div>
-                                <p className="text-gray-500">Оценил</p>
-                                <p className="text-gray-300">{r.assessed_by_name || "—"}</p>
+                                <p className="text-slate-500">Оценил</p>
+                                <p className="text-slate-700">{r.assessed_by_name || "—"}</p>
                               </div>
                             </div>
 
                             {r.materialized_issue_title && (
                               <div className="p-2.5 rounded-lg border border-red-500/25 bg-red-500/5">
-                                <p className="text-xs text-red-300">Риск реализовался — возникла проблема</p>
-                                <p className="text-sm text-gray-300 mt-0.5">{r.materialized_issue_title}</p>
+                                <p className="text-xs text-red-700">Риск реализовался — возникла проблема</p>
+                                <p className="text-sm text-slate-700 mt-0.5">{r.materialized_issue_title}</p>
                               </div>
                             )}
 
                             {acts.length > 0 && (
                               <div>
-                                <p className="text-xs text-gray-500 mb-2">Действия по снижению</p>
+                                <p className="text-xs text-slate-500 mb-2">Действия по снижению</p>
                                 <div className="space-y-1.5">
                                   {acts.map((a) => (
                                     <div
@@ -830,11 +830,11 @@ export default function ExecControlPage() {
                                           target: { kind: "risk", id: r.id, title: r.description },
                                         })
                                       }
-                                      className="p-2.5 rounded-lg border border-gray-800 bg-gray-900 cursor-pointer hover:border-gray-700 transition-colors"
+                                      className="p-2.5 rounded-lg border border-slate-200 bg-white cursor-pointer hover:border-slate-300 transition-colors"
                                     >
                                       <div className="flex items-start justify-between gap-3">
-                                        <p className="text-sm text-gray-300">{a.description}</p>
-                                        <span className="text-xs text-gray-500">
+                                        <p className="text-sm text-slate-700">{a.description}</p>
+                                        <span className="text-xs text-slate-500">
                                           {ACTION_STATUS_LABEL[a.status]}
                                         </span>
                                       </div>
@@ -847,7 +847,7 @@ export default function ExecControlPage() {
                             <div className="flex flex-wrap gap-2">
                               <button
                                 onClick={() => setRiskForm({ open: true, item: r })}
-                                className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-orange-500/50 hover:text-orange-300 text-xs transition-colors flex items-center gap-1.5"
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:border-violet-600/50 hover:text-violet-700 text-xs transition-colors flex items-center gap-1.5"
                               >
                                 <Icon name="Pencil" size={12} />
                                 Редактировать
@@ -860,7 +860,7 @@ export default function ExecControlPage() {
                                     target: { kind: "risk", id: r.id, title: r.description },
                                   })
                                 }
-                                className="px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-gray-600 text-xs transition-colors flex items-center gap-1.5"
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-400 text-xs transition-colors flex items-center gap-1.5"
                               >
                                 <Icon name="Plus" size={12} />
                                 Действие
@@ -873,7 +873,7 @@ export default function ExecControlPage() {
                                     target: { kind: "risk", id: r.id, title: r.description },
                                   })
                                 }
-                                className="px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-300 hover:bg-amber-500/10 text-xs transition-colors flex items-center gap-1.5"
+                                className="px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-700 hover:bg-amber-500/10 text-xs transition-colors flex items-center gap-1.5"
                               >
                                 <Icon name="ArrowUpCircle" size={12} />
                                 Эскалировать
@@ -892,17 +892,17 @@ export default function ExecControlPage() {
           <Card title="История эскалаций" subtitle={`${fEscalations.length} записей`} icon="ArrowUpCircle">
             {fEscalations.length === 0 ? (
               <div className="py-8 px-4 text-center max-w-lg mx-auto">
-                <div className="w-12 h-12 rounded-xl bg-gray-900 border border-gray-800 flex items-center justify-center mx-auto mb-4">
-                  <Icon name="ArrowUpCircle" size={22} className="text-gray-600" />
+                <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center mx-auto mb-4">
+                  <Icon name="ArrowUpCircle" size={22} className="text-slate-400" />
                 </div>
-                <p className="text-sm text-white font-medium mb-2">Эскалаций не было</p>
-                <p className="text-sm text-gray-500 leading-relaxed mb-4">
+                <p className="text-sm text-slate-900 font-medium mb-2">Эскалаций не было</p>
+                <p className="text-sm text-slate-500 leading-relaxed mb-4">
                   Эскалация — передача вопроса на уровень выше, когда своими силами он не
                   решается. Создаётся из карточки проблемы или риска кнопкой «Эскалировать».
                 </p>
-                <div className="p-3 rounded-lg bg-gray-900/60 border border-gray-800 text-left">
-                  <p className="text-xs text-gray-600 mb-1">Например</p>
-                  <p className="text-sm text-gray-400 leading-relaxed">
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-left">
+                  <p className="text-xs text-slate-400 mb-1">Например</p>
+                  <p className="text-sm text-slate-500 leading-relaxed">
                     Проблема не решается на уровне команды — передаёте на Группу сопровождения,
                     указываете срок рассмотрения и основание. Решение Группы фиксируется здесь же.
                   </p>
@@ -924,8 +924,8 @@ export default function ExecControlPage() {
                         },
                       })
                     }
-                    className={`p-4 rounded-lg border cursor-pointer hover:border-gray-700 transition-colors ${
-                      e.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-gray-800 bg-gray-900/40"
+                    className={`p-4 rounded-lg border cursor-pointer hover:border-slate-300 transition-colors ${
+                      e.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-slate-200 bg-white"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -935,25 +935,25 @@ export default function ExecControlPage() {
                             label={
                               ESCALATION_LEVELS.find((l) => l.code === e.level_code)?.title || e.level_code
                             }
-                            cls="bg-amber-500/15 text-amber-300 border-amber-500/30"
+                            cls="bg-amber-500/15 text-amber-700 border-amber-500/30"
                           />
-                          <span className="text-xs text-gray-500">{ESCALATION_STATUS_LABEL[e.status]}</span>
+                          <span className="text-xs text-slate-500">{ESCALATION_STATUS_LABEL[e.status]}</span>
                           {e.is_overdue && (
-                            <Tag label="Срок истёк" cls="bg-red-500/15 text-red-300 border-red-500/30" />
+                            <Tag label="Срок истёк" cls="bg-red-500/15 text-red-700 border-red-500/30" />
                           )}
                         </div>
-                        <p className="text-sm text-white">{e.issue_title || e.risk_description}</p>
-                        {e.reason && <p className="text-xs text-gray-500 mt-1">{e.reason}</p>}
+                        <p className="text-sm text-slate-900">{e.issue_title || e.risk_description}</p>
+                        {e.reason && <p className="text-xs text-slate-500 mt-1">{e.reason}</p>}
                       </div>
-                      <div className="text-xs text-gray-500 text-right">
+                      <div className="text-xs text-slate-500 text-right">
                         <p>передано {fmtDate(e.passed_at)}</p>
                         {e.review_due_at && <p>срок {fmtDate(e.review_due_at)}</p>}
                       </div>
                     </div>
                     {e.decision_text && (
                       <div className="mt-2 p-2.5 rounded-lg bg-green-500/5 border border-green-500/20">
-                        <p className="text-sm text-green-200">{e.decision_text}</p>
-                        <p className="text-xs text-gray-500 mt-1">{fmtDate(e.decided_at)}</p>
+                        <p className="text-sm text-green-800">{e.decision_text}</p>
+                        <p className="text-xs text-slate-500 mt-1">{fmtDate(e.decided_at)}</p>
                       </div>
                     )}
                   </div>
@@ -1075,6 +1075,6 @@ export default function ExecControlPage() {
           />
         )}
       </div>
-    </AdminShell>
+    </Layout>
   );
 }

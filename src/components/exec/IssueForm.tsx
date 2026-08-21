@@ -248,7 +248,7 @@ export default function IssueForm({
         />
         {isResolving && (
           <div className="p-3 rounded-lg border border-green-500/30 bg-green-500/5 space-y-3">
-            <p className="text-xs text-green-300 flex items-center gap-1.5">
+            <p className="text-xs text-green-700 flex items-center gap-1.5">
               <Icon name="CircleCheck" size={13} />
               Подтверждение устранения
             </p>

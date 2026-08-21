@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import AdminShell from "@/components/admin/AdminShell";
+import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Dictionaries, execApi, RefsData, Stakeholder } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
@@ -80,18 +80,18 @@ export default function ExecStakeholdersPage() {
       : { yes: "Есть нерешённые вопросы", no: "Вопросов нет" };
 
   return (
-    <AdminShell>
-      <div className="max-w-[1400px] space-y-5">
+    <Layout>
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-5">
         <header className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-xl font-semibold text-white">Карта стейкхолдеров</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-xl font-semibold text-slate-900">Карта стейкхолдеров</h1>
+            <p className="text-sm text-slate-500 mt-1">
               Участие определяется формальными полномочиями, а не субъективной оценкой
             </p>
           </div>
           <button
             onClick={() => setForm({ open: true, item: null })}
-            className="px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors flex items-center gap-2"
+            className="px-3.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors flex items-center gap-2"
           >
             <Icon name="Plus" size={15} />
             Добавить стейкхолдера
@@ -108,13 +108,13 @@ export default function ExecStakeholdersPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1 p-1 rounded-lg bg-gray-900 border border-gray-800">
+          <div className="flex gap-1 p-1 rounded-lg bg-white border border-slate-200">
             {VIEWS.map((v) => (
               <button
                 key={v.id}
                 onClick={() => setView(v.id)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors ${
-                  view === v.id ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
+                  view === v.id ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:text-slate-700"
                 }`}
               >
                 <Icon name={v.icon} size={13} />
@@ -126,8 +126,8 @@ export default function ExecStakeholdersPage() {
             onClick={() => setOnlyOverdue((v) => !v)}
             className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
               onlyOverdue
-                ? "border-red-500/40 bg-red-500/10 text-red-300"
-                : "border-gray-800 text-gray-500 hover:text-gray-300"
+                ? "border-red-500/40 bg-red-500/10 text-red-700"
+                : "border-slate-200 text-slate-500 hover:text-slate-700"
             }`}
           >
             Только просроченные
@@ -147,7 +147,7 @@ export default function ExecStakeholdersPage() {
             <div className="overflow-x-auto -mx-4 px-4">
               <table className="w-full text-sm min-w-[900px]">
                 <thead>
-                  <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
+                  <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
                     <th className="pb-2 font-medium">Участник</th>
                     <th className="pb-2 font-medium">Инициатива</th>
                     <th className="pb-2 font-medium">Полномочия</th>
@@ -155,33 +155,33 @@ export default function ExecStakeholdersPage() {
                     <th className="pb-2 font-medium">Ближайшее действие</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-800/60">
+                <tbody className="divide-y divide-slate-200">
                   {filtered.map((s) => (
                     <tr
                       key={s.id}
                       onClick={() => setSelected(s)}
-                      className="cursor-pointer hover:bg-gray-900/50 transition-colors"
+                      className="cursor-pointer hover:bg-slate-50 transition-colors"
                     >
                       <td className="py-3">
-                        <p className="text-gray-200">{s.display_name}</p>
-                        <p className="text-xs text-gray-600 mt-0.5">{s.position_title}</p>
+                        <p className="text-slate-800">{s.display_name}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{s.position_title}</p>
                       </td>
-                      <td className="py-3 text-xs text-gray-500 max-w-[220px] truncate">
+                      <td className="py-3 text-xs text-slate-500 max-w-[220px] truncate">
                         {s.initiative_title}
                       </td>
                       <td className="py-3">
                         <div className="flex flex-wrap gap-1">
                           {s.can_decide && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300">решает</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700">решает</span>
                           )}
                           {s.must_approve && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300">согл.</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-700">согл.</span>
                           )}
                           {s.can_block && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-300">блок.</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">блок.</span>
                           )}
                           {s.controls_resource && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300">ресурс</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-700">ресурс</span>
                           )}
                         </div>
                       </td>
@@ -189,9 +189,9 @@ export default function ExecStakeholdersPage() {
                         <Badge dicts={dicts} type="participation_state" code={s.participation_state} />
                       </td>
                       <td className="py-3">
-                        <p className="text-xs text-gray-400 max-w-[240px] truncate">{s.next_action || "—"}</p>
+                        <p className="text-xs text-slate-500 max-w-[240px] truncate">{s.next_action || "—"}</p>
                         {s.next_action_due && (
-                          <p className={`text-[11px] mt-0.5 ${s.is_overdue ? "text-red-400" : "text-gray-600"}`}>
+                          <p className={`text-[11px] mt-0.5 ${s.is_overdue ? "text-red-600" : "text-slate-400"}`}>
                             {fmtDate(s.next_action_due)}
                             {s.is_overdue && " · просрочено"}
                           </p>
@@ -213,25 +213,25 @@ export default function ExecStakeholdersPage() {
                   <div
                     key={s.id}
                     onClick={() => setSelected(s)}
-                    className={`cursor-pointer p-3 rounded-lg border transition-colors hover:border-gray-700 ${
-                      s.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-gray-800 bg-gray-900/40"
+                    className={`cursor-pointer p-3 rounded-lg border transition-colors hover:border-slate-300 ${
+                      s.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-slate-200 bg-white"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="min-w-0">
-                        <p className="text-sm text-white">{s.display_name}</p>
-                        <p className="text-xs text-gray-500">{s.initiative_title}</p>
+                        <p className="text-sm text-slate-900">{s.display_name}</p>
+                        <p className="text-xs text-slate-500">{s.initiative_title}</p>
                       </div>
                       <Badge dicts={dicts} type="engagement_status" code={s.engagement_status} />
                     </div>
-                    <p className="text-sm text-gray-300 mt-2">{s.next_action}</p>
+                    <p className="text-sm text-slate-700 mt-2">{s.next_action}</p>
                     <div className="flex items-center gap-3 mt-2 text-xs">
-                      <span className={s.is_overdue ? "text-red-400" : "text-gray-500"}>
+                      <span className={s.is_overdue ? "text-red-600" : "text-slate-500"}>
                         <Icon name="Calendar" size={11} className="inline mr-1" />
                         {fmtDate(s.next_action_due)}
                       </span>
                       {s.responsible_name && (
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                           <Icon name="User" size={11} className="inline mr-1" />
                           {s.responsible_name}
                         </span>
@@ -251,25 +251,25 @@ export default function ExecStakeholdersPage() {
               {[
                 { p: 5, a: false, tone: "border-red-500/40 bg-red-500/5", label: `Ключевые · ${axisLabels.no}` },
                 { p: 5, a: true, tone: "border-green-500/40 bg-green-500/5", label: `Ключевые · ${axisLabels.yes}` },
-                { p: 1, a: false, tone: "border-gray-800 bg-gray-900/40", label: `Прочие · ${axisLabels.no}` },
+                { p: 1, a: false, tone: "border-slate-200 bg-white", label: `Прочие · ${axisLabels.no}` },
                 { p: 1, a: true, tone: "border-blue-500/30 bg-blue-500/5", label: `Прочие · ${axisLabels.yes}` },
               ].map((q, idx) => {
                 const cell = matrixCell(q.p, q.a);
                 return (
                   <div key={idx} className={`rounded-xl border p-4 min-h-[160px] ${q.tone}`}>
-                    <p className="text-xs text-gray-400 mb-3 font-medium">{q.label}</p>
+                    <p className="text-xs text-slate-500 mb-3 font-medium">{q.label}</p>
                     {cell.length === 0 ? (
-                      <p className="text-xs text-gray-700">пусто</p>
+                      <p className="text-xs text-slate-600">пусто</p>
                     ) : (
                       <div className="space-y-1.5">
                         {cell.map((s) => (
                           <div
                             key={s.id}
                             onClick={() => setSelected(s)}
-                            className="cursor-pointer p-2 rounded-lg bg-gray-900/70 hover:bg-gray-800 transition-colors"
+                            className="cursor-pointer p-2 rounded-lg bg-white hover:bg-slate-100 transition-colors"
                           >
-                            <p className="text-xs text-white truncate">{s.display_name}</p>
-                            <p className="text-[11px] text-gray-500 truncate">{s.position_title}</p>
+                            <p className="text-xs text-slate-900 truncate">{s.display_name}</p>
+                            <p className="text-[11px] text-slate-500 truncate">{s.position_title}</p>
                           </div>
                         ))}
                       </div>
@@ -287,14 +287,14 @@ export default function ExecStakeholdersPage() {
             onClick={() => setSelected(null)}
           >
             <div
-              className="bg-gray-950 border border-gray-800 rounded-xl max-w-2xl w-full my-8"
+              className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full my-8"
               onClick={(e) => e.stopPropagation()}
             >
-              <header className="flex items-start justify-between gap-4 p-5 border-b border-gray-800">
+              <header className="flex items-start justify-between gap-4 p-5 border-b border-slate-200">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">{selected.display_name}</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">{selected.position_title}</p>
-                  <p className="text-xs text-gray-600 mt-1">{selected.initiative_title}</p>
+                  <h2 className="text-lg font-semibold text-slate-900">{selected.display_name}</h2>
+                  <p className="text-sm text-slate-500 mt-0.5">{selected.position_title}</p>
+                  <p className="text-xs text-slate-400 mt-1">{selected.initiative_title}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -302,12 +302,12 @@ export default function ExecStakeholdersPage() {
                       setForm({ open: true, item: selected });
                       setSelected(null);
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
                   >
                     <Icon name="Pencil" size={13} />
                     Редактировать
                   </button>
-                  <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-white">
+                  <button onClick={() => setSelected(null)} className="text-slate-500 hover:text-slate-900">
                     <Icon name="X" size={18} />
                   </button>
                 </div>
@@ -329,8 +329,8 @@ export default function ExecStakeholdersPage() {
                     ["Цель взаимодействия", selected.engagement_goal],
                   ].map(([label, val]) => (
                     <div key={label as string}>
-                      <p className="text-xs text-gray-500 mb-1">{label}</p>
-                      <p className="text-sm text-gray-200">{(val as string) || <span className="text-gray-600">не заполнено</span>}</p>
+                      <p className="text-xs text-slate-500 mb-1">{label}</p>
+                      <p className="text-sm text-slate-800">{(val as string) || <span className="text-slate-400">не заполнено</span>}</p>
                     </div>
                   ))}
                 </div>
@@ -338,12 +338,12 @@ export default function ExecStakeholdersPage() {
                 {selected.next_action && (
                   <div
                     className={`p-3 rounded-lg border ${
-                      selected.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-gray-800 bg-gray-900"
+                      selected.is_overdue ? "border-red-500/30 bg-red-500/5" : "border-slate-200 bg-white"
                     }`}
                   >
-                    <p className="text-xs text-gray-500 mb-1">Ближайшее действие</p>
-                    <p className="text-sm text-gray-200">{selected.next_action}</p>
-                    <p className={`text-xs mt-1 ${selected.is_overdue ? "text-red-400" : "text-gray-500"}`}>
+                    <p className="text-xs text-slate-500 mb-1">Ближайшее действие</p>
+                    <p className="text-sm text-slate-800">{selected.next_action}</p>
+                    <p className={`text-xs mt-1 ${selected.is_overdue ? "text-red-600" : "text-slate-500"}`}>
                       {fmtDate(selected.next_action_due)}
                       {selected.responsible_name && ` · ${selected.responsible_name}`}
                     </p>
@@ -368,6 +368,6 @@ export default function ExecStakeholdersPage() {
           />
         )}
       </div>
-    </AdminShell>
+    </Layout>
   );
 }
