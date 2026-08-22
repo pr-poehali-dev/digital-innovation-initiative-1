@@ -79,6 +79,13 @@ export default function ExecFocusPage() {
               Быстрый старт
             </button>
             <Link
+              to="/cabinet/exec/planner"
+              className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <Icon name="GanttChartSquare" size={15} />
+              Планировщик
+            </Link>
+            <Link
               to="/cabinet/exec/initiatives"
               className="px-3.5 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors flex items-center gap-2"
             >

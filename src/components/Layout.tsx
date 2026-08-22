@@ -9,6 +9,7 @@ import AiChatPanel from "@/components/AiChatPanel";
 import NotificationBell from "@/components/NotificationBell";
 import PullToRefresh from "@/components/PullToRefresh";
 import { controlApi } from "@/lib/execControlApi";
+import { hasAnyAccess } from "@/lib/execAccess";
 import { BUILD_HASH } from "@/lib/build-info";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -24,7 +25,20 @@ function isSectionActive(pathname: string, section: NavSection): boolean {
 }
 
 // Секции с collapsible поведением (только многопунктовые, не одиночные)
-const COLLAPSIBLE_SECTIONS = new Set(["profile", "growth", "learning"]);
+const COLLAPSIBLE_SECTIONS = new Set(["chief", "profile", "growth", "learning"]);
+
+// Пункты кабинета руководителя — видны только тем, кто допущен к нему
+const EXEC_ONLY_ITEMS = new Set([
+  "chief.exec",
+  "chief.planner",
+  "chief.initiatives",
+  "chief.control",
+  "chief.stakeholders",
+  "chief.decisions",
+  "chief.authority",
+  "chief.persons",
+  "chief.diagnostics",
+]);
 
 const STORAGE_KEY = "cabinet_sidebar_sections_v1";
 
@@ -139,6 +153,8 @@ function SectionGroup({
   const active = isSectionActive(location.pathname, section);
   const canCollapse = !collapsed && COLLAPSIBLE_SECTIONS.has(section.key);
 
+  if (section.items.length === 0) return null;
+
   // Single-item sections (Обзор, Практика) — render as flat item
   if (section.singleItem || section.items.length === 1) {
     return <SubItem item={section.items[0]} collapsed={collapsed} />;
@@ -184,9 +200,9 @@ function SectionGroup({
           "space-y-0.5 overflow-hidden transition-all duration-200",
           !collapsed && canCollapse
             ? isOpen
-              ? "max-h-96 opacity-100"
+              ? "max-h-[720px] opacity-100"
               : "max-h-0 opacity-0"
-            : "max-h-96 opacity-100",
+            : "max-h-[720px] opacity-100",
         ].join(" ")}
       >
         {section.items.map(item => (
@@ -204,7 +220,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [hasExecAccess, setHasExecAccess] = useState(false);
 
   useEffect(() => {
-    if (!user) {
+    // Доступ проверяем и по обычной сессии, и по админ-входу
+    if (!hasAnyAccess()) {
       setHasExecAccess(false);
       return;
     }
@@ -306,7 +323,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               section={
                 hasExecAccess
                   ? section
-                  : { ...section, items: section.items.filter((i) => i.id !== "chief.exec") }
+                  : { ...section, items: section.items.filter((i) => !EXEC_ONLY_ITEMS.has(i.id)) }
               }
               collapsed={collapsed}
               isOpen={openSections[section.key] ?? true}
