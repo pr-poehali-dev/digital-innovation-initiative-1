@@ -87,11 +87,13 @@ AI_SYSTEM = (
 )
 
 AI_PROMPT = """Задача руководителя: {title}
-{goal}{period}{people}
-
+{goal}{period}{people}{knowledge}
 Составь пошаговый план выполнения этой задачи.
 
 Требования:
+0. Если выше приведены внутренние регламенты организации — план обязан им следовать:
+   соблюдай указанные там этапы, роли, порядок согласования и утверждения.
+   Там, где регламент требует согласования или утверждения, добавляй отдельный шаг.
 1. От 4 до 7 крупных шагов в логической последовательности.
 2. У 2-4 шагов добавь вложенные действия (substeps) — по 2-4 штуки, это конкретные операции.
 3. Отметь 1-3 ключевых шага как веху (is_milestone: true) — это проверяемый результат:
@@ -106,6 +108,101 @@ AI_PROMPT = """Задача руководителя: {title}
 
 Верни ТОЛЬКО JSON без пояснений и markdown-обёртки, строго в таком виде:
 {{"steps":[{{"title":"...","description":"...","result":"...","role":"","is_milestone":false,"offset_start":0,"offset_end":10,"substeps":[{{"title":"...","offset_start":0,"offset_end":4}}]}}]}}"""
+
+
+STOP_WORDS = {
+    "и", "в", "на", "с", "по", "о", "об", "от", "для", "что", "как", "где",
+    "это", "так", "же", "из", "к", "у", "за", "не", "ли", "то", "при", "все",
+    "чтобы", "быть", "есть", "или", "его", "их", "был", "было", "нужно",
+}
+
+KNOWLEDGE_BUDGET = 7000  # символов контекста из регламентов
+
+
+def pick_knowledge(cur, query: str) -> str:
+    """Подбирает фрагменты регламентов, релевантные задаче руководителя."""
+    try:
+        cur.execute(f"""
+            SELECT k.id, k.title, k.doc_type, k.summary, k.priority,
+                   c.content, c.page_number
+            FROM {SCHEMA}.exec_knowledge k
+            JOIN {SCHEMA}.exec_knowledge_chunk c ON c.knowledge_id = k.id
+            WHERE k.use_in_ai = true AND k.status = 'active'
+            LIMIT 1500
+        """)
+        found = cur.fetchall()
+    except Exception:
+        return "", []
+
+    if not found:
+        return "", []
+
+    words = [w for w in re.findall(r"[\w\-]{3,}", (query or "").lower())
+             if w not in STOP_WORDS]
+
+    scored = []
+    for kid, title, dtype, summary, priority, content, page in found:
+        low = (content or "").lower()
+        score = 0.0
+        for w in words:
+            hits = low.count(w)
+            if hits:
+                score += hits * (1.0 + len(w) / 20.0)
+        # заголовок документа тоже подсказывает релевантность
+        tl = (title or "").lower()
+        for w in words:
+            if w in tl:
+                score += 3.0
+        score += (priority or 50) / 100.0
+        if score > 0:
+            scored.append((score, title, dtype, content, page))
+
+    if not scored:
+        # ничего не совпало — берём самые приоритетные документы целиком
+        cur.execute(f"""
+            SELECT k.title, k.doc_type, c.content, c.page_number
+            FROM {SCHEMA}.exec_knowledge k
+            JOIN {SCHEMA}.exec_knowledge_chunk c ON c.knowledge_id = k.id
+            WHERE k.use_in_ai = true AND k.status = 'active'
+            ORDER BY k.priority DESC, c.chunk_index
+            LIMIT 6
+        """)
+        scored = [(1.0, r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+
+    scored.sort(key=lambda x: -x[0])
+
+    parts, used = [], 0
+    seen_titles = set()
+    for _, title, dtype, content, page in scored:
+        if used + len(content) > KNOWLEDGE_BUDGET:
+            continue
+        label = DOC_TYPE_LABEL.get(dtype, "Документ")
+        head = f"[{label}: {title}" + (f", стр. {page}]" if page else "]")
+        parts.append(f"{head}\n{content.strip()}")
+        used += len(content)
+        seen_titles.add(title)
+        if used >= KNOWLEDGE_BUDGET or len(parts) >= 8:
+            break
+
+    if not parts:
+        return "", []
+    text = (
+        "\nВнутренние регламенты и правила организации (обязательны к учёту):\n"
+        + "\n\n---\n\n".join(parts)
+        + "\n"
+    )
+    return text, sorted(seen_titles)
+
+
+DOC_TYPE_LABEL = {
+    "rule": "Регламент",
+    "matrix": "Матрица ответственности",
+    "policy": "Политика",
+    "method": "Методика",
+    "template": "Шаблон",
+    "note": "Вводная",
+    "other": "Документ",
+}
 
 
 def call_gpt(system: str, prompt: str) -> str:
@@ -184,11 +281,14 @@ def ai_suggest(cur, body: dict):
     """)
     people = [f"{r[0]}{f' — {r[1]}' if r[1] else ''}" for r in cur.fetchall()]
 
+    knowledge, used_docs = pick_knowledge(cur, f"{title} {goal}")
+
     prompt = AI_PROMPT.format(
         title=title,
         goal=f"Цель и ожидаемый результат: {goal}\n" if goal else "",
         period=f"Срок выполнения: с {start.isoformat()} по {due.isoformat()}\n" if due else "",
         people=("Доступные участники:\n" + "\n".join(people) + "\n") if people else "",
+        knowledge=knowledge,
         days=days,
     )
 
@@ -242,7 +342,8 @@ def ai_suggest(cur, body: dict):
     steps_out = [s for s in steps_out if s["title"]]
     if not steps_out:
         return None, "AI не смог разложить задачу — уточните формулировку"
-    return {"steps": steps_out, "days": days, "start_date": start.isoformat()}, None
+    return {"steps": steps_out, "days": days, "start_date": start.isoformat(),
+            "used_knowledge": used_docs}, None
 
 
 def handler(event: dict, context) -> dict:

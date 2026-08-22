@@ -20,6 +20,7 @@ export default function AiPlanDialog({
   onApplied: () => void;
 }) {
   const [steps, setSteps] = useState<AiStep[] | null>(null);
+  const [usedDocs, setUsedDocs] = useState<string[]>([]);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -36,6 +37,7 @@ export default function AiPlanDialog({
         due_date: plan.due_date,
       });
       setSteps(r.steps);
+      setUsedDocs(r.used_knowledge || []);
       setPicked(new Set(r.steps.map((_, i) => i)));
     } catch (e) {
       setError((e as Error).message);
@@ -120,6 +122,9 @@ export default function AiPlanDialog({
                 общего периода и отметит ключевые вехи. Перед сохранением всё можно
                 отредактировать.
               </p>
+              <p className="text-xs text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+                Регламенты и матрицы из вашей базы знаний будут учтены автоматически.
+              </p>
               {(plan.start_date || plan.due_date) && (
                 <p className="text-xs text-slate-400 mt-2">
                   Период: {plan.start_date ? fmtDate(plan.start_date) : "сегодня"} —{" "}
@@ -146,6 +151,20 @@ export default function AiPlanDialog({
 
           {steps && !loading && (
             <>
+              {usedDocs.length > 0 && (
+                <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 flex items-start gap-2.5">
+                  <Icon
+                    name="Library"
+                    size={14}
+                    className="text-violet-600 flex-shrink-0 mt-0.5"
+                  />
+                  <p className="text-xs text-violet-800 leading-relaxed">
+                    План построен с учётом базы знаний:{" "}
+                    <span className="font-medium">{usedDocs.join(", ")}</span>
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <p className="text-xs text-slate-500">
                   Отмечено {totalPicked} из {steps.length} шагов

@@ -31,6 +31,7 @@ const COLLAPSIBLE_SECTIONS = new Set(["chief", "profile", "growth", "learning"])
 const EXEC_ONLY_ITEMS = new Set([
   "chief.exec",
   "chief.planner",
+  "chief.knowledge",
   "chief.initiatives",
   "chief.control",
   "chief.stakeholders",

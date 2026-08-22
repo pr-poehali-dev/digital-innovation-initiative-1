@@ -152,6 +152,7 @@ export interface AiSuggestion {
   steps: AiStep[];
   days: number;
   start_date: string;
+  used_knowledge?: string[];
 }
 
 export const plannerApi = {

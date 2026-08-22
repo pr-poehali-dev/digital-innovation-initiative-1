@@ -41,6 +41,7 @@ import ExecPersonsPage from "./pages/cabinet/exec/ExecPersonsPage";
 import ExecHistoryPage from "./pages/cabinet/exec/ExecHistoryPage";
 import ExecControlPage from "./pages/cabinet/exec/ExecControlPage";
 import ExecPlannerPage from "./pages/cabinet/exec/ExecPlannerPage";
+import ExecKnowledgePage from "./pages/cabinet/exec/ExecKnowledgePage";
 import ExecRoute from "./components/exec/ExecRoute";
 import Index from "./pages/Index";
 import WelcomePage from "./pages/WelcomePage";
@@ -172,6 +173,7 @@ const App = () => (
               <Route path="/cabinet/competency-map" element={<ProtectedRoute><CompetencyMapPage /></ProtectedRoute>} />
               <Route path="/cabinet/exec" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
               <Route path="/cabinet/exec/planner" element={<ExecRoute><ExecPlannerPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/knowledge" element={<ExecRoute><ExecKnowledgePage /></ExecRoute>} />
               <Route path="/cabinet/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />
               <Route path="/cabinet/exec/initiatives/:id" element={<ExecRoute><ExecInitiativeDetailPage /></ExecRoute>} />
               <Route path="/cabinet/exec/control" element={<ExecRoute><ExecControlPage /></ExecRoute>} />
