@@ -78,7 +78,7 @@ export default function InitiativeTreeMap({
   };
 
   const { placed, width, height, trunkX, trunkTop, trunkBottom } = useMemo(() => {
-    const ROW = 34;
+    const ROW = 40;
     const STAGE_GAP = 16;
     const LEFT = 96;
     const COL = 300;
@@ -279,19 +279,33 @@ export default function InitiativeTreeMap({
                   />
                 )}
 
-                {/* Подпись */}
+                {/* Подпись: у ветви — над узлом (справа уходят инициативы), у листьев — справа */}
                 <text
-                  x={p.x + r + 8}
-                  y={p.y - 1}
-                  textAnchor="start"
+                  x={isStage ? p.x - r - 2 : p.x + r + 8}
+                  y={isStage ? p.y - r - 7 : p.y - 1}
+                  textAnchor={isStage ? "end" : "start"}
                   fontSize={isStage ? 11.5 : 10.5}
                   fontWeight={isStage ? 700 : 400}
                   fill={c.text}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  strokeLinejoin="round"
                 >
                   {p.title.length > 34 ? p.title.slice(0, 33) + "…" : p.title}
                 </text>
                 {isStage ? (
-                  <text x={p.x + r + 8} y={p.y + 11} fontSize={9} fill="#94a3b8">
+                  <text
+                    x={p.x - r - 2}
+                    y={p.y + r + 14}
+                    textAnchor="end"
+                    fontSize={9}
+                    fill="#94a3b8"
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                    strokeLinejoin="round"
+                  >
                     {p.count} инициатив(ы)
                   </text>
                 ) : (
@@ -301,6 +315,10 @@ export default function InitiativeTreeMap({
                       y={p.y + 11}
                       fontSize={9}
                       fill={p.state === "risk" ? "#dc2626" : "#94a3b8"}
+                      stroke="#ffffff"
+                      strokeWidth={3}
+                      paintOrder="stroke"
+                      strokeLinejoin="round"
                     >
                       {p.item.owner_name ? `${p.item.owner_name} · ` : "владелец не назначен · "}
                       до {new Date(p.item.plan_end.slice(0, 10)).toLocaleDateString("ru-RU", {

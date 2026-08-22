@@ -78,7 +78,7 @@ export default function PlanTreeMap({
   const { placed, width, height, trunkX, trunkTop, trunkBottom } = useMemo(() => {
     const roots = build(steps, null, 0);
 
-    const ROW = 34;           // высота строки на лист
+    const ROW = 40;           // высота строки на лист
     const COL = 250;          // ширина уровня вложенности
     const LEFT = 96;          // отступ под ствол
     const TOP = 34;
@@ -277,24 +277,32 @@ export default function PlanTreeMap({
                   />
                 )}
 
-                {/* Подпись справа от узла */}
+                {/* Подпись: у родителей — над узлом (справа уходят ветви), у листьев — справа */}
                 <text
-                  x={p.x + r + 8}
-                  y={p.y - 1}
-                  textAnchor="start"
+                  x={kids ? p.x - r - 2 : p.x + r + 8}
+                  y={kids ? p.y - r - 7 : p.y - 1}
+                  textAnchor={kids ? "end" : "start"}
                   fontSize={isMs ? 11.5 : 10.5}
                   fontWeight={isMs ? 700 : kids ? 600 : 400}
                   fill={c.text}
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  strokeLinejoin="round"
                 >
                   {s.title.length > 30 ? s.title.slice(0, 29) + "…" : s.title}
                 </text>
                 {s.due_date && (
                   <text
-                    x={p.x + r + 8}
-                    y={p.y + 11}
-                    textAnchor="start"
+                    x={kids ? p.x - r - 2 : p.x + r + 8}
+                    y={kids ? p.y + r + 14 : p.y + 11}
+                    textAnchor={kids ? "end" : "start"}
                     fontSize={9}
                     fill={st === "overdue" ? "#dc2626" : "#94a3b8"}
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                    strokeLinejoin="round"
                   >
                     {new Date(s.due_date.slice(0, 10)).toLocaleDateString("ru-RU", {
                       day: "2-digit",
