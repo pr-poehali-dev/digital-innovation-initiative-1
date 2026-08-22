@@ -11,7 +11,9 @@
       "method": "GET",
       "path": "/?action=list",
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
+      "expectedBody": {
+        "ok": false
+      },
       "bodyMatcher": "partial"
     },
     {
@@ -19,7 +21,9 @@
       "method": "GET",
       "path": "/?action=plan&plan_id=1",
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
+      "expectedBody": {
+        "ok": false
+      },
       "bodyMatcher": "partial"
     },
     {
@@ -27,34 +31,63 @@
       "method": "GET",
       "path": "/?action=resource_load",
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
+      "expectedBody": {
+        "ok": false
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Unauthorized save_plan blocked",
       "method": "POST",
       "path": "/?action=save_plan",
-      "body": {"title": "test"},
+      "body": {
+        "title": "test"
+      },
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
+      "expectedBody": {
+        "ok": false
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Unauthorized save_step blocked",
       "method": "POST",
       "path": "/?action=save_step",
-      "body": {"plan_id": 1, "title": "test"},
+      "body": {
+        "plan_id": 1,
+        "title": "test"
+      },
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
+      "expectedBody": {
+        "ok": false
+      },
       "bodyMatcher": "partial"
     },
     {
       "name": "Unauthorized delete_step blocked",
       "method": "POST",
       "path": "/?action=delete_step",
-      "body": {"id": 1},
+      "body": {
+        "id": 1
+      },
       "expectedStatus": 401,
-      "expectedBody": {"ok": false},
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized ai_apply blocked",
+      "method": "POST",
+      "path": "/?action=ai_apply",
+      "body": {
+        "plan_id": 1,
+        "steps": []
+      },
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
       "bodyMatcher": "partial"
     }
   ]

@@ -304,6 +304,51 @@ def set_assignees(cur, step_id: int, person_ids: list, workloads: dict):
         )
 
 
+def apply_ai_steps(cur, plan_id: int, steps: list):
+    """Сохраняет подтверждённые пользователем шаги в план."""
+    cur.execute(
+        f"SELECT COALESCE(MAX(sort_order), 0) FROM {SCHEMA}.exec_plan_step "
+        f"WHERE plan_id = %s AND parent_step_id IS NULL",
+        (plan_id,),
+    )
+    order = cur.fetchone()[0] or 0
+    created = 0
+
+    for s in steps or []:
+        if not isinstance(s, dict) or not (s.get("title") or "").strip():
+            continue
+        order += 1
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_plan_step "
+            f"(plan_id, title, description, result_criteria, is_milestone, "
+            f" start_date, due_date, responsible_person_id, sort_order) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (plan_id, str(s["title"]).strip()[:500], nz(s.get("description")),
+             nz(s.get("result_criteria")), bool(s.get("is_milestone")),
+             nz(s.get("start_date")), nz(s.get("due_date")),
+             as_int(s.get("responsible_person_id")), order),
+        )
+        parent_id = cur.fetchone()[0]
+        created += 1
+
+        sub_order = 0
+        for sub in s.get("substeps") or []:
+            if not isinstance(sub, dict) or not (sub.get("title") or "").strip():
+                continue
+            sub_order += 1
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_plan_step "
+                f"(plan_id, parent_step_id, title, start_date, due_date, "
+                f" responsible_person_id, sort_order) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (plan_id, parent_id, str(sub["title"]).strip()[:500],
+                 nz(sub.get("start_date")), nz(sub.get("due_date")),
+                 as_int(sub.get("responsible_person_id")), sub_order),
+            )
+            created += 1
+    return created
+
+
 def handler(event: dict, context) -> dict:
     """Планировщик кабинета руководителя: планы, шаги, вехи, распределение ресурсов."""
     if event.get("httpMethod") == "OPTIONS":
@@ -368,6 +413,17 @@ def handler(event: dict, context) -> dict:
                           body.get("workloads") or {})
             conn.commit()
             return cors({"ok": True, "data": {"step_id": step_id}})
+
+        if action == "ai_apply":
+            plan_id = as_int(body.get("plan_id"))
+            steps = body.get("steps") or []
+            if not plan_id:
+                return cors({"ok": False, "error": {"message": "Не указан план"}}, 400)
+            if not steps:
+                return cors({"ok": False, "error": {"message": "Нет шагов для добавления"}}, 400)
+            created = apply_ai_steps(cur, plan_id, steps)
+            conn.commit()
+            return cors({"ok": True, "data": {"plan_id": plan_id, "created": created}})
 
         if action == "reorder":
             for item in body.get("items") or []:

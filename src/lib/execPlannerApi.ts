@@ -1,6 +1,8 @@
 import { accessHeaders } from "./execAccess";
 
 const BASE = "https://functions.poehali.dev/b27c77a4-02b7-4462-801e-a9ef07c36f4e";
+// AI-генерация вынесена отдельно: обращение к нейросети длится десятки секунд
+const AI_BASE = "https://functions.poehali.dev/e1162707-6119-4ac4-b99a-32d4113db505";
 
 export interface PlanAssignee {
   id: number;
@@ -110,8 +112,8 @@ export const PRIORITY_LABEL: Record<string, string> = {
   critical: "Критический",
 };
 
-async function req(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${BASE}${path}`, {
+async function req(path: string, options: RequestInit = {}, base = BASE) {
+  const res = await fetch(`${base}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -126,6 +128,31 @@ async function req(path: string, options: RequestInit = {}) {
 
 const post = (action: string, body: unknown) =>
   req(`/?action=${action}`, { method: "POST", body: JSON.stringify(body) });
+
+export interface AiSubstep {
+  title: string;
+  start_date: string | null;
+  due_date: string | null;
+  responsible_person_id?: number | null;
+}
+
+export interface AiStep {
+  title: string;
+  description: string;
+  result_criteria: string;
+  role_hint: string;
+  is_milestone: boolean;
+  start_date: string | null;
+  due_date: string | null;
+  substeps: AiSubstep[];
+  responsible_person_id?: number | null;
+}
+
+export interface AiSuggestion {
+  steps: AiStep[];
+  days: number;
+  start_date: string;
+}
 
 export const plannerApi = {
   list: (): Promise<{ plans: Plan[]; refs: PlannerRefs }> => req("/?action=list"),
@@ -151,6 +178,17 @@ export const plannerApi = {
 
   reorder: (items: { id: number; sort_order: number; parent_step_id: number | null }[]) =>
     post("reorder", { items }),
+
+  aiSuggest: (data: {
+    title: string;
+    goal?: string;
+    start_date?: string | null;
+    due_date?: string | null;
+  }): Promise<AiSuggestion> =>
+    req("/", { method: "POST", body: JSON.stringify(data) }, AI_BASE),
+
+  aiApply: (planId: number, steps: AiStep[]): Promise<{ plan_id: number; created: number }> =>
+    post("ai_apply", { plan_id: planId, steps }),
 
   deleteStep: (id: number): Promise<{ id: number }> => post("delete_step", { id }),
 

@@ -6,6 +6,7 @@ import { Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/ex
 import PlanForm from "@/components/exec/PlanForm";
 import PlanStepForm from "@/components/exec/PlanStepForm";
 import PlanTimeline from "@/components/exec/PlanTimeline";
+import AiPlanDialog from "@/components/exec/AiPlanDialog";
 import {
   PLAN_STATUS,
   PRIORITY_LABEL,
@@ -207,6 +208,7 @@ export default function ExecPlannerPage() {
     setParams(v === "tree" ? { plan: String(planId) } : { plan: String(planId), view: v });
 
   const [planForm, setPlanForm] = useState<{ open: boolean; edit?: Plan | null }>({ open: false });
+  const [aiOpen, setAiOpen] = useState(false);
   const [stepForm, setStepForm] = useState<{
     open: boolean;
     step?: PlanStep | null;
@@ -420,6 +422,8 @@ export default function ExecPlannerPage() {
             onSaved={(id) => {
               setPlanForm({ open: false });
               setParams({ plan: String(id) });
+              // У новой задачи план пустой — сразу предлагаем собрать его через AI
+              if (!planForm.edit) setAiOpen(true);
             }}
           />
         )}
@@ -499,6 +503,13 @@ export default function ExecPlannerPage() {
             >
               <Icon name="Pencil" size={14} />
               Задача
+            </button>
+            <button
+              onClick={() => setAiOpen(true)}
+              className="px-3 py-2 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 text-sm font-medium transition-colors flex items-center gap-1.5"
+            >
+              <Icon name="Sparkles" size={14} />
+              AI-план
             </button>
             <button
               onClick={() => setStepForm({ open: true, parentId: null })}
@@ -590,15 +601,24 @@ export default function ExecPlannerPage() {
                 <Icon name="ListTree" size={30} className="text-slate-300 mx-auto mb-2" />
                 <p className="text-sm text-slate-900 font-medium">План пока пустой</p>
                 <p className="text-sm text-slate-500 mt-1.5 max-w-sm mx-auto">
-                  Добавьте первый шаг — потом его можно раскрыть на действия.
+                  Пусть AI разложит задачу на шаги — или добавьте первый шаг вручную.
                 </p>
-                <button
-                  onClick={() => setStepForm({ open: true, parentId: null })}
-                  className="mt-4 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors inline-flex items-center gap-2"
-                >
-                  <Icon name="Plus" size={14} />
-                  Добавить шаг
-                </button>
+                <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => setAiOpen(true)}
+                    className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium transition-colors inline-flex items-center gap-2"
+                  >
+                    <Icon name="Sparkles" size={14} />
+                    Составить план через AI
+                  </button>
+                  <button
+                    onClick={() => setStepForm({ open: true, parentId: null })}
+                    className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300 text-sm font-medium transition-colors inline-flex items-center gap-2"
+                  >
+                    <Icon name="Plus" size={14} />
+                    Добавить шаг
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-0.5">
@@ -707,6 +727,18 @@ export default function ExecPlannerPage() {
           onClose={() => setPlanForm({ open: false })}
           onSaved={() => {
             setPlanForm({ open: false });
+            loadPlan(planId);
+          }}
+        />
+      )}
+
+      {aiOpen && (
+        <AiPlanDialog
+          plan={plan}
+          persons={refs.persons}
+          onClose={() => setAiOpen(false)}
+          onApplied={() => {
+            setAiOpen(false);
             loadPlan(planId);
           }}
         />
