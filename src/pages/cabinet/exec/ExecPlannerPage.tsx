@@ -6,6 +6,7 @@ import { Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/ex
 import PlanForm from "@/components/exec/PlanForm";
 import PlanStepForm from "@/components/exec/PlanStepForm";
 import PlanTimeline from "@/components/exec/PlanTimeline";
+import PlanTreeMap from "@/components/exec/PlanTreeMap";
 import AiPlanDialog from "@/components/exec/AiPlanDialog";
 import {
   PLAN_STATUS,
@@ -202,9 +203,9 @@ export default function ExecPlannerPage() {
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const viewParam = params.get("view");
-  const view: "tree" | "timeline" | "resources" =
-    viewParam === "timeline" || viewParam === "resources" ? viewParam : "tree";
-  const setView = (v: "tree" | "timeline" | "resources") =>
+  const view: "tree" | "map" | "timeline" | "resources" =
+    viewParam === "timeline" || viewParam === "resources" || viewParam === "map" ? viewParam : "tree";
+  const setView = (v: "tree" | "map" | "timeline" | "resources") =>
     setParams(v === "tree" ? { plan: String(planId) } : { plan: String(planId), view: v });
 
   const [planForm, setPlanForm] = useState<{ open: boolean; edit?: Plan | null }>({ open: false });
@@ -558,6 +559,7 @@ export default function ExecPlannerPage() {
         <div className="flex items-center gap-1 border-b border-slate-200">
           {[
             { id: "tree", label: "План по шагам", icon: "ListTree" },
+            { id: "map", label: "Дерево плана", icon: "Network" },
             { id: "timeline", label: "Шкала времени", icon: "GanttChartSquare" },
             { id: "resources", label: "Ресурсы", icon: "Users" },
           ].map((t) => (
@@ -640,6 +642,13 @@ export default function ExecPlannerPage() {
               </div>
             )}
           </Card>
+        )}
+
+        {view === "map" && (
+          <PlanTreeMap
+            plan={plan}
+            onStepClick={(s) => setStepForm({ open: true, step: s })}
+          />
         )}
 
         {view === "timeline" && (
