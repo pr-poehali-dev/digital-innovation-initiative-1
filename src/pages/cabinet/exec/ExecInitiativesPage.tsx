@@ -6,6 +6,7 @@ import { Dictionaries, execApi, Initiative, PersonRef } from "@/lib/execCabinetA
 import { Badge, Card, Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
 import InitiativeForm from "@/components/exec/InitiativeForm";
 import QuickStartForm from "@/components/exec/QuickStartForm";
+import InitiativeTreeMap from "@/components/exec/InitiativeTreeMap";
 
 export default function ExecInitiativesPage() {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export default function ExecInitiativesPage() {
   const [priority, setPriority] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Initiative | null>(null);
+  const [view, setView] = useState<"cards" | "map">("cards");
 
   const load = () => {
     setLoading(true);
@@ -133,6 +135,26 @@ export default function ExecInitiativesPage() {
               </option>
             ))}
           </select>
+
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-white border border-slate-200">
+            {[
+              { id: "cards", label: "Карточки", icon: "LayoutGrid" },
+              { id: "map", label: "Дерево", icon: "Network" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setView(t.id as typeof view)}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm transition-colors ${
+                  view === t.id
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <Icon name={t.icon} size={14} />
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading ? (
@@ -143,6 +165,12 @@ export default function ExecInitiativesPage() {
           <Card title="Инициативы" icon="Rocket">
             <Empty text={items.length ? "Ничего не найдено по фильтрам" : "Инициатив пока нет"} />
           </Card>
+        ) : view === "map" ? (
+          <InitiativeTreeMap
+            items={filtered}
+            dicts={dicts}
+            onItemClick={(i) => navigate(`/cabinet/exec/initiatives/${i.id}`)}
+          />
         ) : (
           <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
             {filtered.map((i) => (
