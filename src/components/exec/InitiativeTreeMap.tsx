@@ -70,6 +70,8 @@ export default function InitiativeTreeMap({
   onItemClick?: (i: Initiative) => void;
 }) {
   const [hover, setHover] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [byDate, setByDate] = useState(false);
 
   const stageTitle = (code: string) => {
     if (code === "__none") return "Этап не указан";
@@ -77,7 +79,19 @@ export default function InitiativeTreeMap({
     return found?.title || STAGES.find((s) => s.code === code)?.title || code;
   };
 
-  const { placed, width, height, trunkX, trunkTop, trunkBottom } = useMemo(() => {
+  const toggleStage = (code: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+
+  const TIME_W = 1120;
+
+  const {
+    placed, width, height, trunkX, trunkTop, trunkBottom, ticks, todayX,
+  } = useMemo(() => {
     const ROW = 40;
     const STAGE_GAP = 16;
     const LEFT = 96;
@@ -89,30 +103,50 @@ export default function InitiativeTreeMap({
       list: items.filter((i) => (i.stage || "__none") === s.code),
     })).filter((g) => g.list.length > 0);
 
+    // ── шкала времени ─────────────────────────────────────────────
+    const times: number[] = [];
+    items.forEach((i) => {
+      const a = i.plan_start ? new Date(i.plan_start.slice(0, 10)).getTime() : NaN;
+      const b = i.plan_end ? new Date(i.plan_end.slice(0, 10)).getTime() : NaN;
+      if (!Number.isNaN(a)) times.push(a);
+      if (!Number.isNaN(b)) times.push(b);
+    });
+    times.push(Date.now());
+    const minT = Math.min(...times);
+    const maxT = Math.max(...times);
+    const spanT = Math.max(maxT - minT, 30 * 86400000);
+    const xOfDate = (t: number) => LEFT + ((t - minT) / spanT) * TIME_W;
+
     const out: Placed[] = [];
     let cursor = TOP;
 
     groups.forEach((g) => {
       const startY = cursor;
       const kids: Placed[] = [];
+      const hidden = collapsed.has(g.code);
 
-      g.list.forEach((it) => {
-        const y = cursor + ROW / 2;
+      if (!hidden) {
+        g.list.forEach((it) => {
+          const y = cursor + ROW / 2;
+          cursor += ROW;
+          const end = it.plan_end ? new Date(it.plan_end.slice(0, 10)).getTime() : null;
+          const node: Placed = {
+            kind: "item",
+            key: `i-${it.id}`,
+            title: it.title,
+            x: byDate && end !== null ? xOfDate(end) : LEFT + COL,
+            y,
+            parentX: LEFT,
+            parentY: y,
+            state: stateOf(it),
+            item: it,
+          };
+          kids.push(node);
+          out.push(node);
+        });
+      } else {
         cursor += ROW;
-        const node: Placed = {
-          kind: "item",
-          key: `i-${it.id}`,
-          title: it.title,
-          x: LEFT + COL,
-          y,
-          parentX: LEFT,
-          parentY: y,
-          state: stateOf(it),
-          item: it,
-        };
-        kids.push(node);
-        out.push(node);
-      });
+      }
 
       const stageY = kids.length
         ? (Math.min(...kids.map((k) => k.y)) + Math.max(...kids.map((k) => k.y))) / 2
@@ -145,15 +179,35 @@ export default function InitiativeTreeMap({
     });
 
     const h = Math.max(cursor + TOP, 240);
+
+    // деления шкалы — по месяцам
+    const tk: { x: number; label: string }[] = [];
+    if (byDate) {
+      const d = new Date(minT);
+      d.setDate(1);
+      while (d.getTime() <= maxT) {
+        const t = d.getTime();
+        if (t >= minT) {
+          tk.push({
+            x: xOfDate(t),
+            label: d.toLocaleDateString("ru-RU", { month: "short", year: "2-digit" }),
+          });
+        }
+        d.setMonth(d.getMonth() + 1);
+      }
+    }
+
     return {
       placed: out,
-      width: Math.max(LEFT + COL + 320, 760),
+      width: byDate ? LEFT + TIME_W + 260 : Math.max(LEFT + COL + 320, 760),
       height: h,
       trunkX: LEFT - 52,
       trunkTop: TOP,
       trunkBottom: h - TOP / 2,
+      ticks: tk,
+      todayX: byDate ? xOfDate(Date.now()) : null,
     };
-  }, [items, dicts]);
+  }, [items, dicts, collapsed, byDate]);
 
   if (!items.length) {
     return (
@@ -181,7 +235,32 @@ export default function InitiativeTreeMap({
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setByDate((v) => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              byDate
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+            }`}
+            title="Расставить инициативы по плановым срокам"
+          >
+            <Icon name="CalendarRange" size={13} />
+            По датам
+          </button>
+          <button
+            onClick={() => {
+              const codes = Array.from(new Set(items.map((i) => i.stage || "__none")));
+              setCollapsed((prev) => (prev.size ? new Set() : new Set(codes)));
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border bg-white text-slate-600 border-slate-200 hover:border-slate-300 transition-colors"
+          >
+            <Icon name={collapsed.size ? "Maximize2" : "Minimize2"} size={13} />
+            {collapsed.size ? "Развернуть всё" : "Свернуть всё"}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-[11px] w-full lg:w-auto">
           {(["done", "in_progress", "risk", "paused", "idea"] as NodeState[]).map((st) => (
             <span key={st} className="flex items-center gap-1.5 text-slate-500">
               <span
@@ -205,6 +284,42 @@ export default function InitiativeTreeMap({
       {/* Схема */}
       <div className="overflow-auto max-h-[70vh]">
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block" style={{ minWidth: "100%" }}>
+          {/* Шкала времени — деления по месяцам */}
+          {ticks.map((t, i) => (
+            <g key={`t-${i}`}>
+              <line
+                x1={t.x}
+                y1={trunkTop - 4}
+                x2={t.x}
+                y2={trunkBottom}
+                stroke="#e2e8f0"
+                strokeWidth={1}
+                strokeDasharray="3 4"
+              />
+              <text x={t.x + 3} y={trunkTop - 10} fontSize={9.5} fill="#94a3b8" fontWeight={600}>
+                {t.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Сегодня */}
+          {todayX !== null && (
+            <g>
+              <line
+                x1={todayX}
+                y1={trunkTop - 4}
+                x2={todayX}
+                y2={trunkBottom}
+                stroke="#dc2626"
+                strokeWidth={1.5}
+                opacity={0.5}
+              />
+              <text x={todayX + 4} y={trunkBottom + 12} fontSize={9.5} fill="#dc2626" fontWeight={700}>
+                сегодня
+              </text>
+            </g>
+          )}
+
           {/* Ствол */}
           <line
             x1={trunkX}
@@ -292,7 +407,10 @@ export default function InitiativeTreeMap({
                   paintOrder="stroke"
                   strokeLinejoin="round"
                 >
-                  {p.title.length > 34 ? p.title.slice(0, 33) + "…" : p.title}
+                  {(() => {
+                    const lim = byDate && !isStage ? 22 : 34;
+                    return p.title.length > lim ? p.title.slice(0, lim - 1) + "…" : p.title;
+                  })()}
                 </text>
                 {isStage ? (
                   <text
@@ -334,6 +452,40 @@ export default function InitiativeTreeMap({
                     ? `${p.title}\nИнициатив: ${p.count}`
                     : `${p.title}\n${STATE_COLOR[p.state].label}${p.item?.owner_name ? `\nВладелец: ${p.item.owner_name}` : "\nВладелец не назначен"}`}
                 </title>
+              </g>
+            );
+          })}
+
+          {/* Переключатели сворачивания этапов */}
+          {placed.map((p) => {
+            if (p.kind !== "stage") return null;
+            const code = p.key.replace(/^s-/, "");
+            const isCollapsed = collapsed.has(code);
+            const bx = p.x + 10 + 9;
+            const dim = hover !== null && hover !== p.key;
+
+            return (
+              <g
+                key={`c-${p.key}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleStage(code);
+                }}
+                onMouseEnter={() => setHover(p.key)}
+                onMouseLeave={() => setHover(null)}
+                style={{ cursor: "pointer", opacity: dim ? 0.35 : 1, transition: "opacity .15s" }}
+              >
+                <circle cx={bx} cy={p.y} r={7.5} fill="#ffffff" stroke="#cbd5e1" strokeWidth={1.3} />
+                <line x1={bx - 3.5} y1={p.y} x2={bx + 3.5} y2={p.y} stroke="#475569" strokeWidth={1.6} strokeLinecap="round" />
+                {isCollapsed && (
+                  <line x1={bx} y1={p.y - 3.5} x2={bx} y2={p.y + 3.5} stroke="#475569" strokeWidth={1.6} strokeLinecap="round" />
+                )}
+                {isCollapsed && (
+                  <text x={bx + 12} y={p.y + 3.5} fontSize={9.5} fontWeight={600} fill="#94a3b8">
+                    +{p.count}
+                  </text>
+                )}
+                <title>{isCollapsed ? `Развернуть (${p.count})` : "Свернуть этап"}</title>
               </g>
             );
           })}
