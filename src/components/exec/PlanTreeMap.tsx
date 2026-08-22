@@ -69,42 +69,77 @@ export default function PlanTreeMap({
   onStepClick?: (s: PlanStep) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [byDate, setByDate] = useState(false);
 
   const steps = useMemo(
     () => (plan.steps || []).filter((s) => s.status !== "cancelled"),
     [plan.steps],
   );
 
-  const { placed, width, height, trunkX, trunkTop, trunkBottom } = useMemo(() => {
-    const roots = build(steps, null, 0);
+  const toggleNode = (id: number) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
-    const ROW = 40;           // высота строки на лист
-    const COL = 250;          // ширина уровня вложенности
-    const LEFT = 96;          // отступ под ствол
-    const TOP = 34;
+  const LEFT = 96;
+  const COL = 250;
+  const TOP = 34;
+  const ROW = 40;
+  const TIME_W = 1180;      // ширина полотна в режиме дат
+
+  const {
+    placed, width, height, trunkX, trunkTop, trunkBottom, ticks, todayX,
+  } = useMemo(() => {
+    const roots = build(steps, null, 0);
 
     const maxDepth = (function d(ns: TNode[]): number {
       return ns.length ? 1 + Math.max(...ns.map((n) => d(n.children))) : 0;
     })(roots);
 
+    // ── шкала времени ─────────────────────────────────────────────
+    const times: number[] = [];
+    steps.forEach((s) => {
+      const a = s.start_date ? new Date(s.start_date.slice(0, 10)).getTime() : NaN;
+      const b = s.due_date ? new Date(s.due_date.slice(0, 10)).getTime() : NaN;
+      if (!Number.isNaN(a)) times.push(a);
+      if (!Number.isNaN(b)) times.push(b);
+    });
+    times.push(Date.now());
+    const minT = Math.min(...times);
+    const maxT = Math.max(...times);
+    const spanT = Math.max(maxT - minT, 14 * 86400000);
+    const xOfDate = (t: number) => LEFT + ((t - minT) / spanT) * TIME_W;
+
     const out: Placed[] = [];
     let leafCursor = TOP;
 
-    // Ствол слева, ветви растут вправо: уровень вложенности → X, лист → Y
+    // Ствол слева, ветви растут вправо. Свёрнутые узлы не раскрывают детей.
     const place = (n: TNode) => {
-      const x = LEFT + n.depth * COL;
+      const hidden = collapsed.has(n.step.id);
+      const kidsList = hidden ? [] : n.children;
+
       let y: number;
-      if (!n.children.length) {
+      if (!kidsList.length) {
         y = leafCursor + ROW / 2;
         leafCursor += ROW;
       } else {
         const before = leafCursor;
-        n.children.forEach(place);
-        const kids = out.filter((p) => n.children.includes(p.node));
+        kidsList.forEach(place);
+        const kids = out.filter((p) => kidsList.includes(p.node));
         y = kids.length
           ? (Math.min(...kids.map((p) => p.y)) + Math.max(...kids.map((p) => p.y))) / 2
           : before + ROW / 2;
       }
+
+      const due = n.step.due_date ? new Date(n.step.due_date.slice(0, 10)).getTime() : null;
+      const x = byDate
+        ? due !== null ? xOfDate(due) : LEFT + n.depth * 40
+        : LEFT + n.depth * COL;
+
       out.push({ node: n, x, y, parentX: 0, parentY: 0, isRoot: n.depth === 0 });
     };
 
@@ -130,15 +165,36 @@ export default function PlanTreeMap({
       }
     });
 
+    // деления шкалы — по месяцам
+    const tk: { x: number; label: string }[] = [];
+    if (byDate) {
+      const d = new Date(minT);
+      d.setDate(1);
+      while (d.getTime() <= maxT) {
+        const t = d.getTime();
+        if (t >= minT) {
+          tk.push({
+            x: xOfDate(t),
+            label: d.toLocaleDateString("ru-RU", { month: "short", year: "2-digit" }),
+          });
+        }
+        d.setMonth(d.getMonth() + 1);
+      }
+    }
+
     return {
       placed: out,
-      width: Math.max(LEFT + maxDepth * COL + 60, 760),
+      width: byDate
+        ? LEFT + TIME_W + 260
+        : Math.max(LEFT + maxDepth * COL + 60, 760),
       height: h,
       trunkX: trunkXPos,
       trunkTop: trunkTopY,
       trunkBottom: trunkBottomY,
+      ticks: tk,
+      todayX: byDate ? xOfDate(Date.now()) : null,
     };
-  }, [steps]);
+  }, [steps, collapsed, byDate]);
 
   if (!steps.length) {
     return (
@@ -167,7 +223,36 @@ export default function PlanTreeMap({
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-[11px]">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setByDate((v) => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              byDate
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+            }`}
+            title="Расставить узлы по срокам на шкале времени"
+          >
+            <Icon name="CalendarRange" size={13} />
+            По датам
+          </button>
+          <button
+            onClick={() => {
+              const parents = steps.filter((s) =>
+                steps.some((c) => c.parent_step_id === s.id),
+              );
+              setCollapsed((prev) =>
+                prev.size ? new Set() : new Set(parents.map((s) => s.id)),
+              );
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border bg-white text-slate-600 border-slate-200 hover:border-slate-300 transition-colors"
+          >
+            <Icon name={collapsed.size ? "Maximize2" : "Minimize2"} size={13} />
+            {collapsed.size ? "Развернуть всё" : "Свернуть всё"}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-[11px] w-full lg:w-auto">
           {(["done", "in_progress", "overdue", "not_started"] as NodeState[]).map((st) => (
             <span key={st} className="flex items-center gap-1.5 text-slate-500">
               <span
@@ -200,6 +285,42 @@ export default function PlanTreeMap({
           className="block"
           style={{ minWidth: "100%" }}
         >
+          {/* Шкала времени — вертикальные деления по месяцам */}
+          {ticks.map((t, i) => (
+            <g key={`t-${i}`}>
+              <line
+                x1={t.x}
+                y1={trunkTop - 4}
+                x2={t.x}
+                y2={trunkBottom}
+                stroke="#e2e8f0"
+                strokeWidth={1}
+                strokeDasharray="3 4"
+              />
+              <text x={t.x + 3} y={trunkTop - 10} fontSize={9.5} fill="#94a3b8" fontWeight={600}>
+                {t.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Сегодня */}
+          {todayX !== null && (
+            <g>
+              <line
+                x1={todayX}
+                y1={trunkTop - 4}
+                x2={todayX}
+                y2={trunkBottom}
+                stroke="#dc2626"
+                strokeWidth={1.5}
+                opacity={0.5}
+              />
+              <text x={todayX + 4} y={trunkBottom + 12} fontSize={9.5} fill="#dc2626" fontWeight={700}>
+                сегодня
+              </text>
+            </g>
+          )}
+
           {/* Ствол */}
           <line
             x1={trunkX}
@@ -279,7 +400,7 @@ export default function PlanTreeMap({
 
                 {/* Подпись: у родителей — над узлом (справа уходят ветви), у листьев — справа */}
                 <text
-                  x={kids ? p.x - r - 2 : p.x + r + 8}
+                  x={kids ? p.x - r - 3 : p.x + r + 8}
                   y={kids ? p.y - r - 7 : p.y - 1}
                   textAnchor={kids ? "end" : "start"}
                   fontSize={isMs ? 11.5 : 10.5}
@@ -290,11 +411,14 @@ export default function PlanTreeMap({
                   paintOrder="stroke"
                   strokeLinejoin="round"
                 >
-                  {s.title.length > 30 ? s.title.slice(0, 29) + "…" : s.title}
+                  {(() => {
+                    const lim = byDate ? 20 : 30;
+                    return s.title.length > lim ? s.title.slice(0, lim - 1) + "…" : s.title;
+                  })()}
                 </text>
-                {s.due_date && (
+                {s.due_date && !byDate && (
                   <text
-                    x={kids ? p.x - r - 2 : p.x + r + 8}
+                    x={kids ? p.x - r - 3 : p.x + r + 8}
                     y={kids ? p.y + r + 14 : p.y + 11}
                     textAnchor={kids ? "end" : "start"}
                     fontSize={9}
@@ -314,6 +438,42 @@ export default function PlanTreeMap({
                 <title>
                   {`${s.title}\n${STATE_COLOR[st].label}${s.due_date ? ` · до ${new Date(s.due_date.slice(0, 10)).toLocaleDateString("ru-RU")}` : ""}${kids ? `\nПодшагов: ${kids}` : ""}`}
                 </title>
+              </g>
+            );
+          })}
+
+          {/* Переключатели сворачивания ветвей */}
+          {placed.map((p) => {
+            const s = p.node.step;
+            const kids = p.node.children.length;
+            if (!kids) return null;
+            const isCollapsed = collapsed.has(s.id);
+            const r = s.is_milestone ? 13 : 9;
+            const bx = p.x + r + 9;
+            const dim = hover !== null && hover !== s.id;
+
+            return (
+              <g
+                key={`c-${s.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleNode(s.id);
+                }}
+                onMouseEnter={() => setHover(s.id)}
+                onMouseLeave={() => setHover(null)}
+                style={{ cursor: "pointer", opacity: dim ? 0.35 : 1, transition: "opacity .15s" }}
+              >
+                <circle cx={bx} cy={p.y} r={7.5} fill="#ffffff" stroke="#cbd5e1" strokeWidth={1.3} />
+                <line x1={bx - 3.5} y1={p.y} x2={bx + 3.5} y2={p.y} stroke="#475569" strokeWidth={1.6} strokeLinecap="round" />
+                {isCollapsed && (
+                  <line x1={bx} y1={p.y - 3.5} x2={bx} y2={p.y + 3.5} stroke="#475569" strokeWidth={1.6} strokeLinecap="round" />
+                )}
+                {isCollapsed && (
+                  <text x={bx + 12} y={p.y + 3.5} fontSize={9.5} fontWeight={600} fill="#94a3b8">
+                    +{kids}
+                  </text>
+                )}
+                <title>{isCollapsed ? `Развернуть (${kids})` : "Свернуть ветвь"}</title>
               </g>
             );
           })}
