@@ -7,6 +7,113 @@ import {
   plannerApi,
 } from "@/lib/execPlannerApi";
 import { DateField, Modal, Section, SelectField, TextArea, TextField } from "./ExecForm";
+import PersonPicker from "./PersonPicker";
+import { execApi } from "@/lib/execCabinetApi";
+
+/** Добавление исполнителя по ФИО прямо в форме шага */
+function AddAssigneeInline({
+  persons,
+  onCreated,
+}: {
+  persons: PersonRef[];
+  onCreated: (p: PersonRef) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [pos, setPos] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const exists = persons.some(
+    (p) => p.display_name.trim().toLowerCase() === name.trim().toLowerCase(),
+  );
+  const ok = name.trim().length >= 3 && !exists;
+
+  const create = async () => {
+    if (!ok || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await execApi.createPerson({
+        display_name: name.trim(),
+        position_title: pos.trim() || undefined,
+      });
+      onCreated({
+        id: res.id,
+        display_name: name.trim(),
+        position_title: pos.trim() || null,
+        org_name: null,
+      });
+      setName("");
+      setPos("");
+      setOpen(false);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2 flex items-center gap-1.5 text-xs font-medium text-violet-600 hover:text-violet-700 transition-colors"
+      >
+        <Icon name="UserPlus" size={13} />
+        Добавить исполнителя по ФИО
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 p-2.5 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2">
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => {
+          setName(e.target.value);
+          setErr("");
+        }}
+        placeholder="Фамилия Имя Отчество"
+        className="w-full px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-300"
+      />
+      <input
+        value={pos}
+        onChange={(e) => setPos(e.target.value)}
+        placeholder="Должность (необязательно)"
+        className="w-full px-2.5 py-1.5 rounded-md bg-white border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-300"
+      />
+      {exists && name.trim() && (
+        <p className="text-[11px] text-amber-600">Такой участник уже есть в списке</p>
+      )}
+      {err && <p className="text-[11px] text-red-600">{err}</p>}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={create}
+          disabled={!ok || busy}
+          className="px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-sm font-medium transition-colors"
+        >
+          {busy ? "Добавляю…" : "Добавить"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setName("");
+            setPos("");
+            setErr("");
+          }}
+          className="px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 text-sm transition-colors"
+        >
+          Отмена
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function PlanStepForm({
   step,
@@ -14,7 +121,7 @@ export default function PlanStepForm({
   parentStepId,
   parentTitle,
   siblings,
-  persons,
+  persons: personsProp,
   onClose,
   onSaved,
 }: {
@@ -28,6 +135,13 @@ export default function PlanStepForm({
   onSaved: () => void;
 }) {
   const s = step;
+  const [persons, setPersons] = useState<PersonRef[]>(personsProp);
+  const addPerson = (p: PersonRef) =>
+    setPersons((prev) =>
+      prev.some((x) => x.id === p.id)
+        ? prev
+        : [...prev, p].sort((a, b) => a.display_name.localeCompare(b.display_name, "ru")),
+    );
   const [f, setF] = useState({
     title: s?.title || "",
     description: s?.description || "",
@@ -84,11 +198,6 @@ export default function PlanStepForm({
       setSaving(false);
     }
   };
-
-  const personOptions = persons.map((p) => ({
-    value: String(p.id),
-    label: p.position_title ? `${p.display_name} — ${p.position_title}` : p.display_name,
-  }));
 
   const depOptions = siblings
     .filter((x) => x.id !== s?.id)
@@ -168,12 +277,13 @@ export default function PlanStepForm({
       </Section>
 
       <Section title="Ресурсы">
-        <SelectField
+        <PersonPicker
           label="Ответственный"
           value={f.responsible_person_id}
+          persons={persons}
           onChange={set("responsible_person_id")}
-          options={personOptions}
-          hint="Отвечает за результат шага"
+          onPersonCreated={addPerson}
+          hint="Отвечает за результат шага. Можно выбрать из списка или ввести ФИО"
         />
         <div>
           <span className="text-xs text-slate-500 mb-1.5 block">
@@ -216,6 +326,13 @@ export default function PlanStepForm({
               })}
             </div>
           )}
+          <AddAssigneeInline
+            persons={persons}
+            onCreated={(p) => {
+              addPerson(p);
+              setAssignees((prev) => [...prev, p.id]);
+            }}
+          />
         </div>
       </Section>
 
