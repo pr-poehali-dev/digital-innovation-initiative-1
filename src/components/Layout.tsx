@@ -85,7 +85,7 @@ function Badge({ tone, text }: { tone: "neutral" | "success" | "info"; text: str
 
 // ── Sub-item ──────────────────────────────────────────────────────────────
 
-function SubItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
+function SubItem({ item, collapsed, onNavigate }: { item: NavItem; collapsed: boolean; onNavigate?: () => void }) {
   const location = useLocation();
   const active = isItemActive(location.pathname, item);
 
@@ -131,7 +131,7 @@ function SubItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   }
 
   return (
-    <Link to={item.href} className={cls} title={collapsed ? item.label : undefined}>
+    <Link to={item.href} className={cls} title={collapsed ? item.label : undefined} onClick={onNavigate}>
       {inner}
     </Link>
   );
@@ -144,11 +144,13 @@ function SectionGroup({
   collapsed,
   isOpen,
   onToggle,
+  onNavigate,
 }: {
   section: NavSection;
   collapsed: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  onNavigate?: () => void;
 }) {
   const location = useLocation();
   const active = isSectionActive(location.pathname, section);
@@ -158,7 +160,7 @@ function SectionGroup({
 
   // Single-item sections (Обзор, Практика) — render as flat item
   if (section.singleItem || section.items.length === 1) {
-    return <SubItem item={section.items[0]} collapsed={collapsed} />;
+    return <SubItem item={section.items[0]} collapsed={collapsed} onNavigate={onNavigate} />;
   }
 
   const sectionItemsId = `sidebar-section-${section.key}`;
@@ -207,7 +209,7 @@ function SectionGroup({
         ].join(" ")}
       >
         {section.items.map(item => (
-          <SubItem key={item.id} item={item} collapsed={collapsed} />
+          <SubItem key={item.id} item={item} collapsed={collapsed} onNavigate={onNavigate} />
         ))}
       </div>
     </div>
@@ -234,6 +236,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
 
@@ -276,10 +279,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         e.preventDefault();
         setSearchOpen(v => !v);
       }
+      if (e.key === "Escape") setMobileNavOpen(false);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Закрываем мобильное меню при смене страницы
+  useEffect(() => { setMobileNavOpen(false); }, [location.pathname]);
+
+  // Блокируем прокрутку страницы, пока открыто мобильное меню
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileNavOpen]);
 
   const canGoBack = location.pathname !== "/cabinet" && location.pathname !== "/";
 
@@ -372,6 +387,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10 h-14">
           <div className="px-4 lg:px-6 h-full flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMobileNavOpen(true)}
+                className="lg:hidden w-9 h-9 flex items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 transition-colors flex-shrink-0"
+                aria-label="Открыть меню"
+              >
+                <Icon name="Menu" size={20} />
+              </button>
               <Link to="/cabinet" className="flex items-center gap-2 lg:hidden">
                 <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center">
                   <span className="text-white font-bold text-xs">Т</span>
@@ -421,6 +443,88 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <main className="flex-1 pb-20 lg:pb-6 min-w-0 overflow-x-hidden">
           <PullToRefresh>{children}</PullToRefresh>
         </main>
+      </div>
+
+      {/* ── Mobile drawer nav ── */}
+      <div
+        className={`lg:hidden fixed inset-0 z-[60] transition-opacity duration-200 ${
+          mobileNavOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      >
+        <div
+          className="absolute inset-0 bg-slate-900/40"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+        <aside
+          className={`absolute top-0 left-0 h-full w-[280px] max-w-[85vw] bg-white shadow-xl flex flex-col transition-transform duration-200 ${
+            mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Меню кабинета"
+        >
+          {/* Logo */}
+          <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-100">
+            <Link to="/cabinet" className="flex items-center gap-2.5 min-w-0" onClick={() => setMobileNavOpen(false)}>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-sm">Т</span>
+              </div>
+              <div className="min-w-0">
+                <div className="font-bold text-sm text-slate-900 leading-tight">Траектория</div>
+                <div className="text-[10px] text-slate-400 leading-tight">Кабинет развития</div>
+              </div>
+            </Link>
+            <button
+              onClick={() => setMobileNavOpen(false)}
+              className="ml-auto text-slate-400 hover:text-slate-600 transition-colors p-1 rounded"
+              aria-label="Закрыть меню"
+            >
+              <Icon name="X" size={18} />
+            </button>
+          </div>
+
+          {/* Primary nav */}
+          <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto overscroll-contain">
+            {NAV_SECTIONS.map(section => (
+              <SectionGroup
+                key={section.key}
+                section={
+                  hasExecAccess
+                    ? section
+                    : { ...section, items: section.items.filter((i) => !EXEC_ONLY_ITEMS.has(i.id)) }
+                }
+                collapsed={false}
+                isOpen={openSections[section.key] ?? true}
+                onToggle={() => toggleSection(section.key)}
+                onNavigate={() => setMobileNavOpen(false)}
+              />
+            ))}
+          </nav>
+
+          {/* Secondary + user */}
+          <div className="px-2 py-3 border-t border-slate-100 space-y-0.5">
+            {NAV_SECONDARY.map(item => (
+              <SubItem key={item.id} item={item} collapsed={false} onNavigate={() => setMobileNavOpen(false)} />
+            ))}
+
+            <div className="my-2 border-t border-slate-100" />
+
+            <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center flex-shrink-0">
+                <span className="text-white text-xs font-semibold">{user?.name?.charAt(0)?.toUpperCase() ?? "U"}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-slate-800 truncate">{user?.name}</div>
+                <div className="text-[10px] text-slate-400 truncate">{user?.email}</div>
+              </div>
+              <button onClick={logout} className="text-slate-400 hover:text-slate-600 transition-colors p-1 rounded" title="Выйти">
+                <Icon name="LogOut" size={14} />
+              </button>
+            </div>
+            <div className="px-3 pt-1 text-[9px] text-slate-300 select-none">build {BUILD_HASH}</div>
+          </div>
+        </aside>
       </div>
 
       {/* ── Mobile bottom nav ── */}
