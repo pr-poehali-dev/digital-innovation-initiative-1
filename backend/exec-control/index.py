@@ -15,7 +15,7 @@ def cors(body: dict, code: int = 200) -> dict:
         "headers": {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
+            "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token, X-Session-Id",
             "Content-Type": "application/json",
         },
         "body": json.dumps(body, ensure_ascii=False, default=str),
