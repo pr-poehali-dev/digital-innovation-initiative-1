@@ -556,7 +556,7 @@ export default function ExecPlannerPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-1 border-b border-slate-200">
+        <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto no-scrollbar">
           {[
             { id: "tree", label: "План по шагам", icon: "ListTree" },
             { id: "map", label: "Дерево плана", icon: "Network" },
@@ -566,7 +566,7 @@ export default function ExecPlannerPage() {
             <button
               key={t.id}
               onClick={() => setView(t.id as typeof view)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors ${
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 view === t.id
                   ? "border-violet-600 text-slate-900 font-medium"
                   : "border-transparent text-slate-500 hover:text-slate-700"

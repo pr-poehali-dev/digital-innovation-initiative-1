@@ -71,6 +71,9 @@ export default function PlanTreeMap({
   const [hover, setHover] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [byDate, setByDate] = useState(false);
+  const [zoom, setZoom] = useState(() =>
+    typeof window !== "undefined" && window.innerWidth < 640 ? 0.65 : 1,
+  );
 
   const steps = useMemo(
     () => (plan.steps || []).filter((s) => s.status !== "cancelled"),
@@ -218,7 +221,7 @@ export default function PlanTreeMap({
           <Icon name="Network" size={16} className="text-slate-400" />
           <div>
             <div className="font-semibold text-slate-900 text-sm">Дерево плана</div>
-            <div className="text-xs text-slate-400">
+            <div className="text-xs text-slate-400 hidden sm:block">
               Ствол — план, ветви — разделы, узлы — шаги. Крупные с ободком — вехи
             </div>
           </div>
@@ -250,6 +253,33 @@ export default function PlanTreeMap({
             <Icon name={collapsed.size ? "Maximize2" : "Minimize2"} size={13} />
             {collapsed.size ? "Развернуть всё" : "Свернуть всё"}
           </button>
+
+          {/* Масштаб */}
+          <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
+            <button
+              onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.15).toFixed(2)))}
+              disabled={zoom <= 0.5}
+              className="px-2 py-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+              title="Уменьшить"
+            >
+              <Icon name="Minus" size={13} />
+            </button>
+            <button
+              onClick={() => setZoom(1)}
+              className="px-1.5 py-1.5 text-[11px] font-medium text-slate-500 hover:bg-slate-50 border-x border-slate-200 min-w-[42px] transition-colors"
+              title="Сбросить масштаб"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              onClick={() => setZoom((z) => Math.min(1.6, +(z + 0.15).toFixed(2)))}
+              disabled={zoom >= 1.6}
+              className="px-2 py-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-colors"
+              title="Увеличить"
+            >
+              <Icon name="Plus" size={13} />
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-[11px] w-full lg:w-auto">
@@ -277,13 +307,16 @@ export default function PlanTreeMap({
       </div>
 
       {/* Схема */}
-      <div className="overflow-auto max-h-[70vh]">
+      <div
+        className="overflow-auto max-h-[70vh] overscroll-x-contain"
+        style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
+      >
         <svg
-          width={width}
-          height={height}
+          width={width * zoom}
+          height={height * zoom}
           viewBox={`0 0 ${width} ${height}`}
           className="block"
-          style={{ minWidth: "100%" }}
+          style={{ minWidth: zoom >= 1 ? "100%" : undefined }}
         >
           {/* Шкала времени — вертикальные деления по месяцам */}
           {ticks.map((t, i) => (
@@ -516,7 +549,8 @@ export default function PlanTreeMap({
       </div>
 
       <div className="px-5 py-2.5 border-t border-slate-100 text-[11px] text-slate-400">
-        Нажмите на узел, чтобы открыть шаг. Схему можно прокручивать вбок
+        Нажмите на узел, чтобы открыть шаг. Схему можно прокручивать в обе стороны, «−» и «+»
+        меняют масштаб, кружок с минусом у шага сворачивает ветвь
       </div>
     </div>
   );

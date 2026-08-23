@@ -262,6 +262,18 @@ def save_step(cur, d: dict):
             return None, "Шаг не может зависеть сам от себя"
         if vals.get("parent_step_id") == sid:
             return None, "Шаг не может быть вложен сам в себя"
+        new_parent = vals.get("parent_step_id")
+        if new_parent:
+            cur.execute(
+                f"WITH RECURSIVE sub AS ("
+                f"  SELECT id FROM {SCHEMA}.exec_plan_step WHERE parent_step_id = %s"
+                f"  UNION ALL"
+                f"  SELECT s.id FROM {SCHEMA}.exec_plan_step s JOIN sub ON s.parent_step_id = sub.id"
+                f") SELECT 1 FROM sub WHERE id = %s LIMIT 1",
+                (sid, new_parent),
+            )
+            if cur.fetchone():
+                return None, "Нельзя вложить шаг в его собственный подшаг"
         sets = ", ".join(f"{k} = %s" for k in vals)
         cur.execute(
             f"UPDATE {SCHEMA}.exec_plan_step SET {sets}, updated_at = now() WHERE id = %s RETURNING id",

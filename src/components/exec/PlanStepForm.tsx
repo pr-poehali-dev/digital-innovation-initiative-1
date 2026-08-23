@@ -151,6 +151,13 @@ export default function PlanStepForm({
     fact_date: s?.fact_date || "",
     responsible_person_id: s?.responsible_person_id ? String(s.responsible_person_id) : "",
     depends_on_step_id: s?.depends_on_step_id ? String(s.depends_on_step_id) : "",
+    parent_step_id: s
+      ? s.parent_step_id
+        ? String(s.parent_step_id)
+        : ""
+      : parentStepId
+        ? String(parentStepId)
+        : "",
     progress_pct: String(s?.progress_pct ?? 0),
     result_criteria: s?.result_criteria || "",
     result_evidence: s?.result_evidence || "",
@@ -184,8 +191,8 @@ export default function PlanStepForm({
       await plannerApi.saveStep({
         ...(s ? { id: s.id } : {}),
         plan_id: planId,
-        parent_step_id: s ? s.parent_step_id : (parentStepId ?? null),
         ...f,
+        parent_step_id: f.parent_step_id ? Number(f.parent_step_id) : null,
         responsible_person_id: f.responsible_person_id || null,
         depends_on_step_id: f.depends_on_step_id || null,
         progress_pct: Number(f.progress_pct) || 0,
@@ -198,6 +205,39 @@ export default function PlanStepForm({
       setSaving(false);
     }
   };
+
+  // Возможные родители: всё дерево плана минус сам шаг и его потомки
+  const parentOptions = (() => {
+    const banned = new Set<number>();
+    if (s) {
+      banned.add(s.id);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        siblings.forEach((x) => {
+          if (x.parent_step_id && banned.has(x.parent_step_id) && !banned.has(x.id)) {
+            banned.add(x.id);
+            grew = true;
+          }
+        });
+      }
+    }
+    const out: { value: string; label: string }[] = [];
+    const walk = (parent: number | null, depth: number) => {
+      siblings
+        .filter((x) => (x.parent_step_id ?? null) === parent && !banned.has(x.id))
+        .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+        .forEach((x) => {
+          out.push({
+            value: String(x.id),
+            label: `${"— ".repeat(depth)}${x.title}`,
+          });
+          walk(x.id, depth + 1);
+        });
+    };
+    walk(null, 0);
+    return out;
+  })();
 
   const depOptions = siblings
     .filter((x) => x.id !== s?.id)
@@ -247,6 +287,21 @@ export default function PlanStepForm({
         </label>
       </Section>
 
+      <Section title="Место в плане">
+        <SelectField
+          label="Вложен в шаг"
+          value={f.parent_step_id}
+          onChange={set("parent_step_id")}
+          options={parentOptions}
+          hint="Куда относится этот шаг. «Верхний уровень» — самостоятельный раздел плана"
+          placeholder="Верхний уровень"
+        />
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          Меняя это поле, вы переносите шаг вместе со всеми его подшагами в другую ветвь.
+          Чтобы создать вложенный подшаг, нажмите «+» на нужном шаге в списке плана.
+        </p>
+      </Section>
+
       <Section title="Сроки и статус">
         <div className="grid sm:grid-cols-2 gap-4">
           <SelectField
@@ -271,7 +326,7 @@ export default function PlanStepForm({
             value={f.depends_on_step_id}
             onChange={set("depends_on_step_id")}
             options={depOptions}
-            hint="Не может начаться раньше указанного"
+            hint="Очерёдность, а не вложенность: этот шаг не начнётся раньше указанного"
           />
         </div>
       </Section>
