@@ -88,7 +88,9 @@ STEP_FIELDS = [
     "fact_date", "responsible_person_id", "depends_on_step_id", "is_milestone",
     "progress_pct", "workload_pct", "sort_order", "result_criteria",
     "result_evidence", "note", "parent_step_id",
+    "estimate_hours", "fact_hours",
 ]
+NUM_FIELDS = {"estimate_hours", "fact_hours"}
 INT_FIELDS = {
     "responsible_person_id", "depends_on_step_id", "progress_pct",
     "workload_pct", "sort_order", "parent_step_id",
@@ -161,27 +163,90 @@ def plan_detail(cur, plan_id: int):
 
 
 def resource_load(cur, plan_id=None):
-    """Загрузка людей: сколько активных шагов и суммарный процент участия."""
-    where = "WHERE s.status NOT IN ('done','cancelled')"
+    """Загрузка людей: шаги, проценты участия и трудозатраты в часах."""
+    scope = "WHERE s.status <> 'cancelled'"
     params = []
     if plan_id:
-        where += " AND s.plan_id = %s"
+        scope += " AND s.plan_id = %s"
         params.append(plan_id)
+
+    # Часы шага делятся между всеми исполнителями пропорционально их участию
     cur.execute(f"""
+        WITH people AS (
+            -- Явно назначенные участники шага
+            SELECT a.step_id, a.person_id, COALESCE(a.workload_pct, 100) AS pct
+            FROM {SCHEMA}.exec_plan_assignee a
+            UNION
+            -- Ответственный за шаг тоже считается занятым
+            SELECT s2.id, s2.responsible_person_id, COALESCE(s2.workload_pct, 100)
+            FROM {SCHEMA}.exec_plan_step s2
+            WHERE s2.responsible_person_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM {SCHEMA}.exec_plan_assignee a2
+                  WHERE a2.step_id = s2.id AND a2.person_id = s2.responsible_person_id
+              )
+        ), linked AS (
+            SELECT s.id AS step_id, s.status, s.due_date, s.fact_date,
+                   s.start_date, s.progress_pct, s.title,
+                   s.estimate_hours, s.fact_hours,
+                   a.person_id, a.pct,
+                   SUM(a.pct) OVER (PARTITION BY s.id) AS step_pct_total
+            FROM people a
+            JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
+            {scope}
+        ), shared AS (
+            SELECT l.*,
+                   l.pct::numeric / NULLIF(l.step_pct_total, 0) AS share
+            FROM linked l
+        )
         SELECT pe.id AS person_id, pe.display_name, pe.position_title,
-               COUNT(DISTINCT s.id) AS active_steps,
-               COALESCE(SUM(COALESCE(a.workload_pct, 100)), 0) AS total_workload,
-               COUNT(DISTINCT s.id) FILTER (
-                   WHERE s.due_date < CURRENT_DATE
-               ) AS overdue_steps
-        FROM {SCHEMA}.exec_plan_assignee a
-        JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
-        JOIN {SCHEMA}.exec_person pe ON pe.id = a.person_id
-        {where}
+               COUNT(*) FILTER (WHERE sh.status NOT IN ('done')) AS active_steps,
+               COUNT(*) AS total_steps,
+               COUNT(*) FILTER (WHERE sh.status = 'done') AS done_steps,
+               COUNT(*) FILTER (WHERE sh.status = 'in_progress') AS in_progress_steps,
+               COUNT(*) FILTER (WHERE sh.status = 'blocked') AS blocked_steps,
+               COUNT(*) FILTER (
+                   WHERE sh.status NOT IN ('done') AND sh.due_date < CURRENT_DATE
+               ) AS overdue_steps,
+               COALESCE(SUM(sh.pct) FILTER (WHERE sh.status NOT IN ('done')), 0) AS total_workload,
+               ROUND(COALESCE(SUM(sh.estimate_hours * sh.share), 0), 1) AS plan_hours,
+               ROUND(COALESCE(SUM(sh.fact_hours * sh.share), 0), 1) AS fact_hours,
+               ROUND(COALESCE(SUM(sh.estimate_hours * sh.share)
+                     FILTER (WHERE sh.status NOT IN ('done')), 0), 1) AS open_hours,
+               COUNT(*) FILTER (
+                   WHERE sh.status NOT IN ('done') AND sh.estimate_hours IS NULL
+               ) AS unestimated_steps
+        FROM shared sh
+        JOIN {SCHEMA}.exec_person pe ON pe.id = sh.person_id
         GROUP BY pe.id, pe.display_name, pe.position_title
         ORDER BY total_workload DESC, active_steps DESC
     """, params)
     return rows(cur)
+
+
+def labor_summary(cur, plan_id):
+    """Сводка трудозатрат по плану: часы план/факт и разрез по разделам."""
+    cur.execute(f"""
+        SELECT
+            COUNT(*) AS steps,
+            COUNT(*) FILTER (WHERE estimate_hours IS NOT NULL) AS estimated_steps,
+            ROUND(COALESCE(SUM(estimate_hours), 0), 1) AS plan_hours,
+            ROUND(COALESCE(SUM(fact_hours), 0), 1) AS fact_hours,
+            ROUND(COALESCE(SUM(estimate_hours) FILTER (WHERE status = 'done'), 0), 1) AS done_plan_hours,
+            ROUND(COALESCE(SUM(fact_hours) FILTER (WHERE status = 'done'), 0), 1) AS done_fact_hours,
+            ROUND(COALESCE(SUM(estimate_hours) FILTER (WHERE status <> 'done'), 0), 1) AS left_hours,
+            COUNT(*) FILTER (
+                WHERE status <> 'done' AND responsible_person_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM {SCHEMA}.exec_plan_assignee a
+                      WHERE a.step_id = {SCHEMA}.exec_plan_step.id
+                  )
+            ) AS unassigned_steps
+        FROM {SCHEMA}.exec_plan_step
+        WHERE plan_id = %s AND status <> 'cancelled'
+    """, (plan_id,))
+    totals = rows(cur)
+    return totals[0] if totals else {}
 
 
 def refs(cur):
@@ -247,6 +312,13 @@ def save_step(cur, d: dict):
         v = d.get(f)
         if f in INT_FIELDS:
             v = as_int(v)
+        elif f in NUM_FIELDS:
+            try:
+                v = round(float(str(v).replace(",", ".")), 1) if nz(v) is not None else None
+            except (TypeError, ValueError):
+                v = None
+            if v is not None and (v < 0 or v > 99999):
+                v = None
         elif f == "is_milestone":
             v = bool(v)
         else:
@@ -395,6 +467,7 @@ def handler(event: dict, context) -> dict:
                 "plan": data,
                 "refs": refs(cur),
                 "load": resource_load(cur, pid),
+                "labor": labor_summary(cur, pid),
             }})
 
         if action == "resource_load":

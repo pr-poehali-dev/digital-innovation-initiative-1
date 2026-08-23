@@ -151,6 +151,8 @@ export default function PlanStepForm({
     fact_date: s?.fact_date || "",
     responsible_person_id: s?.responsible_person_id ? String(s.responsible_person_id) : "",
     depends_on_step_id: s?.depends_on_step_id ? String(s.depends_on_step_id) : "",
+    estimate_hours: s?.estimate_hours != null ? String(s.estimate_hours) : "",
+    fact_hours: s?.fact_hours != null ? String(s.fact_hours) : "",
     parent_step_id: s
       ? s.parent_step_id
         ? String(s.parent_step_id)
@@ -317,6 +319,18 @@ export default function PlanStepForm({
             value={f.progress_pct}
             onChange={(v) => set("progress_pct")(v.replace(/\D/g, "").slice(0, 3))}
             hint="0–100"
+          />
+          <TextField
+            label="Трудоёмкость, ч"
+            value={f.estimate_hours}
+            onChange={(v) => set("estimate_hours")(v.replace(/[^\d.,]/g, "").slice(0, 7))}
+            hint="Сколько часов работы планируется"
+          />
+          <TextField
+            label="Факт, ч"
+            value={f.fact_hours}
+            onChange={(v) => set("fact_hours")(v.replace(/[^\d.,]/g, "").slice(0, 7))}
+            hint="Сколько ушло на самом деле"
           />
           <DateField label="Начало" value={f.start_date} onChange={set("start_date")} />
           <DateField label="Срок" value={f.due_date} onChange={set("due_date")} />

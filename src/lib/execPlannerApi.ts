@@ -33,6 +33,8 @@ export interface PlanStep {
   is_milestone: boolean;
   progress_pct: number;
   workload_pct: number | null;
+  estimate_hours: number | null;
+  fact_hours: number | null;
   sort_order: number;
   result_criteria: string | null;
   result_evidence: string | null;
@@ -85,8 +87,27 @@ export interface ResourceLoad {
   display_name: string;
   position_title: string | null;
   active_steps: number;
+  total_steps: number;
+  done_steps: number;
+  in_progress_steps: number;
+  blocked_steps: number;
   total_workload: number;
   overdue_steps: number;
+  plan_hours: number;
+  fact_hours: number;
+  open_hours: number;
+  unestimated_steps: number;
+}
+
+export interface LaborSummary {
+  steps: number;
+  estimated_steps: number;
+  plan_hours: number;
+  fact_hours: number;
+  done_plan_hours: number;
+  done_fact_hours: number;
+  left_hours: number;
+  unassigned_steps: number;
 }
 
 export const PLAN_STATUS: Record<string, { title: string; cls: string }> = {
@@ -158,7 +179,7 @@ export interface AiSuggestion {
 export const plannerApi = {
   list: (): Promise<{ plans: Plan[]; refs: PlannerRefs }> => req("/?action=list"),
 
-  plan: (planId: number): Promise<{ plan: Plan; refs: PlannerRefs; load: ResourceLoad[] }> =>
+  plan: (planId: number): Promise<{ plan: Plan; refs: PlannerRefs; load: ResourceLoad[]; labor: LaborSummary }> =>
     req(`/?action=plan&plan_id=${planId}`),
 
   resourceLoad: (planId?: number): Promise<ResourceLoad[]> =>

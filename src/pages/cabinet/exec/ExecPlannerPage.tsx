@@ -7,6 +7,7 @@ import PlanForm from "@/components/exec/PlanForm";
 import PlanStepForm from "@/components/exec/PlanStepForm";
 import PlanTimeline from "@/components/exec/PlanTimeline";
 import PlanTreeMap from "@/components/exec/PlanTreeMap";
+import PlanWorkloadStats from "@/components/exec/PlanWorkloadStats";
 import AiPlanDialog from "@/components/exec/AiPlanDialog";
 import {
   PLAN_STATUS,
@@ -14,6 +15,7 @@ import {
   Plan,
   PlanStep,
   PlannerRefs,
+  LaborSummary,
   ResourceLoad,
   STEP_STATUS,
   branchProgress,
@@ -199,6 +201,7 @@ export default function ExecPlannerPage() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [refs, setRefs] = useState<PlannerRefs>({ persons: [], initiatives: [] });
   const [load, setLoad] = useState<ResourceLoad[]>([]);
+  const [labor, setLabor] = useState<LaborSummary | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -239,6 +242,7 @@ export default function ExecPlannerPage() {
         setPlan(d.plan);
         setRefs(d.refs);
         setLoad(d.load);
+        setLabor(d.labor);
         setExpanded(new Set((d.plan.steps || []).map((s) => s.id)));
       })
       .catch((e) => setError(e.message))
@@ -564,7 +568,7 @@ export default function ExecPlannerPage() {
             { id: "tree", label: "План по шагам", icon: "ListTree" },
             { id: "map", label: "Дерево плана", icon: "Network" },
             { id: "timeline", label: "Шкала времени", icon: "GanttChartSquare" },
-            { id: "resources", label: "Ресурсы", icon: "Users" },
+            { id: "resources", label: "Трудозатраты", icon: "Users" },
           ].map((t) => (
             <button
               key={t.id}
@@ -669,63 +673,22 @@ export default function ExecPlannerPage() {
 
         {view === "resources" && (
           <Card
-            title="Загрузка ресурсов"
-            subtitle="Кто на чём занят в этом плане"
+            title="Трудозатраты и загрузка"
+            subtitle="Часы по плану и кто чем занят"
             icon="Users"
           >
-            {load.length === 0 ? (
+            {load.length === 0 && !labor ? (
               <Empty text="Исполнители пока не назначены" icon="Users" />
             ) : (
-              <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-sm min-w-[600px]">
-                  <thead>
-                    <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                      <th className="pb-2 font-medium">Участник</th>
-                      <th className="pb-2 font-medium">Должность</th>
-                      <th className="pb-2 font-medium text-center">Активных шагов</th>
-                      <th className="pb-2 font-medium text-center">Просрочено</th>
-                      <th className="pb-2 font-medium">Загрузка</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {load.map((r) => {
-                      const over = r.total_workload > 100;
-                      return (
-                        <tr key={r.person_id} className="hover:bg-slate-50 transition-colors">
-                          <td className="py-3 text-slate-900">{r.display_name}</td>
-                          <td className="py-3 text-slate-500 text-xs">
-                            {r.position_title || "—"}
-                          </td>
-                          <td className="py-3 text-center text-slate-700">{r.active_steps}</td>
-                          <td className="py-3 text-center">
-                            <span className={r.overdue_steps ? "text-red-600 font-medium" : "text-slate-400"}>
-                              {r.overdue_steps || "—"}
-                            </span>
-                          </td>
-                          <td className="py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="h-1.5 w-28 rounded-full bg-slate-200 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    over ? "bg-red-500" : "bg-violet-500"
-                                  }`}
-                                  style={{ width: `${Math.min(r.total_workload, 100)}%` }}
-                                />
-                              </div>
-                              <span className={`text-xs ${over ? "text-red-600" : "text-slate-500"}`}>
-                                {r.total_workload}%
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <p className="text-[11px] text-slate-400 mt-3">
-                  Загрузка выше 100% означает, что человек назначен на несколько параллельных шагов.
-                </p>
-              </div>
+              <PlanWorkloadStats
+                load={load}
+                labor={labor}
+                steps={plan.steps || []}
+                onPersonClick={(stepId) => {
+                  const st = (plan.steps || []).find((x) => x.id === stepId);
+                  if (st) setStepForm({ open: true, step: st });
+                }}
+              />
             )}
           </Card>
         )}
