@@ -8,6 +8,10 @@ _s = os.environ.get("MAIN_DB_SCHEMA", "").strip()
 SCHEMA = _s if _s else "t_p61016064_digital_innovation_i"
 
 # Поля, запрещённые к записи: источник истины перенесён в другие таблицы
+# Последний год с официально утверждёнными переносами выходных.
+# Дни после него считаются предварительными.
+CONFIRMED_CALENDAR_YEAR = 2026
+
 DEPRECATED_WRITE = {
     "responsible_person_id",  # -> exec_plan_assignee (raci_role = 'A')
     "owner_person_id",        # -> exec_function_raci (A)
@@ -159,7 +163,29 @@ def person_list(cur, q=None):
                (SELECT COUNT(DISTINCT a.step_id) FROM {SCHEMA}.exec_plan_assignee a
                  JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
                 WHERE a.person_id = p.id AND s.status NOT IN ('done', 'cancelled')
-                  AND s.due_date < CURRENT_DATE) AS overdue_steps
+                  AND s.due_date < CURRENT_DATE) AS overdue_steps,
+               (SELECT COUNT(DISTINCT a.step_id) FROM {SCHEMA}.exec_plan_assignee a
+                 JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
+                WHERE a.person_id = p.id AND s.status = 'done') AS done_steps,
+               COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                          WHERE t.person_id = p.id), 0) AS fact_hours_total,
+               COALESCE((SELECT json_agg(DISTINCT r.function_id)
+                          FROM {SCHEMA}.exec_function_raci r
+                         WHERE r.person_id = p.id AND r.valid_to IS NULL),
+                        '[]'::json) AS function_ids,
+               COALESCE((SELECT json_agg(DISTINCT pl.initiative_id)
+                          FROM {SCHEMA}.exec_plan_assignee a
+                          JOIN {SCHEMA}.exec_plan_step st ON st.id = a.step_id
+                          JOIN {SCHEMA}.exec_plan pl ON pl.id = st.plan_id
+                         WHERE a.person_id = p.id AND pl.initiative_id IS NOT NULL),
+                        '[]'::json) AS initiative_ids,
+               COALESCE((SELECT json_agg(pc.competency_id)
+                          FROM {SCHEMA}.exec_person_competency pc
+                         WHERE pc.person_id = p.id), '[]'::json) AS competency_ids,
+               COALESCE((SELECT string_agg(c.name, ' ')
+                          FROM {SCHEMA}.exec_person_competency pc
+                          JOIN {SCHEMA}.professional_competencies c ON c.id = pc.competency_id
+                         WHERE pc.person_id = p.id), '') AS competency_names
         FROM {SCHEMA}.exec_person p
         LEFT JOIN {SCHEMA}.exec_person_capacity c
                ON c.person_id = p.id AND c.valid_to IS NULL
@@ -211,13 +237,52 @@ def person_detail(cur, pid):
     person["profile_records"] = rows(cur)
 
     cur.execute(f"""
-        SELECT r.*, f.title AS function_title, f.code AS function_code
+        SELECT r.*, f.title AS function_title, f.code AS function_code,
+               f.criticality, f.center_id
         FROM {SCHEMA}.exec_function_raci r
         JOIN {SCHEMA}.exec_center_function f ON f.id = r.function_id
         WHERE r.person_id = %s AND r.valid_to IS NULL
         ORDER BY r.raci_role, f.sort_order
     """, (pid,))
     person["functions"] = rows(cur)
+
+    # Задачи с плановыми и фактическими часами
+    cur.execute(f"""
+        SELECT s.id, s.title, s.status, s.step_type, s.is_control_point,
+               s.start_date, s.due_date, s.estimate_hours, s.progress_pct,
+               a.id AS assignee_id, a.raci_role, a.plan_hours, a.workload_pct,
+               p.title AS plan_title, p.id AS plan_id,
+               i.id AS initiative_id, i.title AS initiative_title,
+               COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                          WHERE t.step_id = s.id AND t.person_id = %s), 0) AS fact_hours,
+               (s.due_date < CURRENT_DATE AND s.status NOT IN ('done','cancelled')) AS is_overdue
+        FROM {SCHEMA}.exec_plan_assignee a
+        JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
+        LEFT JOIN {SCHEMA}.exec_plan p ON p.id = s.plan_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = p.initiative_id
+        WHERE a.person_id = %s AND s.status <> 'cancelled'
+        ORDER BY s.status, s.due_date NULLS LAST
+    """, (pid, pid))
+    person["steps"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT t.*, s.title AS step_title
+        FROM {SCHEMA}.exec_time_entry t
+        JOIN {SCHEMA}.exec_plan_step s ON s.id = t.step_id
+        WHERE t.person_id = %s
+        ORDER BY t.work_date DESC LIMIT 100
+    """, (pid,))
+    person["time_entries"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.*, cr.title AS role_title, c.title AS center_title
+        FROM {SCHEMA}.exec_role_assignment r
+        LEFT JOIN {SCHEMA}.exec_center_role cr ON cr.id = r.center_role_id
+        LEFT JOIN {SCHEMA}.exec_center c ON c.id = cr.center_id
+        WHERE r.person_id = %s
+        ORDER BY r.id DESC
+    """, (pid,))
+    person["role_assignments"] = rows(cur)
 
     return person
 
@@ -342,8 +407,13 @@ def planned_by_week(cur, person_ids, date_from, date_to):
     return rows(cur)
 
 
-def workload(cur, date_from, date_to, person_ids=None):
+def workload(cur, date_from, date_to, person_ids=None, weeks_ahead=None):
     """Загрузка по неделям с порогами Центра."""
+    if weeks_ahead:
+        cur.execute("SELECT CURRENT_DATE AS a, "
+                    "(CURRENT_DATE + (%s || ' weeks')::interval)::date AS b", (weeks_ahead,))
+        per = rows(cur)[0]
+        date_from, date_to = per["a"], per["b"]
     if not person_ids:
         cur.execute(f"""
             SELECT id FROM {SCHEMA}.exec_person
@@ -398,6 +468,24 @@ def workload(cur, date_from, date_to, person_ids=None):
             "state": state,
         })
 
+    # Отсутствия по неделям: показываем отдельно от загрузки
+    cur.execute(f"""
+        SELECT a.person_id, date_trunc('week', w.calendar_date)::date AS week_start,
+               MIN(a.absence_type) AS absence_type,
+               COUNT(*) AS days
+        FROM {SCHEMA}.exec_person_absence a
+        JOIN {SCHEMA}.exec_work_calendar w
+          ON w.calendar_date BETWEEN a.date_from AND a.date_to AND w.work_hours > 0
+        WHERE a.person_id = ANY(%s) AND w.calendar_date BETWEEN %s AND %s
+        GROUP BY 1, 2
+    """, (person_ids, date_from, date_to))
+    abs_map = {(r["person_id"], str(r["week_start"])): r for r in rows(cur)}
+    for row in out:
+        a = abs_map.get((row["person_id"], str(row["week_start"])))
+        if a:
+            row["absence_type"] = a["absence_type"]
+            row["absence_days"] = a["days"]
+
     # Предупреждение о неполном календаре
     cur.execute(f"""
         SELECT COUNT(*) AS missing FROM generate_series(%s::date, %s::date, '1 day') d
@@ -405,10 +493,20 @@ def workload(cur, date_from, date_to, person_ids=None):
                            WHERE w.calendar_date = d::date)
     """, (date_from, date_to))
     miss = rows(cur)
+    cur.execute(f"""
+        SELECT MAX(EXTRACT(YEAR FROM calendar_date))::int AS last_year
+        FROM {SCHEMA}.exec_work_calendar
+    """)
+    cal = rows(cur)
+    provisional = bool(cal and (cal[0]["last_year"] or 0) > CONFIRMED_CALENDAR_YEAR)
     return {
         "rows": out,
         "thresholds": {"low": low, "high": high},
         "calendar_missing_days": miss[0]["missing"] if miss else 0,
+        "calendar_confirmed_year": CONFIRMED_CALENDAR_YEAR,
+        "calendar_provisional": provisional,
+        "date_from": str(date_from),
+        "date_to": str(date_to),
     }
 
 
@@ -471,14 +569,24 @@ def diagnostics(cur, center_id=None):
 
     cur.execute(f"""
         SELECT s.id, s.title FROM {SCHEMA}.exec_plan_step s
-        WHERE s.status NOT IN ('done', 'cancelled')
-          AND (s.due_date IS NULL OR s.estimate_hours IS NULL)
+        WHERE s.status NOT IN ('done', 'cancelled') AND s.due_date IS NULL
         LIMIT 200
     """)
     for r in rows(cur):
         out.append({"code": "S02", "level": "warning", "entity": "step",
                     "entity_id": r["id"], "title": r["title"],
-                    "message": "Не задан срок или трудоёмкость"})
+                    "message": "Не задан срок"})
+
+    cur.execute(f"""
+        SELECT s.id, s.title FROM {SCHEMA}.exec_plan_step s
+        WHERE s.status NOT IN ('done', 'cancelled')
+          AND s.step_type = 'task' AND s.estimate_hours IS NULL
+        LIMIT 200
+    """)
+    for r in rows(cur):
+        out.append({"code": "S03", "level": "warning", "entity": "step",
+                    "entity_id": r["id"], "title": r["title"],
+                    "message": "Не задана трудоёмкость"})
 
     cur.execute(f"""
         SELECT p.id, p.display_name FROM {SCHEMA}.exec_person p
@@ -490,6 +598,65 @@ def diagnostics(cur, center_id=None):
         out.append({"code": "P01", "level": "warning", "entity": "person",
                     "entity_id": r["id"], "title": r["display_name"],
                     "message": "Не задана рабочая ёмкость"})
+
+    cur.execute(f"""
+        SELECT p.id, p.display_name, c.name AS competency_name, pc.valid_until
+        FROM {SCHEMA}.exec_person_competency pc
+        JOIN {SCHEMA}.exec_person p ON p.id = pc.person_id
+        JOIN {SCHEMA}.professional_competencies c ON c.id = pc.competency_id
+        WHERE pc.valid_until IS NOT NULL AND pc.valid_until < CURRENT_DATE
+          AND COALESCE(p.record_state, 'active') = 'active'
+    """)
+    for r in rows(cur):
+        out.append({"code": "P02", "level": "warning", "entity": "person",
+                    "entity_id": r["id"], "title": r["display_name"],
+                    "message": f"Истёк срок подтверждения: {r['competency_name']}"})
+
+    cur.execute(f"""
+        SELECT p.id, p.display_name FROM {SCHEMA}.exec_person p
+        WHERE COALESCE(p.record_state, 'active') = 'active'
+          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_person_competency pc
+              WHERE pc.person_id = p.id)
+    """)
+    for r in rows(cur):
+        out.append({"code": "P03", "level": "warning", "entity": "person",
+                    "entity_id": r["id"], "title": r["display_name"],
+                    "message": "Не указаны компетенции"})
+
+    # Перегрузка на ближайшие 8 недель
+    cur.execute(f"""
+        SELECT id FROM {SCHEMA}.exec_person
+        WHERE COALESCE(record_state, 'active') = 'active'
+    """)
+    active_ids = [r["id"] for r in rows(cur)]
+    if active_ids:
+        wl = workload(cur, "CURRENT_DATE", None, active_ids, weeks_ahead=8)
+        seen = set()
+        for row in wl["rows"]:
+            if row["state"] == "overload" and row["person_id"] not in seen:
+                seen.add(row["person_id"])
+                out.append({"code": "P04", "level": "error", "entity": "person",
+                            "entity_id": row["person_id"], "title": row["display_name"],
+                            "message": f"Перегрузка на неделе {row['week_start']}: "
+                                       f"{row['load_pct']}%"})
+
+    # Календарь: подтверждённый горизонт
+    cur.execute(f"""
+        SELECT MAX(EXTRACT(YEAR FROM calendar_date))::int AS last_year,
+               COUNT(*) FILTER (WHERE calendar_date >= CURRENT_DATE) AS future_days
+        FROM {SCHEMA}.exec_work_calendar
+    """)
+    cal = rows(cur)
+    if cal:
+        if (cal[0]["future_days"] or 0) < 90:
+            out.append({"code": "C01", "level": "error", "entity": "calendar",
+                        "entity_id": None, "title": "Производственный календарь",
+                        "message": "Календарь заполнен меньше чем на квартал вперёд"})
+        elif (cal[0]["last_year"] or 0) > CONFIRMED_CALENDAR_YEAR:
+            out.append({"code": "C02", "level": "warning", "entity": "calendar",
+                        "entity_id": None, "title": "Производственный календарь",
+                        "message": f"Дни после {CONFIRMED_CALENDAR_YEAR} года предварительные: "
+                                   f"переносы выходных ещё не утверждены"})
 
     # Осиротевшие связи: страховка поверх внешних ключей
     cur.execute(f"""
@@ -652,19 +819,35 @@ def handler(event: dict, context) -> dict:
             if hpw is None:
                 return cors({"ok": False, "error": {"message": "Не указаны часы в неделю"}}, 400)
             vfrom = nz(body.get("valid_from"))
-            # Закрываем предыдущий открытый период, историю не перезаписываем
-            cur.execute(
-                f"UPDATE {SCHEMA}.exec_person_capacity SET valid_to = COALESCE(%s::date, CURRENT_DATE) - 1 "
-                f"WHERE person_id = %s AND valid_to IS NULL",
-                (vfrom, pid),
-            )
+            fte = as_num(body.get("fte")) or 1
+            sched = nz(body.get("work_schedule")) or "5/2"
+            note = nz(body.get("note"))
+
+            # Период, начатый той же датой, заменяем: закрыть его задним числом нельзя
             cur.execute(f"""
-                INSERT INTO {SCHEMA}.exec_person_capacity
-                    (person_id, valid_from, hours_per_week, fte, work_schedule, note)
-                VALUES (%s, COALESCE(%s::date, CURRENT_DATE), %s, %s, %s, %s) RETURNING id
-            """, (pid, vfrom, hpw, as_num(body.get("fte")) or 1,
-                  nz(body.get("work_schedule")) or "5/2", nz(body.get("note"))))
-            rid = cur.fetchone()[0]
+                UPDATE {SCHEMA}.exec_person_capacity
+                SET hours_per_week = %s, fte = %s, work_schedule = %s, note = %s
+                WHERE person_id = %s AND valid_to IS NULL
+                  AND valid_from >= COALESCE(%s::date, CURRENT_DATE)
+                RETURNING id
+            """, (hpw, fte, sched, note, pid, vfrom))
+            got = cur.fetchone()
+            if got:
+                rid = got[0]
+            else:
+                # Иначе закрываем прежний период и открываем новый, история сохраняется
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_person_capacity "
+                    f"SET valid_to = COALESCE(%s::date, CURRENT_DATE) - 1 "
+                    f"WHERE person_id = %s AND valid_to IS NULL",
+                    (vfrom, pid),
+                )
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_person_capacity
+                        (person_id, valid_from, hours_per_week, fte, work_schedule, note)
+                    VALUES (%s, COALESCE(%s::date, CURRENT_DATE), %s, %s, %s, %s) RETURNING id
+                """, (pid, vfrom, hpw, fte, sched, note))
+                rid = cur.fetchone()[0]
             audit(cur, actor, "person_capacity", rid, "create", None, body)
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
@@ -783,8 +966,282 @@ def handler(event: dict, context) -> dict:
             ids = [as_int(x) for x in ids if as_int(x)]
             return cors({"ok": True, "data": workload(cur, d1, d2, ids or None)})
 
+        if action == "week_detail":
+            pid = as_int(qs.get("person_id")) or as_int(body.get("person_id"))
+            wk = nz(qs.get("week_start")) or nz(body.get("week_start"))
+            if not pid or not wk:
+                return cors({"ok": False, "error": {"message": "Укажите сотрудника и неделю"}}, 400)
+            cur.execute(f"""
+                SELECT s.id AS step_id, s.title, s.status, s.due_date, s.start_date,
+                       a.id AS assignee_id, a.raci_role, a.plan_hours,
+                       p.title AS plan_title,
+                       i.title AS initiative_title,
+                       f.title AS function_title,
+                       COALESCE(aw.hours, 0) AS week_hours,
+                       (aw.id IS NOT NULL) AS is_manual,
+                       COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                                  WHERE t.step_id = s.id AND t.person_id = a.person_id
+                                    AND t.work_date BETWEEN %s::date AND %s::date + 6), 0) AS fact_hours
+                FROM {SCHEMA}.exec_plan_assignee a
+                JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
+                LEFT JOIN {SCHEMA}.exec_plan p ON p.id = s.plan_id
+                LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = p.initiative_id
+                LEFT JOIN {SCHEMA}.exec_plan_step_function sf
+                       ON sf.step_id = s.id AND sf.is_primary
+                LEFT JOIN {SCHEMA}.exec_center_function f ON f.id = sf.function_id
+                LEFT JOIN {SCHEMA}.exec_assignee_week aw
+                       ON aw.assignee_id = a.id AND aw.week_start = %s::date
+                WHERE a.person_id = %s
+                  AND s.status NOT IN ('cancelled')
+                  AND (aw.id IS NOT NULL
+                       OR (COALESCE(a.valid_from, s.start_date) <= %s::date + 6
+                           AND COALESCE(a.valid_to, s.due_date) >= %s::date))
+                ORDER BY s.due_date NULLS LAST
+            """, (wk, wk, wk, pid, wk, wk))
+            return cors({"ok": True, "data": rows(cur)})
+
+        if action == "step_assignees":
+            sid = as_int(qs.get("step_id")) or as_int(body.get("step_id"))
+            if not sid:
+                return cors({"ok": False, "error": {"message": "Не указана задача"}}, 400)
+            cur.execute(f"""
+                SELECT a.*, p.display_name, p.position_title,
+                       COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                                  WHERE t.step_id = a.step_id AND t.person_id = a.person_id), 0)
+                           AS fact_hours
+                FROM {SCHEMA}.exec_plan_assignee a
+                JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+                WHERE a.step_id = %s
+                ORDER BY CASE a.raci_role WHEN 'A' THEN 1 WHEN 'R' THEN 2
+                                          WHEN 'C' THEN 3 ELSE 4 END, p.display_name
+            """, (sid,))
+            assignees = rows(cur)
+            cur.execute(f"""
+                SELECT aw.*, a.person_id FROM {SCHEMA}.exec_assignee_week aw
+                JOIN {SCHEMA}.exec_plan_assignee a ON a.id = aw.assignee_id
+                WHERE a.step_id = %s ORDER BY aw.week_start
+            """, (sid,))
+            weeks = rows(cur)
+            cur.execute(f"""
+                SELECT t.*, p.display_name FROM {SCHEMA}.exec_time_entry t
+                JOIN {SCHEMA}.exec_person p ON p.id = t.person_id
+                WHERE t.step_id = %s ORDER BY t.work_date DESC
+            """, (sid,))
+            return cors({"ok": True, "data": {
+                "assignees": assignees, "weeks": weeks, "time_entries": rows(cur),
+            }})
+
+        if action == "save_assignee":
+            sid = as_int(body.get("step_id"))
+            pid = as_int(body.get("person_id"))
+            role = (nz(body.get("raci_role")) or "R").upper()[:1]
+            if not sid or not pid or role not in ("R", "A", "C", "I"):
+                return cors({"ok": False, "error": {"message": "Укажите задачу, человека и роль"}}, 400)
+            # Ответственный единственный: прежнего переводим в исполнители
+            if role == "A":
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_plan_assignee SET raci_role = 'R' "
+                    f"WHERE step_id = %s AND raci_role = 'A' AND person_id <> %s "
+                    f"AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_assignee x "
+                    f"WHERE x.step_id = %s AND x.person_id = {SCHEMA}.exec_plan_assignee.person_id "
+                    f"AND x.raci_role = 'R')",
+                    (sid, pid, sid),
+                )
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.exec_plan_assignee "
+                    f"WHERE step_id = %s AND raci_role = 'A' AND person_id <> %s",
+                    (sid, pid),
+                )
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_plan_assignee
+                    (step_id, person_id, raci_role, role_in_step, plan_hours,
+                     workload_pct, valid_from, valid_to)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (step_id, person_id, raci_role) DO UPDATE
+                SET plan_hours = EXCLUDED.plan_hours,
+                    role_in_step = EXCLUDED.role_in_step,
+                    workload_pct = EXCLUDED.workload_pct,
+                    valid_from = EXCLUDED.valid_from,
+                    valid_to = EXCLUDED.valid_to
+                RETURNING id
+            """, (sid, pid, role, nz(body.get("role_in_step")),
+                  as_num(body.get("plan_hours")), as_int(body.get("workload_pct")),
+                  nz(body.get("valid_from")), nz(body.get("valid_to"))))
+            rid = cur.fetchone()[0]
+            audit(cur, actor, "plan_assignee", rid, "upsert", None, body)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "remove_assignee":
+            rid = as_int(body.get("id"))
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не указано назначение"}}, 400)
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_assignee_week WHERE assignee_id = %s", (rid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_plan_assignee WHERE id = %s", (rid,))
+            audit(cur, actor, "plan_assignee", rid, "delete")
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "save_assignee_weeks":
+            aid = as_int(body.get("assignee_id"))
+            weeks = body.get("weeks") or []
+            if not aid:
+                return cors({"ok": False, "error": {"message": "Не указано назначение"}}, 400)
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_assignee_week WHERE assignee_id = %s", (aid,))
+            for w in weeks:
+                h = as_num(w.get("hours"))
+                if h and h > 0:
+                    cur.execute(
+                        f"INSERT INTO {SCHEMA}.exec_assignee_week "
+                        f"(assignee_id, week_start, hours, is_manual) VALUES (%s, %s, %s, true)",
+                        (aid, w.get("week_start"), h),
+                    )
+            conn.commit()
+            return cors({"ok": True, "data": {"assignee_id": aid, "weeks": len(weeks)}})
+
+        if action == "save_time_entry":
+            pid = as_int(body.get("person_id"))
+            sid = as_int(body.get("step_id"))
+            h = as_num(body.get("hours"))
+            wd = nz(body.get("work_date"))
+            if not pid or not sid or not h or not wd:
+                return cors({"ok": False, "error": {"message": "Укажите задачу, дату и часы"}}, 400)
+            rid = as_int(body.get("id"))
+            if rid:
+                cur.execute(f"""
+                    UPDATE {SCHEMA}.exec_time_entry
+                    SET work_date = %s, hours = %s, comment = %s, status = %s
+                    WHERE id = %s RETURNING id
+                """, (wd, h, nz(body.get("comment")),
+                      nz(body.get("status")) or "submitted", rid))
+            else:
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_time_entry
+                        (person_id, step_id, work_date, hours, comment, source, status, created_by)
+                    VALUES (%s, %s, %s, %s, %s, 'manual', %s, %s) RETURNING id
+                """, (pid, sid, wd, h, nz(body.get("comment")),
+                      nz(body.get("status")) or "submitted", actor))
+                rid = cur.fetchone()[0]
+            audit(cur, actor, "time_entry", rid, "upsert", None, body)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "delete_time_entry":
+            rid = as_int(body.get("id"))
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не указана запись"}}, 400)
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_time_entry WHERE id = %s", (rid,))
+            audit(cur, actor, "time_entry", rid, "delete")
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "bulk_assign":
+            step_ids = [as_int(x) for x in (body.get("step_ids") or []) if as_int(x)]
+            if not step_ids:
+                return cors({"ok": False, "error": {"message": "Не выбраны задачи"}}, 400)
+            resp = as_int(body.get("responsible_id"))
+            execs = [as_int(x) for x in (body.get("executor_ids") or []) if as_int(x)]
+            hours_each = as_num(body.get("hours_each"))
+            due = nz(body.get("due_date"))
+            prio = nz(body.get("priority"))
+            done = 0
+            for sid in step_ids:
+                if resp:
+                    cur.execute(
+                        f"DELETE FROM {SCHEMA}.exec_plan_assignee "
+                        f"WHERE step_id = %s AND raci_role = 'A' AND person_id <> %s",
+                        (sid, resp))
+                    cur.execute(f"""
+                        INSERT INTO {SCHEMA}.exec_plan_assignee
+                            (step_id, person_id, raci_role, role_in_step, plan_hours)
+                        VALUES (%s, %s, 'A', 'responsible', %s)
+                        ON CONFLICT (step_id, person_id, raci_role) DO UPDATE
+                        SET plan_hours = COALESCE(EXCLUDED.plan_hours,
+                                                  {SCHEMA}.exec_plan_assignee.plan_hours)
+                    """, (sid, resp, hours_each))
+                for ex in execs:
+                    cur.execute(f"""
+                        INSERT INTO {SCHEMA}.exec_plan_assignee
+                            (step_id, person_id, raci_role, role_in_step, plan_hours)
+                        VALUES (%s, %s, 'R', 'executor', %s)
+                        ON CONFLICT (step_id, person_id, raci_role) DO UPDATE
+                        SET plan_hours = COALESCE(EXCLUDED.plan_hours,
+                                                  {SCHEMA}.exec_plan_assignee.plan_hours)
+                    """, (sid, ex, hours_each))
+                sets, params = [], []
+                if due:
+                    sets.append("due_date = %s")
+                    params.append(due)
+                if prio:
+                    sets.append("priority = %s")
+                    params.append(prio)
+                if sets:
+                    params.append(sid)
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.exec_plan_step SET {', '.join(sets)}, updated_at = now() "
+                        f"WHERE id = %s", params)
+                done += 1
+            audit(cur, actor, "plan_step", None, "bulk_assign", None,
+                  {"step_ids": step_ids, "responsible_id": resp, "executor_ids": execs})
+            conn.commit()
+            return cors({"ok": True, "data": {"updated": done}})
+
+        if action == "unassigned_steps":
+            cur.execute(f"""
+                SELECT s.id, s.title, s.status, s.step_type, s.due_date, s.estimate_hours,
+                       s.is_control_point, p.title AS plan_title,
+                       i.title AS initiative_title
+                FROM {SCHEMA}.exec_plan_step s
+                LEFT JOIN {SCHEMA}.exec_plan p ON p.id = s.plan_id
+                LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = p.initiative_id
+                WHERE s.status NOT IN ('done', 'cancelled')
+                  AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_assignee a
+                      WHERE a.step_id = s.id AND a.raci_role = 'A')
+                ORDER BY s.due_date NULLS LAST, s.id
+            """)
+            return cors({"ok": True, "data": rows(cur)})
+
         if action == "diagnostics":
             return cors({"ok": True, "data": diagnostics(cur, as_int(qs.get("center_id")))})
+
+        if action == "refs":
+            cur.execute(f"""
+                SELECT c.id, c.code, c.name, d.name AS domain_name
+                FROM {SCHEMA}.professional_competencies c
+                LEFT JOIN {SCHEMA}.professional_competency_domains d ON d.id = c.domain_id
+                WHERE COALESCE(c.status, 'active') = 'active'
+                ORDER BY d.name, c.name
+            """)
+            comps = rows(cur)
+            cur.execute(f"""
+                SELECT f.id, f.title, f.code, f.center_id, c.title AS center_title
+                FROM {SCHEMA}.exec_center_function f
+                LEFT JOIN {SCHEMA}.exec_center c ON c.id = f.center_id
+                ORDER BY f.sort_order, f.id
+            """)
+            funcs = rows(cur)
+            cur.execute(f"""
+                SELECT id, title FROM {SCHEMA}.exec_initiative
+                WHERE COALESCE(status, '') <> 'archived' ORDER BY title
+            """)
+            inits = rows(cur)
+            cur.execute(f"""
+                SELECT s.id, s.title, s.status, s.due_date, s.step_type,
+                       p.title AS plan_title
+                FROM {SCHEMA}.exec_plan_step s
+                LEFT JOIN {SCHEMA}.exec_plan p ON p.id = s.plan_id
+                WHERE s.status NOT IN ('done', 'cancelled')
+                ORDER BY s.due_date NULLS LAST LIMIT 500
+            """)
+            steps = rows(cur)
+            cur.execute(f"""
+                SELECT id, display_name, position_title FROM {SCHEMA}.exec_person
+                WHERE COALESCE(record_state, 'active') = 'active' ORDER BY display_name
+            """)
+            return cors({"ok": True, "data": {
+                "competencies": comps, "functions": funcs,
+                "initiatives": inits, "steps": steps, "persons": rows(cur),
+            }})
 
         if action == "competency_catalog":
             cur.execute(f"""

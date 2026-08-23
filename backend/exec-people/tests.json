@@ -1,13 +1,160 @@
 {
   "tests": [
-    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 },
-    { "name": "Unauthorized people", "method": "GET", "path": "/?action=people", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized person", "method": "GET", "path": "/?action=person&id=1", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized workload", "method": "GET", "path": "/?action=workload&date_from=2026-08-01&date_to=2026-08-31", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized diagnostics", "method": "GET", "path": "/?action=diagnostics", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_person blocked", "method": "POST", "path": "/?action=save_person", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_competency blocked", "method": "POST", "path": "/?action=save_competency", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_capacity blocked", "method": "POST", "path": "/?action=save_capacity", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized merge_person blocked", "method": "POST", "path": "/?action=merge_person", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" }
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized people",
+      "method": "GET",
+      "path": "/?action=people",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized person",
+      "method": "GET",
+      "path": "/?action=person&id=1",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized workload",
+      "method": "GET",
+      "path": "/?action=workload&date_from=2026-08-01&date_to=2026-08-31",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized diagnostics",
+      "method": "GET",
+      "path": "/?action=diagnostics",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_person blocked",
+      "method": "POST",
+      "path": "/?action=save_person",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_competency blocked",
+      "method": "POST",
+      "path": "/?action=save_competency",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_capacity blocked",
+      "method": "POST",
+      "path": "/?action=save_capacity",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized merge_person blocked",
+      "method": "POST",
+      "path": "/?action=merge_person",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized week_detail",
+      "method": "GET",
+      "path": "/?action=week_detail&person_id=1&week_start=2026-08-24",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized step_assignees",
+      "method": "GET",
+      "path": "/?action=step_assignees&step_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized refs",
+      "method": "GET",
+      "path": "/?action=refs",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized unassigned_steps",
+      "method": "GET",
+      "path": "/?action=unassigned_steps",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized bulk_assign",
+      "method": "POST",
+      "path": "/?action=bulk_assign",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_time_entry",
+      "method": "POST",
+      "path": "/?action=save_time_entry",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_assignee",
+      "method": "POST",
+      "path": "/?action=save_assignee",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    }
   ]
 }

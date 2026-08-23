@@ -12,6 +12,8 @@ export interface PlanAssignee {
   position_title: string | null;
   role_in_step: string | null;
   workload_pct: number | null;
+  raci_role?: string;
+  plan_hours?: number | null;
 }
 
 export interface PlanStep {

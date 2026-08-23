@@ -7,7 +7,6 @@ import {
   plannerApi,
 } from "@/lib/execPlannerApi";
 import { DateField, Modal, Section, SelectField, TextArea, TextField } from "./ExecForm";
-import PersonPicker from "./PersonPicker";
 import { execApi } from "@/lib/execCabinetApi";
 
 /** Добавление исполнителя по ФИО прямо в форме шага */
@@ -149,7 +148,6 @@ export default function PlanStepForm({
     start_date: s?.start_date || "",
     due_date: s?.due_date || "",
     fact_date: s?.fact_date || "",
-    responsible_person_id: s?.responsible_person_id ? String(s.responsible_person_id) : "",
     depends_on_step_id: s?.depends_on_step_id ? String(s.depends_on_step_id) : "",
     estimate_hours: s?.estimate_hours != null ? String(s.estimate_hours) : "",
     fact_hours: s?.fact_hours != null ? String(s.fact_hours) : "",
@@ -195,7 +193,6 @@ export default function PlanStepForm({
         plan_id: planId,
         ...f,
         parent_step_id: f.parent_step_id ? Number(f.parent_step_id) : null,
-        responsible_person_id: f.responsible_person_id || null,
         depends_on_step_id: f.depends_on_step_id || null,
         progress_pct: Number(f.progress_pct) || 0,
         is_milestone: isMilestone,
@@ -346,14 +343,13 @@ export default function PlanStepForm({
       </Section>
 
       <Section title="Ресурсы">
-        <PersonPicker
-          label="Ответственный"
-          value={f.responsible_person_id}
-          persons={persons}
-          onChange={set("responsible_person_id")}
-          onPersonCreated={addPerson}
-          hint="Отвечает за результат шага. Можно выбрать из списка или ввести ФИО"
-        />
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 flex items-start gap-2">
+          <Icon name="Info" size={13} className="text-slate-500 mt-0.5 flex-shrink-0" />
+          <p className="text-[11px] text-slate-600">
+            Ответственный и плановые часы задаются кнопкой «Исполнители и часы» в списке задач:
+            там же видна загрузка человека и предупреждение о перегрузке.
+          </p>
+        </div>
         <div>
           <span className="text-xs text-slate-500 mb-1.5 block">
             Исполнители {assignees.length > 0 && `(${assignees.length})`}

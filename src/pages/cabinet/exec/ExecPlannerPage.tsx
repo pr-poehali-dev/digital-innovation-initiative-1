@@ -8,6 +8,8 @@ import PlanStepForm from "@/components/exec/PlanStepForm";
 import PlanTimeline from "@/components/exec/PlanTimeline";
 import PlanTreeMap from "@/components/exec/PlanTreeMap";
 import PlanWorkloadStats from "@/components/exec/PlanWorkloadStats";
+import StepAssignPanel from "@/components/exec/team/StepAssignPanel";
+import { PeopleRefs, peopleApi } from "@/lib/execPeopleApi";
 import AiPlanDialog from "@/components/exec/AiPlanDialog";
 import {
   PLAN_STATUS,
@@ -34,6 +36,7 @@ function StepRow({
   onAddChild,
   onQuickStatus,
   onDelete,
+  onAssign,
 }: {
   node: Tree;
   depth: number;
@@ -43,6 +46,7 @@ function StepRow({
   onAddChild: (s: PlanStep) => void;
   onQuickStatus: (s: PlanStep, status: string) => void;
   onDelete: (s: PlanStep) => void;
+  onAssign: (s: PlanStep) => void;
 }) {
   const kids = (node.children as Tree[]).filter((c) => c.status !== "cancelled");
   const hasKids = kids.length > 0;
@@ -109,17 +113,23 @@ function StepRow({
                 {fmtDate(node.due_date)}
               </span>
             )}
-            {node.responsible_name && (
-              <span className="flex items-center gap-1">
-                <Icon name="User" size={10} />
-                {node.responsible_name}
-              </span>
-            )}
-            {node.assignees?.length > 0 && (
+            {node.assignees?.length > 0 ? (
               <span className="flex items-center gap-1">
                 <Icon name="Users" size={10} />
-                {node.assignees.map((a) => a.display_name).join(", ")}
+                {node.assignees
+                  .map((a) => `${a.display_name}${a.raci_role === "A" ? " (отв.)" : ""}`)
+                  .join(", ")}
               </span>
+            ) : (
+              !done && (
+                <button
+                  onClick={() => onAssign(node)}
+                  className="flex items-center gap-1 text-red-600 hover:text-red-700 transition-colors"
+                >
+                  <Icon name="UserX" size={10} />
+                  нет ответственного
+                </button>
+              )
             )}
             {node.depends_on_title && (
               <span className="flex items-center gap-1 text-amber-700">
@@ -159,6 +169,13 @@ function StepRow({
             <Icon name="Plus" size={13} />
           </button>
           <button
+            onClick={() => onAssign(node)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-violet-700 hover:bg-slate-100"
+            title="Исполнители и часы"
+          >
+            <Icon name="UserCheck" size={13} />
+          </button>
+          <button
             onClick={() => onEdit(node)}
             className="p-1.5 rounded-lg text-slate-400 hover:text-violet-700 hover:bg-slate-100"
             title="Изменить"
@@ -187,6 +204,7 @@ function StepRow({
             onAddChild={onAddChild}
             onQuickStatus={onQuickStatus}
             onDelete={onDelete}
+            onAssign={onAssign}
           />
         ))}
     </>
@@ -213,6 +231,8 @@ export default function ExecPlannerPage() {
 
   const [planForm, setPlanForm] = useState<{ open: boolean; edit?: Plan | null }>({ open: false });
   const [aiOpen, setAiOpen] = useState(false);
+  const [assignStep, setAssignStep] = useState<PlanStep | null>(null);
+  const [peopleRefs, setPeopleRefs] = useState<PeopleRefs | null>(null);
   const [stepForm, setStepForm] = useState<{
     open: boolean;
     step?: PlanStep | null;
@@ -248,6 +268,10 @@ export default function ExecPlannerPage() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
+
+  useEffect(() => {
+    peopleApi.refs().then(setPeopleRefs).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (planId) loadPlan(planId);
@@ -644,6 +668,7 @@ export default function ExecPlannerPage() {
                     }
                     onQuickStatus={quickStatus}
                     onDelete={removeStep}
+                    onAssign={(s) => setAssignStep(s)}
                   />
                 ))}
               </div>
@@ -732,6 +757,18 @@ export default function ExecPlannerPage() {
             setStepForm({ open: false });
             loadPlan(planId);
           }}
+        />
+      )}
+
+      {assignStep && (
+        <StepAssignPanel
+          stepId={assignStep.id}
+          stepTitle={assignStep.title}
+          startDate={assignStep.start_date}
+          dueDate={assignStep.due_date}
+          refs={peopleRefs}
+          onClose={() => setAssignStep(null)}
+          onChanged={() => loadPlan(planId)}
         />
       )}
     </Layout>

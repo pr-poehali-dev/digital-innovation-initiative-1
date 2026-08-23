@@ -85,14 +85,14 @@ def as_int(v):
 
 STEP_FIELDS = [
     "title", "description", "step_type", "status", "start_date", "due_date",
-    "fact_date", "responsible_person_id", "depends_on_step_id", "is_milestone",
+    "fact_date", "depends_on_step_id", "is_control_point",
     "progress_pct", "workload_pct", "sort_order", "result_criteria",
     "result_evidence", "note", "parent_step_id",
     "estimate_hours", "fact_hours",
 ]
 NUM_FIELDS = {"estimate_hours", "fact_hours"}
 INT_FIELDS = {
-    "responsible_person_id", "depends_on_step_id", "progress_pct",
+    "depends_on_step_id", "progress_pct",
     "workload_pct", "sort_order", "parent_step_id",
 }
 
@@ -131,12 +131,13 @@ def plan_detail(cur, plan_id: int):
 
     cur.execute(f"""
         SELECT s.*,
-               r.display_name AS responsible_name,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_plan_assignee a
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = a.person_id
+                 WHERE a.step_id = s.id AND a.raci_role = 'A' LIMIT 1) AS responsible_name,
                r.position_title AS responsible_position,
                d.title AS depends_on_title,
                (s.due_date < CURRENT_DATE AND s.status NOT IN ('done','cancelled')) AS is_overdue
         FROM {SCHEMA}.exec_plan_step s
-        LEFT JOIN {SCHEMA}.exec_person r ON r.id = s.responsible_person_id
         LEFT JOIN {SCHEMA}.exec_plan_step d ON d.id = s.depends_on_step_id
         WHERE s.plan_id = %s
         ORDER BY s.sort_order, s.id
@@ -149,7 +150,8 @@ def plan_detail(cur, plan_id: int):
         JOIN {SCHEMA}.exec_person pe ON pe.id = a.person_id
         JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
         WHERE s.plan_id = %s
-        ORDER BY a.id
+        ORDER BY CASE a.raci_role WHEN 'A' THEN 1 WHEN 'R' THEN 2
+                                  WHEN 'C' THEN 3 ELSE 4 END, a.id
     """, (plan_id,))
     assignees = rows(cur)
     by_step = {}
@@ -173,18 +175,9 @@ def resource_load(cur, plan_id=None):
     # Часы шага делятся между всеми исполнителями пропорционально их участию
     cur.execute(f"""
         WITH people AS (
-            -- Явно назначенные участники шага
+            -- Единственный источник: назначения на шаг, включая ответственного (A)
             SELECT a.step_id, a.person_id, COALESCE(a.workload_pct, 100) AS pct
             FROM {SCHEMA}.exec_plan_assignee a
-            UNION
-            -- Ответственный за шаг тоже считается занятым
-            SELECT s2.id, s2.responsible_person_id, COALESCE(s2.workload_pct, 100)
-            FROM {SCHEMA}.exec_plan_step s2
-            WHERE s2.responsible_person_id IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM {SCHEMA}.exec_plan_assignee a2
-                  WHERE a2.step_id = s2.id AND a2.person_id = s2.responsible_person_id
-              )
         ), linked AS (
             SELECT s.id AS step_id, s.status, s.due_date, s.fact_date,
                    s.start_date, s.progress_pct, s.title,
@@ -236,10 +229,11 @@ def labor_summary(cur, plan_id):
             ROUND(COALESCE(SUM(fact_hours) FILTER (WHERE status = 'done'), 0), 1) AS done_fact_hours,
             ROUND(COALESCE(SUM(estimate_hours) FILTER (WHERE status <> 'done'), 0), 1) AS left_hours,
             COUNT(*) FILTER (
-                WHERE status <> 'done' AND responsible_person_id IS NULL
+                WHERE status <> 'done'
                   AND NOT EXISTS (
                       SELECT 1 FROM {SCHEMA}.exec_plan_assignee a
                       WHERE a.step_id = {SCHEMA}.exec_plan_step.id
+                        AND a.raci_role = 'A'
                   )
             ) AS unassigned_steps
         FROM {SCHEMA}.exec_plan_step
@@ -371,20 +365,22 @@ def save_step(cur, d: dict):
 
 
 def set_assignees(cur, step_id: int, person_ids: list, workloads: dict):
+    """Обновляет исполнителей (роль R). Ответственный (A) и часы не затрагиваются:
+    ими управляет раздел «Команда» через exec_plan_assignee."""
+    ids = [int(p) for p in (person_ids or [])]
+
     cur.execute(
-        f"UPDATE {SCHEMA}.exec_plan_assignee SET workload_pct = 0 WHERE step_id = %s AND person_id <> ALL(%s)",
-        (step_id, person_ids or [0]),
+        f"DELETE FROM {SCHEMA}.exec_plan_assignee "
+        f"WHERE step_id = %s AND raci_role = 'R' AND person_id <> ALL(%s)",
+        (step_id, ids or [0]),
     )
-    cur.execute(
-        f"DELETE FROM {SCHEMA}.exec_plan_assignee WHERE step_id = %s AND workload_pct = 0",
-        (step_id,),
-    )
-    for p in person_ids or []:
+    for p in ids:
         cur.execute(
-            f"INSERT INTO {SCHEMA}.exec_plan_assignee (step_id, person_id, workload_pct) "
-            f"VALUES (%s, %s, %s) ON CONFLICT (step_id, person_id) "
+            f"INSERT INTO {SCHEMA}.exec_plan_assignee "
+            f"(step_id, person_id, raci_role, workload_pct) "
+            f"VALUES (%s, %s, 'R', %s) ON CONFLICT (step_id, person_id, raci_role) "
             f"DO UPDATE SET workload_pct = EXCLUDED.workload_pct",
-            (step_id, int(p), int(workloads.get(str(p), workloads.get(p, 100)) or 100)),
+            (step_id, p, int(workloads.get(str(p), workloads.get(p, 100)) or 100)),
         )
 
 
@@ -404,16 +400,16 @@ def apply_ai_steps(cur, plan_id: int, steps: list):
         order += 1
         cur.execute(
             f"INSERT INTO {SCHEMA}.exec_plan_step "
-            f"(plan_id, title, description, result_criteria, is_milestone, "
-            f" start_date, due_date, responsible_person_id, sort_order) "
-            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            f"(plan_id, title, description, result_criteria, is_control_point, "
+            f" start_date, due_date, sort_order) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (plan_id, str(s["title"]).strip()[:500], nz(s.get("description")),
              nz(s.get("result_criteria")), bool(s.get("is_milestone")),
-             nz(s.get("start_date")), nz(s.get("due_date")),
-             as_int(s.get("responsible_person_id")), order),
+             nz(s.get("start_date")), nz(s.get("due_date")), order),
         )
         parent_id = cur.fetchone()[0]
         created += 1
+        add_responsible(cur, parent_id, as_int(s.get("responsible_person_id")))
 
         sub_order = 0
         for sub in s.get("substeps") or []:
@@ -422,15 +418,27 @@ def apply_ai_steps(cur, plan_id: int, steps: list):
             sub_order += 1
             cur.execute(
                 f"INSERT INTO {SCHEMA}.exec_plan_step "
-                f"(plan_id, parent_step_id, title, start_date, due_date, "
-                f" responsible_person_id, sort_order) "
-                f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                f"(plan_id, parent_step_id, title, start_date, due_date, sort_order) "
+                f"VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
                 (plan_id, parent_id, str(sub["title"]).strip()[:500],
-                 nz(sub.get("start_date")), nz(sub.get("due_date")),
-                 as_int(sub.get("responsible_person_id")), sub_order),
+                 nz(sub.get("start_date")), nz(sub.get("due_date")), sub_order),
             )
+            add_responsible(cur, cur.fetchone()[0], as_int(sub.get("responsible_person_id")))
             created += 1
     return created
+
+
+def add_responsible(cur, step_id: int, person_id):
+    """Ответственный записывается только как назначение с ролью A."""
+    if not person_id:
+        return
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_plan_assignee "
+        f"(step_id, person_id, raci_role, role_in_step, workload_pct) "
+        f"VALUES (%s, %s, 'A', 'responsible', 100) "
+        f"ON CONFLICT (step_id, person_id, raci_role) DO NOTHING",
+        (step_id, person_id),
+    )
 
 
 def handler(event: dict, context) -> dict:
