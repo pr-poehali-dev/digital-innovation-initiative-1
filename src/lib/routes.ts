@@ -66,7 +66,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "Crown",
     items: [
       { id: "chief.exec", label: "Мой фокус", icon: "Crosshair", href: "/cabinet/exec", exact: true, active: true },
-      { id: "chief.center", label: "Центр компетенций", icon: "Building2", href: "/cabinet/exec/center", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.center", label: "Центр цифровизации", icon: "Building2", href: "/cabinet/exec/center", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.planner", label: "Планировщик", icon: "GanttChartSquare", href: "/cabinet/exec/planner", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.knowledge", label: "База знаний", icon: "Library", href: "/cabinet/exec/knowledge", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.initiatives", label: "Инициативы", icon: "Rocket", href: "/cabinet/exec/initiatives", active: true },

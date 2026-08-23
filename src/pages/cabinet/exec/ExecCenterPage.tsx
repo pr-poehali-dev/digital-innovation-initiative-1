@@ -107,9 +107,9 @@ export default function ExecCenterPage() {
         <div className="max-w-5xl mx-auto px-4 py-6 space-y-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-xl font-semibold text-slate-900">Центры компетенций</h1>
+              <h1 className="text-xl font-semibold text-slate-900">Центр цифровизации и развития технологий внутреннего контроля</h1>
               <p className="text-sm text-slate-500 mt-1">
-                Обоснование создания, цели, функции и штат
+                Обоснование создания, цели, функции, инициативы и ресурсы
               </p>
             </div>
             <button
