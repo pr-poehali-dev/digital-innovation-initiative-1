@@ -72,6 +72,7 @@ export default function InitiativeTreeMap({
   const [hover, setHover] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [byDate, setByDate] = useState(false);
+  const [showOwners, setShowOwners] = useState(true);
   const [zoom, setZoom] = useState(() =>
     typeof window !== "undefined" && window.innerWidth < 640 ? 0.65 : 1,
   );
@@ -262,6 +263,18 @@ export default function InitiativeTreeMap({
           >
             <Icon name="CalendarRange" size={13} />
             По датам
+          </button>
+          <button
+            onClick={() => setShowOwners((v) => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              showOwners
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+            }`}
+            title="Показать владельцев инициатив"
+          >
+            <Icon name={showOwners ? "UserCheck" : "User"} size={13} />
+            Владельцы
           </button>
           <button
             onClick={() => {
@@ -486,7 +499,11 @@ export default function InitiativeTreeMap({
                       paintOrder="stroke"
                       strokeLinejoin="round"
                     >
-                      {p.item.owner_name ? `${p.item.owner_name} · ` : "владелец не назначен · "}
+                      {showOwners
+                        ? p.item.owner_name
+                          ? `${p.item.owner_name} · `
+                          : "владелец не назначен · "
+                        : ""}
                       до {new Date(p.item.plan_end.slice(0, 10)).toLocaleDateString("ru-RU", {
                         day: "2-digit",
                         month: "short",

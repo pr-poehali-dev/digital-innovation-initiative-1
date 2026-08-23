@@ -71,6 +71,7 @@ export default function PlanTreeMap({
   const [hover, setHover] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [byDate, setByDate] = useState(false);
+  const [showOwners, setShowOwners] = useState(false);
   const [zoom, setZoom] = useState(() =>
     typeof window !== "undefined" && window.innerWidth < 640 ? 0.65 : 1,
   );
@@ -91,7 +92,7 @@ export default function PlanTreeMap({
   const LEFT = 96;
   const COL = 250;
   const TOP = 34;
-  const ROW = 40;
+  const ROW = showOwners ? 50 : 40;
   const TIME_W = 1180;      // ширина полотна в режиме дат
   const LABEL_MAX = 46;     // максимум символов в подписи
   const CHAR_W = 5.7;       // приблизительная ширина символа
@@ -211,7 +212,7 @@ export default function PlanTreeMap({
       ticks: tk,
       todayX: byDate ? xOfDate(Date.now()) : null,
     };
-  }, [steps, collapsed, byDate]);
+  }, [steps, collapsed, byDate, showOwners]);
 
   if (!steps.length) {
     return (
@@ -252,6 +253,18 @@ export default function PlanTreeMap({
           >
             <Icon name="CalendarRange" size={13} />
             По датам
+          </button>
+          <button
+            onClick={() => setShowOwners((v) => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              showOwners
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+            }`}
+            title="Показать ответственных у шагов"
+          >
+            <Icon name={showOwners ? "UserCheck" : "User"} size={13} />
+            Ответственные
           </button>
           <button
             onClick={() => {
@@ -479,8 +492,33 @@ export default function PlanTreeMap({
                   </text>
                 )}
 
+                {/* Ответственный */}
+                {showOwners && (
+                  <text
+                    x={kids ? p.x - r - 3 : p.x + r + 8}
+                    y={
+                      (kids ? p.y + r + 14 : p.y + 11) +
+                      (s.due_date && !byDate ? 10 : 0)
+                    }
+                    textAnchor={kids ? "end" : "start"}
+                    fontSize={9}
+                    fontStyle={s.responsible_name ? "normal" : "italic"}
+                    fill={s.responsible_name ? "#64748b" : "#cbd5e1"}
+                    stroke="#ffffff"
+                    strokeWidth={3}
+                    paintOrder="stroke"
+                    strokeLinejoin="round"
+                  >
+                    {s.responsible_name
+                      ? s.responsible_name.length > 26
+                        ? s.responsible_name.slice(0, 25) + "…"
+                        : s.responsible_name
+                      : "без ответственного"}
+                  </text>
+                )}
+
                 <title>
-                  {`${s.title}\n${STATE_COLOR[st].label}${s.due_date ? ` · до ${new Date(s.due_date.slice(0, 10)).toLocaleDateString("ru-RU")}` : ""}${kids ? `\nПодшагов: ${kids}` : ""}`}
+                  {`${s.title}\n${STATE_COLOR[st].label}${s.due_date ? ` · до ${new Date(s.due_date.slice(0, 10)).toLocaleDateString("ru-RU")}` : ""}\nОтветственный: ${s.responsible_name || "не назначен"}${kids ? `\nПодшагов: ${kids}` : ""}`}
                 </title>
               </g>
             );
