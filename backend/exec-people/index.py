@@ -510,6 +510,57 @@ def workload(cur, date_from, date_to, person_ids=None, weeks_ahead=None):
     }
 
 
+KIND_TITLE = {
+    "task": "Задача",
+    "stage": "Этап",
+    "control_point": "Контрольная точка",
+}
+
+
+def step_rows(cur):
+    """Шаги плана с типом объекта и полным контекстом для детализации.
+
+    Тип определяется так: контрольная точка — по отметке, этап — если есть
+    дочерние шаги или указан тип stage, остальное — задача.
+    """
+    cur.execute(f"""
+        SELECT s.id, s.title, s.status, s.step_type, s.is_control_point,
+               s.due_date, s.start_date, s.estimate_hours, s.parent_step_id,
+               par.title AS parent_title,
+               pl.title AS plan_title, pl.id AS plan_id,
+               i.title AS initiative_title, i.id AS initiative_id,
+               m.title AS milestone_title,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step k
+                 WHERE k.parent_step_id = s.id AND k.status <> 'cancelled') AS child_count,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_plan_assignee a
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = a.person_id
+                 WHERE a.step_id = s.id AND a.raci_role = 'A' LIMIT 1) AS owner_name,
+               EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_assignee a
+                        WHERE a.step_id = s.id AND a.raci_role = 'A') AS has_owner,
+               COALESCE((SELECT SUM(a.plan_hours) FROM {SCHEMA}.exec_plan_assignee a
+                          WHERE a.step_id = s.id), 0) AS assigned_hours,
+               COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                          WHERE t.step_id = s.id), 0) AS fact_hours
+        FROM {SCHEMA}.exec_plan_step s
+        LEFT JOIN {SCHEMA}.exec_plan_step par ON par.id = s.parent_step_id
+        LEFT JOIN {SCHEMA}.exec_plan pl ON pl.id = s.plan_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = pl.initiative_id
+        LEFT JOIN {SCHEMA}.exec_milestone m ON m.id = s.milestone_id
+        WHERE s.status NOT IN ('done', 'cancelled')
+        ORDER BY s.due_date NULLS LAST, s.id
+    """)
+    out = rows(cur)
+    for r in out:
+        if r["is_control_point"]:
+            r["object_kind"] = "control_point"
+        elif r["step_type"] == "stage" or (r["child_count"] or 0) > 0:
+            r["object_kind"] = "stage"
+        else:
+            r["object_kind"] = "task"
+        r["object_kind_title"] = KIND_TITLE[r["object_kind"]]
+    return out
+
+
 def diagnostics(cur, center_id=None):
     """Проверки качества данных."""
     out = []
@@ -542,9 +593,9 @@ def diagnostics(cur, center_id=None):
                            WHERE fc.function_id = f.id)
     """)
     for r in rows(cur):
-        out.append({"code": "F03", "level": "warning", "entity": "function",
+        out.append({"code": "F03", "level": "info", "entity": "function",
                     "entity_id": r["id"], "title": r["title"],
-                    "message": "Не указаны требуемые компетенции"})
+                    "message": "Требования к компетенциям не заданы"})
 
     cur.execute(f"""
         SELECT g.id, g.title FROM {SCHEMA}.exec_center_goal g
@@ -555,38 +606,37 @@ def diagnostics(cur, center_id=None):
                     "entity_id": r["id"], "title": r["title"],
                     "message": "Цель без измеримого показателя"})
 
-    cur.execute(f"""
-        SELECT s.id, s.title FROM {SCHEMA}.exec_plan_step s
-        WHERE s.status NOT IN ('done', 'cancelled')
-          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_assignee a
-              WHERE a.step_id = s.id AND a.raci_role = 'A')
-        LIMIT 200
-    """)
-    for r in rows(cur):
-        out.append({"code": "S01", "level": "error", "entity": "step",
-                    "entity_id": r["id"], "title": r["title"],
-                    "message": "Задача без ответственного (роль A)"})
+    # Тип объекта определяет, какие поля обязательны:
+    #  task           — часы и срок нужны
+    #  stage          — часы складываются из дочерних, свои не требуются
+    #  control_point  — нужен срок и ответственный, часы не требуются
+    for r in step_rows(cur):
+        kind = r["object_kind"]
+        if not r["has_owner"]:
+            out.append({"code": "S01", "level": "error", "entity": "step",
+                        "entity_id": r["id"], "title": r["title"],
+                        "object_kind": kind,
+                        "message": f"{KIND_TITLE[kind]} без ответственного (роль A)"})
+        if not r["due_date"]:
+            out.append({"code": "S02", "level": "warning", "entity": "step",
+                        "entity_id": r["id"], "title": r["title"],
+                        "object_kind": kind,
+                        "message": "Не задан срок"})
+        if kind == "task" and r["estimate_hours"] is None:
+            out.append({"code": "S03", "level": "warning", "entity": "step",
+                        "entity_id": r["id"], "title": r["title"],
+                        "object_kind": kind,
+                        "message": "Не задана трудоёмкость"})
 
-    cur.execute(f"""
-        SELECT s.id, s.title FROM {SCHEMA}.exec_plan_step s
-        WHERE s.status NOT IN ('done', 'cancelled') AND s.due_date IS NULL
-        LIMIT 200
-    """)
-    for r in rows(cur):
-        out.append({"code": "S02", "level": "warning", "entity": "step",
-                    "entity_id": r["id"], "title": r["title"],
-                    "message": "Не задан срок"})
-
-    cur.execute(f"""
-        SELECT s.id, s.title FROM {SCHEMA}.exec_plan_step s
-        WHERE s.status NOT IN ('done', 'cancelled')
-          AND s.step_type = 'task' AND s.estimate_hours IS NULL
-        LIMIT 200
-    """)
-    for r in rows(cur):
-        out.append({"code": "S03", "level": "warning", "entity": "step",
-                    "entity_id": r["id"], "title": r["title"],
-                    "message": "Не задана трудоёмкость"})
+    for r in step_rows(cur):
+        if (r["object_kind"] == "task" and r["estimate_hours"] is not None
+                and float(r["assigned_hours"] or 0) > 0
+                and abs(float(r["assigned_hours"]) - float(r["estimate_hours"])) > 0.05):
+            out.append({"code": "S04", "level": "warning", "entity": "step",
+                        "entity_id": r["id"], "title": r["title"],
+                        "object_kind": r["object_kind"],
+                        "message": f"Часы исполнителей ({r['assigned_hours']}) "
+                                   f"не совпадают с трудоёмкостью ({r['estimate_hours']})"})
 
     cur.execute(f"""
         SELECT p.id, p.display_name FROM {SCHEMA}.exec_person p
@@ -610,7 +660,7 @@ def diagnostics(cur, center_id=None):
     for r in rows(cur):
         out.append({"code": "P02", "level": "warning", "entity": "person",
                     "entity_id": r["id"], "title": r["display_name"],
-                    "message": f"Истёк срок подтверждения: {r['competency_name']}"})
+                    "message": f"Требуется переподтверждение: {r['competency_name']}"})
 
     cur.execute(f"""
         SELECT p.id, p.display_name FROM {SCHEMA}.exec_person p
@@ -619,9 +669,9 @@ def diagnostics(cur, center_id=None):
               WHERE pc.person_id = p.id)
     """)
     for r in rows(cur):
-        out.append({"code": "P03", "level": "warning", "entity": "person",
+        out.append({"code": "P03", "level": "info", "entity": "person",
                     "entity_id": r["id"], "title": r["display_name"],
-                    "message": "Не указаны компетенции"})
+                    "message": "Профиль компетенций не заполнен"})
 
     # Перегрузка на ближайшие 8 недель
     cur.execute(f"""
@@ -1027,8 +1077,61 @@ def handler(event: dict, context) -> dict:
                 JOIN {SCHEMA}.exec_person p ON p.id = t.person_id
                 WHERE t.step_id = %s ORDER BY t.work_date DESC
             """, (sid,))
+            entries = rows(cur)
+
+            info = next((r for r in step_rows(cur) if r["id"] == sid), None)
+            if info is None:
+                cur.execute(f"""
+                    SELECT s.id, s.title, s.step_type, s.is_control_point,
+                           s.estimate_hours, s.due_date, s.start_date,
+                           (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step k
+                             WHERE k.parent_step_id = s.id AND k.status <> 'cancelled') AS child_count
+                    FROM {SCHEMA}.exec_plan_step s WHERE s.id = %s
+                """, (sid,))
+                got = rows(cur)
+                info = got[0] if got else {}
+                if info:
+                    info["object_kind"] = ("control_point" if info["is_control_point"]
+                                           else "stage" if (info["child_count"] or 0) > 0
+                                           else "task")
+                    info["object_kind_title"] = KIND_TITLE[info["object_kind"]]
+
+            plan_sum = sum(float(a["plan_hours"] or 0) for a in assignees)
+            fact_sum = sum(float(t["hours"] or 0) for t in entries)
+            est = info.get("estimate_hours") if info else None
+
+            # Для этапа плановые часы складываются из дочерних задач
+            children_hours = None
+            if info and info.get("object_kind") == "stage":
+                cur.execute(f"""
+                    SELECT COALESCE(SUM(estimate_hours), 0) AS est,
+                           COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                                      JOIN {SCHEMA}.exec_plan_step k2 ON k2.id = t.step_id
+                                     WHERE k2.parent_step_id = %s), 0) AS fact
+                    FROM {SCHEMA}.exec_plan_step
+                    WHERE parent_step_id = %s AND status <> 'cancelled'
+                """, (sid, sid))
+                children_hours = rows(cur)[0]
+
             return cors({"ok": True, "data": {
-                "assignees": assignees, "weeks": weeks, "time_entries": rows(cur),
+                "assignees": assignees,
+                "weeks": weeks,
+                "time_entries": entries,
+                "step": info,
+                "summary": {
+                    "estimate_hours": float(est) if est is not None else None,
+                    "assigned_hours": round(plan_sum, 1),
+                    "fact_hours": round(fact_sum, 1),
+                    "variance": round(plan_sum - fact_sum, 1),
+                    "hours_mismatch": bool(
+                        est is not None and plan_sum > 0
+                        and abs(plan_sum - float(est)) > 0.05
+                    ),
+                    "children_estimate": (float(children_hours["est"])
+                                          if children_hours else None),
+                    "children_fact": (float(children_hours["fact"])
+                                      if children_hours else None),
+                },
             }})
 
         if action == "save_assignee":
@@ -1037,37 +1140,124 @@ def handler(event: dict, context) -> dict:
             role = (nz(body.get("raci_role")) or "R").upper()[:1]
             if not sid or not pid or role not in ("R", "A", "C", "I"):
                 return cors({"ok": False, "error": {"message": "Укажите задачу, человека и роль"}}, 400)
-            # Ответственный единственный: прежнего переводим в исполнители
+            # Ответственный единственный. Судьбу прежнего решает руководитель:
+            # keep_r — остаётся исполнителем, finish — назначение завершается датой,
+            # remove — снимается с задачи. Факт в exec_time_entry не трогаем никогда.
             if role == "A":
                 cur.execute(
-                    f"UPDATE {SCHEMA}.exec_plan_assignee SET raci_role = 'R' "
-                    f"WHERE step_id = %s AND raci_role = 'A' AND person_id <> %s "
-                    f"AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_assignee x "
-                    f"WHERE x.step_id = %s AND x.person_id = {SCHEMA}.exec_plan_assignee.person_id "
-                    f"AND x.raci_role = 'R')",
-                    (sid, pid, sid),
-                )
-                cur.execute(
-                    f"DELETE FROM {SCHEMA}.exec_plan_assignee "
-                    f"WHERE step_id = %s AND raci_role = 'A' AND person_id <> %s",
+                    f"SELECT a.id, a.person_id, p.display_name "
+                    f"FROM {SCHEMA}.exec_plan_assignee a "
+                    f"JOIN {SCHEMA}.exec_person p ON p.id = a.person_id "
+                    f"WHERE a.step_id = %s AND a.raci_role = 'A' AND a.person_id <> %s",
                     (sid, pid),
                 )
-            cur.execute(f"""
-                INSERT INTO {SCHEMA}.exec_plan_assignee
-                    (step_id, person_id, raci_role, role_in_step, plan_hours,
-                     workload_pct, valid_from, valid_to)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (step_id, person_id, raci_role) DO UPDATE
-                SET plan_hours = EXCLUDED.plan_hours,
-                    role_in_step = EXCLUDED.role_in_step,
-                    workload_pct = EXCLUDED.workload_pct,
-                    valid_from = EXCLUDED.valid_from,
-                    valid_to = EXCLUDED.valid_to
-                RETURNING id
-            """, (sid, pid, role, nz(body.get("role_in_step")),
-                  as_num(body.get("plan_hours")), as_int(body.get("workload_pct")),
-                  nz(body.get("valid_from")), nz(body.get("valid_to"))))
-            rid = cur.fetchone()[0]
+                prev = rows(cur)
+                if prev:
+                    decision = nz(body.get("prev_owner_action"))
+                    if not decision:
+                        cur.execute(
+                            f"SELECT COALESCE(SUM(hours), 0) AS h FROM {SCHEMA}.exec_time_entry "
+                            f"WHERE step_id = %s AND person_id = %s",
+                            (sid, prev[0]["person_id"]),
+                        )
+                        fact = rows(cur)[0]["h"]
+                        return cors({"ok": True, "data": {
+                            "needs_decision": True,
+                            "previous_owner": {
+                                "assignee_id": prev[0]["id"],
+                                "person_id": prev[0]["person_id"],
+                                "display_name": prev[0]["display_name"],
+                                "fact_hours": float(fact or 0),
+                            },
+                        }})
+                    for row in prev:
+                        if decision == "keep_r":
+                            cur.execute(
+                                f"DELETE FROM {SCHEMA}.exec_plan_assignee "
+                                f"WHERE step_id = %s AND person_id = %s AND raci_role = 'R'",
+                                (sid, row["person_id"]),
+                            )
+                            cur.execute(
+                                f"UPDATE {SCHEMA}.exec_plan_assignee SET raci_role = 'R', "
+                                f"role_in_step = 'executor' WHERE id = %s",
+                                (row["id"],),
+                            )
+                        elif decision == "finish":
+                            cur.execute(
+                                f"UPDATE {SCHEMA}.exec_plan_assignee "
+                                f"SET raci_role = 'I', role_in_step = 'former_owner', "
+                                f"valid_to = COALESCE(valid_to, CURRENT_DATE) WHERE id = %s",
+                                (row["id"],),
+                            )
+                        else:
+                            cur.execute(
+                                f"DELETE FROM {SCHEMA}.exec_assignee_week WHERE assignee_id = %s",
+                                (row["id"],),
+                            )
+                            cur.execute(
+                                f"DELETE FROM {SCHEMA}.exec_plan_assignee WHERE id = %s",
+                                (row["id"],),
+                            )
+                        audit(cur, actor, "plan_assignee", row["id"], "owner_change",
+                              {"person_id": row["person_id"]}, {"action": decision})
+            # Человек уже участвует в другой роли: повышаем существующую запись,
+            # чтобы не создавать вторую и не терять его недельное распределение
+            cur.execute(
+                f"SELECT id, raci_role, plan_hours FROM {SCHEMA}.exec_plan_assignee "
+                f"WHERE step_id = %s AND person_id = %s",
+                (sid, pid),
+            )
+            mine = rows(cur)
+            same = next((m for m in mine if m["raci_role"] == role), None)
+            other = next((m for m in mine if m["raci_role"] != role), None)
+
+            hours = as_num(body.get("plan_hours"))
+            if same:
+                rid = same["id"]
+                if other and role == "A":
+                    cur.execute(
+                        f"DELETE FROM {SCHEMA}.exec_assignee_week WHERE assignee_id = %s",
+                        (other["id"],))
+                    cur.execute(f"DELETE FROM {SCHEMA}.exec_plan_assignee WHERE id = %s",
+                                (other["id"],))
+                cur.execute(f"""
+                    UPDATE {SCHEMA}.exec_plan_assignee
+                    SET plan_hours = COALESCE(%s, plan_hours),
+                        role_in_step = COALESCE(%s, role_in_step),
+                        workload_pct = COALESCE(%s, workload_pct),
+                        valid_from = COALESCE(%s, valid_from),
+                        valid_to = COALESCE(%s, valid_to)
+                    WHERE id = %s
+                """, (hours, nz(body.get("role_in_step")), as_int(body.get("workload_pct")),
+                      nz(body.get("valid_from")), nz(body.get("valid_to")), rid))
+            elif other:
+                rid = other["id"]
+                cur.execute(f"""
+                    UPDATE {SCHEMA}.exec_plan_assignee
+                    SET raci_role = %s,
+                        role_in_step = %s,
+                        plan_hours = COALESCE(%s, plan_hours),
+                        workload_pct = COALESCE(%s, workload_pct),
+                        valid_from = COALESCE(%s, valid_from),
+                        valid_to = COALESCE(%s, valid_to)
+                    WHERE id = %s
+                """, (role,
+                      nz(body.get("role_in_step"))
+                      or ("responsible" if role == "A" else "executor"),
+                      hours, as_int(body.get("workload_pct")),
+                      nz(body.get("valid_from")), nz(body.get("valid_to")), rid))
+            else:
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_plan_assignee
+                        (step_id, person_id, raci_role, role_in_step, plan_hours,
+                         workload_pct, valid_from, valid_to)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                """, (sid, pid, role,
+                      nz(body.get("role_in_step"))
+                      or ("responsible" if role == "A" else "executor"),
+                      hours, as_int(body.get("workload_pct")),
+                      nz(body.get("valid_from")), nz(body.get("valid_to"))))
+                rid = cur.fetchone()[0]
             audit(cur, actor, "plan_assignee", rid, "upsert", None, body)
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
@@ -1144,8 +1334,13 @@ def handler(event: dict, context) -> dict:
             hours_each = as_num(body.get("hours_each"))
             due = nz(body.get("due_date"))
             prio = nz(body.get("priority"))
+            # Часы записываем только задачам: у этапа они складываются
+            # из дочерних, у контрольной точки трудоёмкости нет
+            kinds = {r["id"]: r["object_kind"] for r in step_rows(cur)}
             done = 0
             for sid in step_ids:
+                kind = kinds.get(sid, "task")
+                hours = hours_each if kind == "task" else None
                 if resp:
                     cur.execute(
                         f"DELETE FROM {SCHEMA}.exec_plan_assignee "
@@ -1158,7 +1353,7 @@ def handler(event: dict, context) -> dict:
                         ON CONFLICT (step_id, person_id, raci_role) DO UPDATE
                         SET plan_hours = COALESCE(EXCLUDED.plan_hours,
                                                   {SCHEMA}.exec_plan_assignee.plan_hours)
-                    """, (sid, resp, hours_each))
+                    """, (sid, resp, hours))
                 for ex in execs:
                     cur.execute(f"""
                         INSERT INTO {SCHEMA}.exec_plan_assignee
@@ -1167,7 +1362,7 @@ def handler(event: dict, context) -> dict:
                         ON CONFLICT (step_id, person_id, raci_role) DO UPDATE
                         SET plan_hours = COALESCE(EXCLUDED.plan_hours,
                                                   {SCHEMA}.exec_plan_assignee.plan_hours)
-                    """, (sid, ex, hours_each))
+                    """, (sid, ex, hours))
                 sets, params = [], []
                 if due:
                     sets.append("due_date = %s")
@@ -1184,22 +1379,42 @@ def handler(event: dict, context) -> dict:
             audit(cur, actor, "plan_step", None, "bulk_assign", None,
                   {"step_ids": step_ids, "responsible_id": resp, "executor_ids": execs})
             conn.commit()
-            return cors({"ok": True, "data": {"updated": done}})
+            remaining = len([r for r in step_rows(cur) if not r["has_owner"]])
+            by_kind = {}
+            for sid in step_ids:
+                k = kinds.get(sid, "task")
+                by_kind[k] = by_kind.get(k, 0) + 1
+            return cors({"ok": True, "data": {
+                "updated": done,
+                "by_kind": by_kind,
+                "remaining_without_owner": remaining,
+            }})
 
         if action == "unassigned_steps":
-            cur.execute(f"""
-                SELECT s.id, s.title, s.status, s.step_type, s.due_date, s.estimate_hours,
-                       s.is_control_point, p.title AS plan_title,
-                       i.title AS initiative_title
-                FROM {SCHEMA}.exec_plan_step s
-                LEFT JOIN {SCHEMA}.exec_plan p ON p.id = s.plan_id
-                LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = p.initiative_id
-                WHERE s.status NOT IN ('done', 'cancelled')
-                  AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_assignee a
-                      WHERE a.step_id = s.id AND a.raci_role = 'A')
-                ORDER BY s.due_date NULLS LAST, s.id
-            """)
-            return cors({"ok": True, "data": rows(cur)})
+            return cors({"ok": True, "data": [
+                r for r in step_rows(cur) if not r["has_owner"]
+            ]})
+
+        if action == "diag_detail":
+            code = nz(qs.get("code")) or nz(body.get("code"))
+            if not code:
+                return cors({"ok": False, "error": {"message": "Не указан показатель"}}, 400)
+            steps = step_rows(cur)
+            if code == "S01":
+                data = [r for r in steps if not r["has_owner"]]
+            elif code == "S02":
+                data = [r for r in steps if not r["due_date"]]
+            elif code == "S03":
+                data = [r for r in steps
+                        if r["object_kind"] == "task" and r["estimate_hours"] is None]
+            elif code == "S04":
+                data = [r for r in steps
+                        if r["object_kind"] == "task" and r["estimate_hours"] is not None
+                        and float(r["assigned_hours"] or 0) > 0
+                        and abs(float(r["assigned_hours"]) - float(r["estimate_hours"])) > 0.05]
+            else:
+                data = []
+            return cors({"ok": True, "data": data})
 
         if action == "diagnostics":
             return cors({"ok": True, "data": diagnostics(cur, as_int(qs.get("center_id")))})

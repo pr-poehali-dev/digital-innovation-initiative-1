@@ -62,7 +62,9 @@ export function LevelBar({ level, target }: { level: number; target?: number | n
 export function PersonWarnings({ p }: { p: TeamMember }) {
   const w: { text: string; cls: string; icon: string }[] = [];
   if (!p.hours_per_week) w.push({ text: "Нет ёмкости", cls: "text-amber-600", icon: "Clock" });
-  if (!p.competency_count) w.push({ text: "Нет компетенций", cls: "text-amber-600", icon: "Award" });
+  // Незаполненные компетенции — неполнота данных, а не нарушение
+  if (!p.competency_count)
+    w.push({ text: "Профиль не заполнен", cls: "text-slate-500", icon: "Award" });
   if (!p.open_steps && !p.owned_functions)
     w.push({ text: "Нет назначений", cls: "text-slate-500", icon: "CircleDashed" });
   if (p.overdue_steps > 0)

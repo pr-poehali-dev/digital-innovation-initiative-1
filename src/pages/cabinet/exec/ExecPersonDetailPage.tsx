@@ -159,7 +159,6 @@ export default function ExecPersonDetailPage() {
             <Stat
               label="Компетенций"
               value={person.competencies.length}
-              tone={person.competencies.length ? "default" : "warning"}
               onClick={() => setTab("competencies")}
             />
             <Stat

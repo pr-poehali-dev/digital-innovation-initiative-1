@@ -5,6 +5,7 @@ import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, Metric } from "@/components/exec/ExecUI";
 import { Avatar, LoadBadge, PersonWarnings, StatChip, Toggle } from "@/components/exec/team/TeamUI";
 import PersonForm from "@/components/exec/team/PersonForm";
+import { useStickyState } from "@/lib/useStickyState";
 import {
   EMPLOYMENT_TYPE,
   PeopleRefs,
@@ -23,13 +24,14 @@ export default function ExecTeamPage() {
   const [load, setLoad] = useState<WorkloadData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [view, setView] = useState<View>("cards");
-  const [q, setQ] = useState("");
-  const [fStatus, setFStatus] = useState("");
-  const [fFunction, setFFunction] = useState("");
-  const [fInitiative, setFInitiative] = useState("");
-  const [fWarning, setFWarning] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
+  const [view, setView] = useStickyState<View>("team_view", "cards");
+  const [q, setQ] = useStickyState("team_q", "");
+  const [fStatus, setFStatus] = useStickyState("team_status", "");
+  const [fFunction, setFFunction] = useStickyState("team_function", "");
+  const [fInitiative, setFInitiative] = useStickyState("team_initiative", "");
+  const [fWarning, setFWarning] = useStickyState("team_warning", "");
+  const [showArchived, setShowArchived] = useStickyState("team_archived", false);
+  const [sort, setSort] = useStickyState("team_sort", "name");
   const [formOpen, setFormOpen] = useState(false);
 
   const reload = () => {
@@ -94,6 +96,16 @@ export default function ExecTeamPage() {
       return true;
     });
   }, [items, q, fStatus, fFunction, fInitiative, fWarning, showArchived, overloadedIds]);
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    const pct = (id: number) => currentLoad.get(id)?.pct ?? -1;
+    if (sort === "load") arr.sort((a, b) => pct(b.id) - pct(a.id));
+    else if (sort === "tasks") arr.sort((a, b) => b.open_steps - a.open_steps);
+    else if (sort === "overdue") arr.sort((a, b) => b.overdue_steps - a.overdue_steps);
+    else arr.sort((a, b) => a.display_name.localeCompare(b.display_name, "ru"));
+    return arr;
+  }, [filtered, sort, currentLoad]);
 
   const stats = useMemo(() => {
     const active = items.filter((p) => (p.record_state || "active") !== "archived");
@@ -180,9 +192,8 @@ export default function ExecTeamPage() {
                 onClick={() => setFWarning("no_capacity")}
               />
               <Metric
-                label="Без компетенций"
+                label="Профиль не заполнен"
                 value={stats.noCompetency}
-                tone={stats.noCompetency ? "warning" : "default"}
                 icon="Award"
                 onClick={() => setFWarning("no_competency")}
               />
@@ -245,6 +256,16 @@ export default function ExecTeamPage() {
                       </option>
                     ))}
                   </select>
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value)}
+                    className="px-2.5 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 focus:outline-none focus:border-violet-400"
+                  >
+                    <option value="name">По алфавиту</option>
+                    <option value="load">По загрузке</option>
+                    <option value="tasks">По числу задач</option>
+                    <option value="overdue">По просрочке</option>
+                  </select>
                   <div className="flex rounded-lg border border-slate-200 overflow-hidden">
                     {(["cards", "table"] as View[]).map((v) => (
                       <button
@@ -270,7 +291,7 @@ export default function ExecTeamPage() {
                     {fWarning === "overload" && "Только перегруженные"}
                     {fWarning === "overdue" && "С просрочкой"}
                     {fWarning === "no_capacity" && "Без ёмкости"}
-                    {fWarning === "no_competency" && "Без компетенций"}
+                    {fWarning === "no_competency" && "Профиль компетенций не заполнен"}
                     {fWarning === "no_assignment" && "Без назначений"}
                     <Icon name="X" size={11} />
                   </button>
@@ -284,19 +305,19 @@ export default function ExecTeamPage() {
                   </button>
                 )}
                 <span className="text-xs text-slate-400 ml-auto">
-                  Найдено: {filtered.length}
+                  Найдено: {sorted.length}
                 </span>
               </div>
             </div>
 
-            {!filtered.length ? (
+            {!sorted.length ? (
               <Empty
                 text={hasFilters ? "Никто не подходит под фильтры" : "Сотрудников пока нет"}
                 icon="Users"
               />
             ) : view === "cards" ? (
               <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                {filtered.map((p) => {
+                {sorted.map((p) => {
                   const cl = currentLoad.get(p.id);
                   return (
                     <button
@@ -366,7 +387,7 @@ export default function ExecTeamPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((p) => {
+                      {sorted.map((p) => {
                         const cl = currentLoad.get(p.id);
                         return (
                           <tr
@@ -401,7 +422,7 @@ export default function ExecTeamPage() {
                               )}
                             </td>
                             <td className="px-3 py-2.5 text-center tabular-nums">
-                              {p.competency_count || <span className="text-amber-500">0</span>}
+                              {p.competency_count || <span className="text-slate-300">0</span>}
                             </td>
                             <td className="px-3 py-2.5 text-center tabular-nums">
                               {p.owned_functions || <span className="text-slate-300">0</span>}

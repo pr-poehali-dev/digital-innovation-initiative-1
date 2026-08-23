@@ -155,6 +155,16 @@
         "ok": false
       },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized diag_detail",
+      "method": "GET",
+      "path": "/?action=diag_detail&code=S01",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }

@@ -209,24 +209,96 @@ export interface AssigneeWeek {
 
 export interface DiagItem {
   code: string;
-  level: "error" | "warning";
+  level: "error" | "warning" | "info";
   entity: string;
   entity_id: number | null;
   title: string;
   message: string;
+  object_kind?: ObjectKind;
 }
 
-export interface UnassignedStep {
+export type ObjectKind = "task" | "stage" | "control_point";
+
+export interface StepInfo {
   id: number;
   title: string;
   status: string;
   step_type: string;
-  due_date: string | null;
-  estimate_hours: number | null;
   is_control_point: boolean;
+  due_date: string | null;
+  start_date: string | null;
+  estimate_hours: number | null;
+  parent_step_id: number | null;
+  parent_title: string | null;
   plan_title: string | null;
+  plan_id: number | null;
   initiative_title: string | null;
+  initiative_id: number | null;
+  milestone_title: string | null;
+  child_count: number;
+  owner_name: string | null;
+  has_owner: boolean;
+  assigned_hours: number;
+  fact_hours: number;
+  object_kind: ObjectKind;
+  object_kind_title: string;
 }
+
+export type UnassignedStep = StepInfo;
+
+export interface StepSummary {
+  estimate_hours: number | null;
+  assigned_hours: number;
+  fact_hours: number;
+  variance: number;
+  hours_mismatch: boolean;
+  children_estimate: number | null;
+  children_fact: number | null;
+}
+
+export interface PrevOwner {
+  assignee_id: number;
+  person_id: number;
+  display_name: string;
+  fact_hours: number;
+}
+
+export const OBJECT_KIND: Record<ObjectKind, { title: string; icon: string; cls: string; needsHours: boolean }> = {
+  task: {
+    title: "Задача",
+    icon: "SquareCheck",
+    cls: "bg-slate-100 text-slate-600 border-slate-200",
+    needsHours: true,
+  },
+  stage: {
+    title: "Этап",
+    icon: "Layers",
+    cls: "bg-blue-50 text-blue-700 border-blue-200",
+    needsHours: false,
+  },
+  control_point: {
+    title: "Контрольная точка",
+    icon: "Flag",
+    cls: "bg-violet-50 text-violet-700 border-violet-200",
+    needsHours: false,
+  },
+};
+
+export const DIAG_CODE: Record<string, { title: string; hint: string }> = {
+  S01: { title: "Без ответственного", hint: "Не назначен сотрудник с ролью A" },
+  S02: { title: "Без срока", hint: "Не указана дата завершения" },
+  S03: { title: "Без трудоёмкости", hint: "Только задачи: у этапов часы из дочерних" },
+  S04: { title: "Часы не сходятся", hint: "Сумма часов исполнителей ≠ трудоёмкость" },
+  P01: { title: "Без рабочей ёмкости", hint: "Не задано, сколько часов в неделю доступно" },
+  P02: { title: "Требуется переподтверждение", hint: "Истёк срок действия компетенции" },
+  P03: { title: "Профиль не заполнен", hint: "Компетенции ещё не внесены" },
+  P04: { title: "Перегрузка", hint: "План превышает доступную ёмкость" },
+  F01: { title: "Функция без владельца", hint: "Не назначена роль A" },
+  F02: { title: "Критичная без замены", hint: "Нет замещающего сотрудника" },
+  F03: { title: "Требования не заданы", hint: "Компетенции функции не описаны" },
+  C01: { title: "Календарь неполный", hint: "Заполнен меньше чем на квартал" },
+  C02: { title: "Календарь предварительный", hint: "Переносы выходных не утверждены" },
+};
 
 export interface PeopleRefs {
   competencies: { id: number; code: string | null; name: string; domain_name: string | null }[];
@@ -340,9 +412,13 @@ export const peopleApi = {
     assignees: StepAssignee[];
     weeks: AssigneeWeek[];
     time_entries: TimeEntry[];
+    step: StepInfo;
+    summary: StepSummary;
   }> => req(`/?action=step_assignees&step_id=${stepId}`),
 
-  saveAssignee: (data: Record<string, unknown>): Promise<{ id: number }> =>
+  saveAssignee: (
+    data: Record<string, unknown>,
+  ): Promise<{ id?: number; needs_decision?: boolean; previous_owner?: PrevOwner }> =>
     post("save_assignee", data),
 
   removeAssignee: (id: number) => post("remove_assignee", { id }),
@@ -355,8 +431,14 @@ export const peopleApi = {
 
   deleteTimeEntry: (id: number) => post("delete_time_entry", { id }),
 
-  bulkAssign: (data: Record<string, unknown>): Promise<{ updated: number }> =>
-    post("bulk_assign", data),
+  bulkAssign: (data: Record<string, unknown>): Promise<{
+    updated: number;
+    by_kind: Record<string, number>;
+    remaining_without_owner: number;
+  }> => post("bulk_assign", data),
+
+  diagDetail: (code: string): Promise<StepInfo[]> =>
+    req(`/?action=diag_detail&code=${code}`),
 
   unassignedSteps: (): Promise<UnassignedStep[]> => req("/?action=unassigned_steps"),
 

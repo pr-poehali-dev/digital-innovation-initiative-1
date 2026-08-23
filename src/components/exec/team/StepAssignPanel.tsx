@@ -5,9 +5,13 @@ import { DateField, Modal, SelectField, TextField } from "@/components/exec/Exec
 import { Avatar, LoadBadge, RaciTag } from "./TeamUI";
 import {
   AssigneeWeek,
+  OBJECT_KIND,
   PeopleRefs,
+  PrevOwner,
   RACI_ROLE,
   StepAssignee,
+  StepInfo,
+  StepSummary,
   TimeEntry,
   WorkloadRow,
   fmtWeek,
@@ -37,12 +41,18 @@ export default function StepAssignPanel({
   const [assignees, setAssignees] = useState<StepAssignee[]>([]);
   const [weeks, setWeeks] = useState<AssigneeWeek[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [info, setInfo] = useState<StepInfo | null>(null);
+  const [sum, setSum] = useState<StepSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState<StepAssignee | null>(null);
   const [weekOpen, setWeekOpen] = useState<StepAssignee | null>(null);
   const [preview, setPreview] = useState<Map<number, WorkloadRow[]>>(new Map());
+  const [ownerChange, setOwnerChange] = useState<{
+    prev: PrevOwner;
+    payload: Record<string, unknown>;
+  } | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -52,6 +62,8 @@ export default function StepAssignPanel({
         setAssignees(d.assignees);
         setWeeks(d.weeks);
         setEntries(d.time_entries);
+        setInfo(d.step);
+        setSum(d.summary);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -117,11 +129,84 @@ export default function StepAssignPanel({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
-            <Box label="Исполнителей" value={assignees.length} />
-            <Box label="План, ч" value={planTotal} />
-            <Box label="Факт, ч" value={factTotal} />
+          {info && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] border ${
+                  OBJECT_KIND[info.object_kind].cls
+                }`}
+              >
+                <Icon name={OBJECT_KIND[info.object_kind].icon} size={11} />
+                {info.object_kind_title}
+              </span>
+              {info.parent_title && (
+                <span className="text-[11px] text-slate-500">
+                  в составе «{info.parent_title}»
+                </span>
+              )}
+              {info.plan_title && (
+                <span className="text-[11px] text-slate-500">· {info.plan_title}</span>
+              )}
+              {info.milestone_title && (
+                <span className="text-[11px] text-violet-600">
+                  · веха «{info.milestone_title}»
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Box
+              label="Трудоёмкость"
+              value={
+                info?.object_kind === "stage"
+                  ? `${sum?.children_estimate ?? 0} ч`
+                  : sum?.estimate_hours != null
+                    ? `${sum.estimate_hours} ч`
+                    : "—"
+              }
+              hint={
+                info?.object_kind === "stage"
+                  ? "из дочерних задач"
+                  : info?.object_kind === "control_point"
+                    ? "не требуется"
+                    : undefined
+              }
+            />
+            <Box label="Сумма по людям" value={`${planTotal} ч`} hint="плановые часы" />
+            <Box
+              label="Факт"
+              value={
+                info?.object_kind === "stage"
+                  ? `${sum?.children_fact ?? 0} ч`
+                  : `${factTotal} ч`
+              }
+            />
+            <Box
+              label="Отклонение"
+              value={`${sum && sum.variance > 0 ? "+" : ""}${sum?.variance ?? 0} ч`}
+              hint="план минус факт"
+            />
           </div>
+
+          {sum?.hours_mismatch && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 flex items-start gap-2">
+              <Icon
+                name="TriangleAlert"
+                size={14}
+                className="text-amber-600 mt-0.5 flex-shrink-0"
+              />
+              <div>
+                <p className="text-xs text-amber-800 font-medium">
+                  Часы исполнителей ({sum.assigned_hours} ч) не совпадают с трудоёмкостью
+                  задачи ({sum.estimate_hours} ч)
+                </p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  Значения не исправляются автоматически: проверьте, что верно.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-slate-900">Назначения</p>
@@ -155,8 +240,19 @@ export default function StepAssignPanel({
                         <p className="text-[11px] text-slate-500 mt-0.5">
                           {RACI_ROLE[a.raci_role]?.title}
                           {a.position_title ? ` · ${a.position_title}` : ""}
-                          {myWeeks.length ? ` · ${myWeeks.length} нед. вручную` : ""}
                         </p>
+                        {myWeeks.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {myWeeks.map((w) => (
+                              <span
+                                key={w.id}
+                                className="text-[10px] bg-violet-50 text-violet-700 border border-violet-200 rounded px-1.5 py-0.5 tabular-nums"
+                              >
+                                {fmtWeek(w.week_start).split(" — ")[0]}: {w.hours}ч
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="text-right">
                         <p className="text-[11px] text-slate-500">План / факт</p>
@@ -275,6 +371,26 @@ export default function StepAssignPanel({
             load();
             onChanged?.();
           }}
+          onNeedsDecision={(prev, payload) => {
+            setAddOpen(false);
+            setOwnerChange({ prev, payload });
+          }}
+        />
+      )}
+
+      {ownerChange && (
+        <OwnerChangeDialog
+          prev={ownerChange.prev}
+          onClose={() => setOwnerChange(null)}
+          onDecided={async (decision) => {
+            await peopleApi.saveAssignee({
+              ...ownerChange.payload,
+              prev_owner_action: decision,
+            });
+            setOwnerChange(null);
+            load();
+            onChanged?.();
+          }}
         />
       )}
 
@@ -309,11 +425,20 @@ export default function StepAssignPanel({
   );
 }
 
-function Box({ label, value }: { label: string; value: number | string }) {
+function Box({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number | string;
+  hint?: string;
+}) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
       <p className="text-[11px] text-slate-500">{label}</p>
       <p className="text-lg font-semibold text-slate-900 tabular-nums mt-0.5">{value}</p>
+      {hint && <p className="text-[10px] text-slate-400 mt-0.5">{hint}</p>}
     </div>
   );
 }
@@ -326,6 +451,7 @@ function AddAssigneeForm({
   dueDate,
   onClose,
   onSaved,
+  onNeedsDecision,
 }: {
   stepId: number;
   refs: PeopleRefs | null;
@@ -334,6 +460,7 @@ function AddAssigneeForm({
   dueDate: string | null;
   onClose: () => void;
   onSaved: () => void;
+  onNeedsDecision: (prev: PrevOwner, payload: Record<string, unknown>) => void;
 }) {
   const [f, setF] = useState({ person_id: "", raci_role: "R", plan_hours: "" });
   const [saving, setSaving] = useState(false);
@@ -377,15 +504,21 @@ function AddAssigneeForm({
   const save = async () => {
     setSaving(true);
     setError("");
+    const payload = {
+      step_id: stepId,
+      person_id: f.person_id,
+      raci_role: f.raci_role,
+      plan_hours: f.plan_hours || null,
+      valid_from: startDate,
+      valid_to: dueDate,
+    };
     try {
-      await peopleApi.saveAssignee({
-        step_id: stepId,
-        person_id: f.person_id,
-        raci_role: f.raci_role,
-        plan_hours: f.plan_hours || null,
-        valid_from: startDate,
-        valid_to: dueDate,
-      });
+      const r = await peopleApi.saveAssignee(payload);
+      // Смена ответственного: судьбу прежнего решает руководитель
+      if (r.needs_decision && r.previous_owner) {
+        onNeedsDecision(r.previous_owner, payload);
+        return;
+      }
       onSaved();
     } catch (e) {
       setError((e as Error).message);
@@ -424,7 +557,7 @@ function AddAssigneeForm({
         placeholder="выберите"
         hint={
           hasA && f.raci_role === "A"
-            ? "Прежний ответственный будет заменён: у задачи может быть только один A"
+            ? "У задачи один ответственный. Что делать с прежним — спросим отдельно"
             : undefined
         }
       />
@@ -624,6 +757,110 @@ function WeekSplitForm({
             </span>
           )}
         </span>
+      </div>
+    </Modal>
+  );
+}
+
+/** Смена ответственного: руководитель решает судьбу прежнего */
+function OwnerChangeDialog({
+  prev,
+  onClose,
+  onDecided,
+}: {
+  prev: PrevOwner;
+  onClose: () => void;
+  onDecided: (decision: "keep_r" | "finish" | "remove") => Promise<void>;
+}) {
+  const [choice, setChoice] = useState<"keep_r" | "finish" | "remove">("keep_r");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const options: {
+    id: "keep_r" | "finish" | "remove";
+    title: string;
+    desc: string;
+    icon: string;
+  }[] = [
+    {
+      id: "keep_r",
+      title: "Оставить исполнителем",
+      desc: "Продолжает работать по задаче в роли R, плановые часы сохраняются",
+      icon: "UserCheck",
+    },
+    {
+      id: "finish",
+      title: "Завершить назначение",
+      desc: "Участие закрывается сегодняшней датой, запись остаётся в истории",
+      icon: "CalendarCheck",
+    },
+    {
+      id: "remove",
+      title: "Снять с задачи",
+      desc: "Назначение и недельное распределение убираются",
+      icon: "UserMinus",
+    },
+  ];
+
+  const apply = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await onDecided(choice);
+    } catch (e) {
+      setError((e as Error).message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Смена ответственного"
+      subtitle={`Что делать с прежним ответственным: ${prev.display_name}`}
+      onClose={onClose}
+      onSave={apply}
+      saving={saving}
+      saveLabel="Применить"
+      error={error}
+    >
+      <div className="space-y-2">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => setChoice(o.id)}
+            className={`w-full text-left rounded-lg border p-3 flex items-start gap-3 transition-colors ${
+              choice === o.id
+                ? "border-violet-400 bg-violet-50/60"
+                : "border-slate-200 hover:border-slate-300"
+            }`}
+          >
+            <span
+              className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                choice === o.id ? "border-violet-600" : "border-slate-300"
+              }`}
+            >
+              {choice === o.id && <span className="w-2 h-2 rounded-full bg-violet-600" />}
+            </span>
+            <Icon
+              name={o.icon}
+              size={16}
+              className={choice === o.id ? "text-violet-600 mt-0.5" : "text-slate-400 mt-0.5"}
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-slate-900">{o.title}</span>
+              <span className="block text-[11px] text-slate-500 mt-0.5">{o.desc}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 flex items-start gap-2">
+        <Icon name="ShieldCheck" size={13} className="text-slate-500 mt-0.5 flex-shrink-0" />
+        <p className="text-[11px] text-slate-600">
+          {prev.fact_hours > 0
+            ? `Внесённые ${prev.fact_hours} ч трудозатрат сохранятся при любом выборе: история работы не удаляется.`
+            : "История трудозатрат сохраняется при любом выборе."}
+        </p>
       </div>
     </Modal>
   );

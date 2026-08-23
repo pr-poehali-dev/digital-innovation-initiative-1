@@ -6,6 +6,8 @@ import { ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
 import { Modal } from "@/components/exec/ExecForm";
 import { Toggle, RaciTag } from "@/components/exec/team/TeamUI";
 import WeekGrid from "@/components/exec/team/WeekGrid";
+import DiagDetail from "@/components/exec/team/DiagDetail";
+import { useStickyState } from "@/lib/useStickyState";
 import {
   DiagItem,
   PeopleRefs,
@@ -40,19 +42,19 @@ export default function ExecWorkloadPage() {
   const [diag, setDiag] = useState<DiagItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [weeks, setWeeks] = useState(8);
-  const [fPerson, setFPerson] = useState("");
-  const [fFunction, setFFunction] = useState("");
-  const [fInitiative, setFInitiative] = useState("");
-  const [onlyOverload, setOnlyOverload] = useState(false);
-  const [showFree, setShowFree] = useState(true);
+  const [weeks, setWeeks] = useStickyState("wl_weeks", 8);
+  const [fPerson, setFPerson] = useStickyState("wl_person", "");
+  const [fFunction, setFFunction] = useStickyState("wl_function", "");
+  const [fInitiative, setFInitiative] = useStickyState("wl_initiative", "");
+  const [onlyOverload, setOnlyOverload] = useStickyState("wl_overload", false);
+  const [showFree, setShowFree] = useStickyState("wl_free", true);
   const [detail, setDetail] = useState<{
     personId: number;
     week: string;
     name: string;
     rows: WeekDetailRow[];
   } | null>(null);
-  const [drill, setDrill] = useState<{ title: string; items: DiagItem[] } | null>(null);
+  const [drill, setDrill] = useState<{ code: string; items?: DiagItem[] } | null>(null);
 
   const reload = () => {
     setLoading(true);
@@ -220,6 +222,7 @@ export default function ExecWorkloadPage() {
       noCapacity: by("P01"),
       expiredComp: by("P02"),
       noComp: by("P03"),
+      hoursMismatch: by("S04"),
       overload: by("P04"),
       funcNoOwner: by("F01"),
       funcNoBackup: by("F02"),
@@ -552,26 +555,28 @@ export default function ExecWorkloadPage() {
               <ChartCard title="Качество данных" icon="ShieldAlert">
                 <div className="grid grid-cols-2 gap-2">
                   <DiagTile
-                    label="Задач без ответственного"
+                    label="Без ответственного"
                     n={diagCounts.noResponsible.length}
                     tone="danger"
-                    onClick={() => nav("/cabinet/exec/assign")}
+                    onClick={() => setDrill({ code: "S01" })}
                   />
                   <DiagTile
-                    label="Задач без срока"
+                    label="Без срока"
                     n={diagCounts.noDue.length}
                     tone="warning"
-                    onClick={() =>
-                      setDrill({ title: "Задачи без срока", items: diagCounts.noDue })
-                    }
+                    onClick={() => setDrill({ code: "S02" })}
                   />
                   <DiagTile
                     label="Задач без оценки"
                     n={diagCounts.noEstimate.length}
                     tone="warning"
-                    onClick={() =>
-                      setDrill({ title: "Задачи без трудоёмкости", items: diagCounts.noEstimate })
-                    }
+                    onClick={() => setDrill({ code: "S03" })}
+                  />
+                  <DiagTile
+                    label="Часы не сходятся"
+                    n={diagCounts.hoursMismatch.length}
+                    tone="warning"
+                    onClick={() => setDrill({ code: "S04" })}
                   />
                   <DiagTile
                     label="Перегруженных"
@@ -583,48 +588,31 @@ export default function ExecWorkloadPage() {
                     label="Без ёмкости"
                     n={diagCounts.noCapacity.length}
                     tone="warning"
-                    onClick={() =>
-                      setDrill({ title: "Сотрудники без ёмкости", items: diagCounts.noCapacity })
-                    }
+                    onClick={() => setDrill({ code: "P01", items: diagCounts.noCapacity })}
                   />
                   <DiagTile
-                    label="Без компетенций"
+                    label="Профиль не заполнен"
                     n={diagCounts.noComp.length}
-                    tone="warning"
-                    onClick={() =>
-                      setDrill({ title: "Сотрудники без компетенций", items: diagCounts.noComp })
-                    }
+                    tone="info"
+                    onClick={() => setDrill({ code: "P03", items: diagCounts.noComp })}
                   />
                   <DiagTile
-                    label="Истёк срок навыка"
+                    label="Переподтвердить навык"
                     n={diagCounts.expiredComp.length}
                     tone="warning"
-                    onClick={() =>
-                      setDrill({
-                        title: "Истёк срок подтверждения компетенций",
-                        items: diagCounts.expiredComp,
-                      })
-                    }
+                    onClick={() => setDrill({ code: "P02", items: diagCounts.expiredComp })}
                   />
                   <DiagTile
                     label="Функций без владельца"
                     n={diagCounts.funcNoOwner.length}
                     tone="danger"
-                    onClick={() => nav("/cabinet/exec/center")}
+                    onClick={() => setDrill({ code: "F01", items: diagCounts.funcNoOwner })}
                   />
                   <DiagTile
                     label="Критичных без замены"
                     n={diagCounts.funcNoBackup.length}
                     tone="danger"
-                    onClick={() => nav("/cabinet/exec/center")}
-                  />
-                  <DiagTile
-                    label="Календарь"
-                    n={diagCounts.calendar.length}
-                    tone="warning"
-                    onClick={() =>
-                      setDrill({ title: "Производственный календарь", items: diagCounts.calendar })
-                    }
+                    onClick={() => setDrill({ code: "F02", items: diagCounts.funcNoBackup })}
                   />
                 </div>
               </ChartCard>
@@ -682,39 +670,7 @@ export default function ExecWorkloadPage() {
         )}
 
         {drill && (
-          <Modal
-            title={drill.title}
-            subtitle={`Найдено: ${drill.items.length}`}
-            onClose={() => setDrill(null)}
-            onSave={() => setDrill(null)}
-            saveLabel="Закрыть"
-            wide
-          >
-            {!drill.items.length ? (
-              <p className="py-6 text-center text-sm text-slate-400">Проблем не найдено</p>
-            ) : (
-              <div className="space-y-1.5 max-h-[55vh] overflow-y-auto">
-                {drill.items.map((d, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      if (d.entity === "person" && d.entity_id) {
-                        nav(`/cabinet/exec/team/${d.entity_id}`);
-                      } else if (d.entity === "step") {
-                        nav("/cabinet/exec/planner");
-                      } else if (d.entity === "function") {
-                        nav("/cabinet/exec/center");
-                      }
-                    }}
-                    className="w-full text-left rounded-lg border border-slate-200 p-2.5 hover:border-violet-300 transition-colors"
-                  >
-                    <p className="text-sm text-slate-900">{d.title}</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{d.message}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-          </Modal>
+          <DiagDetail code={drill.code} items={drill.items} onClose={() => setDrill(null)} />
         )}
       </div>
     </Layout>
@@ -749,7 +705,7 @@ function DiagTile({
 }: {
   label: string;
   n: number;
-  tone: "danger" | "warning";
+  tone: "danger" | "warning" | "info";
   onClick: () => void;
 }) {
   const ok = n === 0;
@@ -757,7 +713,9 @@ function DiagTile({
     ? "border-slate-200 bg-slate-50 text-slate-400"
     : tone === "danger"
       ? "border-red-200 bg-red-50 text-red-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
+      : tone === "info"
+        ? "border-slate-200 bg-slate-50 text-slate-600"
+        : "border-amber-200 bg-amber-50 text-amber-700";
   return (
     <button
       onClick={onClick}
