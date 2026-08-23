@@ -1,13 +1,130 @@
 {
   "tests": [
-    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 },
-    { "name": "Unauthorized list", "method": "GET", "path": "/?action=list", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized center detail", "method": "GET", "path": "/?action=center&center_id=1", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized refs", "method": "GET", "path": "/?action=refs", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_center blocked", "method": "POST", "path": "/?action=save_center", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_goal blocked", "method": "POST", "path": "/?action=save_goal", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_function blocked", "method": "POST", "path": "/?action=save_function", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized save_role blocked", "method": "POST", "path": "/?action=save_role", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
-    { "name": "Unauthorized delete_function blocked", "method": "POST", "path": "/?action=delete_function", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" }
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized list",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized center detail",
+      "method": "GET",
+      "path": "/?action=center&center_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized refs",
+      "method": "GET",
+      "path": "/?action=refs",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_center blocked",
+      "method": "POST",
+      "path": "/?action=save_center",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_goal blocked",
+      "method": "POST",
+      "path": "/?action=save_goal",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_function blocked",
+      "method": "POST",
+      "path": "/?action=save_function",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_role blocked",
+      "method": "POST",
+      "path": "/?action=save_role",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized delete_function blocked",
+      "method": "POST",
+      "path": "/?action=delete_function",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized function_detail",
+      "method": "GET",
+      "path": "/?action=function_detail&function_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_raci blocked",
+      "method": "POST",
+      "path": "/?action=save_raci",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized link_function_initiative blocked",
+      "method": "POST",
+      "path": "/?action=link_function_initiative",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized link_dept_function blocked",
+      "method": "POST",
+      "path": "/?action=link_dept_function",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    }
   ]
 }

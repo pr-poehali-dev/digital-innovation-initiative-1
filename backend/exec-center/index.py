@@ -108,9 +108,22 @@ GOAL_FIELDS = [
 ]
 FUNC_FIELDS = [
     "center_id", "code", "title", "description", "purpose", "result_description",
-    "goal_id", "owner_person_id", "backup_person_id", "criticality",
+    "goal_id", "criticality",
     "regularity", "hours_per_month", "fte_estimate", "status", "sort_order", "note",
 ]
+
+# Источник истины перенесён: эти поля больше не пишутся
+DEPRECATED_WRITE = {
+    "owner_person_id": "владелец функции задаётся через RACI (роль A)",
+    "backup_person_id": "замещающий задаётся через RACI (признак замещения)",
+    "responsible_person_id": "ответственный задаётся через назначения на шаг (роль A)",
+    "fact_hours": "фактические часы вносятся через учёт времени",
+}
+
+
+def guard_deprecated(d: dict):
+    bad = [f"{k} — {v}" for k, v in DEPRECATED_WRITE.items() if k in d]
+    return "Эти поля больше не редактируются: " + "; ".join(bad) if bad else None
 ROLE_FIELDS = [
     "center_id", "title", "purpose", "duties", "requirements", "headcount",
     "hours_per_week", "grade", "person_id", "status", "justification", "sort_order",
@@ -120,6 +133,8 @@ INT_KEYS = {
     "head_person_id", "planned_headcount", "initiative_id", "plan_id",
     "center_id", "parent_goal_id", "owner_person_id", "progress_pct",
     "sort_order", "goal_id", "backup_person_id", "person_id",
+    "competency_id", "required_level", "function_id", "dept_function_id",
+    "step_id", "share_pct",
 }
 NUM_KEYS = {"hours_per_month", "fte_estimate", "headcount", "hours_per_week"}
 
@@ -203,20 +218,37 @@ def center_detail(cur, center_id: int):
     """, (center_id,))
     center["goals"] = rows(cur)
 
-    # По каждой функции считаем связанные шаги плана
+    # По каждой функции считаем связанные шаги плана.
+    # Владелец и замещающий читаются ТОЛЬКО из exec_function_raci.
     cur.execute(f"""
-        SELECT f.*, p.display_name AS owner_name, b.display_name AS backup_name,
+        SELECT f.*,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_function_raci r
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = r.person_id
+                 WHERE r.function_id = f.id AND r.raci_role = 'A'
+                   AND r.valid_to IS NULL AND r.is_backup = false LIMIT 1) AS owner_name,
+               (SELECT r.person_id FROM {SCHEMA}.exec_function_raci r
+                 WHERE r.function_id = f.id AND r.raci_role = 'A'
+                   AND r.valid_to IS NULL AND r.is_backup = false LIMIT 1) AS owner_id,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_function_raci r
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = r.person_id
+                 WHERE r.function_id = f.id AND r.is_backup = true
+                   AND r.valid_to IS NULL LIMIT 1) AS backup_name,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_function_competency fc
+                 WHERE fc.function_id = f.id) AS competency_count,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_function_initiative fi
+                 WHERE fi.function_id = f.id) AS initiative_count,
                g.title AS goal_title,
-               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step s
-                WHERE s.center_function_id = f.id AND s.status <> 'cancelled') AS steps_total,
-               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step s
-                WHERE s.center_function_id = f.id AND s.status = 'done') AS steps_done,
-               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step s
-                WHERE s.center_function_id = f.id AND s.status NOT IN ('done','cancelled')
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step_function sf
+                  JOIN {SCHEMA}.exec_plan_step s ON s.id = sf.step_id
+                WHERE sf.function_id = f.id AND s.status <> 'cancelled') AS steps_total,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step_function sf
+                  JOIN {SCHEMA}.exec_plan_step s ON s.id = sf.step_id
+                WHERE sf.function_id = f.id AND s.status = 'done') AS steps_done,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step_function sf
+                  JOIN {SCHEMA}.exec_plan_step s ON s.id = sf.step_id
+                WHERE sf.function_id = f.id AND s.status NOT IN ('done','cancelled')
                   AND s.due_date < CURRENT_DATE) AS steps_overdue
         FROM {SCHEMA}.exec_center_function f
-        LEFT JOIN {SCHEMA}.exec_person p ON p.id = f.owner_person_id
-        LEFT JOIN {SCHEMA}.exec_person b ON b.id = f.backup_person_id
         LEFT JOIN {SCHEMA}.exec_center_goal g ON g.id = f.goal_id
         WHERE f.center_id = %s
         ORDER BY f.sort_order, f.id
@@ -244,12 +276,18 @@ def center_stats(cur, center_id: int):
     cur.execute(f"""
         SELECT
             COUNT(*) AS functions,
-            COUNT(*) FILTER (WHERE owner_person_id IS NULL) AS functions_no_owner,
+            COUNT(*) FILTER (WHERE NOT EXISTS (
+                SELECT 1 FROM {SCHEMA}.exec_function_raci r
+                WHERE r.function_id = f.id AND r.raci_role = 'A'
+                  AND r.valid_to IS NULL AND r.is_backup = false)) AS functions_no_owner,
             COUNT(*) FILTER (WHERE criticality = 'high') AS critical_functions,
-            COUNT(*) FILTER (WHERE criticality = 'high' AND backup_person_id IS NULL) AS critical_no_backup,
+            COUNT(*) FILTER (WHERE criticality = 'high' AND NOT EXISTS (
+                SELECT 1 FROM {SCHEMA}.exec_function_raci r
+                WHERE r.function_id = f.id AND r.is_backup = true
+                  AND r.valid_to IS NULL)) AS critical_no_backup,
             ROUND(COALESCE(SUM(hours_per_month), 0), 1) AS hours_per_month,
             ROUND(COALESCE(SUM(fte_estimate), 0), 2) AS fte_total
-        FROM {SCHEMA}.exec_center_function WHERE center_id = %s
+        FROM {SCHEMA}.exec_center_function f WHERE center_id = %s
     """, (center_id,))
     fn = rows(cur)
     cur.execute(f"""
@@ -355,6 +393,9 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": {"id": new_id}})
 
         if action == "save_function":
+            dep = guard_deprecated(body)
+            if dep:
+                return cors({"ok": False, "error": {"message": dep}}, 400)
             if not as_int(body.get("id")) and not as_int(body.get("center_id")):
                 return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
             new_id, err = upsert(cur, "exec_center_function", FUNC_FIELDS, body)
@@ -386,17 +427,188 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
 
+        if action == "function_detail":
+            fid = as_int(qs.get("function_id")) or as_int(body.get("function_id"))
+            if not fid:
+                return cors({"ok": False, "error": {"message": "Не указана функция"}}, 400)
+            cur.execute(f"""
+                SELECT r.*, p.display_name AS person_name, p.position_title
+                FROM {SCHEMA}.exec_function_raci r
+                JOIN {SCHEMA}.exec_person p ON p.id = r.person_id
+                WHERE r.function_id = %s
+                ORDER BY r.raci_role, r.is_backup, p.display_name
+            """, (fid,))
+            raci = rows(cur)
+            cur.execute(f"""
+                SELECT fc.*, c.name AS competency_name, c.code AS competency_code
+                FROM {SCHEMA}.exec_function_competency fc
+                JOIN {SCHEMA}.professional_competencies c ON c.id = fc.competency_id
+                WHERE fc.function_id = %s ORDER BY fc.is_critical DESC, c.name
+            """, (fid,))
+            comps = rows(cur)
+            cur.execute(f"""
+                SELECT fi.*, i.title AS initiative_title
+                FROM {SCHEMA}.exec_function_initiative fi
+                JOIN {SCHEMA}.exec_initiative i ON i.id = fi.initiative_id
+                WHERE fi.function_id = %s ORDER BY i.title
+            """, (fid,))
+            inits = rows(cur)
+            cur.execute(f"""
+                SELECT df.center_function_id, df.dept_function_id, d.title AS dept_function_title
+                FROM {SCHEMA}.exec_center_function_dept_function df
+                JOIN {SCHEMA}.dept_functions d ON d.id = df.dept_function_id
+                WHERE df.center_function_id = %s
+            """, (fid,))
+            depts = rows(cur)
+            cur.execute(f"""
+                SELECT s.id, s.title, s.status, s.due_date, s.estimate_hours, sf.is_primary
+                FROM {SCHEMA}.exec_plan_step_function sf
+                JOIN {SCHEMA}.exec_plan_step s ON s.id = sf.step_id
+                WHERE sf.function_id = %s AND s.status <> 'cancelled'
+                ORDER BY s.due_date NULLS LAST
+            """, (fid,))
+            steps = rows(cur)
+            return cors({"ok": True, "data": {
+                "raci": raci, "competencies": comps, "initiatives": inits,
+                "dept_functions": depts, "steps": steps,
+            }})
+
+        if action == "save_raci":
+            fid = as_int(body.get("function_id"))
+            pid = as_int(body.get("person_id"))
+            role = (nz(body.get("raci_role")) or "R").upper()[:1]
+            if not fid or not pid or role not in ("R", "A", "C", "I"):
+                return cors({"ok": False, "error": {"message": "Укажите функцию, человека и роль"}}, 400)
+            is_backup = bool(body.get("is_backup"))
+            # Владелец единственный: прежнего закрываем датой
+            if role == "A" and not is_backup:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_function_raci SET valid_to = CURRENT_DATE "
+                    f"WHERE function_id = %s AND raci_role = 'A' AND valid_to IS NULL "
+                    f"AND is_backup = false AND person_id <> %s",
+                    (fid, pid),
+                )
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_function_raci
+                    (function_id, person_id, raci_role, is_backup, valid_from, note)
+                VALUES (%s, %s, %s, %s, COALESCE(%s::date, CURRENT_DATE), %s)
+                ON CONFLICT (function_id, person_id, raci_role, valid_from) DO UPDATE
+                SET is_backup = EXCLUDED.is_backup, note = EXCLUDED.note, valid_to = NULL
+                RETURNING id
+            """, (fid, pid, role, is_backup, nz(body.get("valid_from")), nz(body.get("note"))))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "close_raci":
+            rid = as_int(body.get("id"))
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не указано назначение"}}, 400)
+            cur.execute(
+                f"UPDATE {SCHEMA}.exec_function_raci SET valid_to = COALESCE(%s::date, CURRENT_DATE) "
+                f"WHERE id = %s", (nz(body.get("valid_to")), rid),
+            )
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "save_function_competency":
+            fid = as_int(body.get("function_id"))
+            cid = as_int(body.get("competency_id"))
+            if not fid or not cid:
+                return cors({"ok": False, "error": {"message": "Укажите функцию и компетенцию"}}, 400)
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_function_competency
+                    (function_id, competency_id, required_level, is_critical, note)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (function_id, competency_id) DO UPDATE
+                SET required_level = EXCLUDED.required_level,
+                    is_critical = EXCLUDED.is_critical, note = EXCLUDED.note
+                RETURNING id
+            """, (fid, cid, as_int(body.get("required_level")) or 3,
+                  bool(body.get("is_critical")), nz(body.get("note"))))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "link_function_initiative":
+            fid = as_int(body.get("function_id"))
+            iid = as_int(body.get("initiative_id"))
+            if not fid or not iid:
+                return cors({"ok": False, "error": {"message": "Укажите функцию и инициативу"}}, 400)
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_function_initiative
+                    (function_id, initiative_id, role_in_initiative, valid_from, valid_to, note)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (function_id, initiative_id, role_in_initiative) DO UPDATE
+                SET note = EXCLUDED.note RETURNING id
+            """, (fid, iid, nz(body.get("role_in_initiative")) or "supports",
+                  nz(body.get("valid_from")), nz(body.get("valid_to")), nz(body.get("note"))))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "link_dept_function":
+            fid = as_int(body.get("function_id"))
+            did = as_int(body.get("dept_function_id"))
+            if not fid or not did:
+                return cors({"ok": False, "error": {"message": "Укажите обе функции"}}, 400)
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_center_function_dept_function
+                    (center_function_id, dept_function_id, coverage_note)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (center_function_id, dept_function_id) DO UPDATE
+                SET coverage_note = EXCLUDED.coverage_note
+            """, (fid, did, nz(body.get("coverage_note"))))
+            conn.commit()
+            return cors({"ok": True, "data": {"function_id": fid}})
+
+        if action == "unlink":
+            kind = nz(body.get("kind"))
+            fid = as_int(body.get("function_id"))
+            if kind == "initiative":
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.exec_function_initiative WHERE id = %s",
+                    (as_int(body.get("id")),))
+            elif kind == "competency":
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.exec_function_competency WHERE id = %s",
+                    (as_int(body.get("id")),))
+            elif kind == "dept_function":
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.exec_center_function_dept_function "
+                    f"WHERE center_function_id = %s AND dept_function_id = %s",
+                    (fid, as_int(body.get("dept_function_id"))))
+            elif kind == "step":
+                cur.execute(
+                    f"DELETE FROM {SCHEMA}.exec_plan_step_function "
+                    f"WHERE function_id = %s AND step_id = %s",
+                    (fid, as_int(body.get("step_id"))))
+            else:
+                return cors({"ok": False, "error": {"message": "Не указан тип связи"}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"ok": True}})
+
         if action == "link_steps":
             # Привязать шаги плана к функции центра
             fid = as_int(body.get("function_id"))
             ids = [as_int(x) for x in (body.get("step_ids") or []) if as_int(x)]
             if not ids:
                 return cors({"ok": False, "error": {"message": "Не выбраны шаги"}}, 400)
-            cur.execute(
-                f"UPDATE {SCHEMA}.exec_plan_step SET center_function_id = %s, updated_at = now() "
-                f"WHERE id = ANY(%s)",
-                (fid, ids),
-            )
+            if not fid:
+                return cors({"ok": False, "error": {"message": "Не указана функция"}}, 400)
+            primary = bool(body.get("is_primary"))
+            if primary:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_plan_step_function SET is_primary = false "
+                    f"WHERE step_id = ANY(%s)", (ids,),
+                )
+            for sid in ids:
+                cur.execute(
+                    f"INSERT INTO {SCHEMA}.exec_plan_step_function (step_id, function_id, is_primary) "
+                    f"VALUES (%s, %s, %s) ON CONFLICT (step_id, function_id) "
+                    f"DO UPDATE SET is_primary = EXCLUDED.is_primary",
+                    (sid, fid, primary),
+                )
             conn.commit()
             return cors({"ok": True, "data": {"updated": len(ids)}})
 
@@ -409,6 +621,36 @@ def handler(event: dict, context) -> dict:
             rid = as_int(body.get("id")) or as_int(qs.get("id"))
             if not rid:
                 return cors({"ok": False, "error": {"message": "Не указана запись"}}, 400)
+            # Сначала снимаем связи, затем саму запись
+            if action == "delete_function":
+                for t, col in (
+                    ("exec_function_raci", "function_id"),
+                    ("exec_function_competency", "function_id"),
+                    ("exec_function_initiative", "function_id"),
+                    ("exec_plan_step_function", "function_id"),
+                    ("exec_center_role_function", "function_id"),
+                    ("exec_center_function_dept_function", "center_function_id"),
+                ):
+                    cur.execute(f"DELETE FROM {SCHEMA}.{t} WHERE {col} = %s", (rid,))
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_plan_step SET center_function_id = NULL "
+                    f"WHERE center_function_id = %s", (rid,))
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_risk SET center_function_id = NULL "
+                    f"WHERE center_function_id = %s", (rid,))
+            elif action == "delete_goal":
+                cur.execute(f"DELETE FROM {SCHEMA}.exec_center_kpi_value WHERE goal_id = %s", (rid,))
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_center_function SET goal_id = NULL WHERE goal_id = %s",
+                    (rid,))
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_center_goal SET parent_goal_id = NULL "
+                    f"WHERE parent_goal_id = %s", (rid,))
+            elif action == "delete_role":
+                cur.execute(f"DELETE FROM {SCHEMA}.exec_center_role_function WHERE role_id = %s", (rid,))
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_role_assignment SET center_role_id = NULL "
+                    f"WHERE center_role_id = %s", (rid,))
             cur.execute(f"DELETE FROM {SCHEMA}.{table} WHERE id = %s", (rid,))
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
