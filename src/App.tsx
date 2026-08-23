@@ -38,6 +38,7 @@ import ExecDecisionsPage from "./pages/cabinet/exec/ExecDecisionsPage";
 import ExecAuthorityPage from "./pages/cabinet/exec/ExecAuthorityPage";
 import ExecDiagnosticsPage from "./pages/cabinet/exec/ExecDiagnosticsPage";
 import ExecPersonsPage from "./pages/cabinet/exec/ExecPersonsPage";
+import ExecCenterPage from "./pages/cabinet/exec/ExecCenterPage";
 import ExecHistoryPage from "./pages/cabinet/exec/ExecHistoryPage";
 import ExecControlPage from "./pages/cabinet/exec/ExecControlPage";
 import ExecPlannerPage from "./pages/cabinet/exec/ExecPlannerPage";
@@ -182,6 +183,7 @@ const App = () => (
               <Route path="/cabinet/exec/authority" element={<ExecRoute><ExecAuthorityPage /></ExecRoute>} />
               <Route path="/cabinet/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/center" element={<ExecRoute><ExecCenterPage /></ExecRoute>} />
               <Route path="/cabinet/exec/history" element={<ExecRoute><ExecHistoryPage /></ExecRoute>} />
               <Route path="/cabinet/headquarters" element={<Navigate to="/cabinet" replace />} />
               <Route path="/welcome" element={<ProtectedRoute><WelcomePage /></ProtectedRoute>} />
