@@ -200,9 +200,21 @@ export default function InitiativeTreeMap({
       }
     }
 
+    // Полотно должно вместить самую длинную подпись справа от узла
+    const labelReach = Math.max(
+      0,
+      ...out.map((p) =>
+        p.kind === "stage" ? 0 : p.x + 16 + Math.min(p.title.length, 46) * 5.7,
+      ),
+    );
+
     return {
       placed: out,
-      width: byDate ? LEFT + TIME_W + 260 : Math.max(LEFT + COL + 320, 760),
+      width: Math.max(
+        byDate ? LEFT + TIME_W + 60 : LEFT + COL + 60,
+        labelReach + 24,
+        760,
+      ),
       height: h,
       trunkX: LEFT - 52,
       trunkTop: TOP,
@@ -446,10 +458,7 @@ export default function InitiativeTreeMap({
                   paintOrder="stroke"
                   strokeLinejoin="round"
                 >
-                  {(() => {
-                    const lim = byDate && !isStage ? 22 : 34;
-                    return p.title.length > lim ? p.title.slice(0, lim - 1) + "…" : p.title;
-                  })()}
+                  {p.title.length > 46 ? p.title.slice(0, 45) + "…" : p.title}
                 </text>
                 {isStage ? (
                   <text

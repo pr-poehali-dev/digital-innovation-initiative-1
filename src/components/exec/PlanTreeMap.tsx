@@ -93,6 +93,8 @@ export default function PlanTreeMap({
   const TOP = 34;
   const ROW = 40;
   const TIME_W = 1180;      // ширина полотна в режиме дат
+  const LABEL_MAX = 46;     // максимум символов в подписи
+  const CHAR_W = 5.7;       // приблизительная ширина символа
 
   const {
     placed, width, height, trunkX, trunkTop, trunkBottom, ticks, todayX,
@@ -185,11 +187,23 @@ export default function PlanTreeMap({
       }
     }
 
+    // Полотно должно вместить самую длинную подпись справа от узла
+    const labelReach = Math.max(
+      0,
+      ...out.map((p) => {
+        const t = p.node.step.title;
+        const len = Math.min(t.length, LABEL_MAX);
+        return p.node.children.length ? 0 : p.x + 16 + len * CHAR_W;
+      }),
+    );
+
     return {
       placed: out,
-      width: byDate
-        ? LEFT + TIME_W + 260
-        : Math.max(LEFT + maxDepth * COL + 60, 760),
+      width: Math.max(
+        byDate ? LEFT + TIME_W + 60 : LEFT + maxDepth * COL + 60,
+        labelReach + 24,
+        760,
+      ),
       height: h,
       trunkX: trunkXPos,
       trunkTop: trunkTopY,
@@ -444,10 +458,7 @@ export default function PlanTreeMap({
                   paintOrder="stroke"
                   strokeLinejoin="round"
                 >
-                  {(() => {
-                    const lim = byDate ? 20 : 30;
-                    return s.title.length > lim ? s.title.slice(0, lim - 1) + "…" : s.title;
-                  })()}
+                  {s.title.length > LABEL_MAX ? s.title.slice(0, LABEL_MAX - 1) + "…" : s.title}
                 </text>
                 {s.due_date && !byDate && (
                   <text

@@ -101,11 +101,14 @@ export default function PlanTimeline({
   const planEnd = parse(plan.due_date);
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[760px]">
+    <div
+      className="overflow-x-auto overflow-y-hidden overscroll-x-contain"
+      style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-x pan-y" }}
+    >
+      <div className="min-w-[620px] sm:min-w-[760px]">
         {/* Шапка со шкалой */}
         <div className="flex border-b border-slate-200 pb-1.5 mb-1.5">
-          <div className="w-[240px] flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="w-[150px] sm:w-[240px] flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
             Шаг
           </div>
           <div className="flex-1 relative h-4">
@@ -124,7 +127,7 @@ export default function PlanTimeline({
         {/* Строки */}
         <div className="relative">
           {/* Вертикальные линии месяцев */}
-          <div className="absolute inset-0 left-[240px] pointer-events-none">
+          <div className="absolute inset-0 left-[150px] sm:left-[240px] pointer-events-none">
             {ticks.map((t) => (
               <div
                 key={t.pct}
@@ -171,7 +174,7 @@ export default function PlanTimeline({
                 className="flex items-center h-9 group hover:bg-slate-50 rounded transition-colors"
               >
                 <div
-                  className="w-[240px] flex-shrink-0 pr-3 flex items-center gap-1.5 min-w-0"
+                  className="w-[150px] sm:w-[240px] flex-shrink-0 pr-3 flex items-center gap-1.5 min-w-0"
                   style={{ paddingLeft: `${depth * 14}px` }}
                 >
                   {step.is_milestone ? (

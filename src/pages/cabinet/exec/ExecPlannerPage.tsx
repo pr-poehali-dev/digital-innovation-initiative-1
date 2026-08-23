@@ -556,7 +556,10 @@ export default function ExecPlannerPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto no-scrollbar">
+        <div
+          className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto overflow-y-hidden no-scrollbar overscroll-x-contain"
+          style={{ touchAction: "pan-x" }}
+        >
           {[
             { id: "tree", label: "План по шагам", icon: "ListTree" },
             { id: "map", label: "Дерево плана", icon: "Network" },
