@@ -1,0 +1,10 @@
+{
+  "tests": [
+    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 },
+    { "name": "Unauthorized deck", "method": "GET", "path": "/?action=deck", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
+    { "name": "Unauthorized save_slide blocked", "method": "POST", "path": "/?action=save_slide", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
+    { "name": "Unauthorized reorder_slides blocked", "method": "POST", "path": "/?action=reorder_slides", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
+    { "name": "Unauthorized save_expert_value blocked", "method": "POST", "path": "/?action=save_expert_value", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" },
+    { "name": "Unauthorized delete_expert_value blocked", "method": "POST", "path": "/?action=delete_expert_value", "expectedStatus": 401, "expectedBody": { "ok": false }, "bodyMatcher": "partial" }
+  ]
+}
