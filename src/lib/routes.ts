@@ -66,7 +66,8 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: "Crown",
     items: [
       { id: "chief.exec", label: "Мой фокус", icon: "Crosshair", href: "/cabinet/exec", exact: true, active: true },
-      { id: "chief.center", label: "Центр цифровизации и развития технологий ВК", icon: "Building2", href: "/cabinet/exec/center", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.dashboard", label: "Сводка Центра", icon: "LayoutDashboard", href: "/cabinet/exec/dashboard", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.center", label: "Центр цифровизации и развития технологий ВК", icon: "Building2", href: "/cabinet/exec/center", active: true },
       { id: "chief.planner", label: "Планировщик", icon: "GanttChartSquare", href: "/cabinet/exec/planner", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.team", label: "Команда", icon: "UsersRound", href: "/cabinet/exec/team", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.workload", label: "Загрузка команды", icon: "CalendarRange", href: "/cabinet/exec/workload", active: true, badge: { text: "Новое", tone: "info" } },

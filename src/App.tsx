@@ -47,6 +47,7 @@ import ExecTeamPage from "./pages/cabinet/exec/ExecTeamPage";
 import ExecPersonDetailPage from "./pages/cabinet/exec/ExecPersonDetailPage";
 import ExecWorkloadPage from "./pages/cabinet/exec/ExecWorkloadPage";
 import ExecAssignPage from "./pages/cabinet/exec/ExecAssignPage";
+import ExecCenterDashboardPage from "./pages/cabinet/exec/ExecCenterDashboardPage";
 import ExecRoute from "./components/exec/ExecRoute";
 import Index from "./pages/Index";
 import WelcomePage from "./pages/WelcomePage";
@@ -188,6 +189,7 @@ const App = () => (
               <Route path="/cabinet/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/center" element={<ExecRoute><ExecCenterPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/dashboard" element={<ExecRoute><ExecCenterDashboardPage /></ExecRoute>} />
               <Route path="/cabinet/exec/team" element={<ExecRoute><ExecTeamPage /></ExecRoute>} />
               <Route path="/cabinet/exec/team/:id" element={<ExecRoute><ExecPersonDetailPage /></ExecRoute>} />
               <Route path="/cabinet/exec/workload" element={<ExecRoute><ExecWorkloadPage /></ExecRoute>} />

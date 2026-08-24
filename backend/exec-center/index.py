@@ -314,6 +314,303 @@ def center_stats(cur, center_id: int):
     return out
 
 
+def dashboard(cur, center_id: int):
+    """Сводная управленческая картина Центра: от целей до фактических часов."""
+    cur.execute(f"""
+        SELECT c.*, p.display_name AS head_name,
+               i.title AS initiative_title, pl.title AS plan_title
+        FROM {SCHEMA}.exec_center c
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = c.head_person_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = c.initiative_id
+        LEFT JOIN {SCHEMA}.exec_plan pl ON pl.id = c.plan_id
+        WHERE c.id = %s
+    """, (center_id,))
+    got = rows(cur)
+    if not got:
+        return {"center": None}
+    center = got[0]
+
+    # Цели и показатели
+    cur.execute(f"""
+        SELECT g.*, p.display_name AS owner_name,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_center_function f
+                 WHERE f.goal_id = g.id) AS function_count,
+               (SELECT v.value FROM {SCHEMA}.exec_center_kpi_value v
+                 WHERE v.goal_id = g.id ORDER BY v.period_date DESC LIMIT 1) AS last_value,
+               (SELECT v.period_date FROM {SCHEMA}.exec_center_kpi_value v
+                 WHERE v.goal_id = g.id ORDER BY v.period_date DESC LIMIT 1) AS last_period
+        FROM {SCHEMA}.exec_center_goal g
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = g.owner_person_id
+        WHERE g.center_id = %s
+        ORDER BY g.kind DESC, g.sort_order, g.id
+    """, (center_id,))
+    goals = rows(cur)
+
+    # Функции: владелец и замещающий только из RACI, покрытие компетенциями
+    cur.execute(f"""
+        SELECT f.id, f.code, f.title, f.criticality, f.status, f.goal_id,
+               f.hours_per_month, f.fte_estimate, f.sort_order,
+               g.title AS goal_title,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_function_raci r
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = r.person_id
+                 WHERE r.function_id = f.id AND r.raci_role = 'A'
+                   AND r.valid_to IS NULL AND r.is_backup = false LIMIT 1) AS owner_name,
+               (SELECT r.person_id FROM {SCHEMA}.exec_function_raci r
+                 WHERE r.function_id = f.id AND r.raci_role = 'A'
+                   AND r.valid_to IS NULL AND r.is_backup = false LIMIT 1) AS owner_id,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_function_raci r
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = r.person_id
+                 WHERE r.function_id = f.id AND r.is_backup = true
+                   AND r.valid_to IS NULL LIMIT 1) AS backup_name,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_function_competency fc
+                 WHERE fc.function_id = f.id) AS req_competencies,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_function_competency fc
+                 WHERE fc.function_id = f.id AND fc.is_critical) AS req_critical,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_function_initiative fi
+                 WHERE fi.function_id = f.id) AS initiative_count,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step_function sf
+                  JOIN {SCHEMA}.exec_plan_step s ON s.id = sf.step_id
+                 WHERE sf.function_id = f.id AND s.status NOT IN ('done','cancelled')) AS open_steps
+        FROM {SCHEMA}.exec_center_function f
+        LEFT JOIN {SCHEMA}.exec_center_goal g ON g.id = f.goal_id
+        WHERE f.center_id = %s
+        ORDER BY f.sort_order, f.id
+    """, (center_id,))
+    functions = rows(cur)
+
+    # Покрытие компетенциями: у кого из владельцев уровень ниже требуемого
+    cur.execute(f"""
+        SELECT f.id AS function_id, f.title AS function_title,
+               c.name AS competency_name, fc.required_level, fc.is_critical,
+               r.person_id, pr.display_name,
+               pc.current_level
+        FROM {SCHEMA}.exec_function_competency fc
+        JOIN {SCHEMA}.exec_center_function f ON f.id = fc.function_id
+        JOIN {SCHEMA}.professional_competencies c ON c.id = fc.competency_id
+        LEFT JOIN {SCHEMA}.exec_function_raci r
+               ON r.function_id = f.id AND r.raci_role = 'A' AND r.valid_to IS NULL
+        LEFT JOIN {SCHEMA}.exec_person pr ON pr.id = r.person_id
+        LEFT JOIN {SCHEMA}.exec_person_competency pc
+               ON pc.person_id = r.person_id AND pc.competency_id = fc.competency_id
+        WHERE f.center_id = %s
+        ORDER BY fc.is_critical DESC, f.sort_order
+    """, (center_id,))
+    coverage = rows(cur)
+    gaps = [
+        r for r in coverage
+        if r["person_id"] and (r["current_level"] is None
+                               or (r["current_level"] or 0) < (r["required_level"] or 0))
+    ]
+
+    # Штат и обоснование численности
+    cur.execute(f"""
+        SELECT r.*, p.display_name AS person_name,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_center_role_function rf
+                 WHERE rf.role_id = r.id) AS function_count
+        FROM {SCHEMA}.exec_center_role r
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = r.person_id
+        WHERE r.center_id = %s ORDER BY r.sort_order, r.id
+    """, (center_id,))
+    roles = rows(cur)
+
+    # Инициативы Центра: через функции и через собственную привязку
+    cur.execute(f"""
+        SELECT DISTINCT i.id, i.title, i.status, i.stage, i.priority,
+               i.plan_start, i.plan_end, i.effect_metric, i.effect_target,
+               i.effect_actual, i.verification_status,
+               COALESCE(i.is_test_data, false) AS is_test,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan pl
+                  JOIN {SCHEMA}.exec_plan_step s ON s.plan_id = pl.id
+                 WHERE pl.initiative_id = i.id AND s.status NOT IN ('done','cancelled')) AS open_steps,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_plan pl
+                  JOIN {SCHEMA}.exec_plan_step s ON s.plan_id = pl.id
+                 WHERE pl.initiative_id = i.id AND s.status NOT IN ('done','cancelled')
+                   AND s.due_date < CURRENT_DATE) AS overdue_steps,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_milestone m
+                 WHERE m.initiative_id = i.id) AS milestone_count
+        FROM {SCHEMA}.exec_initiative i
+        WHERE (i.id = %s
+               OR i.id IN (SELECT fi.initiative_id FROM {SCHEMA}.exec_function_initiative fi
+                            JOIN {SCHEMA}.exec_center_function f ON f.id = fi.function_id
+                           WHERE f.center_id = %s)
+               OR %s IS NULL)
+        ORDER BY i.title
+    """, (center["initiative_id"], center_id, center["initiative_id"]))
+    initiatives = rows(cur)
+
+    # Контрольные точки: управленческие вехи и отметки в плане
+    cur.execute(f"""
+        SELECT m.id, m.title, m.plan_date AS due_date, m.status, m.fact_date,
+               i.title AS initiative_title, 'milestone' AS kind,
+               COALESCE(m.is_test_data, false) AS is_test,
+               (m.plan_date < CURRENT_DATE
+                AND COALESCE(m.status, '') NOT IN ('done','achieved')) AS is_overdue
+        FROM {SCHEMA}.exec_milestone m
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = m.initiative_id
+        UNION ALL
+        SELECT s.id, s.title, s.due_date, s.status, s.fact_date,
+               pl.title AS initiative_title, 'control_point' AS kind,
+               false AS is_test,
+               (s.due_date < CURRENT_DATE AND s.status NOT IN ('done','cancelled')) AS is_overdue
+        FROM {SCHEMA}.exec_plan_step s
+        LEFT JOIN {SCHEMA}.exec_plan pl ON pl.id = s.plan_id
+        WHERE s.is_control_point = true AND s.status <> 'cancelled'
+        ORDER BY due_date NULLS LAST
+        LIMIT 60
+    """)
+    checkpoints = rows(cur)
+
+    # Риски и блокировки
+    cur.execute(f"""
+        SELECT r.id, r.description AS title, r.status,
+               r.probability, r.impact, r.risk_score,
+               r.is_blocking, r.block_what, r.block_status,
+               r.center_function_id, f.title AS function_title,
+               i.title AS initiative_title,
+               COALESCE(r.is_test_data, false) AS is_test,
+               CASE WHEN COALESCE(r.risk_score, 0) >= 12 THEN 'high'
+                    WHEN COALESCE(r.risk_score, 0) >= 6 THEN 'medium'
+                    ELSE 'low' END AS severity
+        FROM {SCHEMA}.exec_risk r
+        LEFT JOIN {SCHEMA}.exec_center_function f ON f.id = r.center_function_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE COALESCE(r.status, '') NOT IN ('closed', 'cancelled', 'realized')
+        ORDER BY COALESCE(r.risk_score, 0) DESC
+        LIMIT 40
+    """)
+    risks = rows(cur)
+
+    cur.execute(f"""
+        SELECT s.id, s.title, s.criticality AS severity, s.status,
+               s.is_blocking, s.block_what, s.block_status, s.due_at,
+               s.needs_escalation, i.title AS initiative_title,
+               COALESCE(s.is_test_data, false) AS is_test
+        FROM {SCHEMA}.exec_issue s
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = s.initiative_id
+        WHERE COALESCE(s.status, '') NOT IN ('closed', 'resolved', 'cancelled')
+        ORDER BY CASE s.criticality WHEN 'critical' THEN 1 WHEN 'high' THEN 2
+                                    WHEN 'medium' THEN 3 ELSE 4 END
+        LIMIT 40
+    """)
+    issues = rows(cur)
+
+    # Трудозатраты: план из назначений, факт из учёта времени
+    cur.execute(f"""
+        SELECT
+            COALESCE(SUM(a.plan_hours), 0) AS plan_hours,
+            COUNT(DISTINCT a.person_id) AS people_involved
+        FROM {SCHEMA}.exec_plan_assignee a
+        JOIN {SCHEMA}.exec_plan_step s ON s.id = a.step_id
+        WHERE s.status <> 'cancelled'
+    """)
+    labor = rows(cur)[0]
+    cur.execute(f"""
+        SELECT COALESCE(SUM(hours), 0) AS fact_hours,
+               COUNT(DISTINCT person_id) AS people_reported
+        FROM {SCHEMA}.exec_time_entry
+    """)
+    labor.update(rows(cur)[0])
+
+    # Результаты: выполненные работы
+    cur.execute(f"""
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'done') AS steps_done,
+            COUNT(*) FILTER (WHERE status NOT IN ('done','cancelled')) AS steps_open,
+            COUNT(*) FILTER (WHERE status NOT IN ('done','cancelled')
+                              AND due_date < CURRENT_DATE) AS steps_overdue,
+            COUNT(*) FILTER (WHERE is_control_point AND status = 'done') AS cp_done,
+            COUNT(*) FILTER (WHERE is_control_point) AS cp_total
+        FROM {SCHEMA}.exec_plan_step
+    """)
+    results = rows(cur)[0]
+
+    # Сводные показатели
+    crit = [f for f in functions if f["criticality"] == "high"]
+    stats = {
+        "goals": len([g for g in goals if g["kind"] == "goal"]),
+        "tasks": len([g for g in goals if g["kind"] != "goal"]),
+        "goals_no_metric": len([g for g in goals
+                                if g["kind"] == "goal"
+                                and (not g["metric"] or not g["target_value"])]),
+        "goals_no_value": len([g for g in goals
+                               if g["kind"] == "goal" and not g["last_value"]]),
+        "functions": len(functions),
+        "functions_no_owner": len([f for f in functions if not f["owner_id"]]),
+        "critical_functions": len(crit),
+        "critical_no_backup": len([f for f in crit if not f["backup_name"]]),
+        "functions_no_competency": len([f for f in functions if not f["req_competencies"]]),
+        "competency_gaps": len(gaps),
+        "hours_per_month": round(sum(float(f["hours_per_month"] or 0) for f in functions), 1),
+        "fte_total": round(sum(float(f["fte_estimate"] or 0) for f in functions), 2),
+        "roles": len(roles),
+        "headcount": sum(int(r["headcount"] or 0) for r in roles),
+        "headcount_filled": sum(int(r["headcount"] or 0) for r in roles if r["person_id"]),
+        "vacant_roles": len([r for r in roles if not r["person_id"]]),
+        "roles_no_justification": len([r for r in roles if not r["justification"]]),
+        "initiatives": len(initiatives),
+        "checkpoints": len(checkpoints),
+        "checkpoints_overdue": len([c for c in checkpoints if c["is_overdue"]]),
+        "risks_high": len([r for r in risks if r["severity"] == "high"]),
+        "blocking": len([r for r in risks if r["is_blocking"]])
+                    + len([i for i in issues if i["is_blocking"]]),
+        "risks": len(risks),
+        "issues": len(issues),
+        "test_records": (len([i for i in initiatives if i["is_test"]])
+                         + len([r for r in risks if r["is_test"]])
+                         + len([i for i in issues if i["is_test"]])
+                         + len([c for c in checkpoints if c["is_test"]])),
+    }
+
+    # Готовность паспорта: что заполнено, что нет
+    readiness = [
+        {"code": "passport", "title": "Паспорт Центра",
+         "done": bool(center["mission"] and center["rationale"]),
+         "hint": "Назначение и обоснование создания"},
+        {"code": "goals", "title": "Цели с показателями",
+         "done": stats["goals"] > 0 and stats["goals_no_metric"] == 0,
+         "hint": "У каждой цели измеримый показатель и целевое значение"},
+        {"code": "functions", "title": "Функции Центра",
+         "done": stats["functions"] > 0,
+         "hint": "Перечень выполняемой работы"},
+        {"code": "owners", "title": "Владельцы функций",
+         "done": stats["functions"] > 0 and stats["functions_no_owner"] == 0,
+         "hint": "У каждой функции ответственный по матрице RACI"},
+        {"code": "backup", "title": "Замещение критичных функций",
+         "done": stats["critical_functions"] == 0 or stats["critical_no_backup"] == 0,
+         "hint": "У критичных функций есть замещающий"},
+        {"code": "competency", "title": "Требования к компетенциям",
+         "done": stats["functions"] > 0 and stats["functions_no_competency"] == 0,
+         "hint": "Для функций описаны нужные навыки и уровни"},
+        {"code": "roles", "title": "Обоснование численности",
+         "done": stats["roles"] > 0 and stats["roles_no_justification"] == 0,
+         "hint": "Штатные позиции с обоснованием потребности"},
+        {"code": "labor", "title": "Учёт трудозатрат",
+         "done": float(labor["fact_hours"] or 0) > 0,
+         "hint": "Вносятся фактические часы работы"},
+    ]
+    done_n = len([r for r in readiness if r["done"]])
+    stats["readiness_pct"] = round(done_n / len(readiness) * 100)
+    stats["readiness_done"] = done_n
+    stats["readiness_total"] = len(readiness)
+
+    return {
+        "center": center,
+        "goals": goals,
+        "functions": functions,
+        "coverage": coverage,
+        "gaps": gaps,
+        "roles": roles,
+        "initiatives": initiatives,
+        "checkpoints": checkpoints,
+        "risks": risks,
+        "issues": issues,
+        "labor": labor,
+        "results": results,
+        "stats": stats,
+        "readiness": readiness,
+    }
+
+
 def refs(cur):
     cur.execute(f"""
         SELECT id, display_name, position_title, org_name
@@ -426,6 +723,21 @@ def handler(event: dict, context) -> dict:
                         )
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "dashboard":
+            cid = as_int(qs.get("center_id")) or as_int(body.get("center_id"))
+            if not cid:
+                # Действующий центр, иначе последний созданный — включая архивный,
+                # чтобы запись не пропадала из виду
+                cur.execute(f"""
+                    SELECT id FROM {SCHEMA}.exec_center
+                    ORDER BY (status <> 'archived') DESC, id DESC LIMIT 1
+                """)
+                got = rows(cur)
+                if not got:
+                    return cors({"ok": True, "data": {"center": None}})
+                cid = got[0]["id"]
+            return cors({"ok": True, "data": dashboard(cur, cid)})
 
         if action == "function_detail":
             fid = as_int(qs.get("function_id")) or as_int(body.get("function_id"))

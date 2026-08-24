@@ -150,6 +150,197 @@ export const GOAL_STATUS: Record<string, { title: string; cls: string }> = {
   at_risk: { title: "Под угрозой", cls: "bg-red-50 text-red-700 border-red-200" },
 };
 
+export interface DashGoal {
+  id: number;
+  kind: string;
+  title: string;
+  metric: string | null;
+  baseline_value: string | null;
+  target_value: string | null;
+  status: string;
+  progress_pct: number | null;
+  due_date: string | null;
+  owner_name: string | null;
+  function_count: number;
+  last_value: number | null;
+  last_period: string | null;
+}
+
+export interface DashFunction {
+  id: number;
+  code: string | null;
+  title: string;
+  criticality: string;
+  status: string;
+  goal_id: number | null;
+  goal_title: string | null;
+  hours_per_month: number | null;
+  fte_estimate: number | null;
+  owner_name: string | null;
+  owner_id: number | null;
+  backup_name: string | null;
+  req_competencies: number;
+  req_critical: number;
+  initiative_count: number;
+  open_steps: number;
+}
+
+export interface CoverageRow {
+  function_id: number;
+  function_title: string;
+  competency_name: string;
+  required_level: number;
+  is_critical: boolean;
+  person_id: number | null;
+  display_name: string | null;
+  current_level: number | null;
+}
+
+export interface DashRole {
+  id: number;
+  title: string;
+  headcount: number;
+  hours_per_week: number | null;
+  grade: string | null;
+  person_id: number | null;
+  person_name: string | null;
+  status: string;
+  justification: string | null;
+  function_count: number;
+}
+
+export interface DashInitiative {
+  id: number;
+  title: string;
+  status: string;
+  stage: string | null;
+  priority: string | null;
+  plan_start: string | null;
+  plan_end: string | null;
+  effect_metric: string | null;
+  effect_target: string | null;
+  effect_actual: string | null;
+  open_steps: number;
+  overdue_steps: number;
+  milestone_count: number;
+  is_test: boolean;
+}
+
+export interface Checkpoint {
+  id: number;
+  title: string;
+  due_date: string | null;
+  status: string | null;
+  fact_date: string | null;
+  initiative_title: string | null;
+  kind: "milestone" | "control_point";
+  is_overdue: boolean;
+  is_test: boolean;
+}
+
+export interface DashRisk {
+  id: number;
+  title: string;
+  status: string | null;
+  probability: number | null;
+  impact: number | null;
+  risk_score: number | null;
+  severity: string;
+  is_blocking: boolean;
+  block_what: string | null;
+  block_status: string | null;
+  function_title: string | null;
+  initiative_title: string | null;
+  is_test: boolean;
+}
+
+export interface DashIssue {
+  id: number;
+  title: string;
+  severity: string | null;
+  status: string | null;
+  is_blocking: boolean;
+  block_what: string | null;
+  block_status: string | null;
+  due_at: string | null;
+  needs_escalation: boolean;
+  initiative_title: string | null;
+  is_test: boolean;
+}
+
+export interface ReadinessItem {
+  code: string;
+  title: string;
+  done: boolean;
+  hint: string;
+}
+
+export interface DashStats {
+  goals: number;
+  tasks: number;
+  goals_no_metric: number;
+  goals_no_value: number;
+  functions: number;
+  functions_no_owner: number;
+  critical_functions: number;
+  critical_no_backup: number;
+  functions_no_competency: number;
+  competency_gaps: number;
+  hours_per_month: number;
+  fte_total: number;
+  roles: number;
+  headcount: number;
+  headcount_filled: number;
+  vacant_roles: number;
+  roles_no_justification: number;
+  initiatives: number;
+  checkpoints: number;
+  checkpoints_overdue: number;
+  risks: number;
+  risks_high: number;
+  issues: number;
+  blocking: number;
+  test_records: number;
+  readiness_pct: number;
+  readiness_done: number;
+  readiness_total: number;
+}
+
+export interface DashboardData {
+  center: Center | null;
+  goals: DashGoal[];
+  functions: DashFunction[];
+  coverage: CoverageRow[];
+  gaps: CoverageRow[];
+  roles: DashRole[];
+  initiatives: DashInitiative[];
+  checkpoints: Checkpoint[];
+  risks: DashRisk[];
+  issues: DashIssue[];
+  labor: {
+    plan_hours: number | string;
+    fact_hours: number | string;
+    people_involved: number;
+    people_reported: number;
+  };
+  results: {
+    steps_done: number;
+    steps_open: number;
+    steps_overdue: number;
+    cp_done: number;
+    cp_total: number;
+  };
+  stats: DashStats;
+  readiness: ReadinessItem[];
+}
+
+export const SEVERITY: Record<string, { title: string; cls: string }> = {
+  critical: { title: "Критичный", cls: "bg-red-100 text-red-800 border-red-300" },
+  high: { title: "Высокий", cls: "bg-red-50 text-red-700 border-red-200" },
+  medium: { title: "Средний", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  low: { title: "Низкий", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+};
+
 async function req(path: string, options: RequestInit = {}) {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -171,6 +362,28 @@ export const centerApi = {
   list: (): Promise<Center[]> => req("/?action=list"),
 
   refs: (): Promise<CenterRefs> => req("/?action=refs"),
+
+  dashboard: (centerId?: number): Promise<DashboardData> =>
+    req(`/?action=dashboard${centerId ? `&center_id=${centerId}` : ""}`),
+
+  functionDetail: (functionId: number): Promise<{
+    raci: Record<string, unknown>[];
+    competencies: Record<string, unknown>[];
+    initiatives: Record<string, unknown>[];
+    dept_functions: Record<string, unknown>[];
+    steps: Record<string, unknown>[];
+  }> => req(`/?action=function_detail&function_id=${functionId}`),
+
+  saveRaci: (data: Record<string, unknown>): Promise<{ id: number }> =>
+    post("save_raci", data),
+
+  closeRaci: (id: number) => post("close_raci", { id }),
+
+  saveFunctionCompetency: (data: Record<string, unknown>): Promise<{ id: number }> =>
+    post("save_function_competency", data),
+
+  linkFunctionInitiative: (data: Record<string, unknown>): Promise<{ id: number }> =>
+    post("link_function_initiative", data),
 
   center: (
     id: number,

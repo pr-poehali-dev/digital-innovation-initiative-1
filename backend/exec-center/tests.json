@@ -125,6 +125,16 @@
         "ok": false
       },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized dashboard",
+      "method": "GET",
+      "path": "/?action=dashboard",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }
