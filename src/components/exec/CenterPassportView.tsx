@@ -66,6 +66,7 @@ export default function CenterPassportView({
   onAddFunction,
   onEditFunction,
   onDeleteFunction,
+  onEditRaci,
   onAddRole,
   onEditRole,
   onDeleteRole,
@@ -79,6 +80,7 @@ export default function CenterPassportView({
   onAddFunction: () => void;
   onEditFunction: (f: CenterFunction) => void;
   onDeleteFunction: (f: CenterFunction) => void;
+  onEditRaci: (f: CenterFunction) => void;
   onAddRole: () => void;
   onEditRole: (r: CenterRole) => void;
   onDeleteRole: (r: CenterRole) => void;
@@ -448,15 +450,18 @@ export default function CenterPassportView({
                           </p>
                         )}
 
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-500">
-                          <span>
-                            Ответственный:{" "}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-500">
+                          <button
+                            onClick={() => onEditRaci(f)}
+                            className="hover:text-violet-600 transition-colors"
+                          >
+                            Владелец:{" "}
                             {f.owner_name ? (
                               <b className="text-slate-700">{f.owner_name}</b>
                             ) : (
                               <span className="text-amber-600">не назначен</span>
                             )}
-                          </span>
+                          </button>
                           {f.backup_name ? (
                             <span>Замещает: {f.backup_name}</span>
                           ) : f.criticality === "high" ? (

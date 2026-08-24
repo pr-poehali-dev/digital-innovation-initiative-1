@@ -24,6 +24,11 @@ export interface Center {
   plan_id: number | null;
   plan_title?: string | null;
   note: string | null;
+  reserve_pct: number | string;
+  annual_fund_hours: number | string;
+  backup_coverage_pct: number | string;
+  roadmap_text: string | null;
+  expected_effects: string | null;
   functions_count?: number;
   goals_count?: number;
   roles_headcount?: number;
@@ -66,6 +71,7 @@ export interface CenterFunction {
   backup_person_id: number | null;
   backup_name: string | null;
   criticality: string;
+  work_category: string;
   regularity: string | null;
   hours_per_month: number | null;
   fte_estimate: number | null;
@@ -119,10 +125,33 @@ export interface CenterRefs {
 
 export const CENTER_STATUS: Record<string, { title: string; cls: string }> = {
   draft: { title: "Черновик", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+  modeling: { title: "Моделирование", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  preparation: { title: "Подготовка к созданию", cls: "bg-violet-50 text-violet-700 border-violet-200" },
   proposed: { title: "На согласовании", cls: "bg-amber-50 text-amber-700 border-amber-200" },
   approved: { title: "Утверждён", cls: "bg-violet-100 text-violet-700 border-violet-200" },
-  active: { title: "Работает", cls: "bg-green-50 text-green-700 border-green-200" },
+  active: { title: "Действует", cls: "bg-green-50 text-green-700 border-green-200" },
   archived: { title: "Архив", cls: "bg-slate-100 text-slate-500 border-slate-200" },
+};
+
+export const PARTICIPATION_FORMAT: Record<string, { title: string; cls: string }> = {
+  permanent: { title: "Постоянно", cls: "bg-green-50 text-green-700 border-green-200" },
+  partial: { title: "Частично", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  expert: { title: "Экспертно", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  temporary: { title: "Временно", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+};
+
+export const RESOURCE_SOURCE: Record<string, { title: string }> = {
+  own_staff: { title: "Собственный штат" },
+  other_unit: { title: "Другое подразделение" },
+  project_team: { title: "Проектная команда" },
+  contractor: { title: "Подрядчик" },
+};
+
+export const WORK_CATEGORY: Record<string, { title: string; cls: string }> = {
+  operational: { title: "Постоянные функции", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  project: { title: "Проектная работа", cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  management: { title: "Управление и координация", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  analytics: { title: "Аналитика и отчётность", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
 };
 
 export const CRITICALITY: Record<string, { title: string; cls: string }> = {
@@ -409,4 +438,126 @@ export const centerApi = {
   deleteFunction: (id: number) => post("delete_function", { id }),
   deleteRole: (id: number) => post("delete_role", { id }),
   deleteCenter: (id: number) => post("delete_center", { id }),
+
+  model: (centerId?: number): Promise<ModelData> =>
+    req(`/?action=model${centerId ? `&center_id=${centerId}` : ""}`),
+
+  saveParticipation: (data: Record<string, unknown>): Promise<{ id: number }> =>
+    post("save_participation", data),
+
+  deleteParticipation: (id: number) => post("delete_participation", { id }),
 };
+
+// ── Распределённая модель Центра ──────────────────────────────────────
+
+export interface Participation {
+  id: number;
+  person_id: number;
+  center_id: number;
+  display_name: string;
+  position_title: string | null;
+  org_name: string | null;
+  employment_type: string | null;
+  total_hours_per_week: number | null;
+  role_in_model: string | null;
+  participation_format: string;
+  format_title: string;
+  center_hours_per_week: number | null;
+  target_role_title: string | null;
+  planned_transfer: boolean;
+  resource_source: string;
+  source_title: string;
+  date_from: string | null;
+  date_to: string | null;
+  note: string | null;
+  functions: {
+    person_id: number;
+    function_id: number;
+    raci_role: string;
+    is_backup: boolean;
+    function_title: string;
+    criticality: string;
+  }[];
+  center_plan_hours: number;
+  center_fact_hours: number;
+}
+
+export interface UndocumentedPerson {
+  person_id: number;
+  display_name: string;
+  position_title: string | null;
+  org_name: string | null;
+}
+
+export interface TargetFunction {
+  id: number;
+  title: string;
+  criticality: string;
+  work_category: string;
+  hours_per_month: number | null;
+  target_role_count: number;
+  current_owner: string | null;
+  current_plan_hours: number;
+  req_competencies: number;
+  covered_now: boolean;
+  covered_in_target: boolean;
+  needs_new_position: boolean;
+}
+
+export interface TargetRole {
+  id: number;
+  title: string;
+  headcount: number;
+  hours_per_week: number | null;
+  grade: string | null;
+  person_id: number | null;
+  person_name: string | null;
+  status: string;
+  justification: string | null;
+  functions: { id: number; title: string }[];
+}
+
+export interface StaffingCategory {
+  code: string;
+  title: string;
+  annual_hours: number;
+  function_count: number;
+  fte: number;
+}
+
+export interface StaffingCalculation {
+  annual_fund_hours: number | string;
+  reserve_pct: number | string;
+  backup_coverage_pct: number | string;
+  categories: StaffingCategory[];
+  base_total_hours: number;
+  reserve_hours: number;
+  backup_hours: number;
+  total_hours: number;
+  required_fte: number;
+  available_hours: number;
+  available_fte: number;
+  staffed_fte: number;
+  deficit_fte: number;
+  target_gap_fte: number;
+}
+
+export interface StatusQuoRisk {
+  code: string;
+  level: "high" | "medium" | "low";
+  text: string;
+}
+
+export interface ModelData {
+  center: Center | null;
+  current_team: {
+    participation: Participation[];
+    undocumented: UndocumentedPerson[];
+  };
+  target: {
+    roles: TargetRole[];
+    functions: TargetFunction[];
+  };
+  staffing: StaffingCalculation;
+  status_quo_risks: StatusQuoRisk[];
+}

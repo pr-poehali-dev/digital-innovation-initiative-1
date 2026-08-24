@@ -10,6 +10,7 @@ import {
   CenterRoleForm,
 } from "@/components/exec/CenterForms";
 import CenterPassportView from "@/components/exec/CenterPassportView";
+import FunctionRaciEditor from "@/components/exec/FunctionRaciEditor";
 import {
   CENTER_STATUS,
   Center,
@@ -47,6 +48,9 @@ export default function ExecCenterPage() {
     open: false,
   });
   const [roleForm, setRoleForm] = useState<{ open: boolean; role?: CenterRole }>({
+    open: false,
+  });
+  const [raciForm, setRaciForm] = useState<{ open: boolean; fn?: CenterFunction }>({
     open: false,
   });
 
@@ -230,6 +234,7 @@ export default function ExecCenterPage() {
               onAddFunction={() => setFnForm({ open: true })}
               onEditFunction={(f) => setFnForm({ open: true, fn: f })}
               onDeleteFunction={(f) => remove("function", f.id, f.title)}
+              onEditRaci={(f) => setRaciForm({ open: true, fn: f })}
               onAddRole={() => setRoleForm({ open: true })}
               onEditRole={(r) => setRoleForm({ open: true, role: r })}
               onDeleteRole={(r) => remove("role", r.id, r.title)}
@@ -289,6 +294,18 @@ export default function ExecCenterPage() {
           onClose={() => setRoleForm({ open: false })}
           onSaved={() => {
             setRoleForm({ open: false });
+            reload();
+          }}
+        />
+      )}
+
+      {raciForm.open && raciForm.fn && (
+        <FunctionRaciEditor
+          fn={raciForm.fn}
+          refs={refs}
+          onClose={() => setRaciForm({ open: false })}
+          onSaved={() => {
+            setRaciForm({ open: false });
             reload();
           }}
         />

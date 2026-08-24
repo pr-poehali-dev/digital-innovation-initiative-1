@@ -8,6 +8,7 @@ import PersonForm from "@/components/exec/team/PersonForm";
 import CompetencyTab from "@/components/exec/team/CompetencyTab";
 import WorkloadTab from "@/components/exec/team/WorkloadTab";
 import ProfileTab from "@/components/exec/team/ProfileTab";
+import ParticipationTab from "@/components/exec/team/ParticipationTab";
 import {
   EMPLOYMENT_TYPE,
   PeopleRefs,
@@ -20,6 +21,7 @@ import {
 const TABS = [
   { id: "main", title: "Основное", icon: "User" },
   { id: "functions", title: "Функции и роли", icon: "Network" },
+  { id: "participation", title: "Участие в Центре", icon: "UsersRound" },
   { id: "competencies", title: "Компетенции", icon: "Award" },
   { id: "profile", title: "Опыт и образование", icon: "GraduationCap" },
   { id: "workload", title: "Загрузка", icon: "CalendarRange" },
@@ -268,6 +270,8 @@ export default function ExecPersonDetailPage() {
             </div>
           </div>
         )}
+
+        {tab === "participation" && <ParticipationTab person={person} />}
 
         {tab === "competencies" && (
           <CompetencyTab person={person} refs={refs} onChanged={reload} />

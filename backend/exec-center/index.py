@@ -100,7 +100,16 @@ CENTER_FIELDS = [
     "mission", "rationale", "problem_statement", "scope_included",
     "scope_excluded", "success_criteria", "planned_headcount",
     "start_date", "review_date", "initiative_id", "plan_id", "note",
+    "reserve_pct", "annual_fund_hours", "backup_coverage_pct",
+    "roadmap_text", "expected_effects",
 ]
+CENTER_STATUS_TITLE = {
+    "modeling": "Моделирование",
+    "preparation": "Подготовка к созданию",
+    "proposed": "На согласовании",
+    "active": "Действует",
+    "archived": "Архив",
+}
 GOAL_FIELDS = [
     "center_id", "parent_goal_id", "kind", "title", "description", "metric",
     "baseline_value", "target_value", "horizon", "due_date",
@@ -108,8 +117,13 @@ GOAL_FIELDS = [
 ]
 FUNC_FIELDS = [
     "center_id", "code", "title", "description", "purpose", "result_description",
-    "goal_id", "criticality",
+    "goal_id", "criticality", "work_category",
     "regularity", "hours_per_month", "fte_estimate", "status", "sort_order", "note",
+]
+PARTICIPATION_FIELDS = [
+    "person_id", "center_id", "role_in_model", "participation_format",
+    "center_hours_per_week", "target_role_title", "planned_transfer",
+    "resource_source", "date_from", "date_to", "note",
 ]
 
 # Источник истины перенесён: эти поля больше не пишутся
@@ -136,7 +150,10 @@ INT_KEYS = {
     "competency_id", "required_level", "function_id", "dept_function_id",
     "step_id", "share_pct",
 }
-NUM_KEYS = {"hours_per_month", "fte_estimate", "headcount", "hours_per_week"}
+NUM_KEYS = {
+    "hours_per_month", "fte_estimate", "headcount", "hours_per_week",
+    "center_hours_per_week", "reserve_pct", "annual_fund_hours", "backup_coverage_pct",
+}
 
 
 def clean(d: dict, fields: list) -> dict:
@@ -611,6 +628,287 @@ def dashboard(cur, center_id: int):
     }
 
 
+WORK_CATEGORY_TITLE = {
+    "operational": "Постоянные функции",
+    "project": "Проектная работа",
+    "management": "Управление и координация",
+    "analytics": "Аналитика и отчётность",
+}
+
+PARTICIPATION_FORMAT_TITLE = {
+    "permanent": "Постоянно",
+    "partial": "Частично",
+    "expert": "Экспертно",
+    "temporary": "Временно",
+}
+
+RESOURCE_SOURCE_TITLE = {
+    "own_staff": "Собственный штат",
+    "other_unit": "Другое подразделение",
+    "project_team": "Проектная команда",
+    "contractor": "Подрядчик",
+}
+
+
+def center_step_ids(cur, center_id: int):
+    """Шаги плана, выполняемые в интересах Центра: через функции Центра
+    либо через инициативу, привязанную к паспорту Центра."""
+    cur.execute(f"""
+        SELECT DISTINCT s.id
+        FROM {SCHEMA}.exec_plan_step s
+        WHERE s.status <> 'cancelled'
+          AND (
+            EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan_step_function sf
+                      JOIN {SCHEMA}.exec_center_function f ON f.id = sf.function_id
+                     WHERE sf.step_id = s.id AND f.center_id = %s)
+            OR EXISTS (SELECT 1 FROM {SCHEMA}.exec_plan p
+                        JOIN {SCHEMA}.exec_center c ON c.initiative_id = p.initiative_id
+                       WHERE p.id = s.plan_id AND c.id = %s)
+          )
+    """, (center_id, center_id))
+    return [r[0] for r in cur.fetchall()]
+
+
+def current_team(cur, center_id: int):
+    """Распределённая команда: кто фактически сейчас работает на Центр,
+    независимо от официального подразделения."""
+    step_ids = center_step_ids(cur, center_id)
+
+    cur.execute(f"""
+        SELECT pcp.*, p.display_name, p.position_title, p.org_name,
+               p.employment_type,
+               cap.hours_per_week AS total_hours_per_week
+        FROM {SCHEMA}.exec_person_center_participation pcp
+        JOIN {SCHEMA}.exec_person p ON p.id = pcp.person_id
+        LEFT JOIN {SCHEMA}.exec_person_capacity cap
+               ON cap.person_id = pcp.person_id AND cap.valid_to IS NULL
+        WHERE pcp.center_id = %s
+        ORDER BY p.display_name
+    """, (center_id,))
+    participation = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.person_id, r.function_id, r.raci_role, r.is_backup,
+               f.title AS function_title, f.criticality
+        FROM {SCHEMA}.exec_function_raci r
+        JOIN {SCHEMA}.exec_center_function f ON f.id = r.function_id
+        WHERE f.center_id = %s AND r.valid_to IS NULL
+    """, (center_id,))
+    raci_by_person: dict = {}
+    for r in rows(cur):
+        raci_by_person.setdefault(r["person_id"], []).append(r)
+
+    plan_fact: dict = {}
+    if step_ids:
+        cur.execute(f"""
+            SELECT a.person_id,
+                   COALESCE(SUM(a.plan_hours), 0) AS plan_hours,
+                   (SELECT COALESCE(SUM(t.hours), 0) FROM {SCHEMA}.exec_time_entry t
+                     WHERE t.person_id = a.person_id AND t.step_id = ANY(%s)) AS fact_hours
+            FROM {SCHEMA}.exec_plan_assignee a
+            WHERE a.step_id = ANY(%s)
+            GROUP BY a.person_id
+        """, (step_ids, step_ids))
+        for r in rows(cur):
+            plan_fact[r["person_id"]] = r
+
+    for p in participation:
+        p["functions"] = raci_by_person.get(p["person_id"], [])
+        pf = plan_fact.get(p["person_id"], {"plan_hours": 0, "fact_hours": 0})
+        p["center_plan_hours"] = float(pf["plan_hours"] or 0)
+        p["center_fact_hours"] = float(pf["fact_hours"] or 0)
+        p["format_title"] = PARTICIPATION_FORMAT_TITLE.get(p["participation_format"], p["participation_format"])
+        p["source_title"] = RESOURCE_SOURCE_TITLE.get(p["resource_source"], p["resource_source"])
+
+    # Люди, выполняющие функции/задачи Центра, но без карточки участия —
+    # видно, что модель ещё не полностью описана
+    described_ids = {p["person_id"] for p in participation}
+    cur.execute(f"""
+        SELECT DISTINCT r.person_id, p.display_name, p.position_title, p.org_name
+        FROM {SCHEMA}.exec_function_raci r
+        JOIN {SCHEMA}.exec_center_function f ON f.id = r.function_id
+        JOIN {SCHEMA}.exec_person p ON p.id = r.person_id
+        WHERE f.center_id = %s AND r.valid_to IS NULL
+    """, (center_id,))
+    undocumented = [r for r in rows(cur) if r["person_id"] not in described_ids]
+
+    return {"participation": participation, "undocumented": undocumented}
+
+
+def target_structure(cur, center_id: int):
+    """Целевая модель: штатные позиции и покрытие функций в перспективе."""
+    cur.execute(f"""
+        SELECT r.*, p.display_name AS person_name,
+               COALESCE((SELECT json_agg(json_build_object('id', f.id, 'title', f.title))
+                          FROM {SCHEMA}.exec_center_role_function rf
+                          JOIN {SCHEMA}.exec_center_function f ON f.id = rf.function_id
+                         WHERE rf.role_id = r.id), '[]'::json) AS functions
+        FROM {SCHEMA}.exec_center_role r
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = r.person_id
+        WHERE r.center_id = %s
+        ORDER BY r.sort_order, r.id
+    """, (center_id,))
+    roles = rows(cur)
+
+    cur.execute(f"""
+        SELECT f.id, f.title, f.criticality, f.work_category, f.hours_per_month,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_center_role_function rf
+                 WHERE rf.function_id = f.id) AS target_role_count,
+               (SELECT pr.display_name FROM {SCHEMA}.exec_function_raci r
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = r.person_id
+                 WHERE r.function_id = f.id AND r.raci_role = 'A'
+                   AND r.valid_to IS NULL LIMIT 1) AS current_owner,
+               COALESCE((SELECT SUM(a.plan_hours) FROM {SCHEMA}.exec_plan_assignee a
+                          JOIN {SCHEMA}.exec_plan_step_function sf ON sf.step_id = a.step_id
+                         WHERE sf.function_id = f.id), 0) AS current_plan_hours,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_function_competency fc
+                 WHERE fc.function_id = f.id) AS req_competencies
+        FROM {SCHEMA}.exec_center_function f
+        WHERE f.center_id = %s
+        ORDER BY f.sort_order, f.id
+    """, (center_id,))
+    functions = rows(cur)
+    for f in functions:
+        f["covered_now"] = bool(f["current_owner"])
+        f["covered_in_target"] = f["target_role_count"] > 0
+        f["needs_new_position"] = not f["covered_in_target"]
+
+    return {"roles": roles, "functions": functions}
+
+
+def staffing_calculation(cur, center_id: int):
+    """Расчёт потребности в штате: годовая трудоёмкость / полезный годовой фонд.
+
+    Потребность в ставках = годовая трудоёмкость функций и инициатив /
+    полезный годовой фонд времени одного сотрудника.
+    Расшифровка по категориям + отдельно резерв и замещение непрерывности.
+    """
+    cur.execute(f"""
+        SELECT reserve_pct, annual_fund_hours, backup_coverage_pct
+        FROM {SCHEMA}.exec_center WHERE id = %s
+    """, (center_id,))
+    center = rows(cur)[0]
+    fund = float(center["annual_fund_hours"] or 1900)
+    reserve_pct = float(center["reserve_pct"] or 0) / 100
+    backup_pct = float(center["backup_coverage_pct"] or 0) / 100
+
+    cur.execute(f"""
+        SELECT work_category, criticality,
+               COALESCE(SUM(hours_per_month), 0) * 12 AS annual_hours,
+               COUNT(*) AS function_count
+        FROM {SCHEMA}.exec_center_function
+        WHERE center_id = %s
+        GROUP BY work_category, criticality
+    """, (center_id,))
+    by_cat_crit = rows(cur)
+
+    categories = []
+    base_total = 0.0
+    critical_hours = 0.0
+    for code, title in WORK_CATEGORY_TITLE.items():
+        cat_rows = [r for r in by_cat_crit if r["work_category"] == code]
+        hours = sum(float(r["annual_hours"] or 0) for r in cat_rows)
+        fcount = sum(int(r["function_count"] or 0) for r in cat_rows)
+        crit = sum(float(r["annual_hours"] or 0) for r in cat_rows if r["criticality"] == "high")
+        critical_hours += crit
+        base_total += hours
+        categories.append({
+            "code": code, "title": title, "annual_hours": round(hours, 1),
+            "function_count": fcount, "fte": round(hours / fund, 2) if fund else 0,
+        })
+
+    reserve_hours = base_total * reserve_pct
+    backup_hours = critical_hours * backup_pct
+    total_hours = base_total + reserve_hours + backup_hours
+    required_fte = round(total_hours / fund, 2) if fund else 0
+
+    # Доступность: сколько ёмкости уже выделено распределённой командой
+    cur.execute(f"""
+        SELECT COALESCE(SUM(annual_fund_hours_ref.v * (pcp.center_hours_per_week / 40.0)), 0) AS hrs
+        FROM {SCHEMA}.exec_person_center_participation pcp,
+             LATERAL (SELECT %s::numeric AS v) annual_fund_hours_ref
+        WHERE pcp.center_id = %s AND pcp.center_hours_per_week IS NOT NULL
+          AND (pcp.date_to IS NULL OR pcp.date_to >= CURRENT_DATE)
+    """, (fund, center_id))
+    avail = rows(cur)[0]
+    available_hours = float(avail["hrs"] or 0)
+    available_fte = round(available_hours / fund, 2) if fund else 0
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(headcount), 0) AS staffed
+        FROM {SCHEMA}.exec_center_role WHERE center_id = %s
+    """, (center_id,))
+    staffed_fte = float(rows(cur)[0]["staffed"] or 0)
+
+    return {
+        "annual_fund_hours": fund,
+        "reserve_pct": center["reserve_pct"],
+        "backup_coverage_pct": center["backup_coverage_pct"],
+        "categories": categories,
+        "base_total_hours": round(base_total, 1),
+        "reserve_hours": round(reserve_hours, 1),
+        "backup_hours": round(backup_hours, 1),
+        "total_hours": round(total_hours, 1),
+        "required_fte": required_fte,
+        "available_hours": round(available_hours, 1),
+        "available_fte": available_fte,
+        "staffed_fte": round(staffed_fte, 2),
+        "deficit_fte": round(required_fte - available_fte, 2),
+        "target_gap_fte": round(required_fte - staffed_fte, 2),
+    }
+
+
+def status_quo_risks(cur, center_id: int):
+    """Риски сохранения текущего распределённого формата — для обоснования."""
+    risks = []
+
+    cur.execute(f"""
+        SELECT f.title FROM {SCHEMA}.exec_center_function f
+        WHERE f.center_id = %s AND f.criticality = 'high'
+          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_function_raci r
+              WHERE r.function_id = f.id AND r.is_backup = true AND r.valid_to IS NULL)
+    """, (center_id,))
+    for r in rows(cur):
+        risks.append({"code": "no_backup", "level": "high",
+                      "text": f"Критичная функция «{r['title']}» держится на одном человеке "
+                              f"без замещения — риск при увольнении или отпуске"})
+
+    cur.execute(f"""
+        SELECT p.display_name, COUNT(DISTINCT r.function_id) AS n
+        FROM {SCHEMA}.exec_function_raci r
+        JOIN {SCHEMA}.exec_person p ON p.id = r.person_id
+        JOIN {SCHEMA}.exec_center_function f ON f.id = r.function_id
+        WHERE f.center_id = %s AND r.raci_role = 'A' AND r.valid_to IS NULL
+        GROUP BY p.display_name HAVING COUNT(DISTINCT r.function_id) >= 3
+    """, (center_id,))
+    for r in rows(cur):
+        risks.append({"code": "overloaded_owner", "level": "medium",
+                      "text": f"{r['display_name']} отвечает сразу за {r['n']} функций "
+                              f"распределённой модели — риск перегрузки и потери качества"})
+
+    cur.execute(f"""
+        SELECT COUNT(*) AS n FROM {SCHEMA}.exec_person_center_participation
+        WHERE center_id = %s AND participation_format IN ('temporary', 'expert')
+    """, (center_id,))
+    tmp = rows(cur)[0]["n"]
+    if tmp:
+        risks.append({"code": "temporary_resources", "level": "medium",
+                      "text": f"{tmp} участников работают на временной или экспертной основе — "
+                              f"устойчивость команды не гарантирована"})
+
+    cur.execute(f"""
+        SELECT COUNT(*) AS n FROM {SCHEMA}.exec_person_center_participation
+        WHERE center_id = %s AND resource_source <> 'own_staff'
+    """, (center_id,))
+    ext = rows(cur)[0]["n"]
+    if ext:
+        risks.append({"code": "external_source", "level": "low",
+                      "text": f"{ext} человек привлечены из других подразделений или извне — "
+                              f"их возврат в исходные задачи снизит возможности Центра"})
+
+    return risks
+
+
 def refs(cur):
     cur.execute(f"""
         SELECT id, display_name, position_title, org_name
@@ -723,6 +1021,50 @@ def handler(event: dict, context) -> dict:
                         )
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "model":
+            # Сводка распределённой модели: текущая команда, целевая структура,
+            # расчёт численности и риски сохранения статус-кво
+            if not cid:
+                cur.execute(f"""
+                    SELECT id FROM {SCHEMA}.exec_center
+                    ORDER BY (status <> 'archived') DESC, id DESC LIMIT 1
+                """)
+                got = rows(cur)
+                if not got:
+                    return cors({"ok": True, "data": {"center": None}})
+                cid = got[0]["id"]
+            data = center_detail(cur, cid)
+            if not data:
+                return cors({"ok": False, "error": {"message": "Центр не найден"}}, 404)
+            return cors({"ok": True, "data": {
+                "center": data,
+                "current_team": current_team(cur, cid),
+                "target": target_structure(cur, cid),
+                "staffing": staffing_calculation(cur, cid),
+                "status_quo_risks": status_quo_risks(cur, cid),
+            }})
+
+        if action == "save_participation":
+            pid = as_int(body.get("person_id"))
+            ctr = as_int(body.get("center_id"))
+            if not pid or not ctr:
+                return cors({"ok": False, "error": {"message": "Укажите сотрудника и центр"}}, 400)
+            new_id, err = upsert(cur, "exec_person_center_participation",
+                                  PARTICIPATION_FIELDS, body, require_title=False)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "delete_participation":
+            rid = as_int(body.get("id"))
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не указана запись"}}, 400)
+            cur.execute(
+                f"DELETE FROM {SCHEMA}.exec_person_center_participation WHERE id = %s", (rid,))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
 
         if action == "dashboard":
             cid = as_int(qs.get("center_id")) or as_int(body.get("center_id"))

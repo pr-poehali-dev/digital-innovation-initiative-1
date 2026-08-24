@@ -135,6 +135,36 @@
         "ok": false
       },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized model",
+      "method": "GET",
+      "path": "/?action=model",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_participation blocked",
+      "method": "POST",
+      "path": "/?action=save_participation",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized delete_participation blocked",
+      "method": "POST",
+      "path": "/?action=delete_participation",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }

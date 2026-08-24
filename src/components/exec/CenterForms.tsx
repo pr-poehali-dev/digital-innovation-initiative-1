@@ -18,6 +18,7 @@ import {
   FUNC_STATUS,
   GOAL_STATUS,
   ROLE_STATUS,
+  WORK_CATEGORY,
   centerApi,
 } from "@/lib/execCenterApi";
 
@@ -79,6 +80,12 @@ export function CenterForm({
     initiative_id: center?.initiative_id ? String(center.initiative_id) : "",
     plan_id: center?.plan_id ? String(center.plan_id) : "",
     note: center?.note || "",
+    reserve_pct: center?.reserve_pct != null ? String(center.reserve_pct) : "15",
+    annual_fund_hours: center?.annual_fund_hours != null ? String(center.annual_fund_hours) : "1900",
+    backup_coverage_pct:
+      center?.backup_coverage_pct != null ? String(center.backup_coverage_pct) : "30",
+    expected_effects: center?.expected_effects || "",
+    roadmap_text: center?.roadmap_text || "",
   });
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
   const { saving, error, run } = useSaver(onSaved);
@@ -206,6 +213,46 @@ export function CenterForm({
           />
         </div>
         <TextArea label="Заметки" value={f.note} onChange={set("note")} rows={2} />
+      </Section>
+
+      <Section title="Параметры расчёта численности">
+        <div className="grid sm:grid-cols-3 gap-4">
+          <TextField
+            label="Резерв, %"
+            value={f.reserve_pct}
+            onChange={(v) => set("reserve_pct")(v.replace(/[^\d.,]/g, "").slice(0, 5))}
+            hint="На внеплановые задачи"
+          />
+          <TextField
+            label="Годовой фонд, ч"
+            value={f.annual_fund_hours}
+            onChange={(v) => set("annual_fund_hours")(v.replace(/[^\d.,]/g, "").slice(0, 6))}
+            hint="Полезное время одного сотрудника в год"
+          />
+          <TextField
+            label="Замещение критичных, %"
+            value={f.backup_coverage_pct}
+            onChange={(v) => set("backup_coverage_pct")(v.replace(/[^\d.,]/g, "").slice(0, 5))}
+            hint="Доля ёмкости на непрерывность"
+          />
+        </div>
+      </Section>
+
+      <Section title="Обоснование создания">
+        <TextArea
+          label="Ожидаемые эффекты"
+          value={f.expected_effects}
+          onChange={set("expected_effects")}
+          rows={3}
+          hint="Что изменится после официального создания Центра"
+        />
+        <TextArea
+          label="Дорожная карта создания"
+          value={f.roadmap_text}
+          onChange={set("roadmap_text")}
+          rows={4}
+          hint="Этапы перехода от модели к штатной единице"
+        />
       </Section>
     </Modal>
   );
@@ -360,7 +407,6 @@ export function CenterFunctionForm({
   fn,
   centerId,
   goals,
-  refs,
   onClose,
   onSaved,
 }: {
@@ -378,9 +424,8 @@ export function CenterFunctionForm({
     purpose: fn?.purpose || "",
     result_description: fn?.result_description || "",
     goal_id: fn?.goal_id ? String(fn.goal_id) : "",
-    owner_person_id: fn?.owner_person_id ? String(fn.owner_person_id) : "",
-    backup_person_id: fn?.backup_person_id ? String(fn.backup_person_id) : "",
     criticality: fn?.criticality || "medium",
+    work_category: fn?.work_category || "operational",
     regularity: fn?.regularity || "",
     hours_per_month: fn?.hours_per_month != null ? String(fn.hours_per_month) : "",
     fte_estimate: fn?.fte_estimate != null ? String(fn.fte_estimate) : "",
@@ -442,23 +487,17 @@ export function CenterFunctionForm({
       <Section title="Ответственность">
         <div className="grid sm:grid-cols-2 gap-4">
           <SelectField
-            label="Ответственный"
-            value={f.owner_person_id}
-            onChange={set("owner_person_id")}
-            options={personOpts(refs)}
-          />
-          <SelectField
-            label="Замещающий"
-            value={f.backup_person_id}
-            onChange={set("backup_person_id")}
-            options={personOpts(refs)}
-            hint="Кто подхватит, если основной недоступен"
-          />
-          <SelectField
             label="Критичность"
             value={f.criticality}
             onChange={set("criticality")}
             options={opts(CRITICALITY)}
+          />
+          <SelectField
+            label="Категория работы"
+            value={f.work_category}
+            onChange={set("work_category")}
+            options={opts(WORK_CATEGORY)}
+            hint="Нужна для расчёта численности"
           />
           <SelectField
             label="Служит цели"
@@ -469,6 +508,16 @@ export function CenterFunctionForm({
               .map((g) => ({ value: String(g.id), label: g.title }))}
           />
         </div>
+        {fn ? (
+          <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            Владелец и замещающий назначаются через матрицу RACI на карточке функции
+            (кнопка «Ответственность» в списке функций), а не в этой форме.
+          </p>
+        ) : (
+          <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            После сохранения назначьте владельца через RACI на карточке функции.
+          </p>
+        )}
       </Section>
 
       <Section title="Объём работы">
