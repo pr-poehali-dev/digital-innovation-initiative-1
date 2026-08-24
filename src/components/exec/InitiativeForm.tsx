@@ -40,6 +40,16 @@ function init(i?: Initiative | null): Form {
     manager_person_id: i?.manager_person_id ? String(i.manager_person_id) : "",
     curator_person_id: i?.curator_person_id ? String(i.curator_person_id) : "",
     effect_owner_person_id: i?.effect_owner_person_id ? String(i.effect_owner_person_id) : "",
+    budget_year: i?.budget_year ? String(i.budget_year) : "",
+    budget_kind: i?.budget_kind || "",
+    budget_source_prev: i?.budget_source_prev || "",
+    budget_source_new: i?.budget_source_new || "",
+    budget_amount: i?.budget_amount != null ? String(i.budget_amount) : "",
+    budget_status: i?.budget_status || "not_started",
+    budget_owner_person_id: i?.budget_owner_person_id ? String(i.budget_owner_person_id) : "",
+    budget_materials_note: i?.budget_materials_note || "",
+    budget_due_date: i?.budget_due_date || "",
+    budget_finance_comment: i?.budget_finance_comment || "",
   };
 }
 
@@ -81,12 +91,16 @@ export default function InitiativeForm({
       "manager_person_id",
       "curator_person_id",
       "effect_owner_person_id",
+      "budget_owner_person_id",
     ].forEach((k) => {
       payload[k] = f[k] ? Number(f[k]) : null;
     });
-    ["plan_start", "plan_end"].forEach((k) => {
+    ["plan_start", "plan_end", "budget_due_date"].forEach((k) => {
       payload[k] = f[k] || null;
     });
+    payload.budget_year = f.budget_year ? Number(f.budget_year) : null;
+    payload.budget_amount = f.budget_amount ? Number(f.budget_amount) : null;
+    payload.budget_kind = f.budget_kind || null;
     try {
       await execApi.saveInitiative(payload);
       onSaved();
@@ -222,6 +236,77 @@ export default function InitiativeForm({
           <TextField label="Бюджетная потребность" value={f.budget_need} onChange={set("budget_need")} />
           <TextField label="Источник финансирования" value={f.budget_source} onChange={set("budget_source")} />
         </div>
+      </Section>
+
+      <Section title="Бюджетное планирование">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <TextField
+            label="Бюджетный год"
+            value={f.budget_year}
+            onChange={(v) => set("budget_year")(v.replace(/\D/g, "").slice(0, 4))}
+            placeholder="2027"
+          />
+          <SelectField
+            label="Вид расходов"
+            value={f.budget_kind}
+            onChange={set("budget_kind")}
+            options={[
+              { value: "capex", label: "Инвестиционный (CAPEX)" },
+              { value: "opex", label: "Текущие расходы (OPEX)" },
+            ]}
+          />
+          <TextField
+            label="Прежний источник финансирования"
+            value={f.budget_source_prev}
+            onChange={set("budget_source_prev")}
+          />
+          <TextField
+            label="Новый источник финансирования"
+            value={f.budget_source_new}
+            onChange={set("budget_source_new")}
+          />
+          <TextField
+            label="Сумма, руб."
+            value={f.budget_amount}
+            onChange={(v) => set("budget_amount")(v.replace(/[^\d.,]/g, ""))}
+          />
+          <SelectField
+            label="Статус включения в бюджет"
+            value={f.budget_status}
+            onChange={set("budget_status")}
+            options={[
+              { value: "not_started", label: "Не начата" },
+              { value: "in_progress", label: "В проработке" },
+              { value: "submitted", label: "Подана" },
+              { value: "approved", label: "Утверждена" },
+              { value: "rejected", label: "Отклонена" },
+              { value: "not_required", label: "Не требуется" },
+            ]}
+          />
+          <SelectField
+            label="Ответственный за проработку"
+            value={f.budget_owner_person_id}
+            onChange={set("budget_owner_person_id")}
+            options={personOptions}
+          />
+          <DateField
+            label="Срок представления материалов"
+            value={f.budget_due_date}
+            onChange={set("budget_due_date")}
+          />
+        </div>
+        <TextArea
+          label="Необходимые материалы"
+          value={f.budget_materials_note}
+          onChange={set("budget_materials_note")}
+          rows={2}
+        />
+        <TextArea
+          label="Комментарий финансового подразделения"
+          value={f.budget_finance_comment}
+          onChange={set("budget_finance_comment")}
+          rows={2}
+        />
       </Section>
     </Modal>
   );

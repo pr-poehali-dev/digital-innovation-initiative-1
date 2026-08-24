@@ -54,6 +54,22 @@
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized my_day",
+      "method": "GET",
+      "path": "/?action=my_day",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized portfolio_summary",
+      "method": "GET",
+      "path": "/?action=portfolio_summary",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

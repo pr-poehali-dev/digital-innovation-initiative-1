@@ -3,8 +3,13 @@ import { Link, useParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import {
+  BUDGET_KIND_LABEL,
+  BUDGET_STATUS_LABEL,
   Decision,
   Dictionaries,
+  InitiativeFunctionRef,
+  InitiativeLabor,
+  InitiativeMilestoneRef,
   execApi,
   Initiative,
   RefsData,
@@ -19,14 +24,15 @@ import DecisionForm from "@/components/exec/DecisionForm";
 import QuickIssueForm from "@/components/exec/QuickIssueForm";
 import QuickRiskForm from "@/components/exec/QuickRiskForm";
 
-type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect";
+type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect" | "budget";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Основное", icon: "FileText" },
   { id: "stakeholders", label: "Стейкхолдеры", icon: "Users" },
   { id: "decisions", label: "Решения", icon: "GitPullRequest" },
   { id: "roles", label: "Роли", icon: "Shield" },
-  { id: "effect", label: "Эффект и бюджет", icon: "TrendingUp" },
+  { id: "effect", label: "Эффект", icon: "TrendingUp" },
+  { id: "budget", label: "Бюджет", icon: "Wallet" },
 ];
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -34,6 +40,32 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
     <div>
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <div className="text-sm text-slate-800">{value || <span className="text-slate-400">не заполнено</span>}</div>
+    </div>
+  );
+}
+
+function MiniMetric({
+  label,
+  value,
+  tone = "default",
+  hint,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "default" | "warning" | "danger";
+  hint?: string;
+}) {
+  const cls =
+    tone === "danger"
+      ? "border-red-200 bg-red-50 text-red-700"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-slate-200 bg-white text-slate-900";
+  return (
+    <div className={`rounded-lg border p-3 ${cls}`}>
+      <p className="text-[11px] text-slate-500">{label}</p>
+      <p className="text-base font-semibold mt-0.5">{value}</p>
+      {hint && <p className="text-[10px] mt-0.5 opacity-80 truncate">{hint}</p>}
     </div>
   );
 }
@@ -61,6 +93,17 @@ export default function ExecInitiativeDetailPage() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [quickIssue, setQuickIssue] = useState(false);
   const [quickRisk, setQuickRisk] = useState(false);
+  const [nextMilestone, setNextMilestone] = useState<InitiativeMilestoneRef | null>(null);
+  const [issueStats, setIssueStats] = useState({ open_issues: 0, blocking_issues: 0 });
+  const [riskStats, setRiskStats] = useState({ open_risks: 0, high_risks: 0 });
+  const [labor, setLabor] = useState<InitiativeLabor>({
+    plan_hours: 0,
+    fact_hours: 0,
+    open_steps: 0,
+    overdue_steps: 0,
+  });
+  const [functions, setFunctions] = useState<InitiativeFunctionRef[]>([]);
+  const [actionStats, setActionStats] = useState({ open_actions: 0, overdue_actions: 0 });
 
   const load = () => {
     setLoading(true);
@@ -73,6 +116,12 @@ export default function ExecInitiativeDetailPage() {
         setAssignments(r.assignments);
         setDicts(r.dictionaries);
         setRefs(rf);
+        setNextMilestone(r.next_milestone);
+        setIssueStats(r.issue_stats);
+        setRiskStats(r.risk_stats);
+        setLabor(r.labor);
+        setFunctions(r.functions);
+        setActionStats(r.action_stats);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -173,6 +222,61 @@ export default function ExecInitiativeDetailPage() {
             />
           </div>
         </header>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <MiniMetric
+            label="Ближайшая точка"
+            value={nextMilestone ? fmtDate(nextMilestone.plan_date) : "—"}
+            tone={
+              nextMilestone?.days_left != null && nextMilestone.days_left < 0 ? "danger" : "default"
+            }
+            hint={nextMilestone?.title}
+          />
+          <MiniMetric
+            label="Открытых задач"
+            value={labor.open_steps}
+            tone={labor.overdue_steps > 0 ? "warning" : "default"}
+            hint={labor.overdue_steps > 0 ? `просрочено: ${labor.overdue_steps}` : undefined}
+          />
+          <MiniMetric
+            label="План/факт часов"
+            value={`${Math.round(Number(labor.plan_hours))}/${Math.round(Number(labor.fact_hours))}`}
+          />
+          <MiniMetric
+            label="Проблемы"
+            value={issueStats.open_issues}
+            tone={issueStats.blocking_issues > 0 ? "danger" : "default"}
+            hint={issueStats.blocking_issues > 0 ? `блокирующих: ${issueStats.blocking_issues}` : undefined}
+          />
+          <MiniMetric
+            label="Риски"
+            value={riskStats.open_risks}
+            tone={riskStats.high_risks > 0 ? "warning" : "default"}
+            hint={riskStats.high_risks > 0 ? `высоких: ${riskStats.high_risks}` : undefined}
+          />
+          <MiniMetric
+            label="Поручения"
+            value={actionStats.open_actions}
+            tone={actionStats.overdue_actions > 0 ? "danger" : "default"}
+            hint={actionStats.overdue_actions > 0 ? `просрочено: ${actionStats.overdue_actions}` : undefined}
+          />
+        </div>
+
+        {functions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500">Функции Центра:</span>
+            {functions.map((f) => (
+              <Link
+                key={f.id}
+                to="/cabinet/exec/center"
+                className="text-xs px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors"
+              >
+                {f.code ? `${f.code}. ` : ""}
+                {f.title}
+              </Link>
+            ))}
+          </div>
+        )}
 
         <nav className="flex gap-1 border-b border-slate-200 overflow-x-auto">
           {TABS.map((t) => (
@@ -466,32 +570,68 @@ export default function ExecInitiativeDetailPage() {
         )}
 
         {tab === "effect" && (
-          <div className="grid lg:grid-cols-2 gap-5">
-            <Card title="Ожидаемый эффект" icon="TrendingUp">
-              <div className="space-y-4">
-                <Field label="Описание эффекта" value={i.effect_description} />
-                <Field label="Владелец эффекта" value={i.effect_owner_name} />
-                <Field label="Показатель" value={i.effect_metric} />
-                <div className="grid grid-cols-3 gap-3 pt-2">
-                  <div className="rounded-lg border border-slate-200 p-3">
-                    <p className="text-xs text-slate-500">Базовое</p>
-                    <p className="text-sm text-slate-800 mt-1">{i.effect_baseline || "—"}</p>
-                  </div>
-                  <div className="rounded-lg border border-violet-600/30 bg-violet-50 p-3">
-                    <p className="text-xs text-slate-500">Целевое</p>
-                    <p className="text-sm text-violet-700 mt-1">{i.effect_target || "—"}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 p-3">
-                    <p className="text-xs text-slate-500">Фактическое</p>
-                    <p className="text-sm text-slate-800 mt-1">{i.effect_actual || "—"}</p>
-                  </div>
+          <Card title="Ожидаемый эффект" icon="TrendingUp">
+            <div className="space-y-4">
+              <Field label="Описание эффекта" value={i.effect_description} />
+              <Field label="Владелец эффекта" value={i.effect_owner_name} />
+              <Field label="Показатель" value={i.effect_metric} />
+              <div className="grid grid-cols-3 gap-3 pt-2">
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Базовое</p>
+                  <p className="text-sm text-slate-800 mt-1">{i.effect_baseline || "—"}</p>
+                </div>
+                <div className="rounded-lg border border-violet-600/30 bg-violet-50 p-3">
+                  <p className="text-xs text-slate-500">Целевое</p>
+                  <p className="text-sm text-violet-700 mt-1">{i.effect_target || "—"}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Фактическое</p>
+                  <p className="text-sm text-slate-800 mt-1">{i.effect_actual || "—"}</p>
                 </div>
               </div>
-            </Card>
-            <Card title="Бюджет" icon="Wallet">
+            </div>
+          </Card>
+        )}
+
+        {tab === "budget" && (
+          <div className="grid lg:grid-cols-2 gap-5">
+            <Card title="Бюджетная заявка" icon="Wallet">
               <div className="space-y-4">
-                <Field label="Бюджетная потребность" value={i.budget_need} />
-                <Field label="Источник финансирования" value={i.budget_source} />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-md border ${BUDGET_STATUS_LABEL[i.budget_status]?.cls || BUDGET_STATUS_LABEL.not_started.cls}`}
+                  >
+                    {BUDGET_STATUS_LABEL[i.budget_status]?.title || "Не начата"}
+                  </span>
+                  {i.budget_kind && (
+                    <span className="text-xs px-2 py-0.5 rounded-md border bg-slate-100 text-slate-600 border-slate-200">
+                      {BUDGET_KIND_LABEL[i.budget_kind]}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Бюджетный год" value={i.budget_year ? String(i.budget_year) : null} />
+                  <Field
+                    label="Сумма"
+                    value={
+                      i.budget_amount != null
+                        ? `${Number(i.budget_amount).toLocaleString("ru-RU")} ₽`
+                        : null
+                    }
+                  />
+                  <Field label="Прежний источник" value={i.budget_source_prev} />
+                  <Field label="Новый источник" value={i.budget_source_new} />
+                  <Field label="Ответственный за проработку" value={i.budget_owner_name} />
+                  <Field label="Срок представления" value={i.budget_due_date ? fmtDate(i.budget_due_date) : null} />
+                </div>
+                <Field label="Необходимые материалы" value={i.budget_materials_note} />
+                <Field label="Комментарий финансового подразделения" value={i.budget_finance_comment} />
+              </div>
+            </Card>
+            <Card title="Историческая потребность" icon="FileText">
+              <div className="space-y-4">
+                <Field label="Бюджетная потребность (общая)" value={i.budget_need} />
+                <Field label="Источник финансирования (общий)" value={i.budget_source} />
               </div>
             </Card>
           </div>

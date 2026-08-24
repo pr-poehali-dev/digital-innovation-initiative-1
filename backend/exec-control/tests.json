@@ -63,6 +63,40 @@
       "expectedStatus": 401,
       "expectedBody": {"ok": false},
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized actions",
+      "method": "GET",
+      "path": "/?action=actions",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_action blocked",
+      "method": "POST",
+      "path": "/?action=save_action",
+      "body": {"title": "test"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized meetings",
+      "method": "GET",
+      "path": "/?action=meetings",
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_meeting blocked",
+      "method": "POST",
+      "path": "/?action=save_meeting",
+      "body": {"title": "test"},
+      "expectedStatus": 401,
+      "expectedBody": {"ok": false},
+      "bodyMatcher": "partial"
     }
   ]
 }

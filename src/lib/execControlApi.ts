@@ -123,9 +123,22 @@ export interface ControlAction {
   risk_id: number | null;
   issue_title: string | null;
   risk_description: string | null;
+  title: string | null;
   description: string;
   responsible_person_id: number | null;
   responsible_name: string | null;
+  author_person_id: number | null;
+  author_name: string | null;
+  initiative_id: number | null;
+  initiative_id_resolved: number | null;
+  initiative_title: string | null;
+  center_function_id: number | null;
+  center_function_title: string | null;
+  meeting_id: number | null;
+  meeting_title: string | null;
+  priority: "low" | "normal" | "high" | "urgent";
+  expected_result: string | null;
+  is_on_control: boolean;
   start_date: string | null;
   due_at: string | null;
   fact_date: string | null;
@@ -136,7 +149,55 @@ export interface ControlAction {
   delay_reason: string | null;
   decision_id: number | null;
   decision_question: string | null;
+  accepted_by_executor_at: string | null;
+  accepted_by_head_at: string | null;
+  coexecutors: { id: number; display_name: string }[];
   is_overdue: boolean;
+}
+
+export interface ActionStatusLogEntry {
+  id: number;
+  action_id: number;
+  from_status: string | null;
+  to_status: string;
+  comment: string | null;
+  changed_by: string | null;
+  changed_at: string;
+}
+
+export interface Meeting {
+  id: number;
+  title: string;
+  meeting_at: string;
+  location: string | null;
+  agenda: string | null;
+  materials: string | null;
+  notes: string | null;
+  next_meeting_at: string | null;
+  status: "planned" | "held" | "cancelled";
+  participants?: { id: number; display_name: string }[];
+  initiatives?: { id: number; title: string }[];
+  outcomes_count?: number;
+}
+
+export interface MeetingOutcome {
+  id: number;
+  meeting_id: number;
+  outcome_type: "note" | "action" | "task" | "milestone" | "issue" | "risk" | "decision";
+  text: string;
+  action_id: number | null;
+  action_title: string | null;
+  plan_step_id: number | null;
+  plan_step_title: string | null;
+  milestone_id: number | null;
+  milestone_title: string | null;
+  issue_id: number | null;
+  issue_title: string | null;
+  risk_id: number | null;
+  risk_description: string | null;
+  decision_id: number | null;
+  decision_question: string | null;
+  created_at: string;
 }
 
 export interface Escalation {
@@ -328,6 +389,48 @@ export const controlApi = {
 
   setNextAction: (p: Record<string, unknown>): Promise<{ id: number }> =>
     req("/?action=set_next_action", { method: "POST", body: JSON.stringify(p) }),
+
+  actions: (kind?: "mine_authored" | "mine_responsible", onlyOverdue?: boolean): Promise<{ items: ControlAction[] }> =>
+    req(`/?action=actions${kind ? `&kind=${kind}` : ""}${onlyOverdue ? "&overdue=1" : ""}`),
+
+  assignmentsSummary: (): Promise<{
+    mine_authored: number;
+    mine_responsible: number;
+    overdue: number;
+    awaiting_head: number;
+    awaiting_start: number;
+    in_progress: number;
+    completed: number;
+  }> => req("/?action=assignments_summary"),
+
+  actionStatusHistory: (id: number): Promise<{ items: ActionStatusLogEntry[] }> =>
+    req(`/?action=action_status_history&id=${id}`),
+
+  deleteAction: (id: number): Promise<{ id: number }> =>
+    req("/?action=delete_action", { method: "POST", body: JSON.stringify({ id }) }),
+
+  meetings: (): Promise<{ items: Meeting[] }> => req("/?action=meetings"),
+
+  meeting: (
+    id: number,
+  ): Promise<{
+    meeting: Meeting;
+    participants: { id: number; display_name: string; position_title: string | null }[];
+    initiatives: { id: number; title: string }[];
+    functions: { id: number; title: string }[];
+    outcomes: MeetingOutcome[];
+  }> => req(`/?action=meeting&id=${id}`),
+
+  saveMeeting: (p: Record<string, unknown>): Promise<{ id: number }> =>
+    req("/?action=save_meeting", { method: "POST", body: JSON.stringify(p) }),
+
+  deleteMeeting: (id: number): Promise<{ id: number }> =>
+    req("/?action=delete_meeting", { method: "POST", body: JSON.stringify({ id }) }),
+
+  addMeetingOutcome: (
+    p: Record<string, unknown>,
+  ): Promise<{ outcome_id: number; created: { type: string; id: number } | Record<string, never> }> =>
+    req("/?action=add_meeting_outcome", { method: "POST", body: JSON.stringify(p) }),
 };
 
 export const RISK_LEVEL_LABEL: Record<string, { title: string; cls: string }> = {
@@ -375,6 +478,55 @@ export const ACTION_STATUS_LABEL: Record<string, string> = {
   done: "Выполнено",
   cancelled: "Отменено",
   needs_review: "Требует пересмотра",
+  new: "Новое",
+  accepted: "Принято",
+  done_by_executor: "Выполнено исполнителем",
+  accepted_by_head: "Принято руководителем",
+};
+
+// Статусный цикл поручения: Новое → Принято → В работе →
+// Выполнено исполнителем → Принято руководителем
+export const ASSIGNMENT_STATUS_FLOW = [
+  "new", "accepted", "in_progress", "done_by_executor", "accepted_by_head",
+] as const;
+
+export const ASSIGNMENT_STATUS_CLS: Record<string, string> = {
+  new: "bg-slate-100 text-slate-600 border-slate-200",
+  accepted: "bg-blue-50 text-blue-700 border-blue-200",
+  in_progress: "bg-blue-50 text-blue-700 border-blue-200",
+  done_by_executor: "bg-amber-50 text-amber-700 border-amber-200",
+  accepted_by_head: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  not_started: "bg-slate-100 text-slate-600 border-slate-200",
+  done: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  cancelled: "bg-slate-100 text-slate-400 border-slate-200",
+  needs_review: "bg-red-50 text-red-700 border-red-200",
+};
+
+export const ASSIGNMENT_DONE_STATUSES = new Set([
+  "done", "done_by_executor", "accepted_by_head", "cancelled",
+]);
+
+export const PRIORITY_LABEL: Record<string, { title: string; cls: string }> = {
+  low: { title: "Низкий", cls: "bg-slate-100 text-slate-500 border-slate-200" },
+  normal: { title: "Обычный", cls: "bg-blue-50 text-blue-600 border-blue-200" },
+  high: { title: "Высокий", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  urgent: { title: "Срочный", cls: "bg-red-50 text-red-700 border-red-200" },
+};
+
+export const MEETING_STATUS_LABEL: Record<string, string> = {
+  planned: "Запланирована",
+  held: "Проведена",
+  cancelled: "Отменена",
+};
+
+export const OUTCOME_TYPE_LABEL: Record<string, { title: string; icon: string }> = {
+  note: { title: "Заметка", icon: "StickyNote" },
+  action: { title: "Поручение", icon: "ClipboardCheck" },
+  task: { title: "Задача", icon: "ListTodo" },
+  milestone: { title: "Контрольная точка", icon: "Flag" },
+  issue: { title: "Проблема", icon: "TriangleAlert" },
+  risk: { title: "Риск", icon: "ShieldAlert" },
+  decision: { title: "Решение", icon: "GitPullRequest" },
 };
 
 export const ESCALATION_STATUS_LABEL: Record<string, string> = {

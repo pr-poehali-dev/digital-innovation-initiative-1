@@ -65,7 +65,10 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Кабинет руководителя",
     icon: "Crown",
     items: [
-      { id: "chief.exec", label: "Мой фокус", icon: "Crosshair", href: "/cabinet/exec", exact: true, active: true },
+      { id: "chief.myday", label: "Мой день", icon: "Sunrise", href: "/cabinet/exec", exact: true, active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.exec", label: "Мой фокус", icon: "Crosshair", href: "/cabinet/exec/focus", active: true },
+      { id: "chief.meetings", label: "Встречи и решения", icon: "CalendarClock", href: "/cabinet/exec/meetings", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.assignments", label: "Поручения", icon: "ClipboardCheck", href: "/cabinet/exec/assignments", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.dashboard", label: "Сводка Центра", icon: "LayoutDashboard", href: "/cabinet/exec/dashboard", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.center", label: "Центр цифровизации и развития технологий ВК", icon: "Building2", href: "/cabinet/exec/center", active: true },
       { id: "chief.model", label: "Модель и обоснование", icon: "Network", href: "/cabinet/exec/model", active: true, badge: { text: "Новое", tone: "info" } },

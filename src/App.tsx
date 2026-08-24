@@ -31,6 +31,10 @@ import AdminCompetenciesPage from "./pages/admin/AdminCompetenciesPage";
 import AdminAdoptionPage from "./pages/admin/AdminAdoptionPage";
 import AdminBenchmarkPage from "./pages/admin/AdminBenchmarkPage";
 import ExecFocusPage from "./pages/cabinet/exec/ExecFocusPage";
+import ExecMyDayPage from "./pages/cabinet/exec/ExecMyDayPage";
+import ExecAssignmentsPage from "./pages/cabinet/exec/ExecAssignmentsPage";
+import ExecMeetingsPage from "./pages/cabinet/exec/ExecMeetingsPage";
+import ExecMeetingDetailPage from "./pages/cabinet/exec/ExecMeetingDetailPage";
 import ExecInitiativesPage from "./pages/cabinet/exec/ExecInitiativesPage";
 import ExecInitiativeDetailPage from "./pages/cabinet/exec/ExecInitiativeDetailPage";
 import ExecStakeholdersPage from "./pages/cabinet/exec/ExecStakeholdersPage";
@@ -182,7 +186,11 @@ const App = () => (
               <Route path="/cabinet/growth" element={<ProtectedRoute><GrowthNavigatorPage /></ProtectedRoute>} />
               <Route path="/cabinet/public-profile" element={<ProtectedRoute><PublicProfileSettingsPage /></ProtectedRoute>} />
               <Route path="/cabinet/competency-map" element={<ProtectedRoute><CompetencyMapPage /></ProtectedRoute>} />
-              <Route path="/cabinet/exec" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
+              <Route path="/cabinet/exec" element={<ExecRoute><ExecMyDayPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/focus" element={<ExecRoute><ExecFocusPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/assignments" element={<ExecRoute><ExecAssignmentsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/meetings" element={<ExecRoute><ExecMeetingsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/meetings/:id" element={<ExecRoute><ExecMeetingDetailPage /></ExecRoute>} />
               <Route path="/cabinet/exec/planner" element={<ExecRoute><ExecPlannerPage /></ExecRoute>} />
               <Route path="/cabinet/exec/knowledge" element={<ExecRoute><ExecKnowledgePage /></ExecRoute>} />
               <Route path="/cabinet/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />

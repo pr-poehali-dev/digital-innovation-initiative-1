@@ -58,6 +58,40 @@ export interface Initiative {
   open_decisions?: number;
   verification_status: string;
   is_test_data?: boolean;
+  // Бюджетное планирование
+  budget_year: number | null;
+  budget_kind: "capex" | "opex" | null;
+  budget_source_prev: string | null;
+  budget_source_new: string | null;
+  budget_amount: number | string | null;
+  budget_status: string;
+  budget_owner_person_id: number | null;
+  budget_owner_name?: string | null;
+  budget_materials_note: string | null;
+  budget_due_date: string | null;
+  budget_finance_comment: string | null;
+}
+
+export interface InitiativeMilestoneRef {
+  id: number;
+  title: string;
+  plan_date: string | null;
+  status: string;
+  days_left: number | null;
+}
+
+export interface InitiativeLabor {
+  plan_hours: number | string;
+  fact_hours: number | string;
+  open_steps: number;
+  overdue_steps: number;
+}
+
+export interface InitiativeFunctionRef {
+  id: number;
+  title: string;
+  code: string | null;
+  criticality: string;
 }
 
 export interface Stakeholder {
@@ -256,6 +290,12 @@ export const execApi = {
     stakeholders: Stakeholder[];
     decisions: Decision[];
     assignments: RoleAssignment[];
+    next_milestone: InitiativeMilestoneRef | null;
+    issue_stats: { open_issues: number; blocking_issues: number };
+    risk_stats: { open_risks: number; high_risks: number };
+    labor: InitiativeLabor;
+    functions: InitiativeFunctionRef[];
+    action_stats: { open_actions: number; overdue_actions: number };
     dictionaries: Dictionaries;
   }> => req(`/?action=initiative&id=${id}`),
 
@@ -320,6 +360,74 @@ export const execApi = {
 
   auditLog: (entity = "", limit = 200): Promise<AuditData> =>
     req(`/?action=audit_log&limit=${limit}${entity ? `&entity=${entity}` : ""}`),
+
+  myDay: (): Promise<MyDayData> => req("/?action=my_day"),
+
+  portfolioSummary: (): Promise<PortfolioSummary> => req("/?action=portfolio_summary"),
+};
+
+export interface MyDayData {
+  me_person_id: number | null;
+  recent_initiatives: {
+    id: number;
+    title: string;
+    status: string;
+    priority: string | null;
+    updated_at: string;
+    owner_name: string | null;
+  }[];
+  my_actions: {
+    id: number;
+    title: string | null;
+    description: string | null;
+    due_at: string | null;
+    status: string;
+    priority: string;
+    initiative_title: string | null;
+    is_overdue: boolean;
+  }[];
+  incoming_actions: {
+    id: number;
+    title: string | null;
+    description: string | null;
+    responsible_person_id: number | null;
+    responsible_name: string | null;
+    status: string;
+    due_at: string | null;
+  }[];
+  upcoming_meetings: {
+    id: number;
+    title: string;
+    meeting_at: string;
+    location: string | null;
+  }[];
+}
+
+export interface PortfolioSummary {
+  by_status: { status: string; cnt: number }[];
+  by_budget_status: { budget_status: string; cnt: number; amount: number | string }[];
+  flags: {
+    active_total: number;
+    no_owner: number;
+    no_next_step: number;
+    overdue_milestone: number;
+    needs_decision: number;
+    budget_not_ready: number;
+  };
+}
+
+export const BUDGET_STATUS_LABEL: Record<string, { title: string; cls: string }> = {
+  not_started: { title: "Не начата", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+  in_progress: { title: "В проработке", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  submitted: { title: "Подана", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  approved: { title: "Утверждена", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  rejected: { title: "Отклонена", cls: "bg-red-50 text-red-700 border-red-200" },
+  not_required: { title: "Не требуется", cls: "bg-slate-50 text-slate-400 border-slate-200" },
+};
+
+export const BUDGET_KIND_LABEL: Record<string, string> = {
+  capex: "Инвестиционный (CAPEX)",
+  opex: "Текущие расходы (OPEX)",
 };
 
 export function dictTitle(dicts: Dictionaries, type: string, code: string | null): string {

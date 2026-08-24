@@ -2,8 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
-import { Dictionaries, execApi, Initiative, PersonRef } from "@/lib/execCabinetApi";
-import { Badge, Card, Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
+import {
+  BUDGET_STATUS_LABEL,
+  Dictionaries,
+  PortfolioSummary,
+  execApi,
+  Initiative,
+  PersonRef,
+} from "@/lib/execCabinetApi";
+import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
 import InitiativeForm from "@/components/exec/InitiativeForm";
 import QuickStartForm from "@/components/exec/QuickStartForm";
 import InitiativeTreeMap from "@/components/exec/InitiativeTreeMap";
@@ -22,15 +29,19 @@ export default function ExecInitiativesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Initiative | null>(null);
   const [view, setView] = useState<"cards" | "map">("cards");
+  const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [onlyBudgetNotReady, setOnlyBudgetNotReady] = useState(false);
+  const [onlyNoOwner, setOnlyNoOwner] = useState(false);
 
   const load = () => {
     setLoading(true);
     setError("");
-    Promise.all([execApi.initiatives(), execApi.refs()])
-      .then(([r, refs]) => {
+    Promise.all([execApi.initiatives(), execApi.refs(), execApi.portfolioSummary()])
+      .then(([r, refs, ps]) => {
         setItems(r.items);
         setDicts(r.dictionaries);
         setPersons(refs.persons);
+        setSummary(ps);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -45,9 +56,12 @@ export default function ExecInitiativesPage() {
           return false;
         if (status && i.status !== status) return false;
         if (priority && i.priority !== priority) return false;
+        if (onlyNoOwner && i.owner_person_id) return false;
+        if (onlyBudgetNotReady && (!i.budget_year || i.budget_status === "approved" || i.budget_status === "not_required"))
+          return false;
         return true;
       }),
-    [items, q, status, priority],
+    [items, q, status, priority, onlyNoOwner, onlyBudgetNotReady],
   );
 
   const openNew = () => {
@@ -95,6 +109,68 @@ export default function ExecInitiativesPage() {
             onClose={() => setQuickStart(false)}
             onDone={(id) => navigate(`/cabinet/exec/initiatives/${id}`)}
           />
+        )}
+
+        {summary && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Metric label="В портфеле" value={summary.flags.active_total} icon="Rocket" />
+            <Metric
+              label="Без владельца"
+              value={summary.flags.no_owner}
+              icon="UserX"
+              tone={summary.flags.no_owner > 0 ? "danger" : "success"}
+              onClick={() => setOnlyNoOwner((v) => !v)}
+            />
+            <Metric
+              label="Без следующего шага"
+              value={summary.flags.no_next_step}
+              icon="CircleDashed"
+              tone={summary.flags.no_next_step > 0 ? "warning" : "success"}
+            />
+            <Metric
+              label="Требуют решения"
+              value={summary.flags.needs_decision}
+              icon="GitPullRequest"
+              tone={summary.flags.needs_decision > 0 ? "warning" : "default"}
+            />
+            <Metric
+              label="Просрочена контрольная точка"
+              value={summary.flags.overdue_milestone}
+              icon="CalendarX"
+              tone={summary.flags.overdue_milestone > 0 ? "danger" : "success"}
+            />
+            <Metric
+              label="Не готовы к бюджету"
+              value={summary.flags.budget_not_ready}
+              icon="Wallet"
+              tone={summary.flags.budget_not_ready > 0 ? "warning" : "success"}
+              onClick={() => setOnlyBudgetNotReady((v) => !v)}
+            />
+            {summary.by_status.map((s) => (
+              <Metric key={s.status} label={s.status} value={s.cnt} icon="Circle" />
+            ))}
+          </div>
+        )}
+
+        {(onlyNoOwner || onlyBudgetNotReady) && (
+          <div className="flex items-center gap-2 text-xs">
+            {onlyNoOwner && (
+              <button
+                onClick={() => setOnlyNoOwner(false)}
+                className="px-2 py-1 rounded-md bg-red-50 text-red-700 border border-red-200 flex items-center gap-1"
+              >
+                Без владельца <Icon name="X" size={11} />
+              </button>
+            )}
+            {onlyBudgetNotReady && (
+              <button
+                onClick={() => setOnlyBudgetNotReady(false)}
+                className="px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1"
+              >
+                Не готовы к бюджету <Icon name="X" size={11} />
+              </button>
+            )}
+          </div>
         )}
 
         <div className="flex flex-wrap gap-2">
@@ -216,6 +292,16 @@ export default function ExecInitiativesPage() {
                       {i.open_decisions ?? 0} открытых
                     </span>
                   </div>
+                  {i.budget_year && (
+                    <span
+                      className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md border mt-1 ${
+                        BUDGET_STATUS_LABEL[i.budget_status]?.cls || BUDGET_STATUS_LABEL.not_started.cls
+                      }`}
+                    >
+                      <Icon name="Wallet" size={10} />
+                      {i.budget_year}: {BUDGET_STATUS_LABEL[i.budget_status]?.title}
+                    </span>
+                  )}
                 </div>
               </Link>
             ))}

@@ -136,15 +136,21 @@ def validate(kind: str, d: dict, existing: dict = None):
                 return "При блокировке обязательны все шесть полей блока"
 
     if kind == "action":
+        # Поручение может быть самостоятельным (title без issue/risk),
+        # либо привязанным ровно к одному из: проблема, риск.
         has_issue = cur_val("issue_id") is not None
         has_risk = cur_val("risk_id") is not None
-        if has_issue == has_risk:
-            return "Действие относится ровно к одной проблеме или одному риску"
-        if cur_val("status") == "done":
+        if has_issue and has_risk:
+            return "Поручение может относиться максимум к одной проблеме или одному риску"
+        if not cur_val("title") and not cur_val("description"):
+            return "Укажите формулировку поручения"
+        if not cur_val("responsible_person_id"):
+            return "Укажите ответственного исполнителя"
+        if cur_val("status") in ("done", "done_by_executor", "accepted_by_head"):
             if not cur_val("result"):
-                return "Выполненное действие требует указания результата"
+                return "Для завершения поручения укажите результат"
             if not cur_val("fact_date"):
-                return "Выполненное действие требует фактической даты завершения"
+                return "Для завершения поручения укажите фактическую дату"
 
     if kind == "escalation":
         has_issue = cur_val("issue_id") is not None
@@ -256,21 +262,68 @@ def risks(cur, initiative_id=None, include_closed=True):
     return rows(cur)
 
 
-def actions(cur):
+ASSIGNMENT_DONE_STATUSES = ("done", "done_by_executor", "accepted_by_head", "cancelled")
+
+# Активный статусный цикл поручения. Старые action по рискам/проблемам
+# (not_started/in_progress/done) поддерживаются наравне через ASSIGNMENT_STATUS_MAP.
+ASSIGNMENT_STATUS_MAP = {
+    "not_started": "new",
+    "in_progress": "in_progress",
+    "done": "accepted_by_head",
+}
+
+
+def actions(cur, kind=None, mine_email=None, only_overdue=False):
+    """Поручения (бывшие «действия»). kind: 'mine_authored'|'mine_responsible'|'incoming'.
+    mine_email нужен, чтобы найти person_id текущего пользователя через exec_cabinet_access."""
+    conds, params = [], []
+    if kind and mine_email:
+        conds.append(f"""
+            (
+              (%s = 'mine_authored' AND a.author_person_id = (
+                  SELECT person_id FROM {SCHEMA}.exec_cabinet_access
+                  WHERE LOWER(email) = LOWER(%s) LIMIT 1))
+              OR
+              (%s = 'mine_responsible' AND a.responsible_person_id = (
+                  SELECT person_id FROM {SCHEMA}.exec_cabinet_access
+                  WHERE LOWER(email) = LOWER(%s) LIMIT 1))
+            )
+        """)
+        params.extend([kind, mine_email, kind, mine_email])
+    if only_overdue:
+        conds.append(f"a.due_at < CURRENT_DATE AND a.status NOT IN {ASSIGNMENT_DONE_STATUSES}")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     cur.execute(f"""
         SELECT a.*, p.display_name AS responsible_name,
+               au.display_name AS author_name,
                cf.display_name AS result_confirmed_by_name,
                s.title AS issue_title, r.description AS risk_description,
                d.question AS decision_question,
-               (a.due_at < CURRENT_DATE AND a.status NOT IN ('done','cancelled')) AS is_overdue
+               i.title AS initiative_title, i.id AS initiative_id_resolved,
+               cfn.title AS center_function_title,
+               m.title AS meeting_title,
+               (SELECT COALESCE(json_agg(json_build_object('id', pp.id, 'display_name', pp.display_name)), '[]'::json)
+                  FROM {SCHEMA}.exec_action_coexecutor ce
+                  JOIN {SCHEMA}.exec_person pp ON pp.id = ce.person_id
+                 WHERE ce.action_id = a.id) AS coexecutors,
+               (a.due_at < CURRENT_DATE AND a.status NOT IN {ASSIGNMENT_DONE_STATUSES}) AS is_overdue
         FROM {SCHEMA}.exec_action a
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = a.responsible_person_id
+        LEFT JOIN {SCHEMA}.exec_person au ON au.id = a.author_person_id
         LEFT JOIN {SCHEMA}.exec_person cf ON cf.id = a.result_confirmed_by_person_id
         LEFT JOIN {SCHEMA}.exec_issue s ON s.id = a.issue_id
         LEFT JOIN {SCHEMA}.exec_risk r ON r.id = a.risk_id
         LEFT JOIN {SCHEMA}.exec_decision_instance d ON d.id = a.decision_id
-        ORDER BY a.due_at NULLS LAST
-    """)
+        LEFT JOIN {SCHEMA}.exec_center_function cfn ON cfn.id = a.center_function_id
+        LEFT JOIN {SCHEMA}.exec_meeting m ON m.id = a.meeting_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = COALESCE(
+            a.initiative_id,
+            (SELECT s2.initiative_id FROM {SCHEMA}.exec_issue s2 WHERE s2.id = a.issue_id),
+            (SELECT r2.initiative_id FROM {SCHEMA}.exec_risk r2 WHERE r2.id = a.risk_id)
+        )
+        {where}
+        ORDER BY a.due_at NULLS LAST, a.id DESC
+    """, params)
     return rows(cur)
 
 
@@ -568,7 +621,29 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": {"items": risks(cur, iid)}})
 
         if action == "actions":
-            return cors({"ok": True, "data": {"items": actions(cur)}})
+            kind = qs.get("kind")
+            only_overdue = qs.get("overdue") == "1"
+            return cors({"ok": True, "data": {
+                "items": actions(cur, kind=kind, mine_email=actor, only_overdue=only_overdue)
+            }})
+
+        if action == "assignments_summary":
+            # Сводка для раздела «Поручения»: количество по каждому статусному ведру.
+            cur.execute(f"""
+                SELECT
+                  COUNT(*) FILTER (WHERE author_person_id = pid) AS mine_authored,
+                  COUNT(*) FILTER (WHERE responsible_person_id = pid) AS mine_responsible,
+                  COUNT(*) FILTER (WHERE due_at < CURRENT_DATE
+                      AND status NOT IN {ASSIGNMENT_DONE_STATUSES}) AS overdue,
+                  COUNT(*) FILTER (WHERE status = 'done_by_executor') AS awaiting_head,
+                  COUNT(*) FILTER (WHERE status IN ('new','accepted')) AS awaiting_start,
+                  COUNT(*) FILTER (WHERE status NOT IN {ASSIGNMENT_DONE_STATUSES}) AS in_progress,
+                  COUNT(*) FILTER (WHERE status IN {ASSIGNMENT_DONE_STATUSES}) AS completed
+                FROM {SCHEMA}.exec_action,
+                     LATERAL (SELECT person_id AS pid FROM {SCHEMA}.exec_cabinet_access
+                               WHERE LOWER(email) = LOWER(%s) LIMIT 1) me
+            """, (actor,))
+            return cors({"ok": True, "data": rows(cur)[0]})
 
         if action == "escalations":
             return cors({"ok": True, "data": {"items": escalations(cur)}})
@@ -700,14 +775,23 @@ def handler(event: dict, context) -> dict:
 
         if action == "save_action":
             aid = body.get("id")
-            fields = ["issue_id", "risk_id", "description", "responsible_person_id",
+            fields = ["issue_id", "risk_id", "title", "description", "responsible_person_id",
+                      "author_person_id", "initiative_id", "center_function_id", "meeting_id",
+                      "priority", "expected_result", "is_on_control",
                       "start_date", "due_at", "fact_date", "status", "completion_criteria",
                       "result", "result_confirmed_by_person_id", "delay_reason", "decision_id"]
             data = {k: body.get(k) for k in fields if k in body}
+            # description в БД обязателен (историческое поле) — если задан только
+            # короткий title, дублируем его в description, чтобы не менять схему
+            if not data.get("description") and data.get("title"):
+                data["description"] = data["title"]
 
-            err = validate("action", data, fetch_existing(cur, "exec_action", aid) if aid else None)
+            existing = fetch_existing(cur, "exec_action", aid) if aid else None
+            err = validate("action", data, existing)
             if err:
                 return cors({"ok": False, "error": {"message": err}}, 400)
+
+            prev_status = existing.get("status") if existing else None
 
             if aid:
                 sets = ", ".join(f"{k} = %s" for k in data)
@@ -715,15 +799,62 @@ def handler(event: dict, context) -> dict:
                     f"UPDATE {SCHEMA}.exec_action SET {sets}, updated_at = now() "
                     f"WHERE id = %s RETURNING id", list(data.values()) + [aid])
             else:
+                data.setdefault("author_person_id", body.get("author_person_id"))
+                data.setdefault("status", "new")
                 data["created_by"] = actor
                 cols = ", ".join(data.keys())
                 ph = ", ".join(["%s"] * len(data))
                 cur.execute(f"INSERT INTO {SCHEMA}.exec_action ({cols}) VALUES ({ph}) RETURNING id",
                             list(data.values()))
             new_id = cur.fetchone()[0]
+
+            new_status = data.get("status")
+            if new_status and new_status != prev_status:
+                cur.execute(
+                    f"INSERT INTO {SCHEMA}.exec_action_status_log "
+                    f"(action_id, from_status, to_status, comment, changed_by) "
+                    f"VALUES (%s,%s,%s,%s,%s)",
+                    (new_id, prev_status, new_status, body.get("status_comment"), actor))
+                if new_status in ("done_by_executor", "done"):
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.exec_action SET accepted_by_executor_at = now() "
+                        f"WHERE id = %s AND accepted_by_executor_at IS NULL", (new_id,))
+                if new_status == "accepted_by_head":
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.exec_action SET accepted_by_head_at = now() "
+                        f"WHERE id = %s AND accepted_by_head_at IS NULL", (new_id,))
+
+            coexecs = body.get("coexecutor_ids")
+            if coexecs is not None:
+                cur.execute(f"DELETE FROM {SCHEMA}.exec_action_coexecutor WHERE action_id = %s", (new_id,))
+                for pid in coexecs:
+                    cur.execute(
+                        f"INSERT INTO {SCHEMA}.exec_action_coexecutor (action_id, person_id) "
+                        f"VALUES (%s,%s) ON CONFLICT DO NOTHING", (new_id, pid))
+
             log(cur, actor, "action", new_id, "update" if aid else "create", data)
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "action_status_history":
+            aid = int(qs.get("id", 0))
+            cur.execute(f"""
+                SELECT l.*, NULL AS actor_name FROM {SCHEMA}.exec_action_status_log l
+                WHERE l.action_id = %s ORDER BY l.changed_at
+            """, (aid,))
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "delete_action":
+            aid = body.get("id")
+            if not aid:
+                return cors({"ok": False, "error": {"message": "Не указано поручение"}}, 400)
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_action_coexecutor WHERE action_id = %s", (aid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_action_status_log WHERE action_id = %s", (aid,))
+            cur.execute(f"UPDATE {SCHEMA}.exec_meeting_outcome SET action_id = NULL WHERE action_id = %s", (aid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_action WHERE id = %s", (aid,))
+            log(cur, actor, "action", aid, "delete")
+            conn.commit()
+            return cors({"ok": True, "data": {"id": aid}})
 
         if action == "save_escalation":
             eid = body.get("id")
@@ -828,6 +959,229 @@ def handler(event: dict, context) -> dict:
                 ORDER BY r.created_at DESC
             """)
             return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "meetings":
+            cur.execute(f"""
+                SELECT m.*,
+                       (SELECT COALESCE(json_agg(json_build_object('id', p.id, 'display_name', p.display_name)), '[]'::json)
+                          FROM {SCHEMA}.exec_meeting_participant mp
+                          JOIN {SCHEMA}.exec_person p ON p.id = mp.person_id
+                         WHERE mp.meeting_id = m.id) AS participants,
+                       (SELECT COALESCE(json_agg(json_build_object('id', i.id, 'title', i.title)), '[]'::json)
+                          FROM {SCHEMA}.exec_meeting_initiative mi
+                          JOIN {SCHEMA}.exec_initiative i ON i.id = mi.initiative_id
+                         WHERE mi.meeting_id = m.id) AS initiatives,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_meeting_outcome o WHERE o.meeting_id = m.id) AS outcomes_count
+                FROM {SCHEMA}.exec_meeting m
+                ORDER BY m.meeting_at DESC
+            """)
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "meeting":
+            mid = int(qs.get("id", 0))
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            item = rows(cur)
+            if not item:
+                return cors({"ok": False, "error": {"message": "Встреча не найдена"}}, 404)
+            cur.execute(f"""
+                SELECT p.id, p.display_name, p.position_title FROM {SCHEMA}.exec_meeting_participant mp
+                JOIN {SCHEMA}.exec_person p ON p.id = mp.person_id WHERE mp.meeting_id = %s
+            """, (mid,))
+            participants = rows(cur)
+            cur.execute(f"""
+                SELECT i.id, i.title FROM {SCHEMA}.exec_meeting_initiative mi
+                JOIN {SCHEMA}.exec_initiative i ON i.id = mi.initiative_id WHERE mi.meeting_id = %s
+            """, (mid,))
+            initiatives = rows(cur)
+            cur.execute(f"""
+                SELECT f.id, f.title FROM {SCHEMA}.exec_meeting_function mf
+                JOIN {SCHEMA}.exec_center_function f ON f.id = mf.center_function_id WHERE mf.meeting_id = %s
+            """, (mid,))
+            functions = rows(cur)
+            cur.execute(f"""
+                SELECT o.*, a.title AS action_title, s.title AS plan_step_title,
+                       ms.title AS milestone_title, iss.title AS issue_title,
+                       LEFT(r.description, 200) AS risk_description, d.question AS decision_question
+                FROM {SCHEMA}.exec_meeting_outcome o
+                LEFT JOIN {SCHEMA}.exec_action a ON a.id = o.action_id
+                LEFT JOIN {SCHEMA}.exec_plan_step s ON s.id = o.plan_step_id
+                LEFT JOIN {SCHEMA}.exec_milestone ms ON ms.id = o.milestone_id
+                LEFT JOIN {SCHEMA}.exec_issue iss ON iss.id = o.issue_id
+                LEFT JOIN {SCHEMA}.exec_risk r ON r.id = o.risk_id
+                LEFT JOIN {SCHEMA}.exec_decision_instance d ON d.id = o.decision_id
+                WHERE o.meeting_id = %s ORDER BY o.created_at
+            """, (mid,))
+            outcomes = rows(cur)
+            return cors({"ok": True, "data": {
+                "meeting": item[0], "participants": participants,
+                "initiatives": initiatives, "functions": functions, "outcomes": outcomes,
+            }})
+
+        if action == "save_meeting":
+            mid = body.get("id")
+            fields = ["title", "meeting_at", "location", "agenda", "materials",
+                      "notes", "next_meeting_at", "status"]
+            data = {k: body.get(k) for k in fields if k in body}
+            if mid:
+                sets = ", ".join(f"{k} = %s" for k in data)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_meeting SET {sets}, updated_at = now() "
+                    f"WHERE id = %s RETURNING id", list(data.values()) + [mid])
+            else:
+                data.setdefault("status", "planned")
+                data["created_by"] = actor
+                cols = ", ".join(data.keys())
+                ph = ", ".join(["%s"] * len(data))
+                cur.execute(f"INSERT INTO {SCHEMA}.exec_meeting ({cols}) VALUES ({ph}) RETURNING id",
+                            list(data.values()))
+            new_id = cur.fetchone()[0]
+
+            if "participant_ids" in body:
+                cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_participant WHERE meeting_id = %s", (new_id,))
+                for pid in body["participant_ids"] or []:
+                    cur.execute(
+                        f"INSERT INTO {SCHEMA}.exec_meeting_participant (meeting_id, person_id) "
+                        f"VALUES (%s,%s) ON CONFLICT DO NOTHING", (new_id, pid))
+            if "initiative_ids" in body:
+                cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_initiative WHERE meeting_id = %s", (new_id,))
+                for iid2 in body["initiative_ids"] or []:
+                    cur.execute(
+                        f"INSERT INTO {SCHEMA}.exec_meeting_initiative (meeting_id, initiative_id) "
+                        f"VALUES (%s,%s) ON CONFLICT DO NOTHING", (new_id, iid2))
+            if "function_ids" in body:
+                cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_function WHERE meeting_id = %s", (new_id,))
+                for fid2 in body["function_ids"] or []:
+                    cur.execute(
+                        f"INSERT INTO {SCHEMA}.exec_meeting_function (meeting_id, center_function_id) "
+                        f"VALUES (%s,%s) ON CONFLICT DO NOTHING", (new_id, fid2))
+
+            log(cur, actor, "meeting", new_id, "update" if mid else "create", data)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "delete_meeting":
+            mid = body.get("id")
+            if not mid:
+                return cors({"ok": False, "error": {"message": "Не указана встреча"}}, 400)
+            cur.execute(f"UPDATE {SCHEMA}.exec_action SET meeting_id = NULL WHERE meeting_id = %s", (mid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_outcome WHERE meeting_id = %s", (mid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_participant WHERE meeting_id = %s", (mid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_initiative WHERE meeting_id = %s", (mid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting_function WHERE meeting_id = %s", (mid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            log(cur, actor, "meeting", mid, "delete")
+            conn.commit()
+            return cors({"ok": True, "data": {"id": mid}})
+
+        if action == "add_meeting_outcome":
+            # Фиксирует запись протокола и опционально одним действием создаёт
+            # из неё задачу/веху/проблему/риск/решение/поручение.
+            mid = body.get("meeting_id")
+            outcome_type = body.get("outcome_type")
+            text = body.get("text")
+            if not mid or not outcome_type or not text:
+                return cors({"ok": False, "error": {
+                    "message": "Укажите встречу, тип записи и текст"}}, 400)
+
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            meeting = rows(cur)
+            if not meeting:
+                return cors({"ok": False, "error": {"message": "Встреча не найдена"}}, 404)
+            meeting = meeting[0]
+
+            outcome = {
+                "meeting_id": mid, "outcome_type": outcome_type, "text": text,
+            }
+            created_ref = {}
+
+            if outcome_type == "action":
+                responsible = body.get("responsible_person_id")
+                if not responsible:
+                    return cors({"ok": False, "error": {
+                        "message": "Для поручения из протокола укажите ответственного"}}, 400)
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_action
+                        (title, description, responsible_person_id, author_person_id,
+                         due_at, priority, meeting_id, status, created_by)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'new',%s) RETURNING id
+                """, (text[:400], text, responsible, body.get("author_person_id"),
+                      body.get("due_at"), body.get("priority") or "normal", mid, actor))
+                new_ref = cur.fetchone()[0]
+                outcome["action_id"] = new_ref
+                created_ref = {"type": "action", "id": new_ref}
+
+            elif outcome_type == "milestone":
+                init_id = body.get("initiative_id")
+                if not init_id:
+                    return cors({"ok": False, "error": {
+                        "message": "Для контрольной точки из протокола укажите инициативу"}}, 400)
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_milestone
+                        (initiative_id, title, plan_date, plan_date_original,
+                         responsible_person_id, status, created_by)
+                    VALUES (%s,%s,%s,%s,%s,'planned',%s) RETURNING id
+                """, (init_id, text[:400], body.get("plan_date"), body.get("plan_date"),
+                      body.get("responsible_person_id"), actor))
+                new_ref = cur.fetchone()[0]
+                outcome["milestone_id"] = new_ref
+                created_ref = {"type": "milestone", "id": new_ref}
+
+            elif outcome_type == "issue":
+                init_id = body.get("initiative_id")
+                if not init_id:
+                    return cors({"ok": False, "error": {
+                        "message": "Для проблемы из протокола укажите инициативу"}}, 400)
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_issue
+                        (initiative_id, title, description, criticality, status, created_by)
+                    VALUES (%s,%s,%s,'medium','open',%s) RETURNING id
+                """, (init_id, text[:400], text, actor))
+                new_ref = cur.fetchone()[0]
+                outcome["issue_id"] = new_ref
+                created_ref = {"type": "issue", "id": new_ref}
+
+            elif outcome_type == "risk":
+                init_id = body.get("initiative_id")
+                if not init_id:
+                    return cors({"ok": False, "error": {
+                        "message": "Для риска из протокола укажите инициативу"}}, 400)
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_risk
+                        (initiative_id, description, probability, impact, status, created_by)
+                    VALUES (%s,%s,3,3,'active',%s) RETURNING id
+                """, (init_id, text, actor))
+                new_ref = cur.fetchone()[0]
+                outcome["risk_id"] = new_ref
+                created_ref = {"type": "risk", "id": new_ref}
+
+            elif outcome_type == "decision":
+                init_id = body.get("initiative_id")
+                dtype = body.get("decision_type_code")
+                if not init_id or not dtype:
+                    return cors({"ok": False, "error": {
+                        "message": "Для решения из протокола укажите инициативу и тип решения"}}, 400)
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_decision_instance
+                        (initiative_id, decision_type_code, question, status,
+                         final_decision, decided_at, decided_by_person_id)
+                    VALUES (%s,%s,%s,'decided',%s,CURRENT_DATE,%s) RETURNING id
+                """, (init_id, dtype, text[:500], body.get("final_decision") or text,
+                      body.get("decided_by_person_id")))
+                new_ref = cur.fetchone()[0]
+                outcome["decision_id"] = new_ref
+                created_ref = {"type": "decision", "id": new_ref}
+
+            elif outcome_type != "note":
+                return cors({"ok": False, "error": {"message": "Неизвестный тип записи протокола"}}, 400)
+
+            cols = ", ".join(outcome.keys())
+            ph = ", ".join(["%s"] * len(outcome))
+            cur.execute(f"INSERT INTO {SCHEMA}.exec_meeting_outcome ({cols}) VALUES ({ph}) RETURNING id",
+                        list(outcome.values()))
+            outcome_id = cur.fetchone()[0]
+            log(cur, actor, "meeting_outcome", outcome_id, "create", outcome)
+            conn.commit()
+            return cors({"ok": True, "data": {"outcome_id": outcome_id, "created": created_ref}})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
     except psycopg2.Error as e:

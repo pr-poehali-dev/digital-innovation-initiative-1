@@ -909,6 +909,60 @@ def status_quo_risks(cur, center_id: int):
     return risks
 
 
+def _period_starts(periodicity: str, horizon_days: int) -> list:
+    """Начала периодов (даты) от сегодня до горизонта, для штамповки задач.
+    daily — каждый день, weekly — каждый понедельник, monthly — 1 число,
+    quarterly — начало квартала, yearly — начало года."""
+    import datetime
+    today = datetime.date.today()
+    end = today + datetime.timedelta(days=horizon_days)
+    out = []
+
+    if periodicity == "daily":
+        d = today
+        while d <= end:
+            out.append(d)
+            d += datetime.timedelta(days=1)
+    elif periodicity == "weekly":
+        d = today - datetime.timedelta(days=today.weekday())
+        while d <= end:
+            if d >= today:
+                out.append(d)
+            d += datetime.timedelta(days=7)
+    elif periodicity == "monthly":
+        y, m = today.year, today.month
+        while True:
+            d = datetime.date(y, m, 1)
+            if d > end:
+                break
+            if d >= today.replace(day=1):
+                out.append(max(d, today))
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+    elif periodicity == "quarterly":
+        y, q_month = today.year, ((today.month - 1) // 3) * 3 + 1
+        while True:
+            d = datetime.date(y, q_month, 1)
+            if d > end:
+                break
+            if d + datetime.timedelta(days=90) >= today:
+                out.append(max(d, today))
+            q_month += 3
+            if q_month > 12:
+                q_month = 1
+                y += 1
+    elif periodicity == "yearly":
+        y = today.year
+        while datetime.date(y, 1, 1) <= end:
+            d = datetime.date(y, 1, 1)
+            out.append(max(d, today))
+            y += 1
+
+    return sorted(set(out))
+
+
 def refs(cur):
     cur.execute(f"""
         SELECT id, display_name, position_title, org_name
@@ -1319,6 +1373,152 @@ def handler(event: dict, context) -> dict:
             )
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "task_templates":
+            fid = as_int(qs.get("function_id"))
+            where = "WHERE t.function_id = %s" if fid else ""
+            cur.execute(f"""
+                SELECT t.*, f.title AS function_title, p.display_name AS default_responsible_name,
+                       pl.title AS plan_title,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step s
+                         WHERE s.task_template_id = t.id AND s.status <> 'cancelled') AS instances_count,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_plan_step s
+                         WHERE s.task_template_id = t.id AND s.status NOT IN ('done','cancelled')
+                           AND s.due_date < CURRENT_DATE) AS overdue_instances
+                FROM {SCHEMA}.exec_function_task_template t
+                JOIN {SCHEMA}.exec_center_function f ON f.id = t.function_id
+                LEFT JOIN {SCHEMA}.exec_person p ON p.id = t.default_responsible_person_id
+                LEFT JOIN {SCHEMA}.exec_plan pl ON pl.id = t.plan_id
+                {where}
+                ORDER BY f.sort_order, t.title
+            """, (fid,) if fid else ())
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "save_task_template":
+            fields = ["function_id", "title", "description", "periodicity",
+                      "default_responsible_person_id", "estimate_hours", "checklist_json",
+                      "expected_result", "day_offset", "is_active", "plan_id"]
+            new_id, err = upsert(cur, "exec_function_task_template", fields, body)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "delete_task_template":
+            tid = as_int(body.get("id"))
+            if not tid:
+                return cors({"ok": False, "error": {"message": "Не указан шаблон"}}, 400)
+            cur.execute(
+                f"UPDATE {SCHEMA}.exec_plan_step SET task_template_id = NULL WHERE task_template_id = %s",
+                (tid,))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_function_task_template WHERE id = %s", (tid,))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": tid}})
+
+        if action == "generate_regular_tasks":
+            # Штампует экземпляры задач по активным шаблонам вперёд на указанный
+            # горизонт (по умолчанию 60 дней). Не создаёт дублей: сверяется
+            # с last_generated_for и с уже существующими шагами по task_template_id.
+            horizon_days = as_int(body.get("horizon_days")) or 60
+            only_template_id = as_int(body.get("template_id"))
+
+            where = "WHERE t.is_active = true"
+            params = []
+            if only_template_id:
+                where += " AND t.id = %s"
+                params.append(only_template_id)
+
+            cur.execute(f"""
+                SELECT t.*, f.center_id, f.title AS function_title
+                FROM {SCHEMA}.exec_function_task_template t
+                JOIN {SCHEMA}.exec_center_function f ON f.id = t.function_id
+                {where}
+            """, params)
+            templates = rows(cur)
+
+            created = []
+            for t in templates:
+                period_starts = _period_starts(t["periodicity"], horizon_days)
+                for p_start in period_starts:
+                    due = p_start
+                    if t["day_offset"]:
+                        cur.execute("SELECT %s::date + (%s || ' days')::interval",
+                                    (p_start, t["day_offset"]))
+                        due = cur.fetchone()[0]
+                    # защита от дублей: экземпляр на эту дату по этому шаблону уже есть?
+                    cur.execute(f"""
+                        SELECT 1 FROM {SCHEMA}.exec_plan_step
+                        WHERE task_template_id = %s AND due_date = %s AND status <> 'cancelled'
+                    """, (t["id"], due))
+                    if rows(cur):
+                        continue
+                    plan_id = t["plan_id"]
+                    if not plan_id:
+                        cur.execute(f"""
+                            SELECT id FROM {SCHEMA}.exec_plan
+                            WHERE title = %s LIMIT 1
+                        """, (f"Регулярные работы — {t['function_title']}",))
+                        found = rows(cur)
+                        if found:
+                            plan_id = found[0]["id"]
+                        else:
+                            cur.execute(f"""
+                                INSERT INTO {SCHEMA}.exec_plan (title, status, note)
+                                VALUES (%s, 'active', 'Автоматически создан для регулярных задач функции')
+                                RETURNING id
+                            """, (f"Регулярные работы — {t['function_title']}",))
+                            plan_id = cur.fetchone()[0]
+                        cur.execute(
+                            f"UPDATE {SCHEMA}.exec_function_task_template SET plan_id = %s WHERE id = %s",
+                            (plan_id, t["id"]))
+                    cur.execute(f"""
+                        INSERT INTO {SCHEMA}.exec_plan_step
+                            (plan_id, title, description, step_type, status, due_date,
+                             estimate_hours, result_criteria, center_function_id, task_template_id)
+                        VALUES (%s,%s,%s,'task','not_started',%s,%s,%s,%s,%s) RETURNING id
+                    """, (plan_id, t["title"], t["description"], due, t["estimate_hours"],
+                          t["expected_result"], t["function_id"], t["id"]))
+                    step_id = cur.fetchone()[0]
+                    if t["default_responsible_person_id"]:
+                        cur.execute(f"""
+                            INSERT INTO {SCHEMA}.exec_plan_assignee (step_id, person_id, raci_role, role_in_step)
+                            VALUES (%s,%s,'A','responsible')
+                            ON CONFLICT (step_id, person_id, raci_role) DO NOTHING
+                        """, (step_id, t["default_responsible_person_id"]))
+                    created.append({"template_id": t["id"], "step_id": step_id, "due_date": str(due)})
+                if period_starts:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.exec_function_task_template "
+                        f"SET last_generated_for = %s WHERE id = %s",
+                        (period_starts[-1], t["id"]))
+            conn.commit()
+            return cors({"ok": True, "data": {"created": created, "count": len(created)}})
+
+        if action == "regular_tasks_summary":
+            # Сколько ресурсов уходит на постоянную деятельность vs инициативы —
+            # для обоснования численности.
+            cur.execute(f"""
+                SELECT
+                  COUNT(DISTINCT t.id) AS active_templates,
+                  COALESCE(SUM(t.estimate_hours), 0) AS hours_per_instance_sum
+                FROM {SCHEMA}.exec_function_task_template t WHERE t.is_active = true
+            """)
+            templates_stat = rows(cur)[0]
+            cur.execute(f"""
+                SELECT
+                  COUNT(*) FILTER (WHERE s.status NOT IN ('done','cancelled')
+                      AND s.due_date < CURRENT_DATE) AS missed,
+                  COUNT(*) FILTER (WHERE s.status NOT IN ('done','cancelled')
+                      AND s.due_date >= CURRENT_DATE) AS upcoming,
+                  COUNT(*) FILTER (WHERE s.status = 'done') AS done,
+                  COALESCE(SUM(s.estimate_hours) FILTER (WHERE s.status NOT IN ('cancelled')), 0) AS total_hours
+                FROM {SCHEMA}.exec_plan_step s
+                WHERE s.task_template_id IS NOT NULL
+            """)
+            instances_stat = rows(cur)[0]
+            return cors({"ok": True, "data": {
+                "templates": templates_stat, "instances": instances_stat,
+            }})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
     finally:

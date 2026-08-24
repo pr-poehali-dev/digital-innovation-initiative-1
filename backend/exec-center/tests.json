@@ -165,6 +165,36 @@
         "ok": false
       },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized task_templates",
+      "method": "GET",
+      "path": "/?action=task_templates",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_task_template blocked",
+      "method": "POST",
+      "path": "/?action=save_task_template",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized generate_regular_tasks blocked",
+      "method": "POST",
+      "path": "/?action=generate_regular_tasks",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "ok": false
+      },
+      "bodyMatcher": "partial"
     }
   ]
 }

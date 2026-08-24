@@ -446,7 +446,65 @@ export const centerApi = {
     post("save_participation", data),
 
   deleteParticipation: (id: number) => post("delete_participation", { id }),
+
+  taskTemplates: (functionId?: number): Promise<{ items: TaskTemplate[] }> =>
+    req(`/?action=task_templates${functionId ? `&function_id=${functionId}` : ""}`),
+
+  saveTaskTemplate: (data: Record<string, unknown>): Promise<{ id: number }> =>
+    post("save_task_template", data),
+
+  deleteTaskTemplate: (id: number) => post("delete_task_template", { id }),
+
+  generateRegularTasks: (
+    horizonDays?: number,
+    templateId?: number,
+  ): Promise<{ created: { template_id: number; step_id: number; due_date: string }[]; count: number }> =>
+    post("generate_regular_tasks", { horizon_days: horizonDays, template_id: templateId }),
+
+  regularTasksSummary: (): Promise<{
+    templates: { active_templates: number; hours_per_instance_sum: number };
+    instances: { missed: number; upcoming: number; done: number; total_hours: number };
+  }> => req("/?action=regular_tasks_summary"),
 };
+
+export interface TaskTemplate {
+  id: number;
+  function_id: number;
+  function_title: string;
+  title: string;
+  description: string | null;
+  periodicity: "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
+  default_responsible_person_id: number | null;
+  default_responsible_name: string | null;
+  estimate_hours: number | string | null;
+  checklist_json: string | null;
+  expected_result: string | null;
+  day_offset: number;
+  is_active: boolean;
+  plan_id: number | null;
+  plan_title: string | null;
+  last_generated_for: string | null;
+  instances_count: number;
+  overdue_instances: number;
+}
+
+export const REGULARITY_LABEL: Record<string, string> = {
+  daily: "Ежедневно",
+  weekly: "Еженедельно",
+  monthly: "Ежемесячно",
+  quarterly: "Ежеквартально",
+  yearly: "Ежегодно",
+  event: "По событию",
+  on_demand: "По требованию",
+};
+
+export const PERIODICITY_OPTIONS = [
+  { value: "daily", label: "Ежедневно" },
+  { value: "weekly", label: "Еженедельно" },
+  { value: "monthly", label: "Ежемесячно" },
+  { value: "quarterly", label: "Ежеквартально" },
+  { value: "yearly", label: "Ежегодно" },
+];
 
 // ── Распределённая модель Центра ──────────────────────────────────────
 

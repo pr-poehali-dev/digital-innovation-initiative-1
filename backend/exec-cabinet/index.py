@@ -423,9 +423,77 @@ def handler(event: dict, context) -> dict:
             """, (iid,))
             assignments = rows(cur)
 
+            # Ближайшая непройденная контрольная точка
+            cur.execute(f"""
+                SELECT m.id, m.title, m.plan_date, m.status,
+                       (m.plan_date - CURRENT_DATE) AS days_left
+                FROM {SCHEMA}.exec_milestone m
+                WHERE m.initiative_id = %s AND m.status NOT IN ('achieved','cancelled')
+                ORDER BY m.plan_date NULLS LAST LIMIT 1
+            """, (iid,))
+            next_milestone = rows(cur)
+            next_milestone = next_milestone[0] if next_milestone else None
+
+            # Риски и проблемы инициативы (сводно, без полной детализации control)
+            cur.execute(f"""
+                SELECT COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed','irrelevant')) AS open_issues,
+                       COUNT(*) FILTER (WHERE is_blocking AND COALESCE(block_status,'active')='active') AS blocking_issues
+                FROM {SCHEMA}.exec_issue WHERE initiative_id = %s
+            """, (iid,))
+            issue_stats = rows(cur)[0]
+            cur.execute(f"""
+                SELECT COUNT(*) FILTER (WHERE status = 'active') AS open_risks,
+                       COUNT(*) FILTER (WHERE risk_score >= 10 AND status = 'active') AS high_risks
+                FROM {SCHEMA}.exec_risk WHERE initiative_id = %s
+            """, (iid,))
+            risk_stats = rows(cur)[0]
+
+            # Плановые/фактические трудозатраты через план(ы), привязанные к инициативе
+            cur.execute(f"""
+                SELECT COALESCE(SUM(a.plan_hours), 0) AS plan_hours,
+                       COALESCE((SELECT SUM(t.hours) FROM {SCHEMA}.exec_time_entry t
+                                  JOIN {SCHEMA}.exec_plan_step s2 ON s2.id = t.step_id
+                                  JOIN {SCHEMA}.exec_plan p2 ON p2.id = s2.plan_id
+                                 WHERE p2.initiative_id = %s), 0) AS fact_hours,
+                       COUNT(DISTINCT s.id) FILTER (WHERE s.status NOT IN ('done','cancelled')) AS open_steps,
+                       COUNT(DISTINCT s.id) FILTER (WHERE s.status NOT IN ('done','cancelled')
+                           AND s.due_date < CURRENT_DATE) AS overdue_steps
+                FROM {SCHEMA}.exec_plan p
+                LEFT JOIN {SCHEMA}.exec_plan_step s ON s.plan_id = p.id AND s.status <> 'cancelled'
+                LEFT JOIN {SCHEMA}.exec_plan_assignee a ON a.step_id = s.id
+                WHERE p.initiative_id = %s
+            """, (iid, iid))
+            labor = rows(cur)[0]
+
+            # Функции Центра, связанные с инициативой
+            cur.execute(f"""
+                SELECT f.id, f.title, f.code, f.criticality
+                FROM {SCHEMA}.exec_function_initiative fi
+                JOIN {SCHEMA}.exec_center_function f ON f.id = fi.function_id
+                WHERE fi.initiative_id = %s
+                ORDER BY f.sort_order
+            """, (iid,))
+            functions = rows(cur)
+
+            # Открытые поручения по инициативе (в т.ч. через issue/risk)
+            cur.execute(f"""
+                SELECT COUNT(*) FILTER (WHERE a.status NOT IN
+                    ('done','done_by_executor','accepted_by_head','cancelled')) AS open_actions,
+                       COUNT(*) FILTER (WHERE a.due_at < CURRENT_DATE AND a.status NOT IN
+                    ('done','done_by_executor','accepted_by_head','cancelled')) AS overdue_actions
+                FROM {SCHEMA}.exec_action a
+                LEFT JOIN {SCHEMA}.exec_issue s3 ON s3.id = a.issue_id
+                LEFT JOIN {SCHEMA}.exec_risk r3 ON r3.id = a.risk_id
+                WHERE a.initiative_id = %s OR s3.initiative_id = %s OR r3.initiative_id = %s
+            """, (iid, iid, iid))
+            action_stats = rows(cur)[0]
+
             return cors({"ok": True, "data": {
                 "initiative": item[0], "stakeholders": stakeholders,
                 "decisions": decisions, "assignments": assignments,
+                "next_milestone": next_milestone,
+                "issue_stats": issue_stats, "risk_stats": risk_stats,
+                "labor": labor, "functions": functions, "action_stats": action_stats,
                 "dictionaries": load_dictionaries(cur),
             }})
 
@@ -515,6 +583,111 @@ def handler(event: dict, context) -> dict:
         if action == "diagnostics":
             return cors({"ok": True, "data": {"issues": diagnostics(cur)}})
 
+        if action == "portfolio_summary":
+            # Сводка портфеля: статусы, готовность к бюджету, отклонения.
+            cur.execute(f"""
+                SELECT status, COUNT(*) AS cnt
+                FROM {SCHEMA}.exec_initiative WHERE status <> 'closed'
+                GROUP BY status
+            """)
+            by_status = rows(cur)
+
+            cur.execute(f"""
+                SELECT budget_status, COUNT(*) AS cnt, SUM(COALESCE(budget_amount,0)) AS amount
+                FROM {SCHEMA}.exec_initiative
+                WHERE status <> 'closed' AND budget_year IS NOT NULL
+                GROUP BY budget_status
+            """)
+            by_budget_status = rows(cur)
+
+            cur.execute(f"""
+                SELECT
+                  COUNT(*) FILTER (WHERE status NOT IN ('closed')) AS active_total,
+                  COUNT(*) FILTER (WHERE owner_person_id IS NULL AND status NOT IN ('closed')) AS no_owner,
+                  COUNT(*) FILTER (WHERE status NOT IN ('closed') AND NOT EXISTS (
+                      SELECT 1 FROM {SCHEMA}.exec_milestone m
+                      WHERE m.initiative_id = exec_initiative.id
+                        AND m.status NOT IN ('achieved','cancelled'))) AS no_next_step,
+                  COUNT(*) FILTER (WHERE status NOT IN ('closed') AND EXISTS (
+                      SELECT 1 FROM {SCHEMA}.exec_milestone m
+                      WHERE m.initiative_id = exec_initiative.id
+                        AND m.plan_date < CURRENT_DATE AND m.status NOT IN ('achieved','cancelled'))) AS overdue_milestone,
+                  COUNT(*) FILTER (WHERE status NOT IN ('closed') AND EXISTS (
+                      SELECT 1 FROM {SCHEMA}.exec_decision_instance d
+                      WHERE d.initiative_id = exec_initiative.id
+                        AND d.status NOT IN ('decided','rejected','deferred'))) AS needs_decision,
+                  COUNT(*) FILTER (WHERE budget_year IS NOT NULL
+                      AND budget_status NOT IN ('approved','not_required')) AS budget_not_ready
+                FROM {SCHEMA}.exec_initiative
+            """)
+            flags = rows(cur)[0]
+
+            return cors({"ok": True, "data": {
+                "by_status": by_status, "by_budget_status": by_budget_status, "flags": flags,
+            }})
+
+        if action == "my_day":
+            # Личный рабочий стол руководителя: собирает готовые данные из уже
+            # существующих выборок, ничего не пересчитывает заново.
+            cur.execute(f"""
+                SELECT p.id, p.display_name FROM {SCHEMA}.exec_cabinet_access a
+                JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+                WHERE LOWER(a.email) = LOWER(%s) LIMIT 1
+            """, (actor,))
+            me = rows(cur)
+            me_person_id = me[0]["id"] if me else None
+
+            cur.execute(f"""
+                SELECT i.id, i.title, i.status, i.priority, i.updated_at, ow.display_name AS owner_name
+                FROM {SCHEMA}.exec_initiative i
+                LEFT JOIN {SCHEMA}.exec_person ow ON ow.id = i.owner_person_id
+                WHERE i.status NOT IN ('closed')
+                ORDER BY i.updated_at DESC LIMIT 8
+            """)
+            recent_initiatives = rows(cur)
+
+            my_actions, incoming_actions = [], []
+            if me_person_id:
+                cur.execute(f"""
+                    SELECT a.id, a.title, a.description, a.due_at, a.status, a.priority,
+                           i.title AS initiative_title,
+                           (a.due_at < CURRENT_DATE AND a.status NOT IN
+                               ('done','done_by_executor','accepted_by_head','cancelled')) AS is_overdue
+                    FROM {SCHEMA}.exec_action a
+                    LEFT JOIN {SCHEMA}.exec_issue s ON s.id = a.issue_id
+                    LEFT JOIN {SCHEMA}.exec_risk r ON r.id = a.risk_id
+                    LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = COALESCE(a.initiative_id, s.initiative_id, r.initiative_id)
+                    WHERE a.responsible_person_id = %s
+                      AND a.status NOT IN ('done','accepted_by_head','cancelled')
+                    ORDER BY a.due_at NULLS LAST LIMIT 20
+                """, (me_person_id,))
+                my_actions = rows(cur)
+
+                cur.execute(f"""
+                    SELECT a.id, a.title, a.description, a.responsible_person_id,
+                           p.display_name AS responsible_name, a.status, a.due_at
+                    FROM {SCHEMA}.exec_action a
+                    LEFT JOIN {SCHEMA}.exec_person p ON p.id = a.responsible_person_id
+                    WHERE a.author_person_id = %s AND a.status = 'done_by_executor'
+                    ORDER BY a.due_at NULLS LAST
+                """, (me_person_id,))
+                incoming_actions = rows(cur)
+
+            cur.execute(f"""
+                SELECT id, title, meeting_at, location FROM {SCHEMA}.exec_meeting
+                WHERE meeting_at BETWEEN now() AND now() + interval '7 days' AND status = 'planned'
+                ORDER BY meeting_at LIMIT 5
+            """)
+            upcoming_meetings = rows(cur)
+
+            return cors({"ok": True, "data": {
+                "me_person_id": me_person_id,
+                "recent_initiatives": recent_initiatives,
+                "my_actions": my_actions,
+                "incoming_actions": incoming_actions,
+                "upcoming_meetings": upcoming_meetings,
+            }})
+
         if action == "refs":
             cur.execute(f"""
                 SELECT id, display_name, position_title, org_name
@@ -567,7 +740,10 @@ def handler(event: dict, context) -> dict:
                       "effect_description", "effect_metric", "effect_baseline", "effect_target",
                       "effect_actual", "budget_need", "budget_source", "escalation_level",
                       "owner_person_id", "manager_person_id", "curator_person_id", "effect_owner_person_id",
-                      "plan_start", "plan_end"]
+                      "plan_start", "plan_end",
+                      "budget_year", "budget_kind", "budget_source_prev", "budget_source_new",
+                      "budget_amount", "budget_status", "budget_owner_person_id",
+                      "budget_materials_note", "budget_due_date", "budget_finance_comment"]
             data = {k: body.get(k) for k in fields if k in body}
             if iid:
                 sets = ", ".join(f"{k} = %s" for k in data)
