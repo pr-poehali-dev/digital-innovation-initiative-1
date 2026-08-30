@@ -385,8 +385,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Top bar */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10 h-14">
-          <div className="px-4 lg:px-6 h-full flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+          <div className="px-3 sm:px-4 lg:px-6 h-full flex items-center justify-between gap-2 sm:gap-3 min-w-0">
+            <div className="flex items-center gap-1 sm:gap-2 min-w-0">
               <button
                 onClick={() => setMobileNavOpen(true)}
                 className="lg:hidden w-9 h-9 flex items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 transition-colors flex-shrink-0"
@@ -394,15 +394,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               >
                 <Icon name="Menu" size={20} />
               </button>
-              <Link to="/cabinet" className="flex items-center gap-2 lg:hidden">
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center">
+              <Link to="/cabinet" className="flex items-center gap-2 lg:hidden min-w-0 flex-shrink">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center flex-shrink-0">
                   <span className="text-white font-bold text-xs">Т</span>
                 </div>
-                <span className="font-bold text-sm text-slate-900">Траектория</span>
-                <span className="text-[9px] text-slate-300 select-none" title="Хеш реально загруженного JS-бандла">{BUILD_HASH}</span>
+                <span className="font-bold text-sm text-slate-900 truncate hidden sm:inline">Траектория</span>
+                <span className="text-[9px] text-slate-300 select-none hidden sm:inline" title="Хеш реально загруженного JS-бандла">{BUILD_HASH}</span>
               </Link>
               {canGoBack && (
-                <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 transition-colors px-2 py-1.5 rounded-lg hover:bg-slate-100">
+                <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 transition-colors px-2 py-1.5 rounded-lg hover:bg-slate-100 flex-shrink-0">
                   <Icon name="ArrowLeft" size={16} />
                   <span className="hidden sm:block text-sm">Назад</span>
                 </button>
@@ -424,10 +424,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <NotificationBell />
               <button
                 onClick={() => setAiOpen(true)}
-                className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity"
+                className="flex items-center gap-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity flex-shrink-0"
+                aria-label="AI-помощник"
               >
                 <Icon name="Sparkles" size={13} />
-                AI-помощник
+                <span className="hidden sm:inline">AI-помощник</span>
               </button>
               <div className="hidden sm:flex items-center gap-2 pl-1">
                 <div className="w-7 h-7 rounded-full bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center flex-shrink-0">

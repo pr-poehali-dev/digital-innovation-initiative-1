@@ -134,7 +134,9 @@ def plan_detail(cur, plan_id: int):
                (SELECT pr.display_name FROM {SCHEMA}.exec_plan_assignee a
                   JOIN {SCHEMA}.exec_person pr ON pr.id = a.person_id
                  WHERE a.step_id = s.id AND a.raci_role = 'A' LIMIT 1) AS responsible_name,
-               r.position_title AS responsible_position,
+               (SELECT pr.position_title FROM {SCHEMA}.exec_plan_assignee a
+                  JOIN {SCHEMA}.exec_person pr ON pr.id = a.person_id
+                 WHERE a.step_id = s.id AND a.raci_role = 'A' LIMIT 1) AS responsible_position,
                d.title AS depends_on_title,
                (s.due_date < CURRENT_DATE AND s.status NOT IN ('done','cancelled')) AS is_overdue
         FROM {SCHEMA}.exec_plan_step s
