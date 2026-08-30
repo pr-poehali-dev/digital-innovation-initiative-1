@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
+import DataKindTag from "@/components/exec/DataKindTag";
 import {
   CRITICALITY,
   CoverageRow,
@@ -103,6 +104,21 @@ export default function ExecCenterCasePage() {
 
   const toggle = (id: string) => setOpenSection((s) => (s === id ? null : id));
 
+  // Готовность модели: доля заполненных ключевых блоков (не пустых значений)
+  const checklist = [
+    { label: "Паспорт (проблема и обоснование)", done: !!c.problem_statement && !!c.rationale },
+    { label: `Цели — ${data.center.goals?.length ?? 0}`, done: (data.center.goals?.length ?? 0) > 0 },
+    { label: `Функции — ${functions.length}`, done: functions.length > 0 },
+    { label: `Целевые роли — ${roles.length}`, done: roles.length > 0 },
+    { label: "Владельцы функций назначены", done: functions.some((f) => !!f.current_owner) },
+    { label: "Участие команды", done: participation.length > 0 },
+    { label: "Компетенции по функциям", done: gaps.length > 0 || functions.some((f) => f.covered_now) },
+  ];
+  const readiness = Math.round((checklist.filter((x) => x.done).length / checklist.length) * 100);
+  const firstGap = checklist.find((x) => !x.done);
+
+  const todayStr = new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
+
   return (
     <Layout>
       <div className="max-w-[1100px] mx-auto px-4 py-6">
@@ -124,10 +140,51 @@ export default function ExecCenterCasePage() {
         </div>
 
         <h1 className="text-2xl font-bold text-slate-900 mt-3">Обоснование создания Центра</h1>
-        <p className="text-sm text-slate-500 mt-1 mb-6">
+        <p className="text-sm text-slate-500 mt-1 mb-4">
           {c.title} · материалы для защиты перед руководством, построены на фактических данных
           кабинета
         </p>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <div className="flex items-center gap-2">
+              <Icon name="Gauge" size={16} className="text-violet-600" />
+              <span className="text-sm font-semibold text-slate-900">Готовность модели: {readiness}%</span>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-slate-500">
+              <span>Данные актуальны на {todayStr}</span>
+              <DataKindTag kind="fact" />
+              <DataKindTag kind="calc" />
+            </div>
+          </div>
+          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden mb-3">
+            <div
+              className={`h-full transition-all ${readiness === 100 ? "bg-emerald-500" : "bg-violet-500"}`}
+              style={{ width: `${readiness}%` }}
+            />
+          </div>
+          <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1.5">
+            {checklist.map((item) => (
+              <div key={item.label} className="flex items-center gap-1.5 text-xs">
+                <Icon
+                  name={item.done ? "CheckCircle2" : "Circle"}
+                  size={13}
+                  className={item.done ? "text-emerald-500 flex-shrink-0" : "text-slate-300 flex-shrink-0"}
+                />
+                <span className={item.done ? "text-slate-600" : "text-slate-400"}>{item.label}</span>
+              </div>
+            ))}
+          </div>
+          {firstGap && (
+            <button
+              onClick={() => nav("/cabinet/exec/model/wizard")}
+              className="mt-3 text-xs text-violet-600 hover:text-violet-700 transition-colors inline-flex items-center gap-1"
+            >
+              <Icon name="Wand2" size={12} />
+              Дозаполнить: {firstGap.label}
+            </button>
+          )}
+        </div>
 
         <Section
           id="problem"
@@ -135,6 +192,7 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Target"
           title="Проблема и предпосылки создания"
+          summary={c.problem_statement ? "заполнено" : "нет данных"}
         >
           <TextBlock label="Какую проблему решаем" value={c.problem_statement} />
           <TextBlock label="Почему нужен отдельный центр" value={c.rationale} />
@@ -147,6 +205,7 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Rocket"
           title="Текущий портфель инициатив"
+          summary={`${functions.length} функций · ${roles.length} ролей`}
         >
           {!data.center.initiative_title && !functions.length ? (
             <Empty text="Инициативы пока не привязаны" icon="Rocket" />
@@ -165,6 +224,13 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Layers"
           title="Объём функций и задач"
+          summary={
+            functions.length
+              ? `${functions.length} функций · ${Math.round(
+                  functions.reduce((s, f) => s + Number(f.hours_per_month || 0), 0),
+                )} ч/мес.`
+              : "нет данных"
+          }
         >
           {!functions.length ? (
             <Empty text="Функции ещё не описаны" icon="Layers" />
@@ -210,6 +276,7 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Timer"
           title="Фактические трудозатраты"
+          summary={totalPlanHours || totalFactHours ? `план ${Math.round(totalPlanHours)} ч · факт ${Math.round(totalFactHours)} ч` : "нет данных"}
         >
           <div className="grid sm:grid-cols-3 gap-3 mb-4">
             <StatCard label="Плановые часы Центра" value={Math.round(totalPlanHours)} />
@@ -247,6 +314,11 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="UsersRound"
           title="Загрузка распределённой команды"
+          summary={
+            participation.length
+              ? `${Math.round(participation.reduce((s, p) => s + (p.center_hours_per_week || 0), 0))} ч/нед · ${participation.length} чел.`
+              : "нет данных"
+          }
         >
           {!participation.length ? (
             <Empty text="Участие сотрудников ещё не описано" icon="UsersRound" />
@@ -286,6 +358,8 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="TrendingDown"
           title="Дефицит ресурсов и компетенций"
+          summary={`дефицит ${staffing.deficit_fte} ст.`}
+          kind="calc"
         >
           <div className="grid sm:grid-cols-3 gap-3 mb-4">
             <StatCard label="Требуется ставок" value={staffing.required_fte} tone="highlight" />
@@ -315,6 +389,8 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Building2"
           title="Текущая и целевая организационная структура"
+          summary={`${roles.length} целевых ролей`}
+          kind="target"
         >
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
@@ -355,6 +431,8 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Calculator"
           title="Расчёт необходимой численности"
+          summary={`рекомендовано ${staffing.required_fte} ст.`}
+          kind="calc"
         >
           <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 mb-3">
             <p className="text-sm text-violet-900">
@@ -380,6 +458,8 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Sparkles"
           title="Ожидаемые эффекты"
+          summary={c.expected_effects ? "заполнено" : "нет данных"}
+          kind="expert"
         >
           <TextBlock label="Что изменится после создания Центра" value={c.expected_effects} />
           <TextBlock label="Критерии успеха" value={c.success_criteria} />
@@ -391,6 +471,8 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="ShieldAlert"
           title="Риски, если Центр не будет создан"
+          summary={`${risks.length} рисков`}
+          kind="calc"
         >
           {!risks.length ? (
             <Empty text="Существенных рисков не выявлено" icon="ShieldCheck" />
@@ -415,6 +497,8 @@ export default function ExecCenterCasePage() {
           onToggle={toggle}
           icon="Route"
           title="Дорожная карта создания"
+          summary={c.roadmap_text ? "заполнено" : "нет данных"}
+          kind="expert"
         >
           <TextBlock label="Этапы перехода" value={c.roadmap_text} multiline />
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mt-2">
@@ -433,6 +517,8 @@ function Section({
   onToggle,
   icon,
   title,
+  summary,
+  kind,
   children,
 }: {
   id: string;
@@ -440,6 +526,8 @@ function Section({
   onToggle: (id: string) => void;
   icon: string;
   title: string;
+  summary?: string;
+  kind?: "fact" | "calc" | "expert" | "target";
   children: React.ReactNode;
 }) {
   return (
@@ -450,10 +538,14 @@ function Section({
       >
         <Icon name={icon} size={16} className="text-violet-600 flex-shrink-0" />
         <span className="text-sm font-semibold text-slate-900 flex-1 text-left">{title}</span>
+        {!open && summary && (
+          <span className="text-xs text-slate-400 hidden sm:inline">{summary}</span>
+        )}
+        {kind && <DataKindTag kind={kind} />}
         <Icon
           name="ChevronDown"
           size={16}
-          className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`text-slate-400 transition-transform flex-shrink-0 ${open ? "rotate-180" : ""}`}
         />
       </button>
       {open && <div className="px-4 pb-4">{children}</div>}

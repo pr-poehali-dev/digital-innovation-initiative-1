@@ -205,6 +205,7 @@ def check_readiness(cur, center_id: int):
         "results": results_n > 0,
         "status_quo_risks": functions_n > 0 or participation_n > 0,
         "target_functions": functions_n > 0,
+        "staffing": functions_n > 0,
         "narrative_text": False,  # решает автор презентации вручную
     }
 
