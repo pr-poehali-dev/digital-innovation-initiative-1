@@ -316,7 +316,7 @@ export default function ExecCenterCasePage() {
           title="Загрузка распределённой команды"
           summary={
             participation.length
-              ? `${Math.round(participation.reduce((s, p) => s + (p.center_hours_per_week || 0), 0))} ч/нед · ${participation.length} чел.`
+              ? `${Math.round(participation.reduce((s, p) => s + Number(p.center_hours_per_week || 0), 0))} ч/нед · ${participation.length} чел.`
               : "нет данных"
           }
         >
