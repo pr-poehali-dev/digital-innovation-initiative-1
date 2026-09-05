@@ -1,9 +1,13 @@
 import Icon from "@/components/ui/icon";
 import type { Block } from "@/lib/bizPresentationsApi";
 import { semColor, COVER_GRADIENTS } from "./theme";
+import OrbitDiagram from "./OrbitDiagram";
 
 export default function BlockRenderer({ block }: { block: Block }) {
   switch (block.kind) {
+    case "orbit":
+      return <OrbitDiagram block={block} />;
+
     case "text":
       return (
         <p className="text-base md:text-lg text-gray-600 leading-relaxed max-w-3xl mx-auto text-center">

@@ -61,6 +61,7 @@ export default function BlockEditor({
     quote: "Цитата",
     banner: "Баннер",
     table: "Таблица",
+    orbit: "Кольцевая схема (Центр + узлы)",
   };
 
   return (
@@ -346,6 +347,99 @@ export default function BlockEditor({
               className={inputCls + " resize-none"}
             />
           </Field>
+        </div>
+      )}
+
+      {block.kind === "orbit" && (
+        <div className="space-y-3">
+          <div className="border border-gray-700 rounded-lg p-2 space-y-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Центр (хаб)</span>
+            <div className="flex items-center gap-1.5">
+              <input
+                placeholder="Иконка"
+                value={block.center?.icon || ""}
+                onChange={(e) => set("center", { ...(block.center || { title: "" }), icon: e.target.value })}
+                className={inputCls + " w-24"}
+              />
+              <input
+                placeholder="Название"
+                value={block.center?.title || ""}
+                onChange={(e) => set("center", { ...(block.center || { title: "" }), title: e.target.value })}
+                className={inputCls + " flex-1"}
+              />
+            </div>
+            <textarea
+              placeholder="Подпись под названием"
+              rows={2}
+              value={block.center?.text || ""}
+              onChange={(e) => set("center", { ...(block.center || { title: "" }), text: e.target.value })}
+              className={inputCls + " resize-none"}
+            />
+            <ColorPicker
+              value={block.center?.color}
+              onChange={(v) => set("center", { ...(block.center || { title: "" }), color: v })}
+            />
+          </div>
+
+          <span className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
+            Узлы вокруг (подразделения)
+          </span>
+          {(block.nodes || []).map((nd, i) => (
+            <div key={i} className="border border-gray-700 rounded-lg p-2 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <input
+                  placeholder="Иконка"
+                  value={nd.icon || ""}
+                  onChange={(e) => {
+                    const arr = [...(block.nodes || [])];
+                    arr[i] = { ...arr[i], icon: e.target.value };
+                    set("nodes", arr);
+                  }}
+                  className={inputCls + " w-24"}
+                />
+                <input
+                  placeholder="Название"
+                  value={nd.title}
+                  onChange={(e) => {
+                    const arr = [...(block.nodes || [])];
+                    arr[i] = { ...arr[i], title: e.target.value };
+                    set("nodes", arr);
+                  }}
+                  className={inputCls + " flex-1"}
+                />
+                <button
+                  onClick={() => set("nodes", (block.nodes || []).filter((_, j) => j !== i))}
+                  className="text-gray-500 hover:text-red-400"
+                >
+                  <Icon name="X" size={13} />
+                </button>
+              </div>
+              <input
+                placeholder="Подпись (необязательно)"
+                value={nd.text || ""}
+                onChange={(e) => {
+                  const arr = [...(block.nodes || [])];
+                  arr[i] = { ...arr[i], text: e.target.value };
+                  set("nodes", arr);
+                }}
+                className={inputCls}
+              />
+              <ColorPicker
+                value={nd.color}
+                onChange={(v) => {
+                  const arr = [...(block.nodes || [])];
+                  arr[i] = { ...arr[i], color: v };
+                  set("nodes", arr);
+                }}
+              />
+            </div>
+          ))}
+          <button
+            onClick={() => set("nodes", [...(block.nodes || []), { title: "", color: "violet" }])}
+            className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center gap-1"
+          >
+            <Icon name="Plus" size={11} /> Добавить узел
+          </button>
         </div>
       )}
     </div>

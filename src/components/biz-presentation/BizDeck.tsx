@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import Icon from "@/components/ui/icon";
 import type { Presentation, Slide } from "@/lib/bizPresentationsApi";
@@ -13,7 +14,9 @@ export default function BizDeck({
   slides: Slide[];
   onExit?: () => void;
 }) {
-  const [idx, setIdx] = useState(0);
+  const [searchParams] = useSearchParams();
+  const startAt = Math.max(0, Math.min(Number(searchParams.get("slide") || 0), slides.length - 1) || 0);
+  const [idx, setIdx] = useState(startAt);
   const total = slides.length;
 
   const go = useCallback((n: number) => setIdx((c) => Math.min(Math.max(c + n, 0), total - 1)), [total]);

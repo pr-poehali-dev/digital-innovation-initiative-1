@@ -13,7 +13,8 @@ export type BlockKind =
   | "roles"
   | "quote"
   | "banner"
-  | "table";
+  | "table"
+  | "orbit";
 
 export interface Block {
   id: string;
@@ -37,6 +38,9 @@ export interface Block {
   // table
   headers?: string[];
   rows?: string[][];
+  // orbit: центр + кольцо узлов вокруг него, связанных стягивающими кольцами
+  center?: { title: string; text?: string; icon?: string; color?: string };
+  nodes?: { title: string; text?: string; icon?: string; color?: string }[];
 }
 
 export interface Slide {

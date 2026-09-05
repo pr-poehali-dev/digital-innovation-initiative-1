@@ -27,6 +27,7 @@ const BLOCK_KINDS: { kind: BlockKind; label: string; icon: string }[] = [
   { kind: "quote", label: "Цитата", icon: "Quote" },
   { kind: "banner", label: "Баннер", icon: "Megaphone" },
   { kind: "table", label: "Таблица", icon: "Table" },
+  { kind: "orbit", label: "Кольцевая схема", icon: "Orbit" },
 ];
 
 function uid() {
@@ -42,6 +43,7 @@ function emptyBlock(kind: BlockKind): Block {
     case "steps": return { ...base, steps: [{ title: "", color: "violet" }] };
     case "roles": return { ...base, roles: [{ title: "", color: "violet" }] };
     case "table": return { ...base, headers: ["Колонка 1", "Колонка 2"], rows: [["", ""]] };
+    case "orbit": return { ...base, center: { title: "Центр", icon: "HeartPulse", color: "violet" }, nodes: [{ title: "", color: "blue" }] };
     default: return base;
   }
 }
