@@ -284,6 +284,15 @@ def person_detail(cur, pid):
     """, (pid,))
     person["role_assignments"] = rows(cur)
 
+    cur.execute(f"""
+        SELECT fr.*, c.title AS related_center_title
+        FROM {SCHEMA}.exec_person_functional_role fr
+        LEFT JOIN {SCHEMA}.exec_center c ON c.id = fr.related_center_id
+        WHERE fr.person_id = %s
+        ORDER BY fr.status, fr.created_at DESC
+    """, (pid,))
+    person["functional_roles"] = rows(cur)
+
     return person
 
 
@@ -993,11 +1002,56 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True, "data": {"target_id": dst}})
 
-        if action in ("delete_competency", "delete_absence", "delete_profile_record"):
+        if action == "save_functional_role":
+            pid = as_int(body.get("person_id"))
+            title = nz(body.get("title"))
+            if not pid or not title:
+                return cors({"ok": False, "error": {"message": "Укажите сотрудника и название роли"}}, 400)
+            rid = as_int(body.get("id"))
+            vals = {
+                "title": title[:300],
+                "scope": nz(body.get("scope")),
+                "role_type": nz(body.get("role_type")) or "additional",
+                "status": nz(body.get("status")) or "assigned",
+                "participation_format": nz(body.get("participation_format")),
+                "authority_source": nz(body.get("authority_source")),
+                "purpose": nz(body.get("purpose")),
+                "duties": nz(body.get("duties")),
+                "not_included": nz(body.get("not_included")),
+                "related_center_id": as_int(body.get("related_center_id")),
+                "date_from": nz(body.get("date_from")),
+                "date_to": nz(body.get("date_to")),
+                "note": nz(body.get("note")),
+            }
+            if rid:
+                sets = ", ".join(f"{k} = %s" for k in vals)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_person_functional_role SET {sets}, updated_at = now() "
+                    f"WHERE id = %s RETURNING id",
+                    list(vals.values()) + [rid],
+                )
+                audit(cur, actor, "person_functional_role", rid, "update", None, vals)
+            else:
+                vals["person_id"] = pid
+                vals["created_by"] = actor
+                cols = ", ".join(vals)
+                ph = ", ".join(["%s"] * len(vals))
+                cur.execute(
+                    f"INSERT INTO {SCHEMA}.exec_person_functional_role ({cols}) "
+                    f"VALUES ({ph}) RETURNING id",
+                    list(vals.values()),
+                )
+                rid = cur.fetchone()[0]
+                audit(cur, actor, "person_functional_role", rid, "create", None, vals)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action in ("delete_competency", "delete_absence", "delete_profile_record", "delete_functional_role"):
             table = {
                 "delete_competency": "exec_person_competency",
                 "delete_absence": "exec_person_absence",
                 "delete_profile_record": "exec_person_profile_record",
+                "delete_functional_role": "exec_person_functional_role",
             }[action]
             rid = as_int(body.get("id")) or as_int(qs.get("id"))
             if not rid:
@@ -1453,9 +1507,13 @@ def handler(event: dict, context) -> dict:
                 SELECT id, display_name, position_title FROM {SCHEMA}.exec_person
                 WHERE COALESCE(record_state, 'active') = 'active' ORDER BY display_name
             """)
+            persons = rows(cur)
+            cur.execute(f"SELECT id, title FROM {SCHEMA}.exec_center ORDER BY title")
+            centers = rows(cur)
             return cors({"ok": True, "data": {
                 "competencies": comps, "functions": funcs,
-                "initiatives": inits, "steps": steps, "persons": rows(cur),
+                "initiatives": inits, "steps": steps, "persons": persons,
+                "centers": centers,
             }})
 
         if action == "competency_catalog":

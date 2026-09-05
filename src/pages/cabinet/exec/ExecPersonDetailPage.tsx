@@ -9,6 +9,7 @@ import CompetencyTab from "@/components/exec/team/CompetencyTab";
 import WorkloadTab from "@/components/exec/team/WorkloadTab";
 import ProfileTab from "@/components/exec/team/ProfileTab";
 import ParticipationTab from "@/components/exec/team/ParticipationTab";
+import FunctionalRolesTab from "@/components/exec/team/FunctionalRolesTab";
 import {
   EMPLOYMENT_TYPE,
   PeopleRefs,
@@ -21,6 +22,7 @@ import {
 const TABS = [
   { id: "main", title: "Основное", icon: "User" },
   { id: "functions", title: "Функции и роли", icon: "Network" },
+  { id: "roles", title: "Функциональные роли", icon: "ShieldCheck" },
   { id: "participation", title: "Участие в Центре", icon: "UsersRound" },
   { id: "competencies", title: "Компетенции", icon: "Award" },
   { id: "profile", title: "Опыт и образование", icon: "GraduationCap" },
@@ -150,7 +152,7 @@ export default function ExecPersonDetailPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-100">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-4 pt-4 border-t border-slate-100">
             <Stat label="Открытых задач" value={openSteps.length} onClick={() => setTab("tasks")} />
             <Stat
               label="Просрочено"
@@ -167,6 +169,11 @@ export default function ExecPersonDetailPage() {
               label="Функций"
               value={person.functions.length}
               onClick={() => setTab("functions")}
+            />
+            <Stat
+              label="Доп. роли"
+              value={(person.functional_roles || []).length}
+              onClick={() => setTab("roles")}
             />
             <Stat
               label="План / факт"
@@ -269,6 +276,10 @@ export default function ExecPersonDetailPage() {
               </button>
             </div>
           </div>
+        )}
+
+        {tab === "roles" && (
+          <FunctionalRolesTab person={person} refs={refs} onChanged={reload} />
         )}
 
         {tab === "participation" && <ParticipationTab person={person} />}

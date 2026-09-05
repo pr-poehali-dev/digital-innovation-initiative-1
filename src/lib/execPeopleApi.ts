@@ -132,6 +132,47 @@ export interface TimeEntry {
   status: string;
 }
 
+export interface FunctionalRole {
+  id: number;
+  person_id: number;
+  title: string;
+  scope: string | null;
+  role_type: string;
+  status: string;
+  participation_format: string | null;
+  authority_source: string | null;
+  purpose: string | null;
+  duties: string | null;
+  not_included: string | null;
+  related_center_id: number | null;
+  related_center_title: string | null;
+  date_from: string | null;
+  date_to: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const FUNCTIONAL_ROLE_TYPE: Record<string, string> = {
+  cds: "CDS (координатор DS/AI)",
+  coordinator: "Координатор",
+  representative: "Представитель в рабочей группе",
+  additional: "Дополнительная роль",
+};
+
+export const FUNCTIONAL_ROLE_STATUS: Record<string, { title: string; cls: string }> = {
+  assigned: { title: "Назначен", cls: "bg-green-50 text-green-700 border-green-200" },
+  proposed: { title: "Предложен", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  ended: { title: "Завершён", cls: "bg-slate-100 text-slate-500 border-slate-200" },
+};
+
+export const PARTICIPATION_FORMAT_LABEL: Record<string, string> = {
+  matrix: "Матричный / совмещение",
+  dedicated: "Выделенный ресурс",
+  advisory: "Консультативный",
+};
+
 export interface PersonDetail extends TeamMember {
   competencies: PersonCompetency[];
   capacity: PersonCapacity[];
@@ -141,6 +182,7 @@ export interface PersonDetail extends TeamMember {
   steps: PersonStep[];
   time_entries: TimeEntry[];
   role_assignments: Record<string, unknown>[];
+  functional_roles: FunctionalRole[];
 }
 
 export interface WorkloadRow {
@@ -306,6 +348,7 @@ export interface PeopleRefs {
   initiatives: { id: number; title: string }[];
   steps: { id: number; title: string; status: string; due_date: string | null; step_type: string; plan_title: string | null }[];
   persons: { id: number; display_name: string; position_title: string | null }[];
+  centers: { id: number; title: string }[];
 }
 
 export const RACI_ROLE: Record<string, { title: string; short: string; cls: string }> = {
@@ -443,6 +486,11 @@ export const peopleApi = {
   unassignedSteps: (): Promise<UnassignedStep[]> => req("/?action=unassigned_steps"),
 
   diagnostics: (): Promise<DiagItem[]> => req("/?action=diagnostics"),
+
+  saveFunctionalRole: (data: Record<string, unknown>): Promise<{ id: number }> =>
+    post("save_functional_role", data),
+
+  deleteFunctionalRole: (id: number) => post("delete_functional_role", { id }),
 };
 
 /** Понедельник недели для даты */
