@@ -27,6 +27,8 @@ export interface TeamMember {
   initiative_ids: number[];
   competency_ids: number[];
   competency_names: string;
+  functional_role_count: number;
+  functional_role_titles: string;
 }
 
 export interface PersonCompetency {

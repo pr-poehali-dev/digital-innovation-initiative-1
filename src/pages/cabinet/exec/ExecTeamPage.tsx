@@ -337,6 +337,20 @@ export default function ExecTeamPage() {
                         </div>
                         {cl && <LoadBadge pct={cl.pct} state={cl.state} />}
                       </div>
+                      {p.functional_role_count > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {p.functional_role_titles.split(", ").map((t) => (
+                            <span
+                              key={t}
+                              title={t}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-violet-200 bg-violet-50 text-violet-700 max-w-[160px] truncate"
+                            >
+                              <Icon name="ShieldCheck" size={10} />
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex flex-wrap items-center gap-3 mt-3">
                         <StatChip icon="ListChecks" value={p.open_steps} label="Открытых задач" />
                         {p.overdue_steps > 0 && (
@@ -384,6 +398,7 @@ export default function ExecTeamPage() {
                         <th className="text-center font-medium px-3 py-2.5">Просрочка</th>
                         <th className="text-center font-medium px-3 py-2.5">Навыков</th>
                         <th className="text-center font-medium px-3 py-2.5">Функций</th>
+                        <th className="text-center font-medium px-3 py-2.5">Доп. роли</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -426,6 +441,16 @@ export default function ExecTeamPage() {
                             </td>
                             <td className="px-3 py-2.5 text-center tabular-nums">
                               {p.owned_functions || <span className="text-slate-300">0</span>}
+                            </td>
+                            <td className="px-3 py-2.5 text-center" title={p.functional_role_titles}>
+                              {p.functional_role_count ? (
+                                <span className="inline-flex items-center gap-1 text-violet-700 font-medium tabular-nums">
+                                  <Icon name="ShieldCheck" size={12} />
+                                  {p.functional_role_count}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">0</span>
+                              )}
                             </td>
                           </tr>
                         );

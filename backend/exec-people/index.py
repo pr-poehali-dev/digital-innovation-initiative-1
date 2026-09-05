@@ -185,7 +185,12 @@ def person_list(cur, q=None):
                COALESCE((SELECT string_agg(c.name, ' ')
                           FROM {SCHEMA}.exec_person_competency pc
                           JOIN {SCHEMA}.professional_competencies c ON c.id = pc.competency_id
-                         WHERE pc.person_id = p.id), '') AS competency_names
+                         WHERE pc.person_id = p.id), '') AS competency_names,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_person_functional_role fr
+                 WHERE fr.person_id = p.id AND fr.status = 'assigned') AS functional_role_count,
+               COALESCE((SELECT string_agg(fr.title, ', ')
+                          FROM {SCHEMA}.exec_person_functional_role fr
+                         WHERE fr.person_id = p.id AND fr.status = 'assigned'), '') AS functional_role_titles
         FROM {SCHEMA}.exec_person p
         LEFT JOIN {SCHEMA}.exec_person_capacity c
                ON c.person_id = p.id AND c.valid_to IS NULL
