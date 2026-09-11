@@ -1,0 +1,8 @@
+{
+  "tests": [
+    { "name": "assignments requires auth", "method": "GET", "path": "/?action=assignments&kind=project&id=1", "expectedStatus": 403 },
+    { "name": "budget_versions requires auth", "method": "GET", "path": "/?action=budget_versions&kind=project&id=1", "expectedStatus": 403 },
+    { "name": "save_assignment requires auth", "method": "POST", "path": "/?action=save_assignment", "expectedStatus": 403 },
+    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 }
+  ]
+}

@@ -6,6 +6,7 @@ import { Metric, Empty, Loading, ErrorBox, fmtDate } from "@/components/exec/Exe
 import {
   execReportsApi, DashboardKpi, AttentionItem, PortfolioRow, UpcomingEvents,
 } from "@/lib/execReportsApi";
+import { execResourcesApi, TeamLoadRow } from "@/lib/execResourcesApi";
 
 const KPI_CARDS: Array<{ key: keyof DashboardKpi; label: string; icon: string; tone: "default" | "danger" | "warning" | "success"; filter?: Record<string, string> }> = [
   { key: "active_actions", label: "Активные поручения", icon: "ClipboardCheck", tone: "default" },
@@ -36,6 +37,9 @@ export default function ExecDashboardPage() {
   const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioRow[]>([]);
   const [upcoming, setUpcoming] = useState<UpcomingEvents | null>(null);
+  const [finKpi, setFinKpi] = useState<Awaited<ReturnType<typeof execResourcesApi.portfolioFinancialKpi>> | null>(null);
+  const [teamLoad, setTeamLoad] = useState<TeamLoadRow[]>([]);
+  const [vacancies, setVacancies] = useState<Array<{ id: number; role_title: string | null; role_title_ref: string | null; project_title: string | null; initiative_title: string | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -47,6 +51,9 @@ export default function ExecDashboardPage() {
       execReportsApi.attention().then((d) => setAttention(d.items)),
       execReportsApi.portfolioTable().then((d) => setPortfolio(d.items)),
       execReportsApi.upcoming().then(setUpcoming),
+      execResourcesApi.portfolioFinancialKpi().then(setFinKpi).catch(() => {}),
+      execResourcesApi.teamLoad().then((d) => setTeamLoad(d.items)).catch(() => {}),
+      execResourcesApi.vacantRoles().then((d) => setVacancies(d.items)).catch(() => {}),
     ])
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
@@ -95,6 +102,54 @@ export default function ExecDashboardPage() {
             />
           ))}
         </div>
+
+        {finKpi && (
+          <div>
+            <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+              <Icon name="Wallet" size={15} className="text-emerald-700" /> Финансы {finKpi.year}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <Metric label="Бюджет на год" value={`${finKpi.total_budget.toLocaleString("ru-RU")} ₽`} icon="PiggyBank" />
+              <Metric label="Факт" value={`${finKpi.total_fact.toLocaleString("ru-RU")} ₽`} icon="Receipt" />
+              <Metric label="Обязательства" value={`${finKpi.total_commitments.toLocaleString("ru-RU")} ₽`} icon="FileSignature" />
+              <Metric label="Прогноз" value={`${finKpi.total_forecast.toLocaleString("ru-RU")} ₽`} icon="TrendingUp" />
+              <Metric label="Остаток" value={`${finKpi.remaining.toLocaleString("ru-RU")} ₽`} tone={finKpi.remaining < 0 ? "danger" : "default"} icon="Coins" />
+              <Metric label="ФОТ" value={`${finKpi.total_fot.toLocaleString("ru-RU")} ₽`} icon="Users" />
+            </div>
+            {finKpi.projects_over_budget.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {finKpi.projects_over_budget.map((p) => (
+                  <div key={p.id} className="text-xs bg-red-50 text-red-700 rounded-lg px-3 py-1.5 flex justify-between">
+                    <span>{p.title}</span>
+                    <span className="font-medium">перерасход {p.deviation.toLocaleString("ru-RU")} ₽</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(teamLoad.length > 0 || vacancies.length > 0) && (
+          <div>
+            <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+              <Icon name="Users" size={15} className="text-blue-700" /> Команда
+            </div>
+            <div className="space-y-1.5">
+              {teamLoad.filter((t) => t.total_load_pct > 100).map((t) => (
+                <div key={t.person_id} className="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 flex justify-between">
+                  <span>{t.display_name} — перегрузка</span>
+                  <span className="font-medium">{t.total_load_pct}% ({t.assignment_count} проектов)</span>
+                </div>
+              ))}
+              {vacancies.length > 0 && (
+                <div className="text-xs text-muted-foreground px-1">Вакантных ролей: {vacancies.length}</div>
+              )}
+              {teamLoad.filter((t) => t.total_load_pct > 100).length === 0 && vacancies.length === 0 && (
+                <div className="text-xs text-muted-foreground px-1">Перегрузок и вакансий нет</div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div>
           <div className="text-sm font-semibold mb-2 flex items-center gap-1.5 text-amber-700">
