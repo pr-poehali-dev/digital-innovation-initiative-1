@@ -1,0 +1,7 @@
+{
+  "tests": [
+    { "name": "dashboard requires auth", "method": "GET", "path": "/?action=dashboard", "expectedStatus": 401 },
+    { "name": "projects requires auth", "method": "GET", "path": "/?action=projects", "expectedStatus": 401 },
+    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 }
+  ]
+}

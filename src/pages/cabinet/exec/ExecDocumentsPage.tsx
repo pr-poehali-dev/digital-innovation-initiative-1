@@ -16,7 +16,7 @@ const TYPE_LABEL: Record<string, string> = {
   ai_summary: "Сводка ИИ",
   legacy_ocr: "Legacy OCR-текст",
   legacy_record: "Legacy-запись",
-  canonical_candidate: "Кандидат в документ",
+  canonical_candidate: "Кандидат на канонический документ (файл доступен)",
   order: "Распоряжение",
   policy: "Положение",
   unknown: "Не установлен",
