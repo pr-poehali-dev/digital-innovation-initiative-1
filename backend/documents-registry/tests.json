@@ -1,0 +1,28 @@
+{
+  "tests": [
+    {
+      "name": "list requires auth",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 401
+    },
+    {
+      "name": "search requires auth",
+      "method": "GET",
+      "path": "/?action=search&q=test",
+      "expectedStatus": 401
+    },
+    {
+      "name": "preview_context requires auth",
+      "method": "GET",
+      "path": "/?action=preview_context&q=test",
+      "expectedStatus": 401
+    },
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    }
+  ]
+}

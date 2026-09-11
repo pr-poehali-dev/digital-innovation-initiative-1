@@ -91,18 +91,26 @@ def list_modules(cur):
         ORDER BY module_label
     """)
     items = rows(cur)
-    # Аварийный server-side блок (env) — показываем честно, чтобы модуль не выглядел
-    # включённым, если переменная окружения его всё равно блокирует.
+    # Аварийный server-side блок (env). ВАЖНО: эта функция читает СВОЁ окружение,
+    # а не окружение функций media_upload/education. В serverless-среде это разные
+    # процессы, поэтому состояние считается НЕПОДТВЕРЖДЁННЫМ и помечается как
+    # "требует проверки" — мы не выдаём его за установленный факт.
     for it in items:
         env_name = EMERGENCY_ENV_FLAGS.get(it["module_code"])
         if env_name:
-            env_allows = os.environ.get(env_name, "") == "true"
+            env_allows_here = os.environ.get(env_name, "") == "true"
             it["emergency_env_flag"] = env_name
-            it["emergency_env_blocked"] = not env_allows
-            it["effective_enabled"] = bool(it["is_enabled"]) and global_enabled and env_allows
+            it["emergency_env_state"] = "unverified"
+            it["emergency_env_blocked_here"] = not env_allows_here
+            # Консервативно: при неподтверждённом состоянии не показываем модуль
+            # фактически активным.
+            it["effective_enabled"] = (
+                bool(it["is_enabled"]) and global_enabled and env_allows_here
+            )
         else:
             it["emergency_env_flag"] = None
-            it["emergency_env_blocked"] = False
+            it["emergency_env_state"] = "not_applicable"
+            it["emergency_env_blocked_here"] = False
             it["effective_enabled"] = bool(it["is_enabled"]) and global_enabled
     return {"global_enabled": global_enabled, "modules": items}
 

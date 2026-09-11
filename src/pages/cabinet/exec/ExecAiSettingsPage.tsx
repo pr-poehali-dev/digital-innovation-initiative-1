@@ -150,13 +150,14 @@ export default function ExecAiSettingsPage() {
                         {m.data_description && (
                           <div className="text-xs text-muted-foreground mt-1">{m.data_description}</div>
                         )}
-                        {m.emergency_env_blocked && (
+                        {m.emergency_env_state === "unverified" && (
                           <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2 py-1.5">
                             <Icon name="ShieldAlert" size={13} className="text-amber-600 mt-0.5 flex-shrink-0" />
                             <span className="text-[11px] text-amber-800 leading-snug">
-                              Заблокировано аварийным серверным переключателем
-                              {m.emergency_env_flag ? ` (${m.emergency_env_flag})` : ""}. Даже при включённом
-                              тумблере внешний AI не вызывается.
+                              Дополнительно защищён аварийным серверным переключателем
+                              {m.emergency_env_flag ? ` ${m.emergency_env_flag}` : ""}. Его состояние
+                              задаётся в окружении самой функции и отсюда не проверяется — считаем
+                              блокировку действующей до её официального снятия.
                             </span>
                           </div>
                         )}

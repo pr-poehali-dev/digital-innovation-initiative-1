@@ -14,7 +14,8 @@ export interface AiModuleSetting {
   updated_by: string | null;
   updated_at: string;
   emergency_env_flag: string | null;
-  emergency_env_blocked: boolean;
+  emergency_env_state: "unverified" | "not_applicable";
+  emergency_env_blocked_here: boolean;
   effective_enabled: boolean;
 }
 

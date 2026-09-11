@@ -48,6 +48,7 @@ import ExecControlPage from "./pages/cabinet/exec/ExecControlPage";
 import ExecPlannerPage from "./pages/cabinet/exec/ExecPlannerPage";
 import ExecKnowledgePage from "./pages/cabinet/exec/ExecKnowledgePage";
 import ExecAiSettingsPage from "./pages/cabinet/exec/ExecAiSettingsPage";
+import ExecDocumentsPage from "./pages/cabinet/exec/ExecDocumentsPage";
 import ExecTeamPage from "./pages/cabinet/exec/ExecTeamPage";
 import ExecPersonDetailPage from "./pages/cabinet/exec/ExecPersonDetailPage";
 import ExecWorkloadPage from "./pages/cabinet/exec/ExecWorkloadPage";
@@ -195,6 +196,7 @@ const App = () => (
               <Route path="/cabinet/exec/planner" element={<ExecRoute><ExecPlannerPage /></ExecRoute>} />
               <Route path="/cabinet/exec/knowledge" element={<ExecRoute><ExecKnowledgePage /></ExecRoute>} />
               <Route path="/cabinet/exec/ai-settings" element={<ExecRoute><ExecAiSettingsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/documents" element={<ExecRoute><ExecDocumentsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/initiatives" element={<ExecRoute><ExecInitiativesPage /></ExecRoute>} />
               <Route path="/cabinet/exec/initiatives/:id" element={<ExecRoute><ExecInitiativeDetailPage /></ExecRoute>} />
               <Route path="/cabinet/exec/control" element={<ExecRoute><ExecControlPage /></ExecRoute>} />
