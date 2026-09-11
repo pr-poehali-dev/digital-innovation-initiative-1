@@ -11,6 +11,13 @@ Educational Passport — паспорт образования пользова�
   - education.analyze             — повторный AI-анализ файла
   - education.confirm             — подтвердить AI-извлечение пользователем
   - education.profile_summary     — счётчики для Dashboard
+
+АВАРИЙНЫЙ KILL SWITCH (введён 2026-09-11, инцидент RR-001):
+автозапуск AI-анализа (YandexGPT) по умолчанию ВЫКЛЮЧЕН. Файл прикрепляется,
+локальное извлечение текста работает как обычно, но текст не отправляется во внешний AI.
+Переключатель действует ТОЛЬКО в этом модуле (education), не является
+глобальным kill switch платформы. Включить обратно: секрет
+EDUCATION_EXTERNAL_AI_ENABLED=true — только по решению владельца.
 """
 import json
 import os
@@ -19,6 +26,10 @@ import base64
 import logging
 from datetime import datetime
 import psycopg2
+
+EDUCATION_EXTERNAL_AI_ENABLED = (
+    os.environ.get("EDUCATION_EXTERNAL_AI_ENABLED", "").strip().lower() == "true"
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("education")
@@ -809,7 +820,18 @@ def handle_upload_file(conn, user, body, request_id, origin):
 
     # Автозапуск AI-анализа если текст извлёкся
     extracted = None
-    if parse_status == "done":
+    ai_processing_performed = False
+    ai_processing_state = "not_applicable"
+    ai_processing_reason = None
+    if parse_status == "done" and not EDUCATION_EXTERNAL_AI_ENABLED:
+        ai_processing_state = "disabled"
+        ai_processing_reason = "external_processing_suspended"
+        cur.execute(
+            f"UPDATE {schema}.education_items SET status = 'draft', source_type = 'uploaded_file' WHERE id = %s",
+            (int(item_id),),
+        )
+        conn.commit()
+    elif parse_status == "done":
         cur.execute(
             f"UPDATE {schema}.education_items SET status = 'processing', source_type = 'uploaded_file' WHERE id = %s",
             (int(item_id),),
@@ -820,6 +842,8 @@ def handle_upload_file(conn, user, body, request_id, origin):
             extracted = ai_extract_formal(parsed_text)
         else:
             extracted = ai_extract_material(parsed_text)
+        ai_processing_performed = True
+        ai_processing_state = "completed"
 
         # Нормализация типов: строковые поля всегда строки, hours — int или None
         _str_fields = ("title", "institution_name", "field_of_study", "level",
@@ -859,7 +883,9 @@ def handle_upload_file(conn, user, body, request_id, origin):
 
     # Понятные предупреждения для UI
     warning = None
-    if parse_status == "image_only":
+    if ai_processing_state == "disabled":
+        warning = "AI-обработка временно приостановлена владельцем платформы. Файл и извлечённый текст сохранены — заполните поля вручную."
+    elif parse_status == "image_only":
         pass  # изображение — прикреплено без OCR, всё ок
     elif parse_status == "failed":
         warning = "Не удалось извлечь текст из файла (возможно повреждён или зашифрован). Проверьте файл или введите данные вручную."
@@ -875,6 +901,9 @@ def handle_upload_file(conn, user, body, request_id, origin):
         "text_length": len(parsed_text or ""),
         "raw_text_preview": (parsed_text or "")[:1000] if parse_status in ("failed", "empty", "too_short") else None,
         "warning": warning,
+        "ai_processing_performed": ai_processing_performed,
+        "ai_processing_state": ai_processing_state,
+        "ai_processing_reason": ai_processing_reason,
     }, request_id, origin)
 
 
@@ -942,6 +971,9 @@ def handle_analyze(conn, user, body, request_id, origin):
     fr = cur.fetchone()
     if not fr or not fr[0]:
         return err_response("no_file", "Нет файла или текст не извлечён", 400, request_id, origin)
+
+    if not EDUCATION_EXTERNAL_AI_ENABLED:
+        return err_response("ai_paused", "AI-обработка временно приостановлена владельцем платформы", 423, request_id, origin)
 
     extracted = ai_extract_formal(fr[0]) if kind in KIND_GROUPS["formal"] else ai_extract_material(fr[0])
     topics = extracted.get("topics") or extracted.get("main_topics") or []
@@ -1114,13 +1146,26 @@ def handle_file_ready(conn, user, body, request_id, origin):
     file_id = cur.fetchone()[0]
 
     extracted = None
-    if parse_status == "done":
+    ai_processing_performed = False
+    ai_processing_state = "not_applicable"
+    ai_processing_reason = None
+    if parse_status == "done" and not EDUCATION_EXTERNAL_AI_ENABLED:
+        ai_processing_state = "disabled"
+        ai_processing_reason = "external_processing_suspended"
+        cur.execute(
+            f"UPDATE {schema}.education_items SET status = 'draft', source_type = 'uploaded_file' WHERE id = %s",
+            (int(item_id),),
+        )
+        conn.commit()
+    elif parse_status == "done":
         cur.execute(
             f"UPDATE {schema}.education_items SET status = 'processing', source_type = 'uploaded_file' WHERE id = %s",
             (int(item_id),),
         )
         conn.commit()
         extracted = ai_extract_formal(parsed_text) if kind in KIND_GROUPS["formal"] else ai_extract_material(parsed_text)
+        ai_processing_performed = True
+        ai_processing_state = "completed"
         topics = extracted.get("topics") or extracted.get("main_topics") or []
         competencies = extracted.get("suggested_competencies") or []
         cur.execute(
@@ -1133,7 +1178,9 @@ def handle_file_ready(conn, user, body, request_id, origin):
         )
 
     warning = None
-    if parse_status == "failed":
+    if ai_processing_state == "disabled":
+        warning = "AI-обработка временно приостановлена владельцем платформы. Файл сохранён — заполните поля вручную."
+    elif parse_status == "failed":
         warning = "Не удалось извлечь текст (файл повреждён или зашифрован). Введите данные вручную."
     elif parse_status == "empty":
         warning = "Файл пустой. Введите данные вручную."
@@ -1144,6 +1191,9 @@ def handle_file_ready(conn, user, body, request_id, origin):
     return ok_response({
         "file_id": file_id, "parse_status": parse_status,
         "extracted": extracted, "warning": warning,
+        "ai_processing_performed": ai_processing_performed,
+        "ai_processing_state": ai_processing_state,
+        "ai_processing_reason": ai_processing_reason,
     }, request_id, origin)
 
 

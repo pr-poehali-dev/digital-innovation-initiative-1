@@ -1,6 +1,13 @@
 """
 Загрузка медиа: фото лекций (OCR через Yandex Vision) и аудио (Yandex SpeechKit).
 Извлекает текст и сохраняет как обычный документ в базе знаний.
+
+АВАРИЙНЫЙ KILL SWITCH (введён 2026-09-11, инцидент RR-001):
+внешняя AI-обработка (Yandex Vision / SpeechKit) по умолчанию ВЫКЛЮЧЕНА.
+Файл продолжает загружаться и сохраняться как обычно, без OCR/распознавания речи.
+Переключатель действует ТОЛЬКО в этом модуле (media_upload), не является
+глобальным kill switch платформы. Включить обратно: секрет
+MEDIA_EXTERNAL_AI_ENABLED=true — только по решению владельца.
 """
 import json
 import os
@@ -9,6 +16,10 @@ import base64
 import psycopg2
 import urllib.request
 import urllib.error
+
+MEDIA_EXTERNAL_AI_ENABLED = (
+    os.environ.get("MEDIA_EXTERNAL_AI_ENABLED", "").strip().lower() == "true"
+)
 
 
 def safe_s3_name(filename: str) -> str:
@@ -115,6 +126,9 @@ def get_s3_client():
 
 def ocr_image(image_bytes: bytes) -> dict:
     """Распознавание текста на фото через Yandex Vision API."""
+    if not MEDIA_EXTERNAL_AI_ENABLED:
+        return {"text": "", "error": False, "ai_processing_performed": False,
+                "ai_processing_state": "disabled", "ai_processing_reason": "external_processing_suspended"}
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
@@ -166,6 +180,9 @@ def ocr_image(image_bytes: bytes) -> dict:
 
 def transcribe_audio(audio_bytes: bytes) -> dict:
     """Распознавание речи через Yandex SpeechKit (краткое распознавание до 1 МБ / 30 сек)."""
+    if not MEDIA_EXTERNAL_AI_ENABLED:
+        return {"text": "", "error": False, "ai_processing_performed": False,
+                "ai_processing_state": "disabled", "ai_processing_reason": "external_processing_suspended"}
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
@@ -330,6 +347,9 @@ def handler(event: dict, context) -> dict:
             "text_length": len(extracted_text),
             "chunks_count": len(chunks),
             "extracted_preview": extracted_text[:500],
+            "ai_processing_performed": result.get("ai_processing_performed", True),
+            "ai_processing_state": result.get("ai_processing_state", "completed"),
+            "ai_processing_reason": result.get("ai_processing_reason"),
             "status": "ready",
         }, origin=origin)
 
