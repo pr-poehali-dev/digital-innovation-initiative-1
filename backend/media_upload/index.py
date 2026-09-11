@@ -6,8 +6,12 @@
 внешняя AI-обработка (Yandex Vision / SpeechKit) по умолчанию ВЫКЛЮЧЕНА.
 Файл продолжает загружаться и сохраняться как обычно, без OCR/распознавания речи.
 Переключатель действует ТОЛЬКО в этом модуле (media_upload), не является
-глобальным kill switch платформы. Включить обратно: секрет
-MEDIA_EXTERNAL_AI_ENABLED=true — только по решению владельца.
+глобальным kill switch платформы. Условие строгое: только точное значение
+"true" включает обработку, любое другое значение или отсутствие переменной
+означает "выключено" (fail-closed).
+Повторное включение AI-обработки — это ОТДЕЛЬНОЕ решение владельца через
+секрет MEDIA_EXTERNAL_AI_ENABLED=true, а не откат этого hotfix.
+Откат самого hotfix — возврат к предыдущему commit и повторный деплой.
 """
 import json
 import os
@@ -17,9 +21,7 @@ import psycopg2
 import urllib.request
 import urllib.error
 
-MEDIA_EXTERNAL_AI_ENABLED = (
-    os.environ.get("MEDIA_EXTERNAL_AI_ENABLED", "").strip().lower() == "true"
-)
+MEDIA_EXTERNAL_AI_ENABLED = os.environ.get("MEDIA_EXTERNAL_AI_ENABLED", "") == "true"
 
 
 def safe_s3_name(filename: str) -> str:

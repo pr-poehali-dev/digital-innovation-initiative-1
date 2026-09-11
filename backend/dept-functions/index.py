@@ -702,7 +702,48 @@ def check_project_access(conn, project_id: int, user_id: int) -> bool:
         return cur.fetchone() is not None
 
 
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    conn = psycopg2.connect(DB)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_module_settings WHERE module_code = 'dept_functions'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    try:
+        conn = psycopg2.connect(DB)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('dept_functions', %s, %s, %s, %s, %s)""",
+                ("YandexGPT" if action != "ocr" else "Vision", action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+class AIDisabledError(Exception):
+    pass
+
+
 def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 3000) -> str:
+    if not _ai_enabled():
+        _log_ai_op("completion", "disabled", data_kind="dept_functions")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Функции подразделений» в разделе «Настройки AI».")
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     messages = []
     if system:
@@ -730,6 +771,9 @@ def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 3000) -> str:
 def yandex_vision_ocr(content_b64: str, mime_type: str = "image/png") -> str:
     """OCR через Yandex Vision API. Поддерживает изображения (JPEG/PNG) и PDF (до 1 страницы —
     ограничение самого Yandex Vision API для формата PDF)."""
+    if not _ai_enabled():
+        _log_ai_op("ocr", "disabled", data_kind="image_scan")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Функции подразделений» в разделе «Настройки AI».")
     url = "https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"
     payload = json.dumps({
         "mimeType": mime_type,
@@ -989,6 +1033,8 @@ def handler(event: dict, context) -> dict:
                             return cors({"ok": False, "error": "Не удалось извлечь текст из DOCX."}, 400)
                     else:
                         return cors({"ok": False, "error": "file_type должен быть pdf или docx"}, 400)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": str(e)}, 423)
             except RuntimeError as e:
                 return cors({"ok": False, "error": f"Не удалось распознать файл: {e}"}, 400)
             except Exception:
@@ -1045,7 +1091,10 @@ def handler(event: dict, context) -> dict:
 
             extracted = []
             for attempt in range(2):
-                raw = yandex_gpt(prompt, system, max_tokens=8000)
+                try:
+                    raw = yandex_gpt(prompt, system, max_tokens=8000)
+                except AIDisabledError as e:
+                    return cors({"ok": False, "error": str(e)}, 423)
                 print(f"[EXTRACT] attempt={attempt} gpt_raw_len={len(raw)} preview={raw[:150]!r}")
                 extracted = parse_functions(raw)
                 if extracted:
@@ -1229,7 +1278,10 @@ def handler(event: dict, context) -> dict:
 
 Только JSON, без пояснений."""
 
-            raw = yandex_gpt(prompt, system, max_tokens=2000)
+            try:
+                raw = yandex_gpt(prompt, system, max_tokens=2000)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": str(e)}, 423)
             start = raw.find("{")
             end = raw.rfind("}") + 1
             rec = json.loads(raw[start:end]) if start >= 0 else {}

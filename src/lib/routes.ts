@@ -79,6 +79,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "chief.workload", label: "Загрузка команды", icon: "CalendarRange", href: "/cabinet/exec/workload", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.assign", label: "Назначение ответственных", icon: "UserCheck", href: "/cabinet/exec/assign", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.knowledge", label: "База знаний", icon: "Library", href: "/cabinet/exec/knowledge", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.aiSettings", label: "Настройки AI", icon: "ShieldCheck", href: "/cabinet/exec/ai-settings", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.initiatives", label: "Инициативы", icon: "Rocket", href: "/cabinet/exec/initiatives", active: true },
       { id: "chief.control", label: "Контроль", icon: "Flag", href: "/cabinet/exec/control", active: true },
       { id: "chief.stakeholders", label: "Стейкхолдеры", icon: "Users", href: "/cabinet/exec/stakeholders", active: true },

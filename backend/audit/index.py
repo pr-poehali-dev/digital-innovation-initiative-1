@@ -168,7 +168,52 @@ def extract_pptx_text(pptx_bytes: bytes) -> list:
 #  YandexGPT call                                                     #
 # ------------------------------------------------------------------ #
 
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    import psycopg2 as _pg
+    schema = get_schema()
+    conn = _pg.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'audit'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    import psycopg2 as _pg
+    schema = get_schema()
+    try:
+        conn = _pg.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('audit', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def call_gpt(messages: list) -> str:
+    if not _ai_enabled():
+        _log_ai_op("run", "disabled", data_kind="documents_and_slides")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Аудит документов и презентаций» в разделе «Настройки AI».")
     import urllib.request
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
@@ -727,7 +772,10 @@ def handler(event: dict, context) -> dict:
             )
 
             # Запускаем AI-анализ
-            audit_result = run_audit(pptx_slides, doc_list)
+            try:
+                audit_result = run_audit(pptx_slides, doc_list)
+            except AIDisabledError as e:
+                return err_resp(str(e), status=423)
             audit_result["slide_count"] = len(pptx_slides)
             audit_result["document_count"] = len(doc_list)
             # Сохраняем точный список документов этого аудита (имя + роль)
@@ -902,10 +950,13 @@ def handler(event: dict, context) -> dict:
   "generate_instruction": "Инструкция для AI генерации исправленной версии в 2-3 абзаца"
 }}"""
 
-            plan_raw = call_gpt([
-                {"role": "system", "content": "Ты — редактор презентаций. Отвечай ТОЛЬКО валидным JSON без markdown."},
-                {"role": "user", "content": plan_prompt},
-            ])
+            try:
+                plan_raw = call_gpt([
+                    {"role": "system", "content": "Ты — редактор презентаций. Отвечай ТОЛЬКО валидным JSON без markdown."},
+                    {"role": "user", "content": plan_prompt},
+                ])
+            except AIDisabledError as e:
+                return err_resp(str(e), status=423)
 
             import re as _re
             plan_data = {}
@@ -1033,10 +1084,13 @@ def handler(event: dict, context) -> dict:
                     for d in sorted(documents, key=lambda d: ROLE_PRIORITY.get(d.get("role","material"), 99))
                 )
 
-                ai_content = call_gpt([
-                    {"role": "system", "content": f"Ты — профессиональный редактор презентаций.\n\nДОКУМЕНТЫ:\n{doc_ctx[:4000]}"},
-                    {"role": "user", "content": final_instruction},
-                ])
+                try:
+                    ai_content = call_gpt([
+                        {"role": "system", "content": f"Ты — профессиональный редактор презентаций.\n\nДОКУМЕНТЫ:\n{doc_ctx[:4000]}"},
+                        {"role": "user", "content": final_instruction},
+                    ])
+                except AIDisabledError as e:
+                    return err_resp(str(e), status=423)
 
                 # Строим revision_meta для result_json
                 applied_ids = [p.get("plan_item_id") for p in revision_plan]
@@ -1104,10 +1158,13 @@ def handler(event: dict, context) -> dict:
                     f"=== [{d.get('role','material').upper()}] {d.get('name','Документ')} ===\n{(d.get('text') or '')[:3000]}"
                     for d in sorted(documents, key=lambda d: ROLE_PRIORITY.get(d.get("role","material"), 99))
                 )
-                ai_content = call_gpt([
-                    {"role": "system", "content": f"Ты — профессиональный редактор презентаций.\n\nДОКУМЕНТЫ:\n{doc_ctx[:4000]}"},
-                    {"role": "user", "content": final_instruction},
-                ])
+                try:
+                    ai_content = call_gpt([
+                        {"role": "system", "content": f"Ты — профессиональный редактор презентаций.\n\nДОКУМЕНТЫ:\n{doc_ctx[:4000]}"},
+                        {"role": "user", "content": final_instruction},
+                    ])
+                except AIDisabledError as e:
+                    return err_resp(str(e), status=423)
 
                 cur.execute(
                     f"UPDATE {schema}.audit_runs SET revision_status = 'revision_done' WHERE id = %s",
@@ -1337,7 +1394,10 @@ def handler(event: dict, context) -> dict:
             ]
 
             pptx_slides = extract_pptx_text(pptx_bytes)
-            new_result = run_audit(pptx_slides, documents)
+            try:
+                new_result = run_audit(pptx_slides, documents)
+            except AIDisabledError as e:
+                return err_resp(str(e), status=423)
             new_score = (new_result.get("audit_summary") or {}).get("compliance_score")
 
             # Дельта

@@ -92,7 +92,44 @@ def group_filter(qs):
 
 # ── YandexGPT ───────────────────────────────────────────────────────
 
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    conn = psycopg2.connect(DB)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {S}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {S}.ai_module_settings WHERE module_code = 'admin_strategy'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    try:
+        conn = psycopg2.connect(DB)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {S}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('admin_strategy', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def call_gpt(messages, max_tokens=4000, temperature=0.4):
+    if not _ai_enabled():
+        _log_ai_op("completion", "disabled", data_kind="strategy_metrics")
+        return "[AI-обработка временно отключена владельцем платформы. Включите модуль «Стратегия и аналитика» в разделе «Настройки AI».]"
     if not YANDEX_GPT_KEY or not YANDEX_FOLDER_ID:
         return "[AI недоступен: добавьте YANDEX_GPT_API_KEY и YANDEX_FOLDER_ID]"
     try:
@@ -104,8 +141,10 @@ def call_gpt(messages, max_tokens=4000, temperature=0.4):
                                         "maxTokens": max_tokens},
                   "messages": [{"role": m["role"], "text": m["content"]} for m in messages]},
             timeout=90)
+        _log_ai_op("completion", "success", data_kind="strategy_metrics", approx_volume=len(str(messages)))
         return r.json()["result"]["alternatives"][0]["message"]["text"]
     except Exception as e:
+        _log_ai_op("completion", "error", data_kind="strategy_metrics")
         return f"[AI error: {e}]"
 
 

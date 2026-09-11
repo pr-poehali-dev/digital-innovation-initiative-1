@@ -109,8 +109,51 @@ def get_current_user(conn, session_id):
     return {"id": row[0]} if row else None
 
 
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    schema = get_schema()
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'goals'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    schema = get_schema()
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('goals', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def yandex_gpt(prompt: str, system: str = "", folder_id: str = "", api_key: str = "") -> str:
     """Вызов YandexGPT."""
+    if not _ai_enabled():
+        _log_ai_op("completion", "disabled", data_kind="education_passport")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Цели и развитие» в разделе «Настройки AI».")
     import urllib.request, urllib.error
     messages = []
     if system:
@@ -359,6 +402,8 @@ def handle_analyze(conn, user, body, request_id, origin):
                 raw = raw[4:]
         raw = raw.strip().rstrip("```").strip()
         extracted = json.loads(raw)
+    except AIDisabledError as e:
+        return err_response("ai_disabled", str(e), 423, request_id, origin)
     except json.JSONDecodeError as e:
         log.error("AI JSON parse error: %s, raw=%r", e, raw[:200])
         return err_response("ai_parse_error", "AI вернул невалидный JSON", 500, request_id, origin)

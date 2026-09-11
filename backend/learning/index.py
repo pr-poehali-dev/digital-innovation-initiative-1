@@ -38,8 +38,49 @@ def get_user_id(conn, session_id: str):
     return row[0] if row else None
 
 
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    conn = psycopg2.connect(DB)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_module_settings WHERE module_code = 'learning'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    try:
+        conn = psycopg2.connect(DB)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('learning', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def yandex_gpt(prompt: str, system: str = "") -> str:
     """Вызов YandexGPT, возвращает текст ответа."""
+    if not _ai_enabled():
+        _log_ai_op("completion", "disabled", data_kind="learning_content")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Обучение и квизы» в разделе «Настройки AI».")
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     messages = []
     if system:
@@ -436,7 +477,10 @@ def handler(event: dict, context) -> dict:
   "key_skills": ["навык 1", "навык 2"],
   "resources_hint": "Что рекомендуется изучать: книги, курсы, практика"
 }}"""
-            raw = yandex_gpt(prompt, system)
+            try:
+                raw = yandex_gpt(prompt, system)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": {"message": str(e)}}, 423)
             raw = raw.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -561,7 +605,10 @@ def handler(event: dict, context) -> dict:
                 + (f" Сейчас он изучает: «{topic_title}»." if topic_title else "")
                 + " Отвечай чётко, по-русски, простым языком. Давай конкретные примеры и следующие шаги."
             )
-            answer = yandex_gpt(question, system)
+            try:
+                answer = yandex_gpt(question, system)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": {"message": str(e)}}, 423)
             return cors({"ok": True, "answer": answer})
 
         # ── Прогресс (веса: not_started=0, studying=0.33, understood=0.66, applied=1.0) ──
@@ -885,6 +932,10 @@ def handler(event: dict, context) -> dict:
 
             if not topic_title:
                 return cors({"ok": False, "error": {"message": "Нужен topic_title"}}, 400)
+
+            if not _ai_enabled():
+                _log_ai_op(f"topic_learn.{mode}", "disabled", data_kind="learning_topic")
+                return cors({"ok": False, "error": {"message": "AI-обработка временно отключена владельцем платформы. Включите модуль «Обучение и квизы» в разделе «Настройки AI»."}}, 423)
 
             # Контекст роли
             role_ctx = ""

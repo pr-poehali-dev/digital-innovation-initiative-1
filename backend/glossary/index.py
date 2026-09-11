@@ -280,7 +280,50 @@ def handle_get(conn, user, body, request_id, origin=None):
     return ok_response({"term": row_to_term(row)}, request_id, origin=origin)
 
 
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    schema = get_schema()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'glossary'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    schema = get_schema()
+    try:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('glossary', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def call_gpt(prompt: str) -> str:
+    if not _ai_enabled():
+        _log_ai_op("explain", "disabled", data_kind="term")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Глоссарий» в разделе «Настройки AI».")
     payload = {
         "modelUri": MODEL_URI,
         "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": 1200},
@@ -332,7 +375,10 @@ def handle_explain(conn, user, body, request_id, origin=None):
     if existing:
         return ok_response({"term": row_to_term(existing), "was_existing": True}, request_id, origin=origin)
 
-    raw = call_gpt(EXPLAIN_PROMPT.format(term=term, org_context=ORG_CONTEXT))
+    try:
+        raw = call_gpt(EXPLAIN_PROMPT.format(term=term, org_context=ORG_CONTEXT))
+    except AIDisabledError as e:
+        return err_response("ai_disabled", str(e), 423, request_id, origin)
     data = parse_json_block(raw)
 
     category = data.get("category", "general")

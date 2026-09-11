@@ -1,0 +1,22 @@
+{
+  "tests": [
+    {
+      "name": "List modules requires auth",
+      "method": "GET",
+      "path": "/?action=list",
+      "expectedStatus": 403
+    },
+    {
+      "name": "Unknown action without auth also denied",
+      "method": "GET",
+      "path": "/?action=unknown",
+      "expectedStatus": 403
+    },
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    }
+  ]
+}

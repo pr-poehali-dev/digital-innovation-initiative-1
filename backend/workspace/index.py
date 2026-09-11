@@ -105,8 +105,42 @@ def check_project_access(conn, project_id: int, user_id: int) -> bool:
         return cur.fetchone() is not None
 
 
-def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 3000) -> str:
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled(conn) -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    cur = conn.cursor()
+    cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_global_settings ORDER BY id DESC LIMIT 1")
+    g = cur.fetchone()
+    if not g or not g[0]:
+        return False
+    cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_module_settings WHERE module_code = 'workspace'")
+    m = cur.fetchone()
+    return bool(m and m[0])
+
+
+def _log_ai_op(conn, action, result, data_kind=None, approx_volume=None):
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""INSERT INTO {SCHEMA}.ai_operation_log
+                (module_code, service, action, data_kind, approx_volume, result)
+                VALUES ('workspace', 'YandexGPT', %s, %s, %s, %s)""",
+            (action, data_kind, approx_volume, result),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
+def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 3000, conn=None) -> str:
     """Вызов YandexGPT."""
+    if conn is not None:
+        if not _ai_enabled(conn):
+            _log_ai_op(conn, "completion", "disabled", data_kind="workspace_context")
+            raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «AI-копайлот проекта» в разделе «Настройки AI».")
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     messages = []
     if system:
@@ -529,7 +563,10 @@ def handler(event: dict, context) -> dict:
             context_summary = f"project={ctx['project_title']}, search={len(ctx['search_results'])} фрагментов, artifacts={len(ctx['artifacts'])}, hypotheses={len(ctx['hypotheses'])}"
 
             system = SYSTEM_PROMPTS.get(mode, SYSTEM_PROMPTS["analyst"])
-            answer = yandex_gpt(context_prompt, system, max_tokens=2500)
+            try:
+                answer = yandex_gpt(context_prompt, system, max_tokens=2500, conn=conn)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": {"message": str(e)}}, 423)
 
             # Сохраняем AI run
             with conn.cursor() as cur:
@@ -1048,7 +1085,10 @@ def handler(event: dict, context) -> dict:
 
 ТОЛЬКО JSON без пояснений."""
 
-            result_text = yandex_gpt(prompt, max_tokens=1500)
+            try:
+                result_text = yandex_gpt(prompt, max_tokens=1500, conn=conn)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": {"message": str(e)}}, 423)
             try:
                 start, end = result_text.find("{"), result_text.rfind("}")
                 result = json.loads(result_text[start:end+1])
@@ -1084,7 +1124,10 @@ def handler(event: dict, context) -> dict:
 
 ТОЛЬКО JSON массив без пояснений."""
 
-            result_text = yandex_gpt(prompt, max_tokens=2000)
+            try:
+                result_text = yandex_gpt(prompt, max_tokens=2000, conn=conn)
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": {"message": str(e)}}, 423)
             try:
                 start, end = result_text.find("["), result_text.rfind("]")
                 pains = json.loads(result_text[start:end+1])
@@ -1437,7 +1480,13 @@ def handler(event: dict, context) -> dict:
 {{"summary":"3-4 предложения — суть кейса и главная проблема","readiness_score":число 1-10,"key_insight":"самый важный инсайт — 1-2 предложения","top_pains":["боль 1","боль 2","боль 3"],"ai_verdict":"AI рекомендован"/"AI возможен"/"Сначала процессы — AI потом","ai_verdict_reason":"1-2 предложения","quick_wins":["что сделать сейчас без AI"],"gaps":["чего не хватает в кейсе"],"next_action":"одно конкретное следующее действие","risks":["риск 1","риск 2"]}}
 ТОЛЬКО JSON."""
 
-                result_text = yandex_gpt(prompt, system, max_tokens=2000)
+                try:
+                    result_text = yandex_gpt(prompt, system, max_tokens=2000, conn=conn)
+                except AIDisabledError as e:
+                    with conn.cursor() as cur:
+                        cur.execute(f"UPDATE {SCHEMA}.projects SET ai_status = 'idle', ai_stage = NULL, ai_run_updated_at = NOW() WHERE id = %s", (project_id,))
+                    conn.commit()
+                    return cors({"ok": False, "error": {"message": str(e)}}, 423)
                 s, e2 = result_text.find("{"), result_text.rfind("}") + 1
                 analysis = json.loads(result_text[s:e2])
 

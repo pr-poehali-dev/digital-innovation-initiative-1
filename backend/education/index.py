@@ -16,8 +16,12 @@ Educational Passport — паспорт образования пользова�
 автозапуск AI-анализа (YandexGPT) по умолчанию ВЫКЛЮЧЕН. Файл прикрепляется,
 локальное извлечение текста работает как обычно, но текст не отправляется во внешний AI.
 Переключатель действует ТОЛЬКО в этом модуле (education), не является
-глобальным kill switch платформы. Включить обратно: секрет
-EDUCATION_EXTERNAL_AI_ENABLED=true — только по решению владельца.
+глобальным kill switch платформы. Условие строгое: только точное значение
+"true" включает обработку, любое другое значение или отсутствие переменной
+означает "выключено" (fail-closed).
+Повторное включение AI-обработки — это ОТДЕЛЬНОЕ решение владельца через
+секрет EDUCATION_EXTERNAL_AI_ENABLED=true, а не откат этого hotfix.
+Откат самого hotfix — возврат к предыдущему commit и повторный деплой.
 """
 import json
 import os
@@ -27,9 +31,7 @@ import logging
 from datetime import datetime
 import psycopg2
 
-EDUCATION_EXTERNAL_AI_ENABLED = (
-    os.environ.get("EDUCATION_EXTERNAL_AI_ENABLED", "").strip().lower() == "true"
-)
+EDUCATION_EXTERNAL_AI_ENABLED = os.environ.get("EDUCATION_EXTERNAL_AI_ENABLED", "") == "true"
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("education")

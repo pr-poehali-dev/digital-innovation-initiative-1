@@ -120,7 +120,50 @@ def get_trusted_sources(conn) -> dict:
     return {row[0]: {"trust_level": row[1], "source_type": row[2], "name": row[3]} for row in cur.fetchall()}
 
 
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    schema = get_schema()
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'learning_pack'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    schema = get_schema()
+    try:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('learning_pack', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def yandex_gpt(prompt: str, system: str = "", max_tokens: int = 2000) -> str:
+    if not _ai_enabled():
+        _log_ai_op("summarize", "disabled", data_kind="learning_material")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Учебные материалы» в разделе «Настройки AI».")
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
@@ -388,6 +431,8 @@ def ai_retrieve_candidates(ms_title: str, ms_desc: str, goal_title: str, target_
                 })
         log.info("ai_retrieve: %d candidates", len(result))
         return result
+    except AIDisabledError:
+        raise
     except Exception as e:
         log.warning("ai_retrieve failed: %s", e)
         return []
@@ -435,6 +480,8 @@ def ai_build_assets(snapshot_text: str, ms_title: str, goal_title: str, mat_titl
         if start != -1 and end != -1:
             raw = raw[start:end + 1]
         return json.loads(raw)
+    except AIDisabledError:
+        raise
     except Exception as e:
         log.warning("ai_build_assets failed: %s", e)
         return {}
@@ -610,7 +657,10 @@ def run_pipeline(conn, milestone_id: int, goal_id: int, user_id: int) -> int:
     # ── Шаг 2: Если corpus дал < 3 — дополняем из whitelist с AI и readability gate ──
     if len(verified) < 3:
         preferred = list(FETCH_WHITELIST)
-        candidates = ai_retrieve_candidates(ms_title, ms_desc or "", goal_title, target_role or "", preferred)
+        try:
+            candidates = ai_retrieve_candidates(ms_title, ms_desc or "", goal_title, target_role or "", preferred)
+        except AIDisabledError:
+            candidates = []
         log.info("ai candidates for supplement: %d", len(candidates))
         seen_urls = {m["url"] for m in verified}
         supplement_count = 0
@@ -950,7 +1000,10 @@ def handle_summarize(conn, user, body, rid, origin):
         if ms_row:
             ms_title, goal_title = ms_row
 
-    assets = ai_build_assets(snap[0], ms_title, goal_title, mat_title)
+    try:
+        assets = ai_build_assets(snap[0], ms_title, goal_title, mat_title)
+    except AIDisabledError as e:
+        return err("ai_disabled", str(e), 423, rid, origin)
     if not assets:
         return err("ai_error", "Не удалось построить выжимку", 500, rid, origin)
 

@@ -823,8 +823,49 @@ def action_content_link_upsert(conn, actor, body):
 
 # ── Evidence Bridge v1 ────────────────────────────────────────────────
 
+class AIDisabledError(Exception):
+    pass
+
+
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    conn = psycopg2.connect(DB)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {S}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {S}.ai_module_settings WHERE module_code = 'professional'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+    try:
+        conn = psycopg2.connect(DB)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {S}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result)
+                    VALUES ('professional', 'YandexGPT', %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def _yandex_gpt(prompt: str, system: str = "") -> str:
     """Вызов YandexGPT для AI-assisted evidence draft."""
+    if not _ai_enabled():
+        _log_ai_op("completion", "disabled", data_kind="workspace_artifact")
+        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «Профессиональные материалы» в разделе «Настройки AI».")
     url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
     messages = []
     if system:
@@ -919,6 +960,8 @@ def action_create_evidence_from_artifact(conn, user_id: int, body: dict) -> dict
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:]).rsplit("```", 1)[0]
         ai_draft = json.loads(raw.strip())
+    except AIDisabledError as e:
+        return resp({"ok": False, "error": str(e)}, 423)
     except Exception:
         ai_draft = {
             "title": art_title[:80], "description": art_summary or "",

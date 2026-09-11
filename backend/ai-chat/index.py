@@ -59,6 +59,37 @@ def get_user(conn, session_id: str):
 
 # ── YandexGPT call ─────────────────────────────────────────────────────
 
+def _ai_enabled(conn) -> bool:
+    """Единое управление AI (раздел «Настройки AI»): проверяет глобальный
+    и модульный переключатели перед любым вызовом внешнего сервиса."""
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT is_enabled FROM {S}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {S}.ai_module_settings WHERE module_code = 'ai_chat'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+
+
+def _log_ai_op(conn, action, result, object_type=None, object_id=None,
+               data_kind=None, approx_volume=None, error_message=None,
+               duration_ms=None, initiated_by=None):
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""INSERT INTO {S}.ai_operation_log
+                    (module_code, service, action, object_type, object_id, data_kind,
+                     approx_volume, result, error_message, duration_ms, initiated_by)
+                    VALUES ('ai_chat', 'YandexGPT', %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (action, object_type, object_id, data_kind, approx_volume, result,
+                 error_message, duration_ms, initiated_by),
+            )
+        conn.commit()
+    except Exception:
+        pass
+
+
 def call_gpt(messages: list) -> str:
     payload = {
         "modelUri": MODEL_URI,
@@ -120,7 +151,22 @@ def handler(event: dict, context) -> dict:
             role = "user" if m.get("role") == "user" else "assistant"
             gpt_messages.append({"role": role, "text": str(m.get("text", ""))})
 
-        answer = call_gpt(gpt_messages)
+        if not _ai_enabled(conn):
+            _log_ai_op(conn, "chat", "disabled", data_kind="chat_history", initiated_by=str(user_id))
+            return resp({"error": "AI-обработка временно отключена владельцем платформы. Включите модуль «AI-чат» в разделе «Настройки AI»."}, 423, origin)
+
+        import time as _time
+        _t0 = _time.monotonic()
+        try:
+            answer = call_gpt(gpt_messages)
+        except Exception as e:
+            _log_ai_op(conn, "chat", "error", data_kind="chat_history",
+                       error_message=str(e)[:500], initiated_by=str(user_id),
+                       duration_ms=int((_time.monotonic() - _t0) * 1000))
+            raise
+        _log_ai_op(conn, "chat", "success", data_kind="chat_history",
+                   approx_volume=len(str(gpt_messages)), initiated_by=str(user_id),
+                   duration_ms=int((_time.monotonic() - _t0) * 1000))
         return resp({"answer": answer}, 200, origin)
 
     finally:

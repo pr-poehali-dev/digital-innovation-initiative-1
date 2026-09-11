@@ -147,7 +147,46 @@ def get_current_user(conn, session_id):
     return None
 
 
+def _ai_enabled() -> bool:
+    """Единое управление AI («Настройки AI»): глобальный + модульный переключатель."""
+    schema = os.environ.get("MAIN_DB_SCHEMA", "").strip() or "t_p61016064_digital_innovation_i"
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+        g = cur.fetchone()
+        if not g or not g[0]:
+            return False
+        cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'generate'")
+        m = cur.fetchone()
+        return bool(m and m[0])
+    finally:
+        conn.close()
+
+
+def _log_ai_op(action, result, data_kind=None, approx_volume=None, error_message=None, initiated_by=None):
+    schema = os.environ.get("MAIN_DB_SCHEMA", "").strip() or "t_p61016064_digital_innovation_i"
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, data_kind, approx_volume, result, error_message, initiated_by)
+                    VALUES ('generate', 'YandexGPT', %s, %s, %s, %s, %s, %s)""",
+                (action, data_kind, approx_volume, result, error_message, initiated_by),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def call_yandex_gpt(messages: list) -> str:
+    if not _ai_enabled():
+        _log_ai_op("completion", "disabled", data_kind="document_chunks")
+        return "[AI-обработка временно отключена владельцем платформы. Включите модуль «Генерация» в разделе «Настройки AI».]"
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
@@ -189,6 +228,7 @@ def call_yandex_gpt(messages: list) -> str:
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
+            _log_ai_op("completion", "success", data_kind="document_chunks", approx_volume=len(payload))
             return result["result"]["alternatives"][0]["message"]["text"]
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="ignore")
