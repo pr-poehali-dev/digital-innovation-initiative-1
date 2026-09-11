@@ -1,0 +1,8 @@
+{
+  "tests": [
+    { "name": "kpi requires auth", "method": "GET", "path": "/?action=kpi", "expectedStatus": 401 },
+    { "name": "attention requires auth", "method": "GET", "path": "/?action=attention", "expectedStatus": 401 },
+    { "name": "create_report requires auth", "method": "POST", "path": "/?action=create_report", "expectedStatus": 401 },
+    { "name": "OPTIONS preflight", "method": "OPTIONS", "path": "/", "expectedStatus": 200 }
+  ]
+}

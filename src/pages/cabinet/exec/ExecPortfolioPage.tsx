@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Metric, Empty, Loading, ErrorBox, fmtDate } from "@/components/exec/Exe
 import { ProjectFormDialog, TaskFormDialog, PROJECT_STATUSES, TASK_STATUSES } from "@/components/exec/PortfolioForms";
 import { execPortfolioApi, PortfolioDashboard, ExecProject, ExecTask } from "@/lib/execPortfolioApi";
 import { execApi } from "@/lib/execCabinetApi";
-import { controlApi } from "@/lib/execControlApi";
+import { controlApi, Risk } from "@/lib/execControlApi";
 
 const PRIORITY_CLS: Record<string, string> = {
   urgent: "bg-red-100 text-red-700",
@@ -22,11 +22,13 @@ const PRIORITY_CLS: Record<string, string> = {
 const PROJECT_STATUS_LABEL: Record<string, string> = Object.fromEntries(PROJECT_STATUSES.map((s) => [s.value, s.label]));
 const TASK_STATUS_LABEL: Record<string, string> = Object.fromEntries(TASK_STATUSES.map((s) => [s.value, s.label]));
 
-type MainTab = "dashboard" | "projects" | "tasks";
+type MainTab = "dashboard" | "projects" | "tasks" | "risks";
 
 export default function ExecPortfolioPage() {
   const navigate = useNavigate();
-  const [mainTab, setMainTab] = useState<MainTab>("dashboard");
+  const [searchParams] = useSearchParams();
+  const [mainTab, setMainTab] = useState<MainTab>((searchParams.get("tab") as MainTab) || "dashboard");
+  const [risks, setRisks] = useState<Risk[]>([]);
   const [data, setData] = useState<PortfolioDashboard | null>(null);
   const [projects, setProjects] = useState<ExecProject[]>([]);
   const [tasks, setTasks] = useState<ExecTask[]>([]);
@@ -61,10 +63,20 @@ export default function ExecPortfolioPage() {
       execPortfolioApi.tasks().then((d) => setTasks(d.items)),
       execApi.initiatives().then((d) => setInitiatives(d.items.map((i) => ({ id: i.id, title: i.title })))),
       controlApi.actions().then((d) => setActions(d.items.map((a) => ({ id: a.id, title: a.title || a.description })))),
+      controlApi.all().then((d) => setRisks(d.risks)),
     ])
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
   }, []);
+
+  // URL-фильтры (?tab=tasks&overdue=1, ?tab=projects&status=..., ?tab=risks&level=critical)
+  const urlOverdue = searchParams.get("overdue") === "1";
+  const urlStatus = searchParams.get("status");
+  const urlLevel = searchParams.get("level");
+
+  const filteredTasks = tasks.filter((t) => (!urlOverdue || t.is_overdue) && (!urlStatus || t.status === urlStatus));
+  const filteredProjects = projects.filter((p) => !urlStatus || p.status === urlStatus);
+  const filteredRisks = risks.filter((r) => !urlLevel || (urlLevel === "critical" ? r.probability * r.impact >= 15 : true));
 
   const makeSnapshot = async () => {
     setSnapBusy(true);
@@ -125,8 +137,15 @@ export default function ExecPortfolioPage() {
         {error && <ErrorBox message={error} onRetry={() => { loadDashboard(); loadProjects(); loadTasks(); }} />}
         {snapMsg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3 py-2">{snapMsg}</div>}
 
+        {(urlOverdue || urlStatus || urlLevel) && (
+          <div className="text-xs bg-violet-50 text-violet-700 rounded-lg px-3 py-2 flex items-center gap-1.5">
+            <Icon name="Filter" size={13} />
+            Фильтр по ссылке: {urlOverdue && "только просроченные "}{urlStatus && `статус «${urlStatus}» `}{urlLevel && `уровень «${urlLevel}»`}
+          </div>
+        )}
+
         <div className="flex gap-1 border-b border-slate-200">
-          {(["dashboard", "projects", "tasks"] as MainTab[]).map((t) => (
+          {(["dashboard", "projects", "tasks", "risks"] as MainTab[]).map((t) => (
             <button
               key={t}
               onClick={() => setMainTab(t)}
@@ -134,7 +153,7 @@ export default function ExecPortfolioPage() {
                 mainTab === t ? "border-violet-600 text-violet-700" : "border-transparent text-muted-foreground"
               }`}
             >
-              {{ dashboard: "Сводка", projects: `Проекты (${projects.length})`, tasks: `Задачи (${tasks.length})` }[t]}
+              {{ dashboard: "Сводка", projects: `Проекты (${filteredProjects.length})`, tasks: `Задачи (${filteredTasks.length})`, risks: `Риски (${filteredRisks.length})` }[t]}
             </button>
           ))}
         </div>
@@ -142,9 +161,9 @@ export default function ExecPortfolioPage() {
         {mainTab === "dashboard" && data && <DashboardTab data={data} />}
 
         {mainTab === "projects" && (
-          projects.length === 0 ? <Empty text="Проектов пока нет" icon="Folder" /> :
+          filteredProjects.length === 0 ? <Empty text="Проектов пока нет" icon="Folder" /> :
           <div className="space-y-1.5">
-            {projects.map((p) => (
+            {filteredProjects.map((p) => (
               <div
                 key={p.id}
                 onClick={() => navigate(`/cabinet/exec/portfolio/projects/${p.id}`)}
@@ -170,9 +189,9 @@ export default function ExecPortfolioPage() {
         )}
 
         {mainTab === "tasks" && (
-          tasks.length === 0 ? <Empty text="Задач пока нет" icon="ListTodo" /> :
+          filteredTasks.length === 0 ? <Empty text="Задач пока нет" icon="ListTodo" /> :
           <div className="space-y-1.5">
-            {tasks.map((t) => (
+            {filteredTasks.map((t) => (
               <div key={t.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-sm truncate">{t.title}</div>
@@ -184,6 +203,20 @@ export default function ExecPortfolioPage() {
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {t.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">просрочена</span>}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${PRIORITY_CLS[t.priority] || PRIORITY_CLS.normal}`}>{t.priority}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {mainTab === "risks" && (
+          filteredRisks.length === 0 ? <Empty text="Рисков пока нет" icon="ShieldAlert" /> :
+          <div className="space-y-1.5">
+            {filteredRisks.map((r) => (
+              <div key={r.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs">
+                <div className="font-medium">{r.description}</div>
+                <div className="text-muted-foreground mt-0.5">
+                  Оценка {r.probability * r.impact} (вероятность {r.probability} × влияние {r.impact}) · {r.initiative_title || "без инициативы"}
                 </div>
               </div>
             ))}
