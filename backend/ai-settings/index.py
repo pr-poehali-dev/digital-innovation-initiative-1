@@ -73,6 +73,12 @@ def rows(cur):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+EMERGENCY_ENV_FLAGS = {
+    "media_upload": "MEDIA_EXTERNAL_AI_ENABLED",
+    "education": "EDUCATION_EXTERNAL_AI_ENABLED",
+}
+
+
 def list_modules(cur):
     cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_global_settings ORDER BY id DESC LIMIT 1")
     g = cur.fetchone()
@@ -84,7 +90,21 @@ def list_modules(cur):
         FROM {SCHEMA}.ai_module_settings
         ORDER BY module_label
     """)
-    return {"global_enabled": global_enabled, "modules": rows(cur)}
+    items = rows(cur)
+    # Аварийный server-side блок (env) — показываем честно, чтобы модуль не выглядел
+    # включённым, если переменная окружения его всё равно блокирует.
+    for it in items:
+        env_name = EMERGENCY_ENV_FLAGS.get(it["module_code"])
+        if env_name:
+            env_allows = os.environ.get(env_name, "") == "true"
+            it["emergency_env_flag"] = env_name
+            it["emergency_env_blocked"] = not env_allows
+            it["effective_enabled"] = bool(it["is_enabled"]) and global_enabled and env_allows
+        else:
+            it["emergency_env_flag"] = None
+            it["emergency_env_blocked"] = False
+            it["effective_enabled"] = bool(it["is_enabled"]) and global_enabled
+    return {"global_enabled": global_enabled, "modules": items}
 
 
 def set_global(cur, enabled: bool, actor: str):

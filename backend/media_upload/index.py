@@ -24,6 +24,54 @@ import urllib.error
 MEDIA_EXTERNAL_AI_ENABLED = os.environ.get("MEDIA_EXTERNAL_AI_ENABLED", "") == "true"
 
 
+def _ai_gate(service: str):
+    """Трёхуровневая проверка: глобальный переключатель → модульный → аварийный env.
+    Возвращает (allowed: bool, reason: str|None)."""
+    if not MEDIA_EXTERNAL_AI_ENABLED:
+        return False, "emergency_block"
+    schema = get_schema()
+    try:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+            g = cur.fetchone()
+            if not g or not g[0]:
+                return False, "global_disabled"
+            cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'media_upload'")
+            m = cur.fetchone()
+            if not (m and m[0]):
+                return False, "module_disabled"
+            return True, None
+        finally:
+            conn.close()
+    except Exception:
+        return False, "validation_error"
+
+
+def _log_ai_op(service, action, result, object_id=None, data_kind=None, approx_volume=None,
+               error_message=None, duration_ms=None, initiated_by=None):
+    """Журнал фактов AI-операций: только метаданные, без содержимого файлов."""
+    schema = get_schema()
+    try:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, object_type, object_id, data_kind,
+                     approx_volume, result, error_message, duration_ms, initiated_by)
+                    VALUES ('media_upload', %s, %s, 'document', %s, %s, %s, %s, %s, %s, %s)""",
+                (service, action, str(object_id) if object_id else None, data_kind,
+                 approx_volume, result, error_message, duration_ms, initiated_by),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def safe_s3_name(filename: str) -> str:
     """Транслитерирует и очищает имя файла, чтобы получился валидный S3-ключ
     (хранилище отклоняет ключи с кириллицей/пробелами кодом 400)."""
@@ -128,9 +176,12 @@ def get_s3_client():
 
 def ocr_image(image_bytes: bytes) -> dict:
     """Распознавание текста на фото через Yandex Vision API."""
-    if not MEDIA_EXTERNAL_AI_ENABLED:
+    allowed, reason = _ai_gate("YandexVision")
+    if not allowed:
+        _log_ai_op("YandexVision", "ocr_image", "blocked", data_kind="image",
+                   approx_volume=len(image_bytes), error_message=reason)
         return {"text": "", "error": False, "ai_processing_performed": False,
-                "ai_processing_state": "disabled", "ai_processing_reason": "external_processing_suspended"}
+                "ai_processing_state": "disabled", "ai_processing_reason": reason}
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:
@@ -182,9 +233,12 @@ def ocr_image(image_bytes: bytes) -> dict:
 
 def transcribe_audio(audio_bytes: bytes) -> dict:
     """Распознавание речи через Yandex SpeechKit (краткое распознавание до 1 МБ / 30 сек)."""
-    if not MEDIA_EXTERNAL_AI_ENABLED:
+    allowed, reason = _ai_gate("SpeechKit")
+    if not allowed:
+        _log_ai_op("SpeechKit", "transcribe_audio", "blocked", data_kind="audio",
+                   approx_volume=len(audio_bytes), error_message=reason)
         return {"text": "", "error": False, "ai_processing_performed": False,
-                "ai_processing_state": "disabled", "ai_processing_reason": "external_processing_suspended"}
+                "ai_processing_state": "disabled", "ai_processing_reason": reason}
     api_key = os.environ.get("YANDEX_GPT_API_KEY", "")
     folder_id = os.environ.get("YANDEX_FOLDER_ID", "")
     if not api_key or not folder_id:

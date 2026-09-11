@@ -33,6 +33,54 @@ import psycopg2
 
 EDUCATION_EXTERNAL_AI_ENABLED = os.environ.get("EDUCATION_EXTERNAL_AI_ENABLED", "") == "true"
 
+
+def _ai_gate():
+    """Трёхуровневая проверка: аварийный env → глобальный переключатель → модульный.
+    Возвращает (allowed: bool, reason: str|None)."""
+    if not EDUCATION_EXTERNAL_AI_ENABLED:
+        return False, "emergency_block"
+    schema = get_schema()
+    try:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT is_enabled FROM {schema}.ai_global_settings ORDER BY id DESC LIMIT 1")
+            g = cur.fetchone()
+            if not g or not g[0]:
+                return False, "global_disabled"
+            cur.execute(f"SELECT is_enabled FROM {schema}.ai_module_settings WHERE module_code = 'education'")
+            m = cur.fetchone()
+            if not (m and m[0]):
+                return False, "module_disabled"
+            return True, None
+        finally:
+            conn.close()
+    except Exception:
+        return False, "validation_error"
+
+
+def _log_ai_op(action, result, object_id=None, data_kind=None, approx_volume=None,
+               error_message=None, duration_ms=None, initiated_by=None):
+    """Журнал фактов AI-операций: только метаданные, без содержимого документов."""
+    schema = get_schema()
+    try:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"""INSERT INTO {schema}.ai_operation_log
+                    (module_code, service, action, object_type, object_id, data_kind,
+                     approx_volume, result, error_message, duration_ms, initiated_by)
+                    VALUES ('education', 'YandexGPT', %s, 'education_item', %s, %s, %s, %s, %s, %s, %s)""",
+                (action, str(object_id) if object_id else None, data_kind,
+                 approx_volume, result, error_message, duration_ms, initiated_by),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("education")
 
@@ -825,9 +873,13 @@ def handle_upload_file(conn, user, body, request_id, origin):
     ai_processing_performed = False
     ai_processing_state = "not_applicable"
     ai_processing_reason = None
-    if parse_status == "done" and not EDUCATION_EXTERNAL_AI_ENABLED:
+    _gate_allowed, _gate_reason = _ai_gate() if parse_status == "done" else (False, None)
+    if parse_status == "done" and not _gate_allowed:
         ai_processing_state = "disabled"
-        ai_processing_reason = "external_processing_suspended"
+        ai_processing_reason = _gate_reason
+        _log_ai_op("upload_file_autoanalyze", "blocked", object_id=item_id,
+                   data_kind="education_document", approx_volume=len(parsed_text or ""),
+                   error_message=_gate_reason, initiated_by=user.get("email"))
         cur.execute(
             f"UPDATE {schema}.education_items SET status = 'draft', source_type = 'uploaded_file' WHERE id = %s",
             (int(item_id),),
@@ -846,6 +898,9 @@ def handle_upload_file(conn, user, body, request_id, origin):
             extracted = ai_extract_material(parsed_text)
         ai_processing_performed = True
         ai_processing_state = "completed"
+        _log_ai_op("upload_file_autoanalyze", "success", object_id=item_id,
+                   data_kind="education_document", approx_volume=len(parsed_text or ""),
+                   initiated_by=user.get("email"))
 
         # Нормализация типов: строковые поля всегда строки, hours — int или None
         _str_fields = ("title", "institution_name", "field_of_study", "level",
@@ -974,10 +1029,16 @@ def handle_analyze(conn, user, body, request_id, origin):
     if not fr or not fr[0]:
         return err_response("no_file", "Нет файла или текст не извлечён", 400, request_id, origin)
 
-    if not EDUCATION_EXTERNAL_AI_ENABLED:
-        return err_response("ai_paused", "AI-обработка временно приостановлена владельцем платформы", 423, request_id, origin)
+    _allowed, _reason = _ai_gate()
+    if not _allowed:
+        _log_ai_op("analyze", "blocked", object_id=item_id, data_kind="education_document",
+                   approx_volume=len(fr[0] or ""), error_message=_reason,
+                   initiated_by=user.get("email"))
+        return err_response("ai_paused", "AI-обработка отключена в настройках платформы", 423, request_id, origin)
 
     extracted = ai_extract_formal(fr[0]) if kind in KIND_GROUPS["formal"] else ai_extract_material(fr[0])
+    _log_ai_op("analyze", "success", object_id=item_id, data_kind="education_document",
+               approx_volume=len(fr[0] or ""), initiated_by=user.get("email"))
     topics = extracted.get("topics") or extracted.get("main_topics") or []
     competencies = extracted.get("suggested_competencies") or []
 
@@ -1151,9 +1212,13 @@ def handle_file_ready(conn, user, body, request_id, origin):
     ai_processing_performed = False
     ai_processing_state = "not_applicable"
     ai_processing_reason = None
-    if parse_status == "done" and not EDUCATION_EXTERNAL_AI_ENABLED:
+    _gate_allowed2, _gate_reason2 = _ai_gate() if parse_status == "done" else (False, None)
+    if parse_status == "done" and not _gate_allowed2:
         ai_processing_state = "disabled"
-        ai_processing_reason = "external_processing_suspended"
+        ai_processing_reason = _gate_reason2
+        _log_ai_op("upload_complete_autoanalyze", "blocked", object_id=item_id,
+                   data_kind="education_document", approx_volume=len(parsed_text or ""),
+                   error_message=_gate_reason2, initiated_by=user.get("email"))
         cur.execute(
             f"UPDATE {schema}.education_items SET status = 'draft', source_type = 'uploaded_file' WHERE id = %s",
             (int(item_id),),
@@ -1166,6 +1231,9 @@ def handle_file_ready(conn, user, body, request_id, origin):
         )
         conn.commit()
         extracted = ai_extract_formal(parsed_text) if kind in KIND_GROUPS["formal"] else ai_extract_material(parsed_text)
+        _log_ai_op("upload_complete_autoanalyze", "success", object_id=item_id,
+                   data_kind="education_document", approx_volume=len(parsed_text or ""),
+                   initiated_by=user.get("email"))
         ai_processing_performed = True
         ai_processing_state = "completed"
         topics = extracted.get("topics") or extracted.get("main_topics") or []

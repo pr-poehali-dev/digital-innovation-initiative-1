@@ -131,7 +131,7 @@ export default function ExecAiSettingsPage() {
 
             <div>
               <div className="text-sm font-semibold mb-2 text-muted-foreground">
-                Модули ({modules.filter((m) => m.is_enabled).length} из {modules.length} включено)
+                Модули ({modules.filter((m) => m.effective_enabled).length} из {modules.length} фактически активно)
               </div>
               <div className="space-y-2">
                 {modules.map((m) => (
@@ -149,6 +149,16 @@ export default function ExecAiSettingsPage() {
                         </div>
                         {m.data_description && (
                           <div className="text-xs text-muted-foreground mt-1">{m.data_description}</div>
+                        )}
+                        {m.emergency_env_blocked && (
+                          <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2 py-1.5">
+                            <Icon name="ShieldAlert" size={13} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                            <span className="text-[11px] text-amber-800 leading-snug">
+                              Заблокировано аварийным серверным переключателем
+                              {m.emergency_env_flag ? ` (${m.emergency_env_flag})` : ""}. Даже при включённом
+                              тумблере внешний AI не вызывается.
+                            </span>
+                          </div>
                         )}
                         <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-3">
                           {m.last_used_at ? (

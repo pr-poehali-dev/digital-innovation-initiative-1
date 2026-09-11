@@ -13,6 +13,9 @@ export interface AiModuleSetting {
   last_result: string | null;
   updated_by: string | null;
   updated_at: string;
+  emergency_env_flag: string | null;
+  emergency_env_blocked: boolean;
+  effective_enabled: boolean;
 }
 
 export interface AiModulesResponse {
