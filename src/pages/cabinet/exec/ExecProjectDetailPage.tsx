@@ -19,8 +19,14 @@ function labelOf(list: { value: string; label: string }[], v: string) {
   return list.find((x) => x.value === v)?.label || v;
 }
 
-const TABS = ["overview", "tasks", "results", "risks", "links", "history"] as const;
+const TABS = ["overview", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
 type Tab = (typeof TABS)[number];
+
+const TAB_LABEL: Record<Tab, string> = {
+  overview: "Обзор", tasks: "Задачи", milestones: "Контрольные точки", results: "Результаты",
+  effects: "Эффекты", risks: "Риски", issues: "Проблемы", documents: "Документы",
+  links: "Связи", history: "История",
+};
 
 export default function ExecProjectDetailPage() {
   const { id } = useParams();
@@ -38,8 +44,9 @@ export default function ExecProjectDetailPage() {
   const [effectDialog, setEffectDialog] = useState<{ open: boolean; item: ExecEffect | null; resultId: number; resultTitle: string }>({
     open: false, item: null, resultId: 0, resultTitle: "",
   });
-  const [effectsByResult, setEffectsByResult] = useState<Record<number, ExecEffect[]>>({});
+  const [allEffects, setAllEffects] = useState<ExecEffect[]>([]);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [linkDefaultKind, setLinkDefaultKind] = useState("doc_source");
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
@@ -64,16 +71,17 @@ export default function ExecProjectDetailPage() {
     }
   }, [tab, pid, data]);
 
-  const loadEffects = async (resultId: number) => {
-    const d = await execPortfolioApi.effects(resultId);
-    setEffectsByResult((prev) => ({ ...prev, [resultId]: d.items }));
-  };
+  const loadAllEffects = useCallback(async () => {
+    if (!data) return;
+    const lists = await Promise.all(data.results.map((r) => execPortfolioApi.effects(r.id)));
+    setAllEffects(lists.flatMap((l) => l.items));
+  }, [data]);
 
   useEffect(() => {
-    if (tab === "results" && data) {
-      data.results.forEach((r) => loadEffects(r.id));
+    if ((tab === "effects" || tab === "results") && data) {
+      loadAllEffects();
     }
-  }, [tab, data]);
+  }, [tab, data, loadAllEffects]);
 
   const doArchive = async () => {
     try {
@@ -87,6 +95,9 @@ export default function ExecProjectDetailPage() {
   if (loading) return <Layout><Loading /></Layout>;
   if (error) return <Layout><div className="max-w-4xl mx-auto px-4 py-6"><ErrorBox message={error} onRetry={load} /></div></Layout>;
   if (!data) return null;
+
+  const documentLinks = data.links.filter((l) => l.other_kind === "doc_source");
+  const nonDocLinks = data.links.filter((l) => l.other_kind !== "doc_source");
 
   return (
     <Layout>
@@ -120,7 +131,7 @@ export default function ExecProjectDetailPage() {
         {data.description && <p className="text-sm text-muted-foreground">{data.description}</p>}
 
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-          {(["overview", "tasks", "results", "risks", "links", "history"] as Tab[]).map((t) => (
+          {(TABS as readonly Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -128,9 +139,15 @@ export default function ExecProjectDetailPage() {
                 tab === t ? "border-violet-600 text-violet-700" : "border-transparent text-muted-foreground"
               }`}
             >
-              {{ overview: "Обзор", tasks: `Задачи (${data.tasks.length})`, results: `Результаты (${data.results.length})`,
-                 risks: `Риски и проблемы (${data.risks.length + data.issues.length})`, links: `Связи (${data.links.length})`,
-                 history: "История" }[t]}
+              {TAB_LABEL[t]}
+              {t === "tasks" && ` (${data.tasks.length})`}
+              {t === "milestones" && ` (${data.milestones.length})`}
+              {t === "results" && ` (${data.results.length})`}
+              {t === "effects" && ` (${allEffects.length})`}
+              {t === "risks" && ` (${data.risks.length})`}
+              {t === "issues" && ` (${data.issues.length})`}
+              {t === "documents" && ` (${documentLinks.length})`}
+              {t === "links" && ` (${nonDocLinks.length})`}
             </button>
           ))}
         </div>
@@ -143,17 +160,6 @@ export default function ExecProjectDetailPage() {
               <div><span className="text-muted-foreground">Начало факт:</span> {data.fact_start ? fmtDate(data.fact_start) : "—"}</div>
               <div><span className="text-muted-foreground">Завершение факт:</span> {data.fact_end ? fmtDate(data.fact_end) : "—"}</div>
             </div>
-            {data.milestones.length > 0 && (
-              <div className="mt-3">
-                <div className="text-xs font-semibold text-muted-foreground mb-1.5">Контрольные точки</div>
-                {data.milestones.map((m) => (
-                  <div key={m.id} className="text-xs py-1 flex justify-between border-b border-slate-100">
-                    <span>{m.title}</span>
-                    <span className="text-muted-foreground">{fmtDate(m.plan_date)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
@@ -167,6 +173,18 @@ export default function ExecProjectDetailPage() {
                   <div className="text-[11px] text-muted-foreground">{t.due_at ? fmtDate(t.due_at) : "Без срока"} · {t.progress_pct}%</div>
                 </div>
                 {t.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0">просрочена</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "milestones" && (
+          data.milestones.length === 0 ? <Empty text="Контрольных точек пока нет" icon="Flag" /> :
+          <div className="space-y-1.5">
+            {data.milestones.map((m) => (
+              <div key={m.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 flex items-center justify-between">
+                <span className="text-sm">{m.title}</span>
+                <span className="text-[11px] text-muted-foreground">{fmtDate(m.plan_date)} · {m.status}</span>
               </div>
             ))}
           </div>
@@ -190,26 +208,38 @@ export default function ExecProjectDetailPage() {
                     <Icon name="Pencil" size={12} />
                   </Button>
                 </div>
-                <div className="mt-2 pl-3 border-l-2 border-slate-100 space-y-1.5">
-                  {(effectsByResult[r.id] || []).map((e) => (
-                    <div key={e.id} className="text-xs flex items-center justify-between">
-                      <div>
-                        <span className="font-medium">{e.title}</span>
-                        <span className="text-muted-foreground ml-1.5">
-                          {e.baseline_value || "—"} → {e.plan_value || "—"} (факт: {e.actual_value || "не измерено"})
-                        </span>
-                      </div>
-                      <button onClick={() => setEffectDialog({ open: true, item: e, resultId: r.id, resultTitle: r.title })}>
-                        <Icon name="Pencil" size={11} className="text-muted-foreground" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    className="text-[11px] text-violet-600 flex items-center gap-1"
-                    onClick={() => setEffectDialog({ open: true, item: null, resultId: r.id, resultTitle: r.title })}
-                  >
-                    <Icon name="Plus" size={11} /> Добавить эффект
+                <button
+                  className="text-[11px] text-violet-600 flex items-center gap-1 mt-2"
+                  onClick={() => setEffectDialog({ open: true, item: null, resultId: r.id, resultTitle: r.title })}
+                >
+                  <Icon name="Plus" size={11} /> Добавить эффект к этому результату
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "effects" && (
+          allEffects.length === 0 ? <Empty text="Эффектов пока нет" icon="TrendingUp" /> :
+          <div className="space-y-1.5">
+            {allEffects.map((e) => (
+              <div key={e.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium">{e.title}</div>
+                  <button onClick={() => setEffectDialog({ open: true, item: e, resultId: e.result_id || 0, resultTitle: e.result_title || "" })}>
+                    <Icon name="Pencil" size={12} className="text-muted-foreground" />
                   </button>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {e.metric || "Показатель не указан"}: {e.baseline_value || "—"} → {e.plan_value || "—"} (факт: {e.actual_value || "не измерено"})
+                </div>
+                <div className="text-[10px] mt-1">
+                  <span className={`px-1.5 py-0.5 rounded ${
+                    e.confirmation_status === "confirmed" ? "bg-emerald-100 text-emerald-700" :
+                    e.confirmation_status === "disputed" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"
+                  }`}>
+                    {e.confirmation_status}
+                  </span>
                 </div>
               </div>
             ))}
@@ -217,32 +247,49 @@ export default function ExecProjectDetailPage() {
         )}
 
         {tab === "risks" && (
-          <div className="space-y-3">
-            {data.risks.length === 0 && data.issues.length === 0 ? (
-              <Empty text="Рисков и проблем не привязано" icon="ShieldAlert" />
-            ) : (
-              <>
-                {data.risks.map((r) => (
-                  <div key={`r${r.id}`} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
-                    {r.description} · оценка {r.probability * r.impact}
-                  </div>
-                ))}
-                {data.issues.map((i) => (
-                  <div key={`i${i.id}`} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs">
-                    {i.title} · {i.status}
-                  </div>
-                ))}
-              </>
-            )}
+          data.risks.length === 0 ? <Empty text="Рисков не привязано" icon="ShieldAlert" /> :
+          <div className="space-y-1.5">
+            {data.risks.map((r) => (
+              <div key={r.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs">
+                {r.description} · оценка риска {r.probability * r.impact} (вероятность {r.probability} × влияние {r.impact}) · {r.status}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "issues" && (
+          data.issues.length === 0 ? <Empty text="Проблем не привязано" icon="AlertOctagon" /> :
+          <div className="space-y-1.5">
+            {data.issues.map((i) => (
+              <div key={i.id} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs">
+                {i.title} · {i.status}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "documents" && (
+          <div className="space-y-2">
+            <Button size="sm" onClick={() => { setLinkDefaultKind("doc_source"); setLinkOpen(true); }}>
+              <Icon name="Plus" size={14} className="mr-1.5" /> Привязать документ
+            </Button>
+            {documentLinks.length === 0 ? <Empty text="Документы не привязаны" icon="FileText" /> : documentLinks.map((l) => (
+              <div key={l.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs flex items-center justify-between">
+                <span>{l.other_title || `Документ #${l.other_id}`}</span>
+                <button onClick={() => execPortfolioApi.archiveLink(l.id).then(load)}>
+                  <Icon name="X" size={12} className="text-muted-foreground" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
         {tab === "links" && (
           <div className="space-y-2">
-            <Button size="sm" onClick={() => setLinkOpen(true)}>
+            <Button size="sm" onClick={() => { setLinkDefaultKind("project"); setLinkOpen(true); }}>
               <Icon name="Link" size={14} className="mr-1.5" /> Добавить связь
             </Button>
-            {data.links.length === 0 ? <Empty text="Связей пока нет" icon="Link" /> : data.links.map((l) => (
+            {nonDocLinks.length === 0 ? <Empty text="Связей пока нет" icon="Link" /> : nonDocLinks.map((l) => (
               <div key={l.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs flex items-center justify-between">
                 <span>{l.link_type_label} — {l.other_title || `${l.other_kind} #${l.other_id}`}</span>
                 <button onClick={() => execPortfolioApi.archiveLink(l.id).then(load)}>
@@ -275,9 +322,9 @@ export default function ExecProjectDetailPage() {
       <EffectFormDialog
         open={effectDialog.open} onOpenChange={(v) => setEffectDialog((p) => ({ ...p, open: v }))}
         effect={effectDialog.item} resultId={effectDialog.resultId} resultTitle={effectDialog.resultTitle}
-        onSaved={() => loadEffects(effectDialog.resultId)}
+        onSaved={loadAllEffects}
       />
-      <LinkFormDialog open={linkOpen} onOpenChange={setLinkOpen} srcKind="project" srcId={pid} onSaved={load} />
+      <LinkFormDialog open={linkOpen} onOpenChange={setLinkOpen} srcKind="project" srcId={pid} onSaved={load} defaultTgtKind={linkDefaultKind} />
 
       <AlertDialog open={archiveConfirm} onOpenChange={setArchiveConfirm}>
         <AlertDialogContent>

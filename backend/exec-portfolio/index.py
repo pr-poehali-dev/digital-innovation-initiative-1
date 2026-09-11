@@ -142,8 +142,11 @@ def fetch_one(cur, table, eid):
 
 # ============ ПРОЕКТЫ ============
 
-def list_projects(cur, include_archived=False):
-    where = "" if include_archived else "WHERE p.archived_at IS NULL"
+def list_projects(cur, include_archived=False, include_test_data=False):
+    conds = [] if include_archived else ["p.archived_at IS NULL"]
+    if not include_test_data:
+        conds.append("p.is_test_data = false")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     cur.execute(f"""
         SELECT p.*, ei.title AS initiative_title,
             (SELECT count(*) FROM {SCHEMA}.exec_task t WHERE t.project_id = p.id AND t.archived_at IS NULL) AS task_count,
@@ -230,8 +233,10 @@ def archive_project(cur, pid, actor):
 
 # ============ ЗАДАЧИ ============
 
-def list_tasks(cur, project_id=None, include_archived=False):
+def list_tasks(cur, project_id=None, include_archived=False, include_test_data=False):
     conds = [] if include_archived else ["t.archived_at IS NULL"]
+    if not include_test_data:
+        conds.append("t.is_test_data = false")
     params = []
     if project_id:
         conds.append("t.project_id = %s")
@@ -310,8 +315,10 @@ def archive_task(cur, tid, actor):
 
 # ============ РЕЗУЛЬТАТЫ И ЭФФЕКТЫ ============
 
-def list_results(cur, project_id=None, include_archived=False):
+def list_results(cur, project_id=None, include_archived=False, include_test_data=False):
     conds = [] if include_archived else ["r.archived_at IS NULL"]
+    if not include_test_data:
+        conds.append("r.is_test_data = false")
     params = []
     if project_id:
         conds.append("r.project_id = %s")
@@ -378,8 +385,10 @@ def archive_result(cur, rid, actor):
     return r[0] if r else None
 
 
-def list_effects(cur, result_id=None, include_archived=False):
+def list_effects(cur, result_id=None, include_archived=False, include_test_data=False):
     conds = [] if include_archived else ["e.archived_at IS NULL"]
+    if not include_test_data:
+        conds.append("e.is_test_data = false")
     params = []
     if result_id:
         conds.append("e.result_id = %s")
@@ -545,7 +554,8 @@ def dashboard(cur):
     cur.execute(f"""
         SELECT id, title, status, priority, due_at, is_on_control
         FROM {SCHEMA}.exec_action
-        WHERE status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
+        WHERE COALESCE(is_test_data, false) = false
+          AND status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
           AND due_at IS NOT NULL AND due_at < CURRENT_DATE
         ORDER BY due_at
     """)
@@ -554,7 +564,8 @@ def dashboard(cur):
     cur.execute(f"""
         SELECT id, title, status, priority, due_at
         FROM {SCHEMA}.exec_action
-        WHERE status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
+        WHERE COALESCE(is_test_data, false) = false
+          AND status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
           AND due_at IS NOT NULL AND due_at BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
         ORDER BY due_at
     """)
@@ -564,7 +575,7 @@ def dashboard(cur):
         SELECT id, title, status, priority, project_id, due_at,
             (due_at IS NOT NULL AND due_at < CURRENT_DATE) AS is_overdue
         FROM {SCHEMA}.exec_task
-        WHERE archived_at IS NULL AND status NOT IN ('done','cancelled')
+        WHERE archived_at IS NULL AND is_test_data = false AND status NOT IN ('done','cancelled')
           AND due_at IS NOT NULL AND due_at < CURRENT_DATE
         ORDER BY due_at
     """)
@@ -573,14 +584,15 @@ def dashboard(cur):
     cur.execute(f"""
         SELECT id, title, plan_date, status, initiative_id, project_id
         FROM {SCHEMA}.exec_milestone
-        WHERE status NOT IN ('achieved','cancelled')
+        WHERE COALESCE(is_test_data, false) = false AND status NOT IN ('achieved','cancelled')
           AND plan_date IS NOT NULL AND plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
         ORDER BY plan_date
     """)
     upcoming_milestones = rows(cur)
 
     cur.execute(f"""
-        SELECT status, count(*) AS cnt FROM {SCHEMA}.exec_project WHERE archived_at IS NULL GROUP BY status
+        SELECT status, count(*) AS cnt FROM {SCHEMA}.exec_project
+        WHERE archived_at IS NULL AND is_test_data = false GROUP BY status
     """)
     projects_by_status = rows(cur)
 
@@ -599,7 +611,7 @@ def dashboard(cur):
 
     cur.execute(f"""
         SELECT id, title, achieved_at, result_kind FROM {SCHEMA}.exec_result
-        WHERE archived_at IS NULL
+        WHERE archived_at IS NULL AND is_test_data = false
         ORDER BY achieved_at DESC NULLS LAST, updated_at DESC LIMIT 10
     """)
     recent_results = rows(cur)
@@ -618,26 +630,37 @@ def dashboard(cur):
 
 def create_snapshot(cur, body: dict, actor: str):
     """Неизменяемый снимок отчёта. У этого backend НЕТ action для редактирования
-    существующего снимка — только создание новой версии. Дополнительно на уровне
-    БД есть UNIQUE-защита связей и CHECK-ограничения; полноценный BEFORE UPDATE
-    триггер недоступен в этой среде (CREATE FUNCTION запрещён платформой), поэтому
-    неизменяемость обеспечивается отсутствием update-пути в API."""
+    или удаления существующего снимка — только создание новой версии.
+
+    ВАЖНО (честная граница гарантии): неизменяемость обеспечивается ТОЛЬКО при
+    работе через этот backend. Полноценный BEFORE UPDATE триггер на уровне БД
+    недоступен в этой среде (CREATE FUNCTION запрещён платформой). Пользователь
+    или сервис с прямым правом UPDATE в БД технически может изменить снимок.
+    Чтобы такое изменение было обнаружимо, при создании считается SHA-256 от
+    payload_json и сохраняется отдельно; get_snapshot всегда пересчитывает хеш
+    и сравнивает с сохранённым — расхождение возвращается явным полем
+    integrity_ok=false, а не тихо."""
     payload = dashboard(cur)
+    payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
     cur.execute(
-        f"""INSERT INTO {SCHEMA}.exec_report_snapshot (title, report_kind, period_from, period_to, payload_json, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, created_at""",
+        f"""INSERT INTO {SCHEMA}.exec_report_snapshot
+            (title, report_kind, period_from, period_to, payload_json, payload_sha256, created_by, is_test_data)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at""",
         (body.get("title", "Справка руководителю"), body.get("report_kind", "portfolio_summary"),
          body.get("period_from") or None, body.get("period_to") or None,
-         json.dumps(payload, ensure_ascii=False, default=str), actor),
+         payload_str, payload_hash, actor, bool(body.get("is_test_data"))),
     )
     row = cur.fetchone()
-    return {"id": row[0], "created_at": row[1]}
+    log_change(cur, actor, "snapshot", row[0], "create", after={"payload_sha256": payload_hash})
+    return {"id": row[0], "created_at": row[1], "payload_sha256": payload_hash}
 
 
-def list_snapshots(cur):
+def list_snapshots(cur, include_test_data=False):
+    where = "" if include_test_data else "WHERE is_test_data = false"
     cur.execute(f"""
-        SELECT id, title, report_kind, period_from, period_to, created_by, created_at
-        FROM {SCHEMA}.exec_report_snapshot ORDER BY created_at DESC LIMIT 50
+        SELECT id, title, report_kind, period_from, period_to, created_by, created_at, is_test_data
+        FROM {SCHEMA}.exec_report_snapshot {where} ORDER BY created_at DESC LIMIT 50
     """)
     return rows(cur)
 
@@ -648,7 +671,11 @@ def get_snapshot(cur, sid: int):
     if not r:
         return None
     item = r[0]
-    item["payload"] = json.loads(item.pop("payload_json"))
+    payload_str = item.pop("payload_json")
+    stored_hash = item.get("payload_sha256")
+    actual_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    item["payload"] = json.loads(payload_str)
+    item["integrity_ok"] = (stored_hash is None) or (stored_hash == actual_hash)
     return item
 
 
@@ -674,7 +701,8 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": dashboard(cur)})
 
         if action == "projects":
-            return cors({"ok": True, "data": {"items": list_projects(cur, qs.get("include_archived") == "1")}})
+            return cors({"ok": True, "data": {"items": list_projects(
+                cur, qs.get("include_archived") == "1", qs.get("include_test_data") == "1")}})
 
         if action == "project":
             pid = as_int(qs.get("id"))
@@ -697,7 +725,8 @@ def handler(event: dict, context) -> dict:
 
         if action == "tasks":
             pid = as_int(qs.get("project_id"))
-            return cors({"ok": True, "data": {"items": list_tasks(cur, pid, qs.get("include_archived") == "1")}})
+            return cors({"ok": True, "data": {"items": list_tasks(
+                cur, pid, qs.get("include_archived") == "1", qs.get("include_test_data") == "1")}})
 
         if action == "save_task":
             tid = save_task(cur, body, user["email"])
@@ -713,7 +742,8 @@ def handler(event: dict, context) -> dict:
 
         if action == "results":
             pid = as_int(qs.get("project_id"))
-            return cors({"ok": True, "data": {"items": list_results(cur, pid, qs.get("include_archived") == "1")}})
+            return cors({"ok": True, "data": {"items": list_results(
+                cur, pid, qs.get("include_archived") == "1", qs.get("include_test_data") == "1")}})
 
         if action == "save_result":
             rid = save_result(cur, body, user["email"])
@@ -729,7 +759,8 @@ def handler(event: dict, context) -> dict:
 
         if action == "effects":
             rid = as_int(qs.get("result_id"))
-            return cors({"ok": True, "data": {"items": list_effects(cur, rid, qs.get("include_archived") == "1")}})
+            return cors({"ok": True, "data": {"items": list_effects(
+                cur, rid, qs.get("include_archived") == "1", qs.get("include_test_data") == "1")}})
 
         if action == "save_effect":
             eid, err = save_effect(cur, body, user["email"])
@@ -777,7 +808,7 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": snap})
 
         if action == "snapshots":
-            return cors({"ok": True, "data": {"items": list_snapshots(cur)}})
+            return cors({"ok": True, "data": {"items": list_snapshots(cur, qs.get("include_test_data") == "1")}})
 
         if action == "snapshot":
             sid = as_int(qs.get("id"))

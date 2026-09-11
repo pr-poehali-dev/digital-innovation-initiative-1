@@ -601,19 +601,25 @@ export function LinkFormDialog({
   srcKind,
   srcId,
   onSaved,
+  defaultTgtKind = "project",
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   srcKind: string;
   srcId: number;
   onSaved: () => void;
+  defaultTgtKind?: string;
 }) {
-  const [tgtKind, setTgtKind] = useState("project");
+  const [tgtKind, setTgtKind] = useState(defaultTgtKind);
   const [tgtId, setTgtId] = useState("");
   const [linkType, setLinkType] = useState("related");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) setTgtKind(defaultTgtKind);
+  }, [open, defaultTgtKind]);
 
   useEffect(() => {
     if (open) {
