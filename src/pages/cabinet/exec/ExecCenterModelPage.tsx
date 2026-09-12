@@ -114,7 +114,7 @@ export default function ExecCenterModelPage() {
               Мастер заполнения
             </button>
             <button
-              onClick={() => nav("/cabinet/exec/dashboard")}
+              onClick={() => nav("/cabinet/exec/center-dashboard")}
               className="px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors inline-flex items-center gap-1.5"
             >
               <Icon name="LayoutDashboard" size={15} />

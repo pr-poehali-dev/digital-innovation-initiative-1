@@ -1035,6 +1035,72 @@ def list_baselines(cur, scope_kind=None, scope_id=None):
     return rows(cur)
 
 
+def project_gantt(cur, pid: int):
+    """Данные для интерактивной диаграммы Ганта одного проекта (режим
+    просмотра): этапы → задачи, вехи, зависимости внутри проекта и
+    последний baseline для сравнения план/факт. Один запрос вместо
+    дублирования отдельных вызовов stages/tasks/milestones/dependencies —
+    экономит round-trip для тяжёлого экрана."""
+    p = fetch_one(cur, "exec_project", pid)
+    if not p:
+        return None
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_project_stage WHERE project_id = %s ORDER BY sort_order, id
+    """, (pid,))
+    stages = rows(cur)
+
+    cur.execute(f"""
+        SELECT t.*, per.display_name AS responsible_name,
+            (t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE
+                AND t.status NOT IN ('done','cancelled')) AS is_overdue
+        FROM {SCHEMA}.exec_task t
+        LEFT JOIN {SCHEMA}.exec_person per ON per.id = t.responsible_person_id
+        WHERE t.project_id = %s AND t.archived_at IS NULL
+        ORDER BY (t.stage_id IS NULL), t.stage_id, (t.due_at IS NULL), t.due_at
+    """, (pid,))
+    tasks = rows(cur)
+
+    cur.execute(f"""
+        SELECT m.*, per.display_name AS responsible_name
+        FROM {SCHEMA}.exec_milestone m
+        LEFT JOIN {SCHEMA}.exec_person per ON per.id = m.responsible_person_id
+        WHERE m.project_id = %s
+        ORDER BY m.plan_date
+    """, (pid,))
+    milestones = rows(cur)
+
+    # Зависимости, где хотя бы один конец принадлежит объектам этого проекта
+    # (включая межпроектные — другой конец может быть в другом проекте).
+    task_ids = [t["id"] for t in tasks]
+    milestone_ids = [m["id"] for m in milestones]
+    stage_ids = [s["id"] for s in stages]
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_schedule_dependency
+        WHERE archived_at IS NULL AND (
+            (src_kind = 'project' AND src_id = %(pid)s) OR (tgt_kind = 'project' AND tgt_id = %(pid)s)
+            OR (src_kind = 'task' AND src_id = ANY(%(task_ids)s)) OR (tgt_kind = 'task' AND tgt_id = ANY(%(task_ids)s))
+            OR (src_kind = 'milestone' AND src_id = ANY(%(milestone_ids)s)) OR (tgt_kind = 'milestone' AND tgt_id = ANY(%(milestone_ids)s))
+            OR (src_kind = 'stage' AND src_id = ANY(%(stage_ids)s)) OR (tgt_kind = 'stage' AND tgt_id = ANY(%(stage_ids)s))
+        )
+    """, {"pid": pid, "task_ids": task_ids or [0], "milestone_ids": milestone_ids or [0], "stage_ids": stage_ids or [0]})
+    dependencies = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, version_number, created_by, created_at, payload_sha256
+        FROM {SCHEMA}.exec_schedule_baseline
+        WHERE scope_kind = 'project' AND scope_id = %s
+        ORDER BY version_number DESC LIMIT 1
+    """, (pid,))
+    latest_baseline = rows(cur)
+
+    return {
+        "project": p, "stages": stages, "tasks": tasks, "milestones": milestones,
+        "dependencies": dependencies, "latest_baseline": latest_baseline[0] if latest_baseline else None,
+    }
+
+
 def get_baseline(cur, bid: int):
     cur.execute(f"SELECT * FROM {SCHEMA}.exec_schedule_baseline WHERE id = %s", (bid,))
     r = rows(cur)
@@ -1185,6 +1251,15 @@ def handler(event: dict, context) -> dict:
             if not snap:
                 return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
             return cors({"ok": True, "data": snap})
+
+        # ============ ГАНТ ПРОЕКТА (РЕЖИМ ПРОСМОТРА) ============
+
+        if action == "project_gantt":
+            gpid = as_int(qs.get("id"))
+            item = project_gantt(cur, gpid) if gpid else None
+            if not item:
+                return cors({"ok": False, "error": {"message": "Проект не найден"}}, 404)
+            return cors({"ok": True, "data": item})
 
         # ============ ДОРОЖНАЯ КАРТА И ШКАЛА ВЕХ ============
 

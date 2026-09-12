@@ -19,16 +19,18 @@ import { execPortfolioApi, ProjectDetail, ExecResult, ExecEffect, HistoryEntry }
 import { execApi } from "@/lib/execCabinetApi";
 import { TeamTab, BudgetTab, CapacityTab, FotTab, PlanFactTab } from "@/components/exec/ProjectResourcesTab";
 import { RequirementsTab } from "@/components/exec/ResourceRequirementsTab";
+import ProjectGanttView from "@/components/exec/roadmap/ProjectGanttView";
+import { ScaleKind, autoScale, diffDays, parseISODate, defaultRangeForScale } from "@/lib/timeScale";
 
 function labelOf(list: { value: string; label: string }[], v: string) {
   return list.find((x) => x.value === v)?.label || v;
 }
 
-const TABS = ["overview", "team", "requirements", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
+const TABS = ["overview", "gantt", "team", "requirements", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
-  overview: "Обзор", team: "Команда", requirements: "Потребности в ресурсах",
+  overview: "Обзор", gantt: "Гант", team: "Команда", requirements: "Потребности в ресурсах",
   capacity: "Загрузка", budget: "Бюджет", fot: "ФОТ",
   planfact: "План-факт", tasks: "Задачи",
   milestones: "Контрольные точки", results: "Результаты",
@@ -39,7 +41,7 @@ const TAB_LABEL: Record<Tab, string> = {
 export default function ExecProjectDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const pid = Number(id);
 
   const [data, setData] = useState<ProjectDetail | null>(null);
@@ -47,7 +49,33 @@ export default function ExecProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const urlTab = searchParams.get("tab") as Tab | null;
-  const [tab, setTab] = useState<Tab>(urlTab && TABS.includes(urlTab) ? urlTab : "overview");
+  const [tab, setTabState] = useState<Tab>(urlTab && TABS.includes(urlTab) ? urlTab : "overview");
+
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", t);
+    setSearchParams(next, { replace: true });
+  };
+
+  // Гант проекта: масштаб и диапазон дат хранятся в URL, как и на портфельной дорожной карте.
+  const ganttScale: ScaleKind = (searchParams.get("gscale") as ScaleKind) || "quarter";
+  const ganttFrom = searchParams.get("gfrom") || defaultRangeForScale(ganttScale).from;
+  const ganttTo = searchParams.get("gto") || defaultRangeForScale(ganttScale).to;
+
+  const setGanttScale = (s: ScaleKind) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("gscale", s);
+    setSearchParams(next, { replace: true });
+  };
+  const setGanttRange = (from: string, to: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("gfrom", from);
+    next.set("gto", to);
+    const nextScale = autoScale(diffDays(parseISODate(from) || new Date(), parseISODate(to) || new Date()));
+    next.set("gscale", nextScale);
+    setSearchParams(next, { replace: true });
+  };
   const [expandedTaskRes, setExpandedTaskRes] = useState<number | null>(null);
   const [expandedMilestoneRes, setExpandedMilestoneRes] = useState<number | null>(null);
 
@@ -113,7 +141,7 @@ export default function ExecProjectDetailPage() {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+      <div className={`mx-auto px-4 py-6 space-y-4 ${tab === "gantt" ? "max-w-[1400px]" : "max-w-4xl"}`}>
         <button onClick={() => navigate("/cabinet/exec/portfolio")} className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground">
           <Icon name="ArrowLeft" size={14} /> К портфелю
         </button>
@@ -143,7 +171,7 @@ export default function ExecProjectDetailPage() {
 
         {data.description && <p className="text-sm text-muted-foreground">{data.description}</p>}
 
-        <PageGuide {...execPageGuides.projectDetail} />
+        <PageGuide {...(tab === "gantt" ? execPageGuides.projectGantt : execPageGuides.projectDetail)} />
 
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
           {(TABS as readonly Tab[]).map((t) => (
@@ -176,6 +204,13 @@ export default function ExecProjectDetailPage() {
               <div><span className="text-muted-foreground">Завершение факт:</span> {data.fact_end ? fmtDate(data.fact_end) : "—"}</div>
             </div>
           </div>
+        )}
+
+        {tab === "gantt" && (
+          <ProjectGanttView
+            projectId={pid} scale={ganttScale} onScaleChange={setGanttScale}
+            dateFrom={ganttFrom} dateTo={ganttTo} onRangeChange={setGanttRange}
+          />
         )}
 
         {tab === "team" && <TeamTab kind="project" parentId={pid} />}

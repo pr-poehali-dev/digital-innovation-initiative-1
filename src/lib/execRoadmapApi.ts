@@ -153,6 +153,58 @@ export interface ScheduleBaseline extends ScheduleBaselineSummary {
   integrity_ok: boolean;
 }
 
+export interface GanttStage {
+  id: number;
+  project_id: number;
+  title: string;
+  sort_order: number;
+  status: string;
+  plan_start: string | null;
+  plan_end: string | null;
+  fact_start: string | null;
+  fact_end: string | null;
+}
+
+export interface GanttTask {
+  id: number;
+  title: string;
+  project_id: number;
+  stage_id: number | null;
+  milestone_id: number | null;
+  responsible_person_id: number | null;
+  responsible_name: string | null;
+  due_at: string | null;
+  priority: string;
+  status: string;
+  progress_pct: number;
+  is_overdue: boolean;
+}
+
+export interface GanttMilestone {
+  id: number;
+  title: string;
+  project_id: number;
+  plan_date_original: string | null;
+  plan_date: string;
+  fact_date: string | null;
+  status: string;
+  responsible_person_id: number | null;
+  responsible_name: string | null;
+  achievement_criteria: string | null;
+}
+
+export interface ProjectGanttData {
+  project: {
+    id: number; title: string; status: string; priority: string; progress_pct: number;
+    plan_start: string | null; plan_end: string | null; fact_start: string | null; fact_end: string | null;
+  };
+  stages: GanttStage[];
+  tasks: GanttTask[];
+  milestones: GanttMilestone[];
+  dependencies: ScheduleDependency[];
+  latest_baseline: ScheduleBaselineSummary | null;
+}
+
 export const execRoadmapApi = {
   roadmap: (filters: RoadmapFilters): Promise<RoadmapData> => req(`/?action=roadmap${toQuery(filters)}`),
   milestonesTimeline: (filters: MilestoneFilters): Promise<{ items: TimelineMilestone[] }> =>
@@ -172,4 +224,6 @@ export const execRoadmapApi = {
   baselines: (scopeKind?: string, scopeId?: number): Promise<{ items: ScheduleBaselineSummary[] }> =>
     req(`/?action=baselines${scopeKind ? `&scope_kind=${scopeKind}` : ""}${scopeId ? `&scope_id=${scopeId}` : ""}`),
   baseline: (id: number): Promise<ScheduleBaseline> => req(`/?action=baseline&id=${id}`),
+
+  projectGantt: (projectId: number): Promise<ProjectGanttData> => req(`/?action=project_gantt&id=${projectId}`),
 };

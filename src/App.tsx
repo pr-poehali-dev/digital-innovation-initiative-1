@@ -217,7 +217,7 @@ const App = () => (
               <Route path="/cabinet/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/center" element={<ExecRoute><ExecCenterPage /></ExecRoute>} />
-              <Route path="/cabinet/exec/dashboard" element={<ExecRoute><ExecCenterDashboardPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/center-dashboard" element={<ExecRoute><ExecCenterDashboardPage /></ExecRoute>} />
               <Route path="/cabinet/exec/model" element={<ExecRoute><ExecCenterModelPage /></ExecRoute>} />
               <Route path="/cabinet/exec/model/wizard" element={<ExecRoute><ExecCenterWizardPage /></ExecRoute>} />
               <Route path="/cabinet/exec/org-model" element={<ExecRoute><ExecOrgModelPage /></ExecRoute>} />
