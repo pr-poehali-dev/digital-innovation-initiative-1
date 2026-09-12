@@ -141,6 +141,22 @@ def guard_deprecated(d: dict):
 ROLE_FIELDS = [
     "center_id", "title", "purpose", "duties", "requirements", "headcount",
     "hours_per_week", "grade", "person_id", "status", "justification", "sort_order",
+    "code", "org_unit_id", "level", "cost_per_month", "valid_from", "valid_to",
+]
+
+# ============ ОРГАНИЗАЦИОННАЯ МОДЕЛЬ: подразделения, штат, RACI, план ============
+ORG_UNIT_FIELDS = [
+    "center_id", "name", "short_name", "type", "parent_id", "head_person_id",
+    "valid_from", "valid_to", "status", "description", "sort_order", "code",
+]
+ROLE_POSITION_FIELDS = [
+    "role_id", "org_unit_id", "fte", "person_id", "status", "date_from",
+    "date_to", "note", "is_test_data",
+]
+ORG_RESOURCE_PLAN_LINE_FIELDS = [
+    "version_id", "org_unit_id", "role_id", "month", "planned_fte",
+    "available_fte", "operational_demand_fte", "external_fte",
+    "fot_plan_amount", "comment",
 ]
 
 INT_KEYS = {
@@ -148,11 +164,14 @@ INT_KEYS = {
     "center_id", "parent_goal_id", "owner_person_id", "progress_pct",
     "sort_order", "goal_id", "backup_person_id", "person_id",
     "competency_id", "required_level", "function_id", "dept_function_id",
-    "step_id", "share_pct",
+    "step_id", "share_pct", "org_unit_id", "parent_id", "role_id",
+    "version_id", "requirement_id", "year",
 }
 NUM_KEYS = {
     "hours_per_month", "fte_estimate", "headcount", "hours_per_week",
     "center_hours_per_week", "reserve_pct", "annual_fund_hours", "backup_coverage_pct",
+    "cost_per_month", "fte", "planned_fte", "available_fte",
+    "operational_demand_fte", "external_fte", "fot_plan_amount",
 }
 
 
@@ -980,6 +999,439 @@ def refs(cur):
     return {"persons": persons, "initiatives": initiatives, "plans": plans}
 
 
+def log_change(cur, actor, entity, eid, action, after=None):
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+        f"VALUES (%s,%s,%s,%s,%s)",
+        (entity, eid, action, actor,
+         json.dumps(after, ensure_ascii=False, default=str) if after else None),
+    )
+
+
+# ================================================================
+# ОРГАНИЗАЦИОННАЯ МОДЕЛЬ ЦЕНТРА
+#
+# Переиспользует существующие сущности: org_units (структура),
+# exec_person (люди), exec_center_role (роли), exec_center_function
+# (функции Центра), professional_competencies (компетенции),
+# exec_resource_requirement/exec_capacity_plan/exec_fot_plan (ресурсный
+# контур). Новые таблицы — только связи и атрибуты, добавленные
+# миграцией V0404 (exec_role_position, exec_center_role_competency,
+# exec_requirement_competency, exec_raci_matrix,
+# exec_org_resource_plan_version/line/snapshot,
+# exec_center_function_org_unit). dept_functions (145 записей ДФМ) и
+# bank_function_catalog (67 кодов) используются только на чтение.
+# ================================================================
+
+RACI_ENTITY_TABLE = {
+    "process": ("exec_process_step", "title"),
+    "initiative": ("exec_initiative", "title"),
+    "project": ("exec_project", "title"),
+    "result": ("exec_result", "title"),
+    "milestone": ("exec_milestone", "title"),
+}
+
+
+def org_structure_tree(cur, center_id: int):
+    """Дерево подразделений Центра (org_units.center_id = center_id) с
+    руководителем, числом функций, штатной/фактической численностью и
+    вакансиями — для карточек дерева на главном экране раздела."""
+    cur.execute(f"""
+        SELECT u.id, u.code, u.name, u.short_name, u.type, u.parent_id, u.path,
+               u.level, u.sort_order, u.status, u.is_archived, u.description,
+               u.valid_from, u.valid_to,
+               u.head_person_id, p.display_name AS head_name, p.position_title AS head_position,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_center_function_org_unit fo
+                 WHERE fo.org_unit_id = u.id) AS function_count,
+               (SELECT COALESCE(SUM(r.headcount), 0) FROM {SCHEMA}.exec_center_role r
+                 WHERE r.org_unit_id = u.id) AS staff_plan_fte,
+               (SELECT COALESCE(SUM(rp.fte), 0) FROM {SCHEMA}.exec_role_position rp
+                 JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+                 WHERE r.org_unit_id = u.id AND rp.status = 'occupied') AS staff_fact_fte,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
+                 JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+                 WHERE r.org_unit_id = u.id AND rp.status = 'vacant') AS vacancy_count
+        FROM {SCHEMA}.org_units u
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = u.head_person_id
+        WHERE u.center_id = %s AND u.is_archived = false
+        ORDER BY u.sort_order, u.code
+    """, (center_id,))
+    return rows(cur)
+
+
+def org_unit_detail(cur, unit_id: int):
+    """Карточка подразделения: функции, роли, люди/вакансии, инициативы."""
+    cur.execute(f"""
+        SELECT u.*, p.display_name AS head_name,
+               parent.name AS parent_name
+        FROM {SCHEMA}.org_units u
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = u.head_person_id
+        LEFT JOIN {SCHEMA}.org_units parent ON parent.id = u.parent_id
+        WHERE u.id = %s
+    """, (unit_id,))
+    got = rows(cur)
+    if not got:
+        return None
+    unit = got[0]
+
+    cur.execute(f"""
+        SELECT f.id, f.code, f.title, f.criticality, f.status, fo.role
+        FROM {SCHEMA}.exec_center_function_org_unit fo
+        JOIN {SCHEMA}.exec_center_function f ON f.id = fo.center_function_id
+        WHERE fo.org_unit_id = %s
+        ORDER BY fo.role DESC, f.sort_order
+    """, (unit_id,))
+    unit["functions"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.*,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
+                 WHERE rp.role_id = r.id AND rp.status = 'occupied') AS occupied_count,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
+                 WHERE rp.role_id = r.id AND rp.status = 'vacant') AS vacant_count
+        FROM {SCHEMA}.exec_center_role r
+        WHERE r.org_unit_id = %s
+        ORDER BY r.sort_order, r.id
+    """, (unit_id,))
+    unit["roles"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT rp.*, p.display_name AS person_name, r.title AS role_title
+        FROM {SCHEMA}.exec_role_position rp
+        JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = rp.person_id
+        WHERE r.org_unit_id = %s
+        ORDER BY r.sort_order, rp.id
+    """, (unit_id,))
+    unit["positions"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT DISTINCT i.id, i.title, i.status, i.stage
+        FROM {SCHEMA}.exec_resource_assignment a
+        JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
+        WHERE a.org_unit_id = %s AND a.archived_at IS NULL
+    """, (unit_id,))
+    unit["initiatives"] = rows(cur)
+
+    return unit
+
+
+def staffing_summary(cur, center_id: int):
+    """Штатная и фактическая численность по Центру и подразделениям —
+    для главной страницы раздела «Организационная модель»."""
+    cur.execute(f"""
+        SELECT u.id AS org_unit_id, u.name AS org_unit_name,
+               COALESCE((SELECT SUM(r.headcount) FROM {SCHEMA}.exec_center_role r
+                          WHERE r.org_unit_id = u.id), 0) AS staff_plan_fte,
+               COALESCE((SELECT SUM(rp.fte) FROM {SCHEMA}.exec_role_position rp
+                          JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+                         WHERE r.org_unit_id = u.id AND rp.status = 'occupied'), 0) AS staff_fact_fte,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
+                 JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+                WHERE r.org_unit_id = u.id AND rp.status = 'vacant') AS vacancy_count,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
+                 JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+                WHERE r.org_unit_id = u.id AND rp.status = 'frozen') AS frozen_count
+        FROM {SCHEMA}.org_units u
+        WHERE u.center_id = %s AND u.is_archived = false
+        ORDER BY u.sort_order
+    """, (center_id,))
+    by_unit = rows(cur)
+
+    cur.execute(f"""
+        SELECT
+          COALESCE(SUM(r.headcount), 0) AS staff_plan_fte,
+          (SELECT COALESCE(SUM(rp.fte), 0) FROM {SCHEMA}.exec_role_position rp
+            JOIN {SCHEMA}.exec_center_role r2 ON r2.id = rp.role_id
+           WHERE r2.center_id = %s AND rp.status = 'occupied') AS staff_fact_fte,
+          (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
+            JOIN {SCHEMA}.exec_center_role r2 ON r2.id = rp.role_id
+           WHERE r2.center_id = %s AND rp.status = 'vacant') AS vacancy_count,
+          (SELECT COUNT(DISTINCT a.person_id) FROM {SCHEMA}.exec_resource_assignment a
+            JOIN {SCHEMA}.exec_center_role r2 ON r2.id = a.role_id
+           WHERE r2.center_id = %s AND a.is_external = true AND a.archived_at IS NULL) AS external_count
+        FROM {SCHEMA}.exec_center_role r WHERE r.center_id = %s
+    """, (center_id, center_id, center_id, center_id))
+    total = rows(cur)[0]
+
+    return {"by_unit": by_unit, "total": total}
+
+
+def competency_gap_report(cur, center_id: int):
+    """Дефицит компетенций: требуемый уровень роли vs подтверждённый уровень
+    занимающего позицию человека. Автоматический расчёт — подсказка, не
+    кадровое решение (см. заголовок раздела на фронтенде)."""
+    cur.execute(f"""
+        SELECT r.id AS role_id, r.title AS role_title, r.org_unit_id, u.name AS org_unit_name,
+               c.id AS competency_id, c.name AS competency_name, rc.required_level, rc.is_critical,
+               rp.id AS position_id, rp.person_id, p.display_name AS person_name,
+               pc.current_level,
+               GREATEST(rc.required_level - COALESCE(pc.current_level, 0), 0) AS gap
+        FROM {SCHEMA}.exec_center_role_competency rc
+        JOIN {SCHEMA}.exec_center_role r ON r.id = rc.role_id
+        JOIN {SCHEMA}.professional_competencies c ON c.id = rc.competency_id
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = r.org_unit_id
+        LEFT JOIN {SCHEMA}.exec_role_position rp ON rp.role_id = r.id AND rp.status = 'occupied'
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = rp.person_id
+        LEFT JOIN {SCHEMA}.exec_person_competency pc
+               ON pc.person_id = rp.person_id AND pc.competency_id = c.id
+        WHERE r.center_id = %s
+        ORDER BY gap DESC, rc.is_critical DESC
+    """, (center_id,))
+    all_rows = rows(cur)
+    gaps = [r for r in all_rows if r["gap"] > 0]
+
+    # Вакансии без занимающего — отдельная категория дефицита (не смешивать
+    # с недостатком уровня у занятого человека)
+    cur.execute(f"""
+        SELECT r.id AS role_id, r.title AS role_title, r.org_unit_id, u.name AS org_unit_name,
+               COUNT(rp.id) AS vacancy_count,
+               array_agg(DISTINCT c.name) FILTER (WHERE c.name IS NOT NULL) AS required_competencies
+        FROM {SCHEMA}.exec_role_position rp
+        JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = r.org_unit_id
+        LEFT JOIN {SCHEMA}.exec_center_role_competency rc ON rc.role_id = r.id
+        LEFT JOIN {SCHEMA}.professional_competencies c ON c.id = rc.competency_id
+        WHERE r.center_id = %s AND rp.status = 'vacant'
+        GROUP BY r.id, r.title, r.org_unit_id, u.name
+    """, (center_id,))
+    vacant_roles = rows(cur)
+
+    return {"competency_gaps": gaps, "vacant_roles": vacant_roles}
+
+
+def raci_check(cur, entity_type: str, entity_id: int):
+    """Проверки RACI: единственный активный A (если не разрешена
+    коллективная ответственность), наличие хотя бы одного A, архивные/
+    неактивные исполнители — предупреждения, не блокировки."""
+    cur.execute(f"""
+        SELECT m.*, p.display_name AS person_name,
+               COALESCE(p.employment_status, 'active') AS person_status
+        FROM {SCHEMA}.exec_raci_matrix m
+        JOIN {SCHEMA}.exec_person p ON p.id = m.person_id
+        WHERE m.entity_type = %s AND m.entity_id = %s AND m.valid_to IS NULL
+        ORDER BY m.raci_role, p.display_name
+    """, (entity_type, entity_id))
+    items = rows(cur)
+    warnings = []
+    a_rows = [r for r in items if r["raci_role"] == "A"]
+    if not a_rows:
+        warnings.append({"code": "no_owner", "message": "Нет ответственного (A)"})
+    elif len(a_rows) > 1 and not any(r["is_collective_a"] for r in a_rows):
+        warnings.append({"code": "multiple_owners",
+                          "message": "Более одного ответственного (A) без явного разрешения коллективной ответственности"})
+    for r in items:
+        if r["person_status"] != "active":
+            warnings.append({"code": "inactive_person",
+                              "message": f"{r['person_name']} назначен(а) на роль {r['raci_role']}, но неактивен(на)"})
+    return {"items": items, "warnings": warnings}
+
+
+def raci_missing_owner_count(cur):
+    """Для главной страницы: количество объектов (функции Центра + матрица
+    exec_raci_matrix), где сейчас нет активного владельца (A)."""
+    cur.execute(f"""
+        SELECT COUNT(*) FROM {SCHEMA}.exec_center_function f
+        WHERE NOT EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_function_raci r
+            WHERE r.function_id = f.id AND r.raci_role = 'A' AND r.valid_to IS NULL AND r.is_backup = false
+        )
+    """)
+    functions_no_owner = cur.fetchone()[0]
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT (m.entity_type, m.entity_id)) FROM {SCHEMA}.exec_raci_matrix m
+        WHERE m.valid_to IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_raci_matrix a
+            WHERE a.entity_type = m.entity_type AND a.entity_id = m.entity_id
+              AND a.raci_role = 'A' AND a.valid_to IS NULL
+          )
+    """)
+    other_no_owner = cur.fetchone()[0]
+    return functions_no_owner + other_no_owner
+
+
+def org_model_overview(cur, center_id: int):
+    """Сводные показатели главной страницы раздела «Организационная модель»."""
+    staffing = staffing_summary(cur, center_id)
+    gaps = competency_gap_report(cur, center_id)
+
+    cur.execute(f"""
+        SELECT COUNT(*) FROM {SCHEMA}.exec_center_function f
+        WHERE f.center_id = %s AND f.owner_org_unit_id IS NULL
+    """, (center_id,))
+    functions_without_unit = cur.fetchone()[0]
+
+    cur.execute(f"""
+        SELECT COUNT(*) FROM {SCHEMA}.exec_center_function f
+        WHERE f.center_id = %s AND NOT EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_function_raci r
+            WHERE r.function_id = f.id AND r.raci_role = 'A' AND r.valid_to IS NULL AND r.is_backup = false
+        )
+    """, (center_id,))
+    functions_without_owner = cur.fetchone()[0]
+
+    cur.execute(f"""
+        SELECT COUNT(*) FROM {SCHEMA}.exec_resource_requirement rq
+        JOIN {SCHEMA}.exec_center_role r ON r.id = rq.role_id
+        WHERE r.center_id = %s AND rq.archived_at IS NULL
+          AND rq.status NOT IN ('closed','cancelled')
+    """, (center_id,))
+    open_requirements = cur.fetchone()[0]
+
+    cur.execute(f"""
+        SELECT COUNT(DISTINCT a.person_id) FROM {SCHEMA}.exec_resource_assignment a
+        JOIN {SCHEMA}.exec_center_role r ON r.id = a.role_id
+        WHERE r.center_id = %s AND a.is_external = true AND a.archived_at IS NULL
+    """, (center_id,))
+    external_count = cur.fetchone()[0]
+
+    # Перегруженные участники: суммарная плановая загрузка по назначениям
+    # (проекты/инициативы) превышает 100%
+    cur.execute(f"""
+        SELECT p.id AS person_id, p.display_name, SUM(a.plan_load_pct) AS total_load_pct
+        FROM {SCHEMA}.exec_resource_assignment a
+        JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        WHERE a.archived_at IS NULL AND a.is_vacant = false
+          AND (a.period_end IS NULL OR a.period_end >= CURRENT_DATE)
+        GROUP BY p.id, p.display_name
+        HAVING SUM(a.plan_load_pct) > 100
+        ORDER BY total_load_pct DESC
+    """)
+    overloaded = rows(cur)
+
+    return {
+        "staffing": staffing["total"],
+        "by_unit": staffing["by_unit"],
+        "external_count": external_count,
+        "overloaded_count": len(overloaded),
+        "overloaded_people": overloaded,
+        "open_requirements_count": open_requirements,
+        "role_competency_gaps_count": len(gaps["competency_gaps"]),
+        "vacant_roles_count": len(gaps["vacant_roles"]),
+        "functions_without_owner_count": functions_without_owner,
+        "functions_without_unit_count": functions_without_unit,
+        "raci_without_owner_count": raci_missing_owner_count(cur),
+    }
+
+
+def dept_function_map_candidates(cur, center_id: int):
+    """Кандидаты для карты соответствия функций Центра и ДФМ/справочника
+    67 кодов — только чтение существующих dept_functions/bank_function_catalog,
+    без изменения исходных записей. Возвращает уже подтверждённые связи
+    (exec_center_function_dept_function) и функции без связи."""
+    cur.execute(f"""
+        SELECT f.id AS center_function_id, f.title AS center_function_title,
+               f.bank_code, bc.name AS bank_code_title,
+               df.dept_function_id, d.title AS dept_function_title, d.dept_name
+        FROM {SCHEMA}.exec_center_function f
+        LEFT JOIN {SCHEMA}.bank_function_catalog bc ON bc.code = f.bank_code
+        LEFT JOIN {SCHEMA}.exec_center_function_dept_function df ON df.center_function_id = f.id
+        LEFT JOIN {SCHEMA}.dept_functions d ON d.id = df.dept_function_id
+        WHERE f.center_id = %s
+        ORDER BY f.sort_order
+    """, (center_id,))
+    return rows(cur)
+
+
+def build_org_resource_plan_payload(cur, version_id: int):
+    """Полный годовой ресурсный план для утверждения снимком: ручные строки
+    плюс агрегированная на лету проектная потребность из
+    exec_resource_requirement (не копируется в exec_org_resource_plan_line —
+    расчёт дефицита строится каждый раз заново)."""
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_org_resource_plan_version WHERE id = %s", (version_id,))
+    v = rows(cur)
+    if not v:
+        return None
+    version = v[0]
+
+    cur.execute(f"""
+        SELECT l.*, u.name AS org_unit_name, r.title AS role_title
+        FROM {SCHEMA}.exec_org_resource_plan_line l
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+        LEFT JOIN {SCHEMA}.exec_center_role r ON r.id = l.role_id
+        WHERE l.version_id = %s
+        ORDER BY l.month, u.sort_order NULLS LAST, r.sort_order NULLS LAST
+    """, (version_id,))
+    lines = rows(cur)
+
+    # Проектная потребность в FTE по месяцу и роли — агрегат exec_resource_requirement,
+    # приведённый к длительности требования, без ручного повторного ввода
+    cur.execute(f"""
+        SELECT date_trunc('month', gs)::date AS month, rq.role_id,
+               SUM(rq.headcount * rq.required_load_pct / 100.0) AS project_demand_fte
+        FROM {SCHEMA}.exec_resource_requirement rq
+        CROSS JOIN LATERAL generate_series(
+            date_trunc('month', COALESCE(rq.period_start, CURRENT_DATE)),
+            date_trunc('month', COALESCE(rq.period_end, CURRENT_DATE)),
+            interval '1 month'
+        ) AS gs
+        WHERE rq.archived_at IS NULL AND rq.status NOT IN ('closed','cancelled')
+          AND rq.role_id IS NOT NULL
+        GROUP BY 1, rq.role_id
+    """)
+    demand_by_month_role = {(r["month"], r["role_id"]): float(r["project_demand_fte"] or 0)
+                             for r in rows(cur)}
+
+    for line in lines:
+        key = (line["month"], line["role_id"])
+        project_demand = demand_by_month_role.get(key, 0.0)
+        line["project_demand_fte"] = round(project_demand, 2)
+        available = float(line["available_fte"] or 0)
+        total_demand = project_demand + float(line["operational_demand_fte"] or 0)
+        line["capacity_gap_fte"] = round(total_demand - available, 2)
+
+    return {"version": version, "lines": lines}
+
+
+def create_org_resource_plan_snapshot(cur, body: dict, actor: str):
+    version_id = as_int(body.get("version_id"))
+    payload = build_org_resource_plan_payload(cur, version_id) if version_id else None
+    if not payload:
+        return None, "Версия плана не найдена"
+
+    payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    version_group = f"org_resource_plan_{payload['version']['year']}"
+    cur.execute(
+        f"SELECT COALESCE(MAX(version_number), 0) FROM {SCHEMA}.exec_org_resource_plan_snapshot "
+        f"WHERE version_group = %s", (version_group,))
+    next_version = cur.fetchone()[0] + 1
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_org_resource_plan_snapshot
+            (version_id, payload_json, payload_sha256, version_group, version_number, is_test_data, created_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id, created_at
+    """, (version_id, payload_str, payload_hash, version_group, next_version,
+          bool(body.get("is_test_data")), actor))
+    snap = cur.fetchone()
+
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_org_resource_plan_version
+        SET status = 'approved', approved_at = now(), approved_by = %s, updated_at = now()
+        WHERE id = %s
+    """, (actor, version_id))
+
+    log_change(cur, actor, "org_resource_plan", version_id, "approve",
+               after={"version_group": version_group, "payload_sha256": payload_hash})
+    return {"id": snap[0], "created_at": snap[1], "version_group": version_group,
+            "version_number": next_version, "payload_sha256": payload_hash}, None
+
+
+def get_org_resource_plan_snapshot(cur, sid: int):
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_org_resource_plan_snapshot WHERE id = %s", (sid,))
+    r = rows(cur)
+    if not r:
+        return None
+    item = r[0]
+    payload_str = item.pop("payload_json")
+    stored_hash = item.get("payload_sha256")
+    actual_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    item["payload"] = json.loads(payload_str)
+    item["integrity_ok"] = stored_hash == actual_hash
+    return item
+
+
 def handler(event: dict, context) -> dict:
     """Паспорт центра: цели, задачи, функции и штатная потребность."""
     method = event.get("httpMethod", "GET")
@@ -1519,6 +1971,348 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": {
                 "templates": templates_stat, "instances": instances_stat,
             }})
+
+        # ============ ОРГАНИЗАЦИОННАЯ МОДЕЛЬ ============
+
+        if action == "org_overview":
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": org_model_overview(cur, cid)})
+
+        if action == "org_tree":
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": {"items": org_structure_tree(cur, cid)}})
+
+        if action == "org_unit_detail":
+            uid = as_int(qs.get("org_unit_id")) or as_int(body.get("org_unit_id"))
+            if not uid:
+                return cors({"ok": False, "error": {"message": "Не указано подразделение"}}, 400)
+            data = org_unit_detail(cur, uid)
+            if not data:
+                return cors({"ok": False, "error": {"message": "Подразделение не найдено"}}, 404)
+            return cors({"ok": True, "data": data})
+
+        if action == "save_org_unit":
+            ctr = as_int(body.get("center_id"))
+            if not as_int(body.get("id")) and not ctr:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            if not as_int(body.get("id")) and not nz(body.get("name")):
+                return cors({"ok": False, "error": {"message": "Не указано название подразделения"}}, 400)
+            vals = clean(body, ORG_UNIT_FIELDS)
+            rid = as_int(body.get("id"))
+            if rid:
+                sets = ", ".join(f"{k} = %s" for k in vals) if vals else None
+                if sets:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.org_units SET {sets}, updated_at = now() WHERE id = %s RETURNING id",
+                        list(vals.values()) + [rid])
+                    rid = cur.fetchone()[0]
+                log_change(cur, user["email"], "org_unit", rid, "update", after=vals)
+            else:
+                cur.execute(f"SELECT org_project_id FROM {SCHEMA}.exec_center WHERE id = %s", (ctr,))
+                got = cur.fetchone()
+                if not got or not got[0]:
+                    return cors({"ok": False, "error": {"message": "У центра не настроен служебный проект-контейнер"}}, 400)
+                org_project_id = got[0]
+                parent_id = as_int(body.get("parent_id"))
+                parent_path, parent_level = "", -1
+                if parent_id:
+                    cur.execute(f"SELECT path, level FROM {SCHEMA}.org_units WHERE id = %s", (parent_id,))
+                    prow = cur.fetchone()
+                    if prow:
+                        parent_path, parent_level = prow[0] or "", prow[1] or -1
+                name = vals.get("name") or ""
+                code = vals.get("code") or ""
+                new_path = (parent_path + " / " + name) if parent_path else name
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.org_units
+                        (project_id, center_id, code, name, short_name, type, parent_id,
+                         path, level, head_person_id, valid_from, valid_to, status, description,
+                         sort_order, source_ref)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'org_model_ui')
+                    RETURNING id
+                """, (org_project_id, ctr, code, name, vals.get("short_name"),
+                      vals.get("type") or "division", parent_id, new_path, parent_level + 1,
+                      vals.get("head_person_id"), vals.get("valid_from"), vals.get("valid_to"),
+                      vals.get("status") or "active", vals.get("description"),
+                      vals.get("sort_order") or 0))
+                rid = cur.fetchone()[0]
+                log_change(cur, user["email"], "org_unit", rid, "create", after=vals)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "archive_org_unit":
+            uid = as_int(body.get("id"))
+            if not uid:
+                return cors({"ok": False, "error": {"message": "Не указано подразделение"}}, 400)
+            cur.execute(
+                f"SELECT 1 FROM {SCHEMA}.org_units WHERE parent_id = %s AND is_archived = false", (uid,))
+            if cur.fetchone():
+                return cors({"ok": False, "error": {"message": "Нельзя архивировать подразделение с активными дочерними"}}, 400)
+            # Историю не удаляем — soft-архивация, как у остального оргдерева.
+            cur.execute(
+                f"UPDATE {SCHEMA}.org_units SET is_archived = true, updated_at = now() WHERE id = %s",
+                (uid,))
+            log_change(cur, user["email"], "org_unit", uid, "archive")
+            conn.commit()
+            return cors({"ok": True, "data": {"id": uid}})
+
+        if action == "save_center_function_org_unit":
+            fid = as_int(body.get("center_function_id"))
+            uid = as_int(body.get("org_unit_id"))
+            role = (nz(body.get("role")) or "participant")
+            if not fid or not uid or role not in ("owner", "participant"):
+                return cors({"ok": False, "error": {"message": "Укажите функцию, подразделение и роль"}}, 400)
+            if role == "owner":
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_center_function_org_unit SET role = 'participant' "
+                    f"WHERE center_function_id = %s AND role = 'owner' AND org_unit_id <> %s",
+                    (fid, uid))
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_center_function SET owner_org_unit_id = %s WHERE id = %s",
+                    (uid, fid))
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_center_function_org_unit (center_function_id, org_unit_id, role)
+                VALUES (%s,%s,%s)
+                ON CONFLICT (center_function_id, org_unit_id) DO UPDATE SET role = EXCLUDED.role
+                RETURNING id
+            """, (fid, uid, role))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "unassign_center_function_org_unit":
+            fid = as_int(body.get("center_function_id"))
+            uid = as_int(body.get("org_unit_id"))
+            cur.execute(
+                f"DELETE FROM {SCHEMA}.exec_center_function_org_unit "
+                f"WHERE center_function_id = %s AND org_unit_id = %s", (fid, uid))
+            cur.execute(
+                f"UPDATE {SCHEMA}.exec_center_function SET owner_org_unit_id = NULL "
+                f"WHERE id = %s AND owner_org_unit_id = %s", (fid, uid))
+            conn.commit()
+            return cors({"ok": True, "data": {"ok": True}})
+
+        if action == "staffing_summary":
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": staffing_summary(cur, cid)})
+
+        if action == "save_role_position":
+            role_id = as_int(body.get("role_id"))
+            if not as_int(body.get("id")) and not role_id:
+                return cors({"ok": False, "error": {"message": "Не указана роль"}}, 400)
+            new_id, err = upsert(cur, "exec_role_position", ROLE_POSITION_FIELDS, body, require_title=False)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            log_change(cur, user["email"], "role_position", new_id,
+                       "update" if as_int(body.get("id")) else "create",
+                       after=clean(body, ROLE_POSITION_FIELDS))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "delete_role_position":
+            pid = as_int(body.get("id"))
+            if not pid:
+                return cors({"ok": False, "error": {"message": "Не указана штатная единица"}}, 400)
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_role_position WHERE id = %s", (pid,))
+            log_change(cur, user["email"], "role_position", pid, "delete")
+            conn.commit()
+            return cors({"ok": True, "data": {"id": pid}})
+
+        if action == "save_role_competency":
+            rid_role = as_int(body.get("role_id"))
+            comp_id = as_int(body.get("competency_id"))
+            if not rid_role or not comp_id:
+                return cors({"ok": False, "error": {"message": "Укажите роль и компетенцию"}}, 400)
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_center_role_competency
+                    (role_id, competency_id, required_level, is_critical, note)
+                VALUES (%s,%s,%s,%s,%s)
+                ON CONFLICT (role_id, competency_id) DO UPDATE
+                SET required_level = EXCLUDED.required_level, is_critical = EXCLUDED.is_critical,
+                    note = EXCLUDED.note
+                RETURNING id
+            """, (rid_role, comp_id, as_int(body.get("required_level")) or 3,
+                  bool(body.get("is_critical")), nz(body.get("note"))))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "delete_role_competency":
+            rid = as_int(body.get("id"))
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_center_role_competency WHERE id = %s", (rid,))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "save_requirement_competency":
+            req_id = as_int(body.get("requirement_id"))
+            comp_id = as_int(body.get("competency_id"))
+            if not req_id or not comp_id:
+                return cors({"ok": False, "error": {"message": "Укажите потребность и компетенцию"}}, 400)
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_requirement_competency (requirement_id, competency_id, required_level)
+                VALUES (%s,%s,%s)
+                ON CONFLICT (requirement_id, competency_id) DO UPDATE
+                SET required_level = EXCLUDED.required_level
+                RETURNING id
+            """, (req_id, comp_id, as_int(body.get("required_level")) or 3))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "competency_gaps":
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": competency_gap_report(cur, cid)})
+
+        if action == "raci_matrix":
+            etype = nz(qs.get("entity_type"))
+            eid = as_int(qs.get("entity_id"))
+            if etype not in RACI_ENTITY_TABLE or not eid:
+                return cors({"ok": False, "error": {"message": "Укажите тип и id объекта"}}, 400)
+            return cors({"ok": True, "data": raci_check(cur, etype, eid)})
+
+        if action == "save_raci_matrix":
+            etype = nz(body.get("entity_type"))
+            eid = as_int(body.get("entity_id"))
+            pid = as_int(body.get("person_id"))
+            role = (nz(body.get("raci_role")) or "R").upper()[:1]
+            if etype not in RACI_ENTITY_TABLE or not eid or not pid or role not in ("R", "A", "C", "I"):
+                return cors({"ok": False, "error": {"message": "Укажите объект, человека и роль RACI"}}, 400)
+            is_collective = bool(body.get("is_collective_a"))
+            # RACI не должен автоматически менять руководителя проекта/владельца
+            # результата — это отдельная запись матрицы, без записи в exec_project/exec_result.
+            if role == "A" and not is_collective:
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_raci_matrix SET valid_to = CURRENT_DATE "
+                    f"WHERE entity_type = %s AND entity_id = %s AND raci_role = 'A' "
+                    f"AND valid_to IS NULL AND is_collective_a = false AND person_id <> %s",
+                    (etype, eid, pid))
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_raci_matrix
+                    (entity_type, entity_id, person_id, raci_role, is_collective_a, valid_from, note, created_by)
+                VALUES (%s,%s,%s,%s,%s, COALESCE(%s::date, CURRENT_DATE), %s, %s)
+                RETURNING id
+            """, (etype, eid, pid, role, is_collective, nz(body.get("valid_from")),
+                  nz(body.get("note")), user["email"]))
+            rid = cur.fetchone()[0]
+            log_change(cur, user["email"], "raci_matrix", rid, "create",
+                       after={"entity_type": etype, "entity_id": eid, "person_id": pid, "raci_role": role})
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "close_raci_matrix":
+            rid = as_int(body.get("id"))
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не указана запись"}}, 400)
+            cur.execute(
+                f"UPDATE {SCHEMA}.exec_raci_matrix SET valid_to = COALESCE(%s::date, CURRENT_DATE) WHERE id = %s",
+                (nz(body.get("valid_to")), rid))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "dept_function_map":
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": {"items": dept_function_map_candidates(cur, cid)}})
+
+        if action == "org_resource_plan_versions":
+            cur.execute(f"""
+                SELECT v.*, (SELECT COUNT(*) FROM {SCHEMA}.exec_org_resource_plan_line l
+                              WHERE l.version_id = v.id) AS line_count
+                FROM {SCHEMA}.exec_org_resource_plan_version v
+                WHERE v.is_test_data = false
+                ORDER BY v.year DESC, v.id DESC
+            """)
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "save_org_resource_plan_version":
+            year = as_int(body.get("year"))
+            if not as_int(body.get("id")) and not year:
+                return cors({"ok": False, "error": {"message": "Укажите год"}}, 400)
+            rid = as_int(body.get("id"))
+            if rid:
+                cur.execute(
+                    f"SELECT status FROM {SCHEMA}.exec_org_resource_plan_version WHERE id = %s", (rid,))
+                got = cur.fetchone()
+                if got and got[0] == "approved":
+                    return cors({"ok": False, "error": {"message": "Версия утверждена — создайте новую редакцию"}}, 400)
+                cur.execute(f"""
+                    UPDATE {SCHEMA}.exec_org_resource_plan_version
+                    SET title = %s, note = %s, updated_at = now() WHERE id = %s RETURNING id
+                """, (nz(body.get("title")), nz(body.get("note")), rid))
+                rid = cur.fetchone()[0]
+            else:
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_org_resource_plan_version
+                        (year, title, note, is_test_data, created_by)
+                    VALUES (%s,%s,%s,%s,%s) RETURNING id
+                """, (year, nz(body.get("title")), nz(body.get("note")),
+                      bool(body.get("is_test_data")), user["email"]))
+                rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "org_resource_plan":
+            vid = as_int(qs.get("version_id")) or as_int(body.get("version_id"))
+            if not vid:
+                return cors({"ok": False, "error": {"message": "Не указана версия плана"}}, 400)
+            data = build_org_resource_plan_payload(cur, vid)
+            if not data:
+                return cors({"ok": False, "error": {"message": "Версия не найдена"}}, 404)
+            return cors({"ok": True, "data": data})
+
+        if action == "save_org_resource_plan_line":
+            vid = as_int(body.get("version_id"))
+            month = nz(body.get("month"))
+            if not vid or not month:
+                return cors({"ok": False, "error": {"message": "Укажите версию и месяц"}}, 400)
+            cur.execute(
+                f"SELECT status FROM {SCHEMA}.exec_org_resource_plan_version WHERE id = %s", (vid,))
+            got = cur.fetchone()
+            if not got:
+                return cors({"ok": False, "error": {"message": "Версия плана не найдена"}}, 404)
+            if got[0] == "approved":
+                return cors({"ok": False, "error": {"message": "Версия утверждена — строки больше не редактируются, создайте новую версию"}}, 400)
+            vals = clean(body, ORG_RESOURCE_PLAN_LINE_FIELDS)
+            rid = as_int(body.get("id"))
+            if rid:
+                sets = ", ".join(f"{k} = %s" for k in vals)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_org_resource_plan_line SET {sets}, updated_at = now() "
+                    f"WHERE id = %s RETURNING id", list(vals.values()) + [rid])
+            else:
+                cols = ", ".join(vals)
+                ph = ", ".join(["%s"] * len(vals))
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_org_resource_plan_line ({cols})
+                    VALUES ({ph})
+                    ON CONFLICT (version_id, org_unit_id, role_id, month) DO UPDATE
+                    SET planned_fte = EXCLUDED.planned_fte, available_fte = EXCLUDED.available_fte,
+                        operational_demand_fte = EXCLUDED.operational_demand_fte,
+                        external_fte = EXCLUDED.external_fte, fot_plan_amount = EXCLUDED.fot_plan_amount,
+                        comment = EXCLUDED.comment, updated_at = now()
+                    RETURNING id
+                """, list(vals.values()))
+            rid = cur.fetchone()[0]
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "create_org_resource_plan_snapshot":
+            snap, err = create_org_resource_plan_snapshot(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": snap})
+
+        if action == "org_resource_plan_snapshot":
+            sid = as_int(qs.get("id"))
+            snap = get_org_resource_plan_snapshot(cur, sid) if sid else None
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
+            return cors({"ok": True, "data": snap})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
     finally:

@@ -621,21 +621,42 @@ def update_reminder_status(cur, body, actor):
     reminder = r[0]
 
     if new_status == "done":
+        # Идемпотентность: если статус уже 'done', повторный вызов (двойной клик,
+        # повтор API-запроса) не должен ни менять done_at, ни плодить второе
+        # "следующее" напоминание — выходим сразу же с тем же результатом.
+        if reminder["status"] == "done":
+            return rid, None
         cur.execute(
-            f"UPDATE {SCHEMA}.exec_reminder SET status = 'done', done_at = now(), updated_at = now() WHERE id = %s",
+            f"UPDATE {SCHEMA}.exec_reminder SET status = 'done', done_at = now(), updated_at = now() "
+            f"WHERE id = %s AND status <> 'done'",
             (rid,))
+        if cur.rowcount == 0:
+            # Кто-то другой уже перевёл в 'done' между SELECT и UPDATE — гонка
+            # обработана, следующее напоминание для этой гонки уже создано.
+            return rid, None
         log_action = "done"
         # Повторяемое напоминание после выполнения переносится на следующий срок —
         # штатным backend-расчётом, без отдельной cloud function/scheduler.
+        # UNIQUE INDEX uq_reminder_single_child(parent_reminder_id) гарантирует,
+        # что даже при параллельном повторном запросе будет создано не более
+        # одного "следующего" напоминания на исходное.
         if reminder["repeat_rule"] != "none":
             next_at = _next_repeat_date(reminder["remind_at"], reminder["repeat_rule"])
             if next_at:
-                cur.execute(f"""
-                    INSERT INTO {SCHEMA}.exec_reminder
-                        (title, remind_at, entity_type, entity_id, comment, priority, repeat_rule, created_by)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
-                """, (reminder["title"], next_at, reminder["entity_type"], reminder["entity_id"],
-                      reminder["comment"], reminder["priority"], reminder["repeat_rule"], actor))
+                cur.execute(
+                    f"SELECT 1 FROM {SCHEMA}.exec_reminder WHERE parent_reminder_id = %s",
+                    (rid,))
+                if not cur.fetchone():
+                    cur.execute(f"""
+                        INSERT INTO {SCHEMA}.exec_reminder
+                            (title, remind_at, entity_type, entity_id, comment, priority,
+                             repeat_rule, created_by, parent_reminder_id)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (parent_reminder_id) WHERE parent_reminder_id IS NOT NULL
+                        DO NOTHING
+                        RETURNING id
+                    """, (reminder["title"], next_at, reminder["entity_type"], reminder["entity_id"],
+                          reminder["comment"], reminder["priority"], reminder["repeat_rule"], actor, rid))
     elif new_status == "snoozed":
         snooze_until = body.get("snooze_until")
         if not snooze_until:
@@ -661,24 +682,34 @@ def update_reminder_status(cur, body, actor):
 # ============ НЕДЕЛЬНОЕ ПЛАНИРОВАНИЕ ============
 
 def get_or_create_weekly_plan(cur, tz, offset_weeks, actor):
+    """Единственность плана недели на владельца обеспечена на уровне БД —
+    UNIQUE INDEX uq_weekly_plan_owner_week(author, week_start). INSERT ...
+    ON CONFLICT DO NOTHING заменяет неатомарную пару SELECT-затем-INSERT:
+    повторное нажатие «Создать план» (в т.ч. параллельное) не создаёт вторую
+    запись на ту же неделю — INSERT просто ничего не вставит, и мы читаем
+    уже существующую строку."""
     monday, sunday, _ = week_bounds(tz, offset_weeks)
     cur.execute(f"""
-        SELECT * FROM {SCHEMA}.exec_weekly_plan WHERE week_start = %s ORDER BY id DESC LIMIT 1
-    """, (monday,))
-    r = rows(cur)
-    if r:
-        return r[0]
-    cur.execute(f"""
         INSERT INTO {SCHEMA}.exec_weekly_plan (week_start, week_end, status, author)
-        VALUES (%s,%s,'draft',%s) RETURNING *
+        VALUES (%s,%s,'draft',%s)
+        ON CONFLICT (author, week_start) DO NOTHING
+        RETURNING *
     """, (monday, sunday, actor))
-    conn_cols = [d[0] for d in cur.description]
-    new_row = dict(zip(conn_cols, cur.fetchone()))
-    cur.execute(
-        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor) VALUES ('weekly_plan', %s, 'create', %s)",
-        (new_row["id"], actor),
-    )
-    return new_row
+    created_cols = [d[0] for d in cur.description]
+    created_row = cur.fetchone()
+    if created_row:
+        new_row = dict(zip(created_cols, created_row))
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor) "
+            f"VALUES ('weekly_plan', %s, 'create', %s)",
+            (new_row["id"], actor),
+        )
+        return new_row
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_weekly_plan WHERE author = %s AND week_start = %s
+        ORDER BY id DESC LIMIT 1
+    """, (actor, monday))
+    return rows(cur)[0]
 
 
 def weekly_plan_detail(cur, plan_id):

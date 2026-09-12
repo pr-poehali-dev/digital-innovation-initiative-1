@@ -431,6 +431,10 @@ export const peopleApi = {
 
   deleteCompetency: (id: number) => post("delete_competency", { id }),
 
+  competencyCatalog: (): Promise<
+    { id: number; code: string; name: string; description: string | null; domain_name: string | null }[]
+  > => req("/?action=competency_catalog"),
+
   saveCapacity: (data: Record<string, unknown>): Promise<{ id: number }> =>
     post("save_capacity", data),
 
