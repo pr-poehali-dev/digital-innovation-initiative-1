@@ -7,6 +7,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Metric, Empty, Loading, ErrorBox, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { ProjectFormDialog, TaskFormDialog, PROJECT_STATUSES, TASK_STATUSES } from "@/components/exec/PortfolioForms";
 import { execPortfolioApi, PortfolioDashboard, ExecProject, ExecTask } from "@/lib/execPortfolioApi";
 import { execApi } from "@/lib/execCabinetApi";
@@ -133,6 +135,8 @@ export default function ExecPortfolioPage() {
             </DropdownMenu>
           </div>
         </div>
+
+        <PageGuide {...execPageGuides.portfolio} />
 
         {error && <ErrorBox message={error} onRetry={() => { loadDashboard(); loadProjects(); loadTasks(); }} />}
         {snapMsg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3 py-2">{snapMsg}</div>}

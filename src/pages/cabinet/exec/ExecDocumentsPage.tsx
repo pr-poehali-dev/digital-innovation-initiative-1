@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import {
   docRegistryApi,
   DocMaterial,
@@ -124,6 +126,8 @@ export default function ExecDocumentsPage() {
             откуда взялся текст и проверен ли он.
           </p>
         </div>
+
+        <PageGuide {...execPageGuides.documents} />
 
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 flex items-start gap-2">
           <Icon name="Info" size={16} className="text-blue-600 mt-0.5 flex-shrink-0" />

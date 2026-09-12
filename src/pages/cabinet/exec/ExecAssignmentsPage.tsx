@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import {
   ASSIGNMENT_DONE_STATUSES,
   ASSIGNMENT_STATUS_CLS,
@@ -145,6 +147,8 @@ export default function ExecAssignmentsPage() {
             Новое поручение
           </button>
         </header>
+
+        <PageGuide {...execPageGuides.assignments} />
 
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
           {tabs.map((t) => (

@@ -23,6 +23,8 @@ import {
 } from "@/lib/execControlApi";
 import { ACCESS_ROLE_LABEL, CabinetAccess } from "@/lib/execAccess";
 import { Card, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import EmptyGuide from "@/components/exec/EmptyGuide";
 import MilestoneForm from "@/components/exec/MilestoneForm";
 import IssueForm from "@/components/exec/IssueForm";
@@ -236,6 +238,8 @@ export default function ExecControlPage() {
             )}
           </div>
         </header>
+
+        <PageGuide {...execPageGuides.control} />
 
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           <Metric label="Критичных и высоких проблем" value={metrics.critIssues} icon="TriangleAlert" tone={metrics.critIssues > 0 ? "danger" : "success"} />

@@ -1,0 +1,81 @@
+erDiagram
+    %% AS IS — фактическое состояние на 11.09.2026
+    %% Легенда состояния (не ER-нотация, добавлено в комментариях к сущности):
+    %% OK = работает, WARN = есть с дефектом, BAD = пустая/мусор, MISS = отсутствует
+
+    EXEC_SOURCE_DOCUMENT {
+        int id PK
+        string status "BAD: 0 записей, модель не используется"
+    }
+    EXEC_SOURCE_USAGE {
+        int id PK
+        string status "BAD: 0 записей, связь документа с сущностями не ведётся"
+    }
+    EXEC_KNOWLEDGE {
+        int id PK
+        string title
+        text body
+        string s3_key "WARN: NULL у 5 из 6 записей"
+        string status "WARN: плоская, нет редакций/страниц/пунктов"
+    }
+    EXEC_KNOWLEDGE_CHUNK {
+        int id PK
+        int knowledge_id FK
+        int page_number "WARN: заполнено лишь у 16 из 72"
+    }
+    DOCUMENTS {
+        int id PK
+        string status "WARN: отдельный модуль (учебные материалы), НЕ контур ЦЦиРТКД"
+        int project_id FK
+    }
+    DOCUMENT_CHUNKS {
+        int id PK
+        int document_id FK
+    }
+    BANK_FUNCTION_CATALOG {
+        int id PK
+        string status "WARN: 67 строк, OCR-реконструкция без редакции/источника"
+    }
+    EXEC_CENTER_FUNCTION {
+        int id PK
+        string bank_code "BAD: код строкой, включает выдуманные значения (81.42, 81.342)"
+        string status "BAD: нет статусной модели вовсе"
+    }
+    ORG_UNITS {
+        int id PK
+        string status "BAD: только ДФМ, 20 записей; нет ДРКНОиПНП/ДВКиК/СВА/смежников"
+    }
+    DEPT_FUNCTIONS {
+        int id PK
+        string status "BAD: 197 записей, 44 SMOKETEST-мусор, created_by NULL у 145"
+    }
+    EXEC_PERSON { int id PK }
+    EXEC_PERSON_FUNCTIONAL_ROLE {
+        int id PK
+        string status "OK: роль CDS отделена от должности корректно"
+    }
+    EXEC_INITIATIVE { int id PK }
+    EXEC_PLAN { int id PK }
+    EXEC_PLAN_STEP { int id PK }
+    EXEC_MILESTONE { int id PK }
+    EXEC_ACTION {
+        int id PK
+        string status "WARN: содержит признаки поручения, но нет action_type"
+    }
+    EXEC_AUDIT_LOG {
+        int id PK
+        string status "BAD: последняя запись 31.08, миграции 11.09 не журналируются"
+    }
+    REF_DICTIONARY_VALUE {
+        string verification_status "BAD: 8 значений в одном поле, смешаны 4 измерения"
+    }
+
+    EXEC_KNOWLEDGE ||--o{ EXEC_KNOWLEDGE_CHUNK : "нарезан на чанки"
+    DOCUMENTS ||--o{ DOCUMENT_CHUNKS : "нарезан на чанки"
+    EXEC_PERSON ||--o{ EXEC_PERSON_FUNCTIONAL_ROLE : "доп. роль (CDS)"
+    EXEC_INITIATIVE ||--o{ EXEC_PLAN : "связь не типизирована (1:N вместо N:N)"
+    EXEC_PLAN ||--o{ EXEC_PLAN_STEP : "содержит"
+    EXEC_PLAN_STEP ||--o{ EXEC_MILESTONE : "жёсткая цепочка (должна быть гибкой)"
+    EXEC_PLAN_STEP ||--o{ EXEC_ACTION : "не типизировано"
+    EXEC_CENTER_FUNCTION }o--o{ BANK_FUNCTION_CATALOG : "СВЯЗИ НЕТ — код лежит строкой"
+    ORG_UNITS ||--o{ DEPT_FUNCTIONS : "связь по названию, не по FK"

@@ -3,6 +3,8 @@ import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Switch } from "@/components/ui/switch";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { aiSettingsApi, AiModuleSetting, AiLogItem } from "@/lib/aiSettingsApi";
 
 const SERVICE_LABEL: Record<string, string> = {
@@ -98,6 +100,8 @@ export default function ExecAiSettingsPage() {
             По умолчанию всё выключено — включайте только те модули, которыми пользуетесь.
           </p>
         </div>
+
+        <PageGuide {...execPageGuides.aiSettings} />
 
         {error && <ErrorBox message={error} onRetry={load} />}
 

@@ -11,6 +11,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Empty, Loading } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import {
   execResourcesApi, ResourceAssignment, CostCategory, BudgetVersion, BudgetLine,
   FinancialSummary, CapacityAssignmentRow, FotRow, FinancialActual, FinancialCommitment,
@@ -260,6 +262,8 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
 
   return (
     <div className="space-y-4">
+      <PageGuide {...execPageGuides.budget} />
+
       {financial && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {"approved_budget" in financial && (

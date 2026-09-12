@@ -12,6 +12,8 @@ import {
   RefsData,
 } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import DecisionForm from "@/components/exec/DecisionForm";
 
 const ROUTE_ORDER = [
@@ -104,6 +106,8 @@ export default function ExecDecisionsPage() {
             Новое решение
           </button>
         </header>
+
+        <PageGuide {...execPageGuides.decisions} />
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <Metric label="Всего решений" value={metrics.total} icon="GitPullRequest" />

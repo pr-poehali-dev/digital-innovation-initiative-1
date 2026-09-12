@@ -8,6 +8,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Loading, ErrorBox, Empty, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import {
   ProjectFormDialog, ResultFormDialog, EffectFormDialog, LinkFormDialog,
   PROJECT_KINDS, PROJECT_STATUSES, RESULT_KINDS,
@@ -138,6 +140,8 @@ export default function ExecProjectDetailPage() {
         </div>
 
         {data.description && <p className="text-sm text-muted-foreground">{data.description}</p>}
+
+        <PageGuide {...execPageGuides.projectDetail} />
 
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
           {(TABS as readonly Tab[]).map((t) => (

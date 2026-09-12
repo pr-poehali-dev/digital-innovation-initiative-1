@@ -11,6 +11,8 @@ import {
   PersonRef,
 } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import InitiativeForm from "@/components/exec/InitiativeForm";
 import QuickStartForm from "@/components/exec/QuickStartForm";
 import InitiativeTreeMap from "@/components/exec/InitiativeTreeMap";
@@ -103,6 +105,8 @@ export default function ExecInitiativesPage() {
             </button>
           </div>
         </header>
+
+        <PageGuide {...execPageGuides.initiatives} />
 
         {quickStart && (
           <QuickStartForm

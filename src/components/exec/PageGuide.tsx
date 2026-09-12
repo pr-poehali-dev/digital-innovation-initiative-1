@@ -13,7 +13,7 @@ export interface GuideCapability {
   desc: string;
 }
 
-interface PageGuideProps {
+export interface PageGuideConfig {
   title: string;
   intro: string;
   flow: GuideFlowStep[];
@@ -23,17 +23,23 @@ interface PageGuideProps {
 
 /**
  * Сворачиваемая мини-инструкция для страницы раздела кабинета руководителя.
- * По умолчанию свёрнута. Визуал — схема работы (шаги слева направо со
- * стрелками), ниже — список возможностей раздела.
+ * По умолчанию свёрнута, не хранит и не запрашивает никаких данных — состояние
+ * open живёт только в памяти компонента (не localStorage, не backend).
+ * Визуал: схема работы (шаги слева направо со стрелками на широких экранах,
+ * вертикально сверху вниз на мобильных), список возможностей, рекомендация.
  */
-export default function PageGuide({ title, intro, flow, capabilities, tip }: PageGuideProps) {
+export default function PageGuide({ title, intro, flow, capabilities, tip }: PageGuideConfig) {
   const [open, setOpen] = useState(false);
+  const panelId = `page-guide-panel-${title.replace(/\s+/g, "-").toLowerCase()}`;
 
   return (
     <div className="rounded-xl border border-violet-600/20 bg-gradient-to-br from-violet-50 to-white overflow-hidden">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-violet-50/60 transition-colors"
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-violet-50/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-inset"
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
@@ -48,15 +54,15 @@ export default function PageGuide({ title, intro, flow, capabilities, tip }: Pag
       </button>
 
       {open && (
-        <div className="px-4 pb-4 space-y-4 border-t border-violet-600/10 pt-3">
+        <div id={panelId} role="region" className="px-4 pb-4 space-y-4 border-t border-violet-600/10 pt-3">
           <p className="text-sm text-slate-600 leading-relaxed">{intro}</p>
 
           <div>
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2.5">Схема работы</p>
-            <div className="flex flex-wrap items-stretch gap-1.5">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch gap-1.5">
               {flow.map((s, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 w-[150px] flex-shrink-0">
+                <div key={i} className="flex flex-col sm:flex-row items-center sm:items-stretch gap-1.5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 w-full sm:w-[150px] flex-shrink-0">
                     <div className="w-7 h-7 rounded-md bg-violet-100 flex items-center justify-center mb-1.5">
                       <Icon name={s.icon} size={14} className="text-violet-600" />
                     </div>
@@ -64,7 +70,10 @@ export default function PageGuide({ title, intro, flow, capabilities, tip }: Pag
                     <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{s.desc}</p>
                   </div>
                   {i < flow.length - 1 && (
-                    <Icon name="ArrowRight" size={16} className="text-violet-300 flex-shrink-0" />
+                    <Icon name="ArrowDown" size={16} className="sm:hidden text-violet-300 flex-shrink-0" aria-hidden="true" />
+                  )}
+                  {i < flow.length - 1 && (
+                    <Icon name="ArrowRight" size={16} className="hidden sm:block text-violet-300 flex-shrink-0" aria-hidden="true" />
                   )}
                 </div>
               ))}

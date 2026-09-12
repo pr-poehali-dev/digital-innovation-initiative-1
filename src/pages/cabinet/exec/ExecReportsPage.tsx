@@ -9,6 +9,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Loading, Empty, ErrorBox, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { execReportsApi, ReportSnapshot, ReportDetail } from "@/lib/execReportsApi";
 
 const REPORT_KIND_LABEL: Record<string, string> = {
@@ -142,6 +144,8 @@ export default function ExecReportsPage() {
             <Icon name="Plus" size={14} className="mr-1.5" /> Сформировать
           </Button>
         </div>
+
+        <PageGuide {...execPageGuides.reports} />
 
         {error && <ErrorBox message={error} onRetry={load} />}
 

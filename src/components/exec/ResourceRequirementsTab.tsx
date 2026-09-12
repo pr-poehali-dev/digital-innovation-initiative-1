@@ -11,6 +11,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Empty, Loading, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { execResourcesApi, ResourceRequirement } from "@/lib/execResourcesApi";
 
 const CRITICALITY_LABEL: Record<string, string> = {
@@ -232,6 +234,8 @@ export function RequirementsTab({
 
   return (
     <div className="space-y-3">
+      {!taskId && !milestoneId && <PageGuide {...execPageGuides.requirements} />}
+
       <Button size="sm" onClick={() => setDialogOpen(true)}>
         <Icon name="UserSearch" size={14} className="mr-1.5" /> Новая потребность
       </Button>

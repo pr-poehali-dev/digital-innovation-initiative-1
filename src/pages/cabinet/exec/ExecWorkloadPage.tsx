@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { Modal } from "@/components/exec/ExecForm";
 import { Toggle, RaciTag } from "@/components/exec/team/TeamUI";
 import WeekGrid from "@/components/exec/team/WeekGrid";
@@ -277,6 +279,8 @@ export default function ExecWorkloadPage() {
             </button>
           </div>
         </header>
+
+        <PageGuide {...execPageGuides.workload} />
 
         {loading ? (
           <Loading />

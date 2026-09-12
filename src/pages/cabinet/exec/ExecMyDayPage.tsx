@@ -4,6 +4,7 @@ import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Card, Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { execApi, MyDayData } from "@/lib/execCabinetApi";
 import { ControlFocus, Meeting, PRIORITY_LABEL, controlApi } from "@/lib/execControlApi";
 import { DiagItem, UnassignedStep, peopleApi } from "@/lib/execPeopleApi";
@@ -140,26 +141,7 @@ export default function ExecMyDayPage() {
           </div>
         </header>
 
-        <PageGuide
-          title="Кабинет руководителя"
-          intro="Кабинет собирает управленческую картину по всем инициативам: что просрочено, что блокирует работу, какие решения ждут вас. Данные приходят из разделов «Контроль», «Портфель», «Команда» и «Инициативы» — этот экран их не хранит, а показывает сводку."
-          flow={[
-            { icon: "Rocket", title: "1. Инициативы", desc: "Заводите проект или изменение" },
-            { icon: "Flag", title: "2. Контроль", desc: "Точки, проблемы, риски, действия" },
-            { icon: "UsersRound", title: "3. Команда", desc: "Назначаете ответственных и загрузку" },
-            { icon: "Sunrise", title: "4. Мой день", desc: "Видите просрочки и что решить" },
-            { icon: "FileText", title: "5. Отчёты", desc: "Фиксируете срез для истории" },
-          ]}
-          capabilities={[
-            { icon: "AlarmClockOff", title: "Просроченные поручения", desc: "Быстро отметить выполненным или перенести срок с комментарием" },
-            { icon: "CalendarClock", title: "Контрольные точки на горизонте", desc: "Что должно случиться в выбранном периоде — сегодня, неделя, месяц" },
-            { icon: "UserX", title: "Задачи без ответственного", desc: "Переход к массовому назначению исполнителей" },
-            { icon: "TrendingUp", title: "Перегруженные сотрудники", desc: "Сигнал, что нагрузку пора перераспределить" },
-            { icon: "TriangleAlert", title: "Проблемы и блокировки", desc: "Что реально мешает работе прямо сейчас" },
-            { icon: "GitPullRequest", title: "Решения к принятию", desc: "Вопросы, которые накопились и требуют вашего слова" },
-          ]}
-          tip="Переключатель «Сегодня / Неделя / Месяц / Критичное» вверху меняет горизонт для контрольных точек и поручений — используйте «Критичное», если нужно быстро увидеть только просроченное и срочное."
-        />
+        <PageGuide {...execPageGuides.myDay} />
 
         <div className="grid lg:grid-cols-2 gap-4">
           {/* Просроченные поручения */}

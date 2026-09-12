@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Metric, Empty, Loading, ErrorBox, fmtDate } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import {
   execReportsApi, DashboardKpi, AttentionItem, PortfolioRow, UpcomingEvents,
 } from "@/lib/execReportsApi";
@@ -112,6 +114,8 @@ export default function ExecDashboardPage() {
             <Icon name="FileText" size={14} /> Отчёты
           </button>
         </div>
+
+        <PageGuide {...execPageGuides.dashboard} />
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
           {KPI_CARDS.map((c) => (
