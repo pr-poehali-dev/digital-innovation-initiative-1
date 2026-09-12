@@ -13,6 +13,7 @@ import {
 } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
+import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import { execPageGuides } from "@/config/execPageGuides";
 import DecisionForm from "@/components/exec/DecisionForm";
 
@@ -182,6 +183,9 @@ export default function ExecDecisionsPage() {
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Badge dicts={dicts} type="decision_status" code={d.status} />
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <ReminderQuickButton entityType="decision" entityId={d.id} title={d.question} variant="icon" />
+                        </span>
                         <Icon
                           name={isOpen ? "ChevronUp" : "ChevronDown"}
                           size={16}

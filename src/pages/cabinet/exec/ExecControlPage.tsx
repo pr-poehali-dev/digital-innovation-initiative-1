@@ -24,6 +24,7 @@ import {
 import { ACCESS_ROLE_LABEL, CabinetAccess } from "@/lib/execAccess";
 import { Card, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
+import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import { execPageGuides } from "@/config/execPageGuides";
 import EmptyGuide from "@/components/exec/EmptyGuide";
 import MilestoneForm from "@/components/exec/MilestoneForm";
@@ -485,6 +486,9 @@ export default function ExecControlPage() {
                             {escs.length > 0 && (
                               <span className="text-xs text-amber-500">{escs.length} эскал.</span>
                             )}
+                            <span onClick={(e) => e.stopPropagation()}>
+                              <ReminderQuickButton entityType="issue" entityId={s.id} title={s.title} variant="icon" />
+                            </span>
                             <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400" />
                           </div>
                         </div>
@@ -766,6 +770,9 @@ export default function ExecControlPage() {
                               <p className="text-sm text-slate-900 leading-snug">{r.description}</p>
                               <p className="text-xs text-slate-400 mt-1 truncate">{r.initiative_title}</p>
                             </div>
+                            <span onClick={(e) => e.stopPropagation()}>
+                              <ReminderQuickButton entityType="risk" entityId={r.id} title={r.description} variant="icon" />
+                            </span>
                             <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={16} className="text-slate-400" />
                           </div>
                         </button>

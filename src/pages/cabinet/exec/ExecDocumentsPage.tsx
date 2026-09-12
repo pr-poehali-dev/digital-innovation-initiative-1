@@ -3,6 +3,7 @@ import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
+import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import { execPageGuides } from "@/config/execPageGuides";
 import {
   docRegistryApi,
@@ -246,7 +247,10 @@ export default function ExecDocumentsPage() {
                     key={`${m.material_kind}-${m.id}`}
                     className="rounded-xl border border-slate-200 bg-white p-3.5"
                   >
-                    <div className="font-medium text-sm">{m.display_title}</div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-medium text-sm">{m.display_title}</div>
+                      <ReminderQuickButton entityType="document" entityId={m.id} title={m.display_title} variant="icon" />
+                    </div>
                     {m.display_title !== m.title && (
                       <div className="text-[11px] text-muted-foreground mt-0.5 italic">
                         Исходный заголовок: {m.title}

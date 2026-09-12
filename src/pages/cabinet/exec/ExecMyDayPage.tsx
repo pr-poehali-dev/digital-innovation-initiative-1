@@ -8,8 +8,13 @@ import { execPageGuides } from "@/config/execPageGuides";
 import { execApi, MyDayData } from "@/lib/execCabinetApi";
 import { ControlFocus, Meeting, PRIORITY_LABEL, controlApi } from "@/lib/execControlApi";
 import { DiagItem, UnassignedStep, peopleApi } from "@/lib/execPeopleApi";
+import { weeklyCycleApi, MyDayV2Data, WeeklyPlan } from "@/lib/execWeeklyCycleApi";
+import {
+  TopPrioritiesPanel, RemindersPanel, WeeklyPlanPanel, useAddToWeek, ItemRow,
+} from "@/components/exec/WeeklyCyclePanels";
 
 type FilterRange = "today" | "week" | "month" | "critical";
+type CycleView = "today" | "week" | "overdue";
 
 export default function ExecMyDayPage() {
   const navigate = useNavigate();
@@ -22,6 +27,20 @@ export default function ExecMyDayPage() {
   const [error, setError] = useState("");
   const [range, setRange] = useState<FilterRange>("week");
 
+  const [cycle, setCycle] = useState<MyDayV2Data | null>(null);
+  const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlan | null>(null);
+  const [weekView, setWeekView] = useState<CycleView>("today");
+
+  const loadCycle = () => {
+    weeklyCycleApi.myDayV2().then(setCycle).catch(() => {});
+    weeklyCycleApi.weeklyPlanCurrent().then(setWeeklyPlan).catch(() => {});
+  };
+
+  const { open: openAddToWeek, dialog: addToWeekDialog } = useAddToWeek(
+    weeklyPlan?.id || null,
+    loadCycle,
+  );
+
   const load = () => {
     setLoading(true);
     setError("");
@@ -31,6 +50,8 @@ export default function ExecMyDayPage() {
       peopleApi.diagnostics(),
       peopleApi.unassignedSteps(),
       controlApi.meetings(),
+      weeklyCycleApi.myDayV2().then(setCycle).catch(() => {}),
+      weeklyCycleApi.weeklyPlanCurrent().then(setWeeklyPlan).catch(() => {}),
     ])
       .then(([md, cf, diag, un, mt]) => {
         setMyDay(md);
@@ -142,6 +163,163 @@ export default function ExecMyDayPage() {
         </header>
 
         <PageGuide {...execPageGuides.myDay} />
+
+        {cycle && (
+          <div className="flex items-center justify-between gap-3 flex-wrap bg-white border border-slate-200 rounded-xl px-4 py-2.5">
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100">
+              {(
+                [
+                  { id: "today", label: "Сегодня" },
+                  { id: "week", label: "Неделя" },
+                  { id: "overdue", label: "Просрочено" },
+                ] as { id: CycleView; label: string }[]
+              ).map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setWeekView(v.id)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    weekView === v.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {v.label}
+                  {v.id === "overdue" && (cycle.overdue.actions.length + cycle.overdue.tasks.length > 0) && (
+                    <span className="ml-1 text-red-600">({cycle.overdue.actions.length + cycle.overdue.tasks.length})</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              {cycle.reminders.filter((r) => r.is_due).length > 0 && (
+                <span className="flex items-center gap-1 text-amber-700">
+                  <Icon name="Bell" size={13} /> {cycle.reminders.filter((r) => r.is_due).length}
+                </span>
+              )}
+              <span>{fmtDate(cycle.today)} · {cycle.timezone}</span>
+            </div>
+          </div>
+        )}
+
+        {addToWeekDialog}
+
+        {cycle && weekView !== "week" && (
+          <div className="grid lg:grid-cols-2 gap-4">
+            {weekView === "today" && (
+              <>
+                <TopPrioritiesPanel />
+                <RemindersPanel reminders={cycle.reminders} onChanged={loadCycle} />
+              </>
+            )}
+
+            {weekView === "overdue" ? (
+              <>
+                <Card title="Просроченные поручения" subtitle={`${cycle.overdue.actions.length} требуют реакции`} icon="AlarmClockOff" className={cycle.overdue.actions.length ? "border-red-300" : ""}>
+                  {cycle.overdue.actions.length === 0 ? <Empty text="Просроченных поручений нет" icon="CircleCheck" /> : (
+                    <div className="space-y-2">
+                      {cycle.overdue.actions.map((a) => (
+                        <ItemRow key={a.id} item={a} entityType="action" reasonLabel="Просроченное поручение" onAddToWeek={openAddToWeek} danger />
+                      ))}
+                    </div>
+                  )}
+                </Card>
+                <Card title="Просроченные задачи" subtitle={`${cycle.overdue.tasks.length} требуют реакции`} icon="ListTodo" className={cycle.overdue.tasks.length ? "border-red-300" : ""}>
+                  {cycle.overdue.tasks.length === 0 ? <Empty text="Просроченных задач нет" icon="CircleCheck" /> : (
+                    <div className="space-y-2">
+                      {cycle.overdue.tasks.map((t) => (
+                        <ItemRow key={t.id} item={t} entityType="task" reasonLabel="Просроченная задача" onAddToWeek={openAddToWeek} danger />
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </>
+            ) : (
+              <>
+                <Card title="Сегодня по сроку" subtitle={`${cycle.today_items.actions.length + cycle.today_items.tasks.length + cycle.today_items.milestones.length} на сегодня`} icon="Sunrise">
+                  {(cycle.today_items.actions.length + cycle.today_items.tasks.length + cycle.today_items.milestones.length) === 0 ? (
+                    <Empty text="На сегодня по сроку ничего нет" icon="CalendarCheck" />
+                  ) : (
+                    <div className="space-y-2">
+                      {cycle.today_items.actions.map((a) => (
+                        <ItemRow key={`a${a.id}`} item={a} entityType="action" reasonLabel="Поручение" onAddToWeek={openAddToWeek} />
+                      ))}
+                      {cycle.today_items.tasks.map((t) => (
+                        <ItemRow key={`t${t.id}`} item={t} entityType="task" reasonLabel="Задача" onAddToWeek={openAddToWeek} />
+                      ))}
+                      {cycle.today_items.milestones.map((m) => (
+                        <ItemRow key={`m${m.id}`} item={m} entityType="milestone" reasonLabel="Контрольная точка" onAddToWeek={openAddToWeek} />
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card title="Требует решения" subtitle={`${cycle.pending_decisions.length} вопросов`} icon="HelpCircle">
+                  {cycle.pending_decisions.length === 0 ? <Empty text="Открытых вопросов нет" icon="CircleCheck" /> : (
+                    <div className="space-y-2">
+                      {cycle.pending_decisions.slice(0, 6).map((d) => (
+                        <ItemRow key={d.id} item={d} entityType="decision" reasonLabel="Требует решения" onAddToWeek={openAddToWeek} />
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </>
+            )}
+
+            <Card title="Критические риски и проблемы" subtitle={`${cycle.critical_risks.length + cycle.critical_issues.length} требуют внимания`} icon="ShieldAlert">
+              {(cycle.critical_risks.length + cycle.critical_issues.length) === 0 ? <Empty text="Критичных рисков и проблем нет" icon="CircleCheck" /> : (
+                <div className="space-y-2">
+                  {cycle.critical_risks.map((r) => (
+                    <ItemRow key={`r${r.id}`} item={r} entityType="risk" reasonLabel={`Критический риск (оценка ${r.risk_score})`} onAddToWeek={openAddToWeek} />
+                  ))}
+                  {cycle.critical_issues.map((i) => (
+                    <ItemRow key={`i${i.id}`} item={i} entityType="issue" reasonLabel="Открытая проблема" onAddToWeek={openAddToWeek} />
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            {cycle.requirements_to_search.length > 0 && (
+              <Card title="Ресурсные потребности — пора искать" subtitle={`${cycle.requirements_to_search.length}`} icon="UserSearch">
+                <div className="space-y-2">
+                  {cycle.requirements_to_search.map((r) => (
+                    <ItemRow key={r.id} item={r} entityType="requirement" reasonLabel="Пора начинать поиск" onAddToWeek={openAddToWeek} />
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {cycle && weekView === "week" && (
+          <div className="grid lg:grid-cols-2 gap-4">
+            <Card title="Поручения и задачи недели" subtitle={`${cycle.week_items.actions.length + cycle.week_items.tasks.length} на неделе`} icon="ListChecks">
+              {(cycle.week_items.actions.length + cycle.week_items.tasks.length) === 0 ? <Empty text="На неделе ничего не запланировано" icon="Calendar" /> : (
+                <div className="space-y-2">
+                  {cycle.week_items.actions.map((a) => (
+                    <ItemRow key={`a${a.id}`} item={a} entityType="action" reasonLabel="Поручение" onAddToWeek={openAddToWeek} />
+                  ))}
+                  {cycle.week_items.tasks.map((t) => (
+                    <ItemRow key={`t${t.id}`} item={t} entityType="task" reasonLabel="Задача" onAddToWeek={openAddToWeek} />
+                  ))}
+                </div>
+              )}
+            </Card>
+            <Card title="Контрольные точки и сроки проектов" subtitle={`${cycle.week_items.milestones.length + cycle.week_items.project_deadlines.length} событий`} icon="Flag">
+              {(cycle.week_items.milestones.length + cycle.week_items.project_deadlines.length) === 0 ? <Empty text="Событий на неделе нет" icon="Calendar" /> : (
+                <div className="space-y-2">
+                  {cycle.week_items.milestones.map((m) => (
+                    <ItemRow key={`m${m.id}`} item={m} entityType="milestone" reasonLabel="Контрольная точка" onAddToWeek={openAddToWeek} />
+                  ))}
+                  {cycle.week_items.project_deadlines.map((p) => (
+                    <ItemRow key={`p${p.id}`} item={p} entityType="project" reasonLabel="Плановое завершение проекта" onAddToWeek={openAddToWeek} />
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {weeklyPlan && (
+          <WeeklyPlanPanel plan={weeklyPlan} onChanged={loadCycle} />
+        )}
 
         <div className="grid lg:grid-cols-2 gap-4">
           {/* Просроченные поручения */}

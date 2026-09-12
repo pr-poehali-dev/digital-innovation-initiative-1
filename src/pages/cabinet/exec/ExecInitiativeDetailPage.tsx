@@ -18,6 +18,7 @@ import {
 } from "@/lib/execCabinetApi";
 import { Badge, Card, Empty, ErrorBox, Loading, VerificationTag, fmtDate } from "@/components/exec/ExecUI";
 import { VerificationSelect } from "@/components/exec/ExecForm";
+import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import InitiativeForm from "@/components/exec/InitiativeForm";
 import StakeholderForm from "@/components/exec/StakeholderForm";
 import DecisionForm from "@/components/exec/DecisionForm";
@@ -195,6 +196,7 @@ export default function ExecInitiativeDetailPage() {
                   saving={statusSaving}
                   onChange={(v) => changeStatus("initiative", i.id, v)}
                 />
+                <ReminderQuickButton entityType="initiative" entityId={i.id} title={i.title} variant="icon" />
                 <button
                   onClick={() => setEditInit(true)}
                   className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium transition-colors flex items-center gap-1.5"

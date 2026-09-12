@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import datetime
 import psycopg2
 import psycopg2.extras
 
@@ -336,6 +337,514 @@ def focus_data(cur):
         "stakeholders_total": total_sh,
     }
     return out
+
+
+# ============ РАБОЧИЙ ЦИКЛ РУКОВОДИТЕЛЯ ============
+# «Сегодня» / «Неделя» / «Просрочено» собираются из уже существующих сущностей
+# (exec_action, exec_task, exec_milestone, exec_decision_instance,
+# exec_resource_requirement, exec_reminder) — ничего не дублируется и не
+# копируется, только читается и агрегируется на лету.
+
+ENTITY_TABLE = {
+    "action": "exec_action", "task": "exec_task", "project": "exec_project",
+    "initiative": "exec_initiative", "milestone": "exec_milestone",
+    "decision": "exec_decision_instance", "risk": "exec_risk", "issue": "exec_issue",
+    "requirement": "exec_resource_requirement", "document": "exec_source_document",
+}
+
+
+def as_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_owner_timezone(cur, actor):
+    cur.execute(f"SELECT timezone FROM {SCHEMA}.exec_cabinet_access WHERE LOWER(email) = LOWER(%s) LIMIT 1", (actor,))
+    r = cur.fetchone()
+    return r[0] if r and r[0] else "Europe/Moscow"
+
+
+def week_bounds(tz: str, offset_weeks: int = 0):
+    """Понедельник-воскресенье текущей недели в часовом поясе владельца
+    (по умолчанию Europe/Moscow), без внешних библиотек — через фиксированные
+    смещения UTC для двух поддерживаемых поясов; для прочих используется UTC."""
+    fixed_offsets = {"Europe/Moscow": 3, "UTC": 0}
+    offset_hours = fixed_offsets.get(tz, 3)
+    now_local = datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+    today_local = now_local.date() + datetime.timedelta(weeks=offset_weeks)
+    monday = today_local - datetime.timedelta(days=today_local.weekday())
+    sunday = monday + datetime.timedelta(days=6)
+    return monday, sunday, today_local
+
+
+def entity_title(cur, entity_type, entity_id):
+    """Название объекта для отображения в напоминании/плане недели без
+    дублирования данных — подтягивается на лету по ссылке."""
+    table = ENTITY_TABLE.get(entity_type)
+    if not table:
+        return None
+    title_col = "description" if entity_type in ("risk",) else \
+        "question" if entity_type == "decision" else "title"
+    try:
+        cur.execute(f"SELECT {title_col} FROM {SCHEMA}.{table} WHERE id = %s", (entity_id,))
+        r = cur.fetchone()
+        return r[0] if r else None
+    except psycopg2.Error:
+        return None
+
+
+def reminders_due(cur, include_test_data=False):
+    """Наступившие и предстоящие (7 дней) напоминания. Наступление вычисляется
+    на лету при каждом вызове — без фонового scheduler и отдельной функции."""
+    tnd = "" if include_test_data else "AND is_test_data = false"
+    cur.execute(f"""
+        SELECT id, title, remind_at, entity_type, entity_id, comment, priority, status, repeat_rule
+        FROM {SCHEMA}.exec_reminder
+        WHERE status = 'planned' {tnd}
+          AND remind_at <= now() + interval '7 days'
+        ORDER BY remind_at
+    """)
+    items = rows(cur)
+    for it in items:
+        it["is_due"] = it["remind_at"] <= datetime.datetime.utcnow()
+    return items
+
+
+def my_day_v2(cur, actor, tz):
+    """Единая агрегация для «Сегодня» / «Неделя» / «Просрочено». Статусы
+    исходных объектов нигде не меняются — только читаются."""
+    monday, sunday, today = week_bounds(tz)
+
+    cur.execute(f"""
+        SELECT a.id, a.title, a.due_at, a.priority, a.status,
+               i.title AS initiative_title, a.project_id, p.title AS project_title,
+               (CURRENT_DATE - a.due_at) AS days_overdue
+        FROM {SCHEMA}.exec_action a
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = a.project_id
+        WHERE a.status NOT IN ('done','done_by_executor','accepted_by_head','cancelled')
+          AND a.due_at IS NOT NULL AND a.due_at < CURRENT_DATE
+        ORDER BY a.due_at LIMIT 30
+    """)
+    overdue_actions = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, due_at, priority, status, project_id,
+               (CURRENT_DATE - due_at) AS days_overdue
+        FROM {SCHEMA}.exec_task
+        WHERE archived_at IS NULL AND is_test_data = false AND status NOT IN ('done','cancelled')
+          AND due_at IS NOT NULL AND due_at < CURRENT_DATE
+        ORDER BY due_at LIMIT 30
+    """)
+    overdue_tasks = rows(cur)
+
+    cur.execute(f"""
+        SELECT a.id, a.title, a.due_at, a.priority, i.title AS initiative_title, a.project_id
+        FROM {SCHEMA}.exec_action a
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
+        WHERE a.status NOT IN ('done','done_by_executor','accepted_by_head','cancelled')
+          AND a.due_at = %s
+    """, (today,))
+    today_actions = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, due_at, priority, project_id
+        FROM {SCHEMA}.exec_task
+        WHERE archived_at IS NULL AND is_test_data = false AND status NOT IN ('done','cancelled')
+          AND due_at = %s
+    """, (today,))
+    today_tasks = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, plan_date, initiative_id, project_id
+        FROM {SCHEMA}.exec_milestone
+        WHERE is_test_data = false AND status NOT IN ('achieved','cancelled') AND plan_date = %s
+    """, (today,))
+    today_milestones = rows(cur)
+
+    cur.execute(f"""
+        SELECT a.id, a.title, a.due_at, a.priority, i.title AS initiative_title, a.project_id
+        FROM {SCHEMA}.exec_action a
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
+        WHERE a.status NOT IN ('done','done_by_executor','accepted_by_head','cancelled')
+          AND a.due_at BETWEEN %s AND %s
+        ORDER BY a.due_at
+    """, (monday, sunday))
+    week_actions = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, due_at, priority, project_id
+        FROM {SCHEMA}.exec_task
+        WHERE archived_at IS NULL AND is_test_data = false AND status NOT IN ('done','cancelled')
+          AND due_at BETWEEN %s AND %s
+        ORDER BY due_at
+    """, (monday, sunday))
+    week_tasks = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, plan_date, initiative_id, project_id
+        FROM {SCHEMA}.exec_milestone
+        WHERE is_test_data = false AND status NOT IN ('achieved','cancelled')
+          AND plan_date BETWEEN %s AND %s
+        ORDER BY plan_date
+    """, (monday, sunday))
+    week_milestones = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, plan_end FROM {SCHEMA}.exec_project
+        WHERE archived_at IS NULL AND is_test_data = false AND plan_end BETWEEN %s AND %s
+        ORDER BY plan_end
+    """, (monday, sunday))
+    week_project_deadlines = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, question, due_at, status, initiative_id FROM {SCHEMA}.exec_decision_instance
+        WHERE status NOT IN ('decided','rejected','deferred')
+        ORDER BY due_at NULLS LAST LIMIT 20
+    """)
+    pending_decisions = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, question, due_at, control_result, initiative_id FROM {SCHEMA}.exec_decision_instance
+        WHERE status = 'decided' AND due_at IS NOT NULL AND due_at <= CURRENT_DATE
+          AND (control_result IS NULL OR control_result = '')
+        ORDER BY due_at LIMIT 20
+    """)
+    decisions_awaiting_control = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, description AS title, probability * impact AS risk_score, initiative_id
+        FROM {SCHEMA}.exec_risk WHERE status = 'active' AND probability * impact >= 15
+        ORDER BY probability * impact DESC LIMIT 10
+    """)
+    critical_risks = rows(cur)
+
+    cur.execute(f"""
+        SELECT id, title, criticality, initiative_id FROM {SCHEMA}.exec_issue
+        WHERE status IN ('open','in_progress') AND criticality IN ('high','critical')
+        ORDER BY criticality DESC LIMIT 10
+    """)
+    critical_issues = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.need_by_date, p.title AS project_title
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        WHERE r.archived_at IS NULL AND r.is_test_data = false
+          AND r.status IN ('draft','confirmed','searching','candidate_identified')
+          AND r.search_start_date IS NOT NULL AND r.search_start_date <= CURRENT_DATE
+          AND (r.need_by_date IS NULL OR r.need_by_date >= CURRENT_DATE)
+        ORDER BY r.need_by_date LIMIT 10
+    """)
+    requirements_to_search = rows(cur)
+
+    reminders = reminders_due(cur)
+
+    active_plan = None
+    cur.execute(f"""
+        SELECT id, week_start, week_end, title, main_goal, status
+        FROM {SCHEMA}.exec_weekly_plan WHERE status = 'active' ORDER BY week_start DESC LIMIT 1
+    """)
+    ap = rows(cur)
+    if ap:
+        active_plan = ap[0]
+
+    return {
+        "today": str(today), "week_start": str(monday), "week_end": str(sunday), "timezone": tz,
+        "overdue": {"actions": overdue_actions, "tasks": overdue_tasks},
+        "today_items": {"actions": today_actions, "tasks": today_tasks, "milestones": today_milestones},
+        "week_items": {
+            "actions": week_actions, "tasks": week_tasks, "milestones": week_milestones,
+            "project_deadlines": week_project_deadlines,
+        },
+        "pending_decisions": pending_decisions,
+        "decisions_awaiting_control": decisions_awaiting_control,
+        "critical_risks": critical_risks, "critical_issues": critical_issues,
+        "requirements_to_search": requirements_to_search,
+        "reminders": reminders,
+        "active_weekly_plan": active_plan,
+    }
+
+
+def save_reminder(cur, body, actor):
+    title = (body.get("title") or "").strip()
+    remind_at = body.get("remind_at")
+    if not title or not remind_at:
+        return None, "Укажите заголовок и дату/время напоминания"
+    entity_type = body.get("entity_type") or None
+    entity_id = as_int(body.get("entity_id"))
+    repeat_rule = body.get("repeat_rule", "none")
+    if repeat_rule not in ("none", "daily", "weekly", "monthly"):
+        return None, "Недопустимая повторяемость"
+    priority = body.get("priority", "normal")
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_reminder
+            (title, remind_at, entity_type, entity_id, comment, priority, repeat_rule, created_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+    """, (title, remind_at, entity_type, entity_id, body.get("comment"), priority, repeat_rule, actor))
+    new_id = cur.fetchone()[0]
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+        f"VALUES ('reminder', %s, 'create', %s, %s)",
+        (new_id, actor, json.dumps({"entity_type": entity_type, "entity_id": entity_id, "remind_at": str(remind_at)}, default=str)),
+    )
+    return new_id, None
+
+
+def _next_repeat_date(remind_at, rule):
+    if rule == "daily":
+        return remind_at + datetime.timedelta(days=1)
+    if rule == "weekly":
+        return remind_at + datetime.timedelta(weeks=1)
+    if rule == "monthly":
+        month = remind_at.month + 1
+        year = remind_at.year + (1 if month > 12 else 0)
+        month = month if month <= 12 else 1
+        day = min(remind_at.day, 28)
+        return remind_at.replace(year=year, month=month, day=day)
+    return None
+
+
+def update_reminder_status(cur, body, actor):
+    rid = as_int(body.get("id"))
+    new_status = body.get("status")
+    if not rid or new_status not in ("done", "snoozed", "cancelled", "planned"):
+        return None, "Укажите корректный id и статус"
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_reminder WHERE id = %s", (rid,))
+    r = rows(cur)
+    if not r:
+        return None, "Напоминание не найдено"
+    reminder = r[0]
+
+    if new_status == "done":
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_reminder SET status = 'done', done_at = now(), updated_at = now() WHERE id = %s",
+            (rid,))
+        log_action = "done"
+        # Повторяемое напоминание после выполнения переносится на следующий срок —
+        # штатным backend-расчётом, без отдельной cloud function/scheduler.
+        if reminder["repeat_rule"] != "none":
+            next_at = _next_repeat_date(reminder["remind_at"], reminder["repeat_rule"])
+            if next_at:
+                cur.execute(f"""
+                    INSERT INTO {SCHEMA}.exec_reminder
+                        (title, remind_at, entity_type, entity_id, comment, priority, repeat_rule, created_by)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                """, (reminder["title"], next_at, reminder["entity_type"], reminder["entity_id"],
+                      reminder["comment"], reminder["priority"], reminder["repeat_rule"], actor))
+    elif new_status == "snoozed":
+        snooze_until = body.get("snooze_until")
+        if not snooze_until:
+            return None, "Укажите дату переноса"
+        cur.execute(f"""
+            UPDATE {SCHEMA}.exec_reminder
+            SET status = 'planned', remind_at = %s, snoozed_at = now(), updated_at = now()
+            WHERE id = %s
+        """, (snooze_until, rid))
+        log_action = "snooze"
+    else:
+        cur.execute(f"UPDATE {SCHEMA}.exec_reminder SET status = %s, updated_at = now() WHERE id = %s",
+                    (new_status, rid))
+        log_action = new_status
+
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor) VALUES ('reminder', %s, %s, %s)",
+        (rid, log_action, actor),
+    )
+    return rid, None
+
+
+# ============ НЕДЕЛЬНОЕ ПЛАНИРОВАНИЕ ============
+
+def get_or_create_weekly_plan(cur, tz, offset_weeks, actor):
+    monday, sunday, _ = week_bounds(tz, offset_weeks)
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_weekly_plan WHERE week_start = %s ORDER BY id DESC LIMIT 1
+    """, (monday,))
+    r = rows(cur)
+    if r:
+        return r[0]
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_weekly_plan (week_start, week_end, status, author)
+        VALUES (%s,%s,'draft',%s) RETURNING *
+    """, (monday, sunday, actor))
+    conn_cols = [d[0] for d in cur.description]
+    new_row = dict(zip(conn_cols, cur.fetchone()))
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor) VALUES ('weekly_plan', %s, 'create', %s)",
+        (new_row["id"], actor),
+    )
+    return new_row
+
+
+def weekly_plan_detail(cur, plan_id):
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_weekly_plan WHERE id = %s", (plan_id,))
+    p = rows(cur)
+    if not p:
+        return None
+    plan = p[0]
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_weekly_plan_item WHERE weekly_plan_id = %s
+        ORDER BY sort_order, id
+    """, (plan_id,))
+    items = rows(cur)
+    for it in items:
+        it["entity_title"] = entity_title(cur, it["entity_type"], it["entity_id"])
+    plan["items"] = items
+    return plan
+
+
+def add_weekly_plan_item(cur, body, actor):
+    plan_id = as_int(body.get("weekly_plan_id"))
+    entity_type = body.get("entity_type")
+    entity_id = as_int(body.get("entity_id"))
+    if not plan_id or entity_type not in ENTITY_TABLE or not entity_id:
+        return None, "Укажите план, тип и id объекта"
+
+    cur.execute(f"SELECT status FROM {SCHEMA}.exec_weekly_plan WHERE id = %s", (plan_id,))
+    p = cur.fetchone()
+    if not p:
+        return None, "Недельный план не найден"
+    if p[0] == "closed":
+        return None, "План недели закрыт — нельзя добавлять пункты"
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_weekly_plan_item
+            (weekly_plan_id, entity_type, entity_id, plan_date, week_priority, expected_result, comment)
+        VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id
+    """, (plan_id, entity_type, entity_id, body.get("plan_date"), body.get("week_priority", "normal"),
+          body.get("expected_result"), body.get("comment")))
+    new_id = cur.fetchone()[0]
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+        f"VALUES ('weekly_plan_item', %s, 'create', %s, %s)",
+        (new_id, actor, json.dumps({"weekly_plan_id": plan_id, "entity_type": entity_type, "entity_id": entity_id})),
+    )
+    return new_id, None
+
+
+def set_weekly_item_done(cur, body, actor):
+    item_id = as_int(body.get("id"))
+    is_done = bool(body.get("is_done"))
+    if not item_id:
+        return None, "Укажите id пункта плана"
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_weekly_plan_item SET is_done = %s, updated_at = now()
+        WHERE id = %s RETURNING id
+    """, (is_done, item_id))
+    r = cur.fetchone()
+    if not r:
+        return None, "Пункт плана не найден"
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor) VALUES ('weekly_plan_item', %s, %s, %s)",
+        (item_id, "mark_done" if is_done else "mark_undone", actor),
+    )
+    return item_id, None
+
+
+def carry_over_item(cur, body, actor):
+    """Перенос невыполненного пункта на следующую неделю — только по явному
+    подтверждению пользователя, не автоматически."""
+    item_id = as_int(body.get("item_id"))
+    target_plan_id = as_int(body.get("target_weekly_plan_id"))
+    reason = body.get("reason")
+    if not item_id or not target_plan_id:
+        return None, "Укажите пункт и план следующей недели"
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_weekly_plan_item WHERE id = %s", (item_id,))
+    src = rows(cur)
+    if not src:
+        return None, "Исходный пункт не найден"
+    src = src[0]
+
+    if src["carry_over_count"] >= 1 and not reason:
+        return None, "Повторный перенос требует указания причины"
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_weekly_plan_item
+            (weekly_plan_id, entity_type, entity_id, week_priority, expected_result,
+             carried_over_from_item_id, carry_over_count, comment)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+    """, (target_plan_id, src["entity_type"], src["entity_id"], src["week_priority"],
+          src["expected_result"], item_id, src["carry_over_count"] + 1, reason))
+    new_id = cur.fetchone()[0]
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+        f"VALUES ('weekly_plan_item', %s, 'carry_over', %s, %s)",
+        (item_id, actor, json.dumps({"target_weekly_plan_id": target_plan_id, "new_item_id": new_id, "reason": reason})),
+    )
+    return new_id, None
+
+
+def close_weekly_plan(cur, body, actor):
+    """Закрытие плана: только фиксирует итог планирования, статусы исходных
+    объектов (поручений/задач/решений и т.д.) НЕ меняются."""
+    plan_id = as_int(body.get("id"))
+    if not plan_id:
+        return None, "Укажите id плана"
+    plan = weekly_plan_detail(cur, plan_id)
+    if not plan:
+        return None, "План не найден"
+    if plan["status"] == "closed":
+        return None, "План уже закрыт"
+
+    items = plan["items"]
+    planned = len(items)
+    done = sum(1 for i in items if i["is_done"])
+    not_done = planned - done
+    carried = sum(1 for i in items if i["carried_over_from_item_id"])
+
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_weekly_plan SET status = 'closed', closed_at = now(),
+            summary_text = %s, updated_at = now()
+        WHERE id = %s
+    """, (body.get("summary_text"), plan_id))
+
+    payload = {
+        "plan": {k: v for k, v in plan.items() if k != "items"},
+        "items": items,
+        "stats": {"planned": planned, "done": done, "not_done": not_done, "carried_over": carried},
+    }
+    payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    version_group = f"weekly_summary_{plan['week_start']}"
+    cur.execute(
+        f"SELECT COALESCE(MAX(version_number), 0) FROM {SCHEMA}.exec_weekly_summary_snapshot WHERE version_group = %s",
+        (version_group,))
+    next_version = cur.fetchone()[0] + 1
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_weekly_summary_snapshot
+            (weekly_plan_id, payload_json, payload_sha256, version_group, version_number, is_test_data, created_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id, created_at
+    """, (plan_id, payload_str, payload_hash, version_group, next_version, bool(body.get("is_test_data")), actor))
+    snap = cur.fetchone()
+
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+        f"VALUES ('weekly_plan', %s, 'close', %s, %s)",
+        (plan_id, actor, json.dumps({"snapshot_id": snap[0], "payload_sha256": payload_hash})),
+    )
+    return {"id": snap[0], "created_at": snap[1], "version_group": version_group,
+            "version_number": next_version, "payload_sha256": payload_hash, "stats": payload["stats"]}, None
+
+
+def get_weekly_summary_snapshot(cur, sid):
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_weekly_summary_snapshot WHERE id = %s", (sid,))
+    r = rows(cur)
+    if not r:
+        return None
+    item = r[0]
+    payload_str = item.pop("payload_json")
+    stored_hash = item.get("payload_sha256")
+    actual_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    item["payload"] = json.loads(payload_str)
+    item["integrity_ok"] = stored_hash == actual_hash
+    return item
 
 
 def handler(event: dict, context) -> dict:
@@ -950,6 +1459,89 @@ def handler(event: dict, context) -> dict:
                 "by_entity": by_entity,
                 "metrics": {"total": total, "today": today, "actors": actors},
             }})
+
+        # ============ РАБОЧИЙ ЦИКЛ РУКОВОДИТЕЛЯ ============
+
+        if action == "my_day_v2":
+            tz = get_owner_timezone(cur, actor)
+            return cors({"ok": True, "data": my_day_v2(cur, actor, tz)})
+
+        if action == "reminders":
+            itd = qs.get("include_test_data") == "1"
+            return cors({"ok": True, "data": {"items": reminders_due(cur, itd)}})
+
+        if action == "save_reminder":
+            rid, err = save_reminder(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "update_reminder_status":
+            rid, err = update_reminder_status(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "weekly_plan_current":
+            tz = get_owner_timezone(cur, actor)
+            offset = as_int(qs.get("offset")) or 0
+            plan = get_or_create_weekly_plan(cur, tz, offset, actor)
+            conn.commit()
+            detail = weekly_plan_detail(cur, plan["id"])
+            return cors({"ok": True, "data": detail})
+
+        if action == "weekly_plan":
+            pid = as_int(qs.get("id"))
+            if not pid:
+                return cors({"ok": False, "error": {"message": "Не указан id плана"}}, 400)
+            detail = weekly_plan_detail(cur, pid)
+            if not detail:
+                return cors({"ok": False, "error": {"message": "План не найден"}}, 404)
+            return cors({"ok": True, "data": detail})
+
+        if action == "weekly_plans":
+            cur.execute(f"""
+                SELECT * FROM {SCHEMA}.exec_weekly_plan WHERE is_test_data = false
+                ORDER BY week_start DESC LIMIT 20
+            """)
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "add_weekly_item":
+            iid, err = add_weekly_plan_item(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action == "set_weekly_item_done":
+            iid, err = set_weekly_item_done(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action == "carry_over_item":
+            iid, err = carry_over_item(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action == "close_weekly_plan":
+            result, err = close_weekly_plan(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": result})
+
+        if action == "weekly_summary_snapshot":
+            sid = as_int(qs.get("id"))
+            snap = get_weekly_summary_snapshot(cur, sid) if sid else None
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
+            return cors({"ok": True, "data": snap})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
     finally:

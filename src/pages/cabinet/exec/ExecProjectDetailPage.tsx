@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Loading, ErrorBox, Empty, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
+import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import { execPageGuides } from "@/config/execPageGuides";
 import {
   ProjectFormDialog, ResultFormDialog, EffectFormDialog, LinkFormDialog,
@@ -130,6 +131,7 @@ export default function ExecProjectDetailPage() {
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">
+            <ReminderQuickButton entityType="project" entityId={pid} title={data.title} variant="icon" />
             <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
               <Icon name="Pencil" size={14} className="mr-1.5" /> Изменить
             </Button>

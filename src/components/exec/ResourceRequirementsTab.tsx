@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Empty, Loading, fmtDate } from "@/components/exec/ExecUI";
+import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import PageGuide from "@/components/exec/PageGuide";
 import { execPageGuides } from "@/config/execPageGuides";
 import { execResourcesApi, ResourceRequirement } from "@/lib/execResourcesApi";
@@ -253,9 +254,12 @@ export function RequirementsTab({
                     {r.milestone_title && ` · веха: ${r.milestone_title}`}
                   </div>
                 </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${CRITICALITY_CLS[r.criticality]}`}>
-                  {CRITICALITY_LABEL[r.criticality]}
-                </span>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${CRITICALITY_CLS[r.criticality]}`}>
+                    {CRITICALITY_LABEL[r.criticality]}
+                  </span>
+                  <ReminderQuickButton entityType="requirement" entityId={r.id} title={r.role_title_ref || r.role_title || "Потребность"} variant="icon" />
+                </div>
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground mt-1.5">
                 <span>Статус: {STATUS_LABEL[r.status] || r.status}</span>
