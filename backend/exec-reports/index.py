@@ -291,6 +291,110 @@ def attention_list(cur):
                       "due_at": None, "days_overdue": None, "priority": None,
                       "project_id": r["id"], "rank": 9})
 
+    # Проекты с прогнозируемым перерасходом бюджета
+    yr = datetime.date.today().year
+    cur.execute(f"""
+        SELECT p.id, p.title,
+            COALESCE((SELECT SUM(l.amount_plan) FROM {SCHEMA}.exec_budget_line l
+                JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
+                WHERE v.project_id = p.id AND v.is_active = true AND v.year = %s), 0) AS budget,
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_actual
+                WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) +
+            COALESCE((SELECT SUM(amount) - SUM(paid_amount) FROM {SCHEMA}.exec_financial_commitment
+                WHERE project_id = p.id AND status='active'), 0) +
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_expected
+                WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) AS forecast
+        FROM {SCHEMA}.exec_project p
+        WHERE p.archived_at IS NULL AND p.is_test_data = false AND p.status IN ('planned','in_progress')
+    """, (yr, yr, yr))
+    for r in rows(cur):
+        budget, forecast = float(r["budget"]), float(r["forecast"])
+        if budget > 0 and forecast > budget:
+            items.append({"kind": "project_budget", "id": r["id"], "title": r["title"],
+                          "reason": f"Прогнозируемый перерасход {forecast - budget:,.0f} ₽".replace(",", " "),
+                          "due_at": None, "days_overdue": None, "priority": "urgent",
+                          "project_id": r["id"], "rank": 3})
+
+    # Перегруженные участники команды
+    cur.execute(f"""
+        SELECT a.person_id, p.display_name, SUM(a.plan_load_pct) AS total_load_pct
+        FROM {SCHEMA}.exec_resource_assignment a
+        JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        WHERE a.archived_at IS NULL AND a.is_test_data = false AND a.person_id IS NOT NULL
+        GROUP BY a.person_id, p.display_name
+        HAVING SUM(a.plan_load_pct) > 100
+        ORDER BY SUM(a.plan_load_pct) DESC LIMIT 20
+    """)
+    for r in rows(cur):
+        items.append({"kind": "person_overload", "id": r["person_id"], "title": r["display_name"],
+                      "reason": f"Перегрузка {float(r['total_load_pct']):.0f}%",
+                      "due_at": None, "days_overdue": None, "priority": "high",
+                      "project_id": None, "rank": 3})
+
+    # Ресурсные потребности: пора начинать поиск / просрочены / без финансирования
+    open_statuses = "('draft','confirmed','searching','candidate_identified')"
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.need_by_date,
+               (CURRENT_DATE - r.need_by_date) AS days_overdue
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        WHERE r.archived_at IS NULL AND r.is_test_data = false AND r.status IN {open_statuses}
+          AND r.need_by_date IS NOT NULL AND r.need_by_date < CURRENT_DATE
+        ORDER BY r.need_by_date LIMIT 20
+    """)
+    for r in rows(cur):
+        items.append({"kind": "requirement_overdue", "id": r["id"], "title": r["role_title_ref"] or r["role_title"],
+                      "reason": "Ресурсная потребность просрочена", "due_at": r["need_by_date"],
+                      "days_overdue": r["days_overdue"], "priority": "urgent",
+                      "project_id": r["project_id"], "rank": 3})
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.need_by_date
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        WHERE r.archived_at IS NULL AND r.is_test_data = false AND r.status IN {open_statuses}
+          AND r.search_start_date IS NOT NULL AND r.search_start_date <= CURRENT_DATE
+          AND (r.need_by_date IS NULL OR r.need_by_date >= CURRENT_DATE)
+        ORDER BY r.need_by_date LIMIT 20
+    """)
+    for r in rows(cur):
+        items.append({"kind": "requirement_search", "id": r["id"], "title": r["role_title_ref"] or r["role_title"],
+                      "reason": "Пора начинать поиск", "due_at": r["need_by_date"],
+                      "days_overdue": None, "priority": "high",
+                      "project_id": r["project_id"], "rank": 6})
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.estimated_total_cost
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        WHERE r.archived_at IS NULL AND r.is_test_data = false AND r.status IN {open_statuses}
+          AND r.funding_confirmed = false
+        ORDER BY r.estimated_total_cost DESC NULLS LAST LIMIT 20
+    """)
+    for r in rows(cur):
+        items.append({"kind": "requirement_no_funding", "id": r["id"], "title": r["role_title_ref"] or r["role_title"],
+                      "reason": "Потребность без подтверждённого финансирования",
+                      "due_at": None, "days_overdue": None, "priority": None,
+                      "project_id": r["project_id"], "rank": 7})
+
+    # Задачи и вехи без обеспеченного ресурса (есть открытая потребность на них)
+    cur.execute(f"""
+        SELECT t.id, t.title, t.project_id, t.due_at
+        FROM {SCHEMA}.exec_task t
+        WHERE t.archived_at IS NULL AND t.is_test_data = false AND t.status NOT IN ('done','cancelled')
+          AND EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_resource_requirement r
+            WHERE r.task_id = t.id AND r.archived_at IS NULL AND r.is_test_data = false
+              AND r.status IN {open_statuses}
+          )
+        ORDER BY (t.due_at IS NULL), t.due_at LIMIT 20
+    """)
+    for r in rows(cur):
+        items.append({"kind": "task_no_resource", "id": r["id"], "title": r["title"],
+                      "reason": "Задача без обеспеченного ресурса", "due_at": r["due_at"],
+                      "days_overdue": None, "priority": None,
+                      "project_id": r["project_id"], "rank": 6})
+
     items.sort(key=lambda x: (x["rank"], -(x["days_overdue"] or 0)))
     return items
 
@@ -389,7 +493,138 @@ REPORT_KINDS = {
     "weekly": "Недельная справка", "monthly": "Месячная справка",
     "actions": "Отчёт по поручениям", "portfolio": "Отчёт по портфелю",
     "risks_issues": "Риски и проблемы", "results_effects": "Результаты и эффекты",
+    "resources_load": "Отчёт по ресурсам и загрузке", "budget_planfact": "Финансовый отчёт (план-факт)",
+    "resource_requirements": "Отчёт по ресурсным потребностям",
 }
+
+
+def resources_load_section(cur, include_test_data=False):
+    """Данные для отчёта «Ресурсы и загрузка»: фактическая команда, вакансии,
+    перегруженные участники — берётся из exec-resources логики напрямую через SQL,
+    без обращения к другому backend (снимок должен быть самодостаточен)."""
+    tnd = "" if include_test_data else "AND a.is_test_data = false"
+    cur.execute(f"""
+        SELECT a.id, a.person_id, p.display_name AS person_name, p.position_title,
+               a.role_title, rc.title AS role_title_ref, a.project_id, a.initiative_id,
+               pr.title AS project_title, ini.title AS initiative_title,
+               a.is_external, a.is_vacant, a.plan_load_pct, a.fact_load_pct
+        FROM {SCHEMA}.exec_resource_assignment a
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = a.role_id
+        LEFT JOIN {SCHEMA}.exec_project pr ON pr.id = a.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative ini ON ini.id = a.initiative_id
+        WHERE a.archived_at IS NULL {tnd}
+        ORDER BY a.project_role, a.created_at
+    """)
+    assignments = rows(cur)
+
+    tnd2 = "" if include_test_data else "AND is_test_data = false"
+    cur.execute(f"""
+        SELECT a.person_id, p.display_name, p.position_title,
+               SUM(a.plan_load_pct) AS total_load_pct, count(*) AS assignment_count
+        FROM {SCHEMA}.exec_resource_assignment a
+        JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        WHERE a.archived_at IS NULL {tnd2} AND a.person_id IS NOT NULL
+        GROUP BY a.person_id, p.display_name, p.position_title
+        ORDER BY total_load_pct DESC
+    """)
+    team_load = rows(cur)
+    for r in team_load:
+        r["total_load_pct"] = float(r["total_load_pct"])
+    overloaded = [r for r in team_load if r["total_load_pct"] > 100]
+
+    vacancies = [a for a in assignments if a.get("is_vacant")]
+
+    return {"assignments": assignments, "team_load": team_load, "overloaded": overloaded, "vacancies": vacancies}
+
+
+def budget_planfact_section(cur, year=None, include_test_data=False):
+    """Данные для финансового отчёта: бюджет/факт/обязательства/ожидаемые/прогноз/отклонение
+    по каждому проекту плюс сводный итог по портфелю за год."""
+    yr = year or datetime.date.today().year
+    tnd = "" if include_test_data else "AND is_test_data = false"
+
+    cur.execute(f"""
+        SELECT p.id, p.title, p.status,
+            COALESCE((SELECT SUM(l.amount_plan) FROM {SCHEMA}.exec_budget_line l
+                JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
+                WHERE v.project_id = p.id AND v.is_active = true AND v.year = %s), 0) AS budget,
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_actual
+                WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) AS fact,
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_commitment
+                WHERE project_id = p.id AND status = 'active'), 0) -
+            COALESCE((SELECT SUM(paid_amount) FROM {SCHEMA}.exec_financial_commitment
+                WHERE project_id = p.id AND status = 'active'), 0) AS commitments_open,
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_expected
+                WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) AS expected,
+            COALESCE((SELECT SUM(plan_total) FROM {SCHEMA}.exec_fot_plan
+                WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) AS fot
+        FROM {SCHEMA}.exec_project p
+        WHERE p.archived_at IS NULL AND p.is_test_data = false
+        ORDER BY p.title
+    """, (yr, yr, yr, yr))
+    by_project = rows(cur)
+    for r in by_project:
+        for k in ("budget", "fact", "commitments_open", "expected", "fot"):
+            r[k] = float(r[k])
+        r["forecast"] = r["fact"] + r["commitments_open"] + r["expected"]
+        r["remaining"] = r["budget"] - r["forecast"]
+        r["deviation"] = r["forecast"] - r["budget"]
+
+    kpi_fin = {
+        "total_budget": sum(r["budget"] for r in by_project),
+        "total_fact": sum(r["fact"] for r in by_project),
+        "total_commitments_open": sum(r["commitments_open"] for r in by_project),
+        "total_expected": sum(r["expected"] for r in by_project),
+        "total_fot": sum(r["fot"] for r in by_project),
+    }
+    kpi_fin["total_forecast"] = kpi_fin["total_fact"] + kpi_fin["total_commitments_open"] + kpi_fin["total_expected"]
+    kpi_fin["remaining"] = kpi_fin["total_budget"] - kpi_fin["total_forecast"]
+    over_budget = [r for r in by_project if r["budget"] > 0 and r["forecast"] > r["budget"]]
+
+    return {"year": yr, "by_project": by_project, "summary": kpi_fin, "projects_over_budget": over_budget}
+
+
+def resource_requirements_section(cur, include_test_data=False):
+    """Данные для отчёта по ресурсным потребностям: полный список открытых
+    потребностей + агрегаты (просрочено / пора искать / без финансирования)."""
+    tnd = "" if include_test_data else "AND r.is_test_data = false"
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.initiative_id,
+               p.title AS project_title, i.title AS initiative_title,
+               r.headcount, r.required_load_pct, r.need_by_date, r.search_start_date,
+               r.criticality, r.status, r.estimated_monthly_cost, r.estimated_total_cost,
+               r.funding_confirmed,
+               (r.need_by_date IS NOT NULL AND r.need_by_date < CURRENT_DATE
+                   AND r.status NOT IN ('closed','cancelled')) AS is_overdue
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.archived_at IS NULL {tnd}
+        ORDER BY (r.need_by_date IS NULL), r.need_by_date
+    """)
+    items = rows(cur)
+    dash = requirement_dashboard_light(items)
+    return {"items": items, **dash}
+
+
+def requirement_dashboard_light(items):
+    """Агрегаты по уже выбранному списку потребностей (для снимка отчёта —
+    без повторных обращений к БД, чтобы payload был согласован с items)."""
+    open_statuses = ("draft", "confirmed", "searching", "candidate_identified")
+    today = datetime.date.today()
+    open_items = [i for i in items if i["status"] in open_statuses]
+    overdue = [i for i in open_items if i.get("need_by_date") and i["need_by_date"] < today]
+    start_search_now = [i for i in open_items
+                         if i.get("search_start_date") and i["search_start_date"] <= today
+                         and (not i.get("need_by_date") or i["need_by_date"] >= today)]
+    without_funding = [i for i in open_items if not i.get("funding_confirmed")]
+    total_unresolved_cost = sum(float(i.get("estimated_total_cost") or 0) for i in open_items)
+    return {
+        "overdue": overdue, "start_search_now": start_search_now,
+        "without_funding": without_funding, "total_unresolved_cost": total_unresolved_cost,
+    }
 
 
 def build_report_payload(cur, report_kind: str, period_from, period_to, project_ids):
@@ -415,6 +650,13 @@ def build_report_payload(cur, report_kind: str, period_from, period_to, project_
         data["actions"] = rows(cur)
 
     if report_kind in ("weekly", "monthly", "portfolio"):
+        cur.execute(f"""
+            SELECT id, title, status, priority, owner_person_id, plan_start, plan_end, budget_need
+            FROM {SCHEMA}.exec_initiative
+            WHERE status NOT IN ('closed')
+            ORDER BY updated_at DESC
+        """)
+        data["initiatives"] = rows(cur)
         data["projects"] = portfolio_table(cur, {})
         cur.execute(f"""
             SELECT id, title, status, priority, due_at, project_id
@@ -467,6 +709,31 @@ def build_report_payload(cur, report_kind: str, period_from, period_to, project_
               AND achieved_at BETWEEN %s AND %s
         """, (period_from, period_to))
         data["completed_this_period"] = rows(cur)
+
+    if report_kind in ("weekly", "monthly", "resources_load"):
+        res = resources_load_section(cur)
+        data["team"] = res["assignments"]
+        data["team_load"] = res["team_load"]
+        data["overloaded"] = res["overloaded"]
+        data["vacancies"] = res["vacancies"]
+
+    if report_kind in ("weekly", "monthly", "budget_planfact"):
+        year = None
+        if period_from:
+            year = (period_from if not isinstance(period_from, str) else datetime.date.fromisoformat(period_from)).year
+        fin = budget_planfact_section(cur, year)
+        data["budget_by_project"] = fin["by_project"]
+        data["budget_summary"] = fin["summary"]
+        data["budget_year"] = fin["year"]
+        data["projects_over_budget"] = fin["projects_over_budget"]
+
+    if report_kind in ("weekly", "monthly", "resource_requirements"):
+        req = resource_requirements_section(cur)
+        data["resource_requirements"] = req["items"]
+        data["requirements_overdue"] = req["overdue"]
+        data["requirements_start_search_now"] = req["start_search_now"]
+        data["requirements_without_funding"] = req["without_funding"]
+        data["requirements_total_unresolved_cost"] = req["total_unresolved_cost"]
 
     return data
 
@@ -589,9 +856,14 @@ def export_html(snapshot: dict) -> str:
         parts.append("</table>")
 
     table_section("Поручения", "actions", [("title", "Название"), ("status", "Статус"), ("priority", "Приоритет"), ("due_at", "Срок")])
+    table_section("Инициативы", "initiatives", [("title", "Название"), ("status", "Статус"), ("priority", "Приоритет"), ("plan_end", "План завершения")])
     table_section("Проекты", "projects", [("title", "Название"), ("status", "Статус"), ("progress_pct", "Готовность %")])
     table_section("Задачи", "tasks", [("title", "Название"), ("status", "Статус"), ("due_at", "Срок")])
     table_section("Контрольные точки", "milestones", [("title", "Название"), ("plan_date", "Дата"), ("status", "Статус")])
+    table_section("Команда", "team", [("person_name", "Участник"), ("role_title_ref", "Роль"), ("project_title", "Проект"), ("plan_load_pct", "Загрузка %")])
+    table_section("Перегруженные", "overloaded", [("display_name", "Участник"), ("total_load_pct", "Суммарная загрузка %")])
+    table_section("Ресурсные потребности", "resource_requirements", [("role_title_ref", "Роль"), ("project_title", "Проект"), ("need_by_date", "Нужен к"), ("criticality", "Критичность"), ("status", "Статус")])
+    table_section("Бюджет по проектам", "budget_by_project", [("title", "Проект"), ("budget", "Бюджет"), ("fact", "Факт"), ("forecast", "Прогноз"), ("deviation", "Отклонение")])
     table_section("Риски", "risks", [("description", "Описание"), ("risk_score", "Оценка"), ("status", "Статус")])
     table_section("Проблемы", "issues", [("title", "Название"), ("criticality", "Критичность"), ("status", "Статус")])
     table_section("Результаты", "results", [("title", "Название"), ("result_kind", "Тип"), ("achieved_at", "Дата")])
@@ -602,6 +874,10 @@ def export_html(snapshot: dict) -> str:
 
 
 def export_xlsx_b64(snapshot: dict) -> str:
+    """XLSX общей управленческой отчётности. Полный комплект из 17 листов
+    формируется всегда — если у конкретного вида отчёта раздела в payload нет,
+    лист создаётся пустым (с заголовками), а не пропускается, чтобы структура
+    файла была предсказуема независимо от report_kind."""
     import xlsxwriter
     buf = io.BytesIO()
     wb = xlsxwriter.Workbook(buf, {"in_memory": True})
@@ -622,20 +898,29 @@ def export_xlsx_b64(snapshot: dict) -> str:
             s.write_row(i, 0, [str(it.get(c[0], "") or "") for c in cols])
 
     sheet("Поручения", "actions", [("title", "Название"), ("status", "Статус"), ("priority", "Приоритет"), ("due_at", "Срок")])
-    sheet("Проекты", "projects", [("title", "Название"), ("status", "Статус"), ("progress_pct", "Готовность %")])
-    sheet("Задачи", "tasks", [("title", "Название"), ("status", "Статус"), ("due_at", "Срок")])
-    sheet("Контрольные точки", "milestones", [("title", "Название"), ("plan_date", "Дата"), ("status", "Статус")])
-    sheet("Риски", "risks", [("description", "Описание"), ("risk_score", "Оценка"), ("status", "Статус")])
+    sheet("Инициативы", "initiatives", [("title", "Название"), ("status", "Статус"), ("priority", "Приоритет"), ("plan_start", "План начала"), ("plan_end", "План завершения"), ("budget_need", "Потребность в бюджете")])
+    sheet("Проекты", "projects", [("title", "Название"), ("status", "Статус"), ("priority", "Приоритет"), ("progress_pct", "Готовность %"), ("plan_end", "План завершения")])
+    sheet("Задачи", "tasks", [("title", "Название"), ("status", "Статус"), ("due_at", "Срок"), ("project_id", "Проект ID")])
+    sheet("Контрольные точки", "milestones", [("title", "Название"), ("plan_date", "Дата"), ("status", "Статус"), ("project_id", "Проект ID")])
+    sheet("Команда", "team", [("person_name", "Участник"), ("position_title", "Должность"), ("role_title_ref", "Роль"), ("project_title", "Проект"), ("initiative_title", "Инициатива"), ("plan_load_pct", "План загрузки %"), ("fact_load_pct", "Факт загрузки %"), ("is_vacant", "Вакансия")])
+    sheet("Загрузка", "team_load", [("display_name", "Участник"), ("position_title", "Должность"), ("total_load_pct", "Суммарная загрузка %"), ("assignment_count", "Кол-во назначений")])
+    sheet("Ресурсные потребности", "resource_requirements", [("role_title_ref", "Роль"), ("project_title", "Проект"), ("initiative_title", "Инициатива"), ("headcount", "Численность"), ("need_by_date", "Нужен к"), ("search_start_date", "Начать поиск"), ("criticality", "Критичность"), ("status", "Статус"), ("estimated_total_cost", "Расчётная стоимость"), ("funding_confirmed", "Финансирование подтверждено")])
+    sheet("Бюджет", "budget_by_project", [("title", "Проект"), ("status", "Статус"), ("budget", "Бюджет"), ("fot", "ФОТ")])
+    sheet("ФОТ", "budget_by_project", [("title", "Проект"), ("fot", "ФОТ план")])
+    sheet("План-факт", "budget_by_project", [("title", "Проект"), ("budget", "Бюджет"), ("fact", "Факт"), ("commitments_open", "Обязательства открыто"), ("expected", "Ожидаемые"), ("forecast", "Прогноз"), ("remaining", "Остаток"), ("deviation", "Отклонение")])
+    sheet("Риски", "risks", [("description", "Описание"), ("probability", "Вероятность"), ("impact", "Влияние"), ("risk_score", "Оценка"), ("status", "Статус")])
     sheet("Проблемы", "issues", [("title", "Название"), ("criticality", "Критичность"), ("status", "Статус")])
     sheet("Результаты", "results", [("title", "Название"), ("result_kind", "Тип"), ("achieved_at", "Дата")])
-    sheet("Эффекты", "effects", [("title", "Название"), ("metric", "Показатель"), ("actual_value", "Факт"), ("confirmation_status", "Статус")])
+    sheet("Эффекты", "effects", [("title", "Название"), ("metric", "Показатель"), ("baseline_value", "База"), ("plan_value", "План"), ("actual_value", "Факт"), ("confirmation_status", "Статус")])
 
     params_sheet = wb.add_worksheet("Параметры отчёта")
     params_sheet.write_row(0, 0, ["Параметр", "Значение"], bold)
     meta = {"Название": snapshot["title"], "Тип": snapshot["report_kind"],
+            "Период с": snapshot.get("period_from"), "Период по": snapshot.get("period_to"),
             "Версия": f"{snapshot.get('version_group')} v{snapshot.get('version_number')}",
             "Автор": snapshot["created_by"], "Сформирован": str(snapshot["created_at"]),
-            "SHA-256": snapshot.get("payload_sha256"), "Целостность": snapshot.get("integrity_ok")}
+            "SHA-256": snapshot.get("payload_sha256"), "Целостность": snapshot.get("integrity_ok"),
+            "Тестовые данные": snapshot.get("is_test_data")}
     for i, (kk, vv) in enumerate(meta.items(), start=1):
         params_sheet.write_row(i, 0, [kk, str(vv)])
 

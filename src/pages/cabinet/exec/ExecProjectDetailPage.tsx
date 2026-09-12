@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -36,13 +36,15 @@ const TAB_LABEL: Record<Tab, string> = {
 export default function ExecProjectDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const pid = Number(id);
 
   const [data, setData] = useState<ProjectDetail | null>(null);
   const [initiatives, setInitiatives] = useState<Array<{ id: number; title: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("overview");
+  const urlTab = searchParams.get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(urlTab && TABS.includes(urlTab) ? urlTab : "overview");
   const [expandedTaskRes, setExpandedTaskRes] = useState<number | null>(null);
   const [expandedMilestoneRes, setExpandedMilestoneRes] = useState<number | null>(null);
 

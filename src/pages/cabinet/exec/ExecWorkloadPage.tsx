@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
@@ -36,6 +36,7 @@ const PIE_COLORS = ["#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#06b
 
 export default function ExecWorkloadPage() {
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState<WorkloadData | null>(null);
   const [people, setPeople] = useState<TeamMember[]>([]);
   const [refs, setRefs] = useState<PeopleRefs | null>(null);
@@ -48,6 +49,14 @@ export default function ExecWorkloadPage() {
   const [fInitiative, setFInitiative] = useStickyState("wl_initiative", "");
   const [onlyOverload, setOnlyOverload] = useStickyState("wl_overload", false);
   const [showFree, setShowFree] = useStickyState("wl_free", true);
+
+  // URL-параметр ?overload=1 (переход с дашборда) переопределяет сохранённый
+  // в localStorage фильтр — иначе ссылка с дашборда «перегруженные» не сработает
+  // при повторном визите, если ранее фильтр был выключен.
+  useEffect(() => {
+    if (searchParams.get("overload") === "1") setOnlyOverload(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const [detail, setDetail] = useState<{
     personId: number;
     week: string;

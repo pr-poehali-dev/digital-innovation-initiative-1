@@ -15,6 +15,8 @@ const REPORT_KIND_LABEL: Record<string, string> = {
   weekly: "Недельная справка", monthly: "Месячная справка",
   actions: "Отчёт по поручениям", portfolio: "Отчёт по портфелю",
   risks_issues: "Риски и проблемы", results_effects: "Результаты и эффекты",
+  resources_load: "Отчёт по ресурсам и загрузке", budget_planfact: "Финансовый отчёт (план-факт)",
+  resource_requirements: "Отчёт по ресурсным потребностям",
 };
 
 export default function ExecReportsPage() {

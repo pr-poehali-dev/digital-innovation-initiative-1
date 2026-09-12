@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
@@ -15,12 +16,16 @@ import AssignmentForm from "@/components/exec/AssignmentForm";
 
 type TabId = "mine_responsible" | "mine_authored" | "overdue" | "awaiting_confirm" | "completed" | "all";
 
+const TAB_IDS: TabId[] = ["mine_responsible", "mine_authored", "overdue", "awaiting_confirm", "completed", "all"];
+
 export default function ExecAssignmentsPage() {
+  const [searchParams] = useSearchParams();
+  const urlTab = searchParams.get("tab") as TabId | null;
   const [items, setItems] = useState<ControlAction[]>([]);
   const [refs, setRefs] = useState<RefsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<TabId>("all");
+  const [tab, setTab] = useState<TabId>(urlTab && TAB_IDS.includes(urlTab) ? urlTab : "all");
   const [formOpen, setFormOpen] = useState<{ open: boolean; item?: ControlAction }>({ open: false });
 
   const load = () => {

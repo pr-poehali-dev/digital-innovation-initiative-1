@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import {
@@ -26,6 +27,9 @@ const ROUTE_ORDER = [
 ];
 
 export default function ExecDecisionsPage() {
+  const [searchParams] = useSearchParams();
+  // ?open=1 (переход с дашборда, метрика «Требуют решения») — только нерешённые
+  const urlOpenOnly = searchParams.get("open") === "1";
   const [items, setItems] = useState<Decision[]>([]);
   const [participation, setParticipation] = useState<Participation[]>([]);
   const [dependencies, setDependencies] = useState<Dependency[]>([]);
@@ -33,7 +37,7 @@ export default function ExecDecisionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "");
   const [refs, setRefs] = useState<RefsData | null>(null);
   const [form, setForm] = useState<{ open: boolean; item: Decision | null }>({
     open: false,
@@ -57,10 +61,11 @@ export default function ExecDecisionsPage() {
 
   useEffect(load, []);
 
-  const filtered = useMemo(
-    () => (statusFilter ? items.filter((d) => d.status === statusFilter) : items),
-    [items, statusFilter],
-  );
+  const filtered = useMemo(() => {
+    let out = statusFilter ? items.filter((d) => d.status === statusFilter) : items;
+    if (urlOpenOnly) out = out.filter((d) => !["decided", "rejected", "deferred"].includes(d.status));
+    return out;
+  }, [items, statusFilter, urlOpenOnly]);
 
   const metrics = useMemo(
     () => ({

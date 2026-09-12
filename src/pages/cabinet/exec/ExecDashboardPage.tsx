@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Metric, Empty, Loading, ErrorBox, fmtDate } from "@/components/exec/ExecUI";
@@ -8,31 +8,35 @@ import {
 } from "@/lib/execReportsApi";
 import { execResourcesApi, TeamLoadRow, RequirementDashboard } from "@/lib/execResourcesApi";
 
-const KPI_CARDS: Array<{ key: keyof DashboardKpi; label: string; icon: string; tone: "default" | "danger" | "warning" | "success"; filter?: Record<string, string> }> = [
-  { key: "active_actions", label: "Активные поручения", icon: "ClipboardCheck", tone: "default" },
-  { key: "overdue_actions", label: "Просроченные поручения", icon: "AlertTriangle", tone: "danger" },
-  { key: "active_projects", label: "Активные проекты", icon: "Folder", tone: "default", filter: { tab: "projects", status: "in_progress" } },
-  { key: "overdue_tasks", label: "Просроченные задачи", icon: "ListTodo", tone: "danger", filter: { tab: "tasks", overdue: "1" } },
-  { key: "blocked_tasks", label: "Заблокированные задачи", icon: "Ban", tone: "warning", filter: { tab: "tasks", status: "blocked" } },
-  { key: "milestones_7", label: "Вехи на 7 дней", icon: "Flag", tone: "warning" },
-  { key: "milestones_14", label: "Вехи на 14 дней", icon: "Flag", tone: "default" },
-  { key: "milestones_30", label: "Вехи на 30 дней", icon: "Flag", tone: "default" },
-  { key: "critical_risks", label: "Критические риски", icon: "ShieldAlert", tone: "danger", filter: { tab: "risks", level: "critical" } },
-  { key: "open_issues", label: "Открытые проблемы", icon: "AlertOctagon", tone: "danger" },
-  { key: "pending_decisions", label: "Требуют решения", icon: "HelpCircle", tone: "warning" },
-  { key: "results_pending", label: "Результаты на подтверждении", icon: "FileQuestion", tone: "warning" },
-  { key: "effects_pending", label: "Эффекты на подтверждении", icon: "TrendingUp", tone: "warning" },
-  { key: "effects_confirmed", label: "Подтверждённые эффекты", icon: "CheckCircle2", tone: "success" },
+const KPI_CARDS: Array<{
+  key: keyof DashboardKpi; label: string; icon: string; tone: "default" | "danger" | "warning" | "success";
+  path?: string; filter?: Record<string, string>;
+}> = [
+  { key: "active_actions", label: "Активные поручения", icon: "ClipboardCheck", tone: "default", path: "/cabinet/exec/assignments", filter: { tab: "all" } },
+  { key: "overdue_actions", label: "Просроченные поручения", icon: "AlertTriangle", tone: "danger", path: "/cabinet/exec/assignments", filter: { tab: "overdue" } },
+  { key: "active_projects", label: "Активные проекты", icon: "Folder", tone: "default", path: "/cabinet/exec/portfolio", filter: { tab: "projects", status: "in_progress" } },
+  { key: "overdue_tasks", label: "Просроченные задачи", icon: "ListTodo", tone: "danger", path: "/cabinet/exec/portfolio", filter: { tab: "tasks", overdue: "1" } },
+  { key: "blocked_tasks", label: "Заблокированные задачи", icon: "Ban", tone: "warning", path: "/cabinet/exec/portfolio", filter: { tab: "tasks", status: "blocked" } },
+  { key: "milestones_7", label: "Вехи на 7 дней", icon: "Flag", tone: "warning", path: "/cabinet/exec/control", filter: { tab: "milestones" } },
+  { key: "milestones_14", label: "Вехи на 14 дней", icon: "Flag", tone: "default", path: "/cabinet/exec/control", filter: { tab: "milestones" } },
+  { key: "milestones_30", label: "Вехи на 30 дней", icon: "Flag", tone: "default", path: "/cabinet/exec/control", filter: { tab: "milestones" } },
+  { key: "critical_risks", label: "Критические риски", icon: "ShieldAlert", tone: "danger", path: "/cabinet/exec/control", filter: { tab: "risks", level: "critical" } },
+  { key: "open_issues", label: "Открытые проблемы", icon: "AlertOctagon", tone: "danger", path: "/cabinet/exec/control", filter: { tab: "issues" } },
+  { key: "pending_decisions", label: "Требуют решения", icon: "HelpCircle", tone: "warning", path: "/cabinet/exec/decisions", filter: { open: "1" } },
+  { key: "results_pending", label: "Результаты на подтверждении", icon: "FileQuestion", tone: "warning", path: "/cabinet/exec/portfolio", filter: { tab: "dashboard" } },
+  { key: "effects_pending", label: "Эффекты на подтверждении", icon: "TrendingUp", tone: "warning", path: "/cabinet/exec/portfolio", filter: { tab: "dashboard" } },
+  { key: "effects_confirmed", label: "Подтверждённые эффекты", icon: "CheckCircle2", tone: "success", path: "/cabinet/exec/portfolio", filter: { tab: "dashboard" } },
 ];
 
 const ATTENTION_ICON: Record<string, string> = {
   action: "ClipboardCheck", milestone: "Flag", task: "ListTodo", risk: "ShieldAlert",
   issue: "AlertOctagon", decision: "HelpCircle", result: "FileQuestion", effect: "TrendingUp", project: "Folder",
+  project_budget: "Wallet", person_overload: "Users", requirement_overdue: "UserSearch",
+  requirement_search: "UserSearch", requirement_no_funding: "UserSearch", task_no_resource: "ListTodo",
 };
 
 export default function ExecDashboardPage() {
   const navigate = useNavigate();
-  const [, setSearchParams] = useSearchParams();
   const [kpiData, setKpiData] = useState<DashboardKpi | null>(null);
   const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioRow[]>([]);
@@ -41,6 +45,9 @@ export default function ExecDashboardPage() {
   const [teamLoad, setTeamLoad] = useState<TeamLoadRow[]>([]);
   const [vacancies, setVacancies] = useState<Array<{ id: number; role_title: string | null; role_title_ref: string | null; project_title: string | null; initiative_title: string | null }>>([]);
   const [reqDash, setReqDash] = useState<RequirementDashboard | null>(null);
+  const openRequirement = (r: { project_id: number | null; initiative_id?: number | null }) => {
+    if (r.project_id) navigate(`/cabinet/exec/portfolio/projects/${r.project_id}?tab=requirements`);
+  };
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -63,10 +70,24 @@ export default function ExecDashboardPage() {
 
   useEffect(load, [load]);
 
-  const openFiltered = (filter?: Record<string, string>) => {
-    if (!filter) return;
-    setSearchParams(filter);
-    navigate(`/cabinet/exec/portfolio?${new URLSearchParams(filter).toString()}`);
+  const openFiltered = (path?: string, filter?: Record<string, string>) => {
+    if (!path) return;
+    const qs = filter ? `?${new URLSearchParams(filter).toString()}` : "";
+    navigate(`${path}${qs}`);
+  };
+
+  const ATTENTION_TAB: Record<string, string> = {
+    project_budget: "planfact", requirement_overdue: "requirements",
+    requirement_search: "requirements", requirement_no_funding: "requirements",
+    task_no_resource: "requirements",
+  };
+  const openAttentionItem = (a: AttentionItem) => {
+    if (a.project_id) {
+      const tab = ATTENTION_TAB[a.kind];
+      navigate(`/cabinet/exec/portfolio/projects/${a.project_id}${tab ? `?tab=${tab}` : ""}`);
+    } else if (a.kind === "person_overload") {
+      navigate("/cabinet/exec/workload?overload=1");
+    }
   };
 
   if (loading) return <Layout><Loading /></Layout>;
@@ -100,7 +121,7 @@ export default function ExecDashboardPage() {
               value={kpiData[c.key]}
               tone={c.tone}
               icon={c.icon}
-              onClick={c.filter ? () => openFiltered(c.filter) : undefined}
+              onClick={c.path ? () => openFiltered(c.path, c.filter) : undefined}
             />
           ))}
         </div>
@@ -121,10 +142,14 @@ export default function ExecDashboardPage() {
             {finKpi.projects_over_budget.length > 0 && (
               <div className="mt-2 space-y-1">
                 {finKpi.projects_over_budget.map((p) => (
-                  <div key={p.id} className="text-xs bg-red-50 text-red-700 rounded-lg px-3 py-1.5 flex justify-between">
+                  <button
+                    key={p.id}
+                    onClick={() => navigate(`/cabinet/exec/portfolio/projects/${p.id}?tab=planfact`)}
+                    className="w-full text-left text-xs bg-red-50 text-red-700 rounded-lg px-3 py-1.5 flex justify-between hover:bg-red-100"
+                  >
                     <span>{p.title}</span>
                     <span className="font-medium">перерасход {p.deviation.toLocaleString("ru-RU")} ₽</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -138,13 +163,22 @@ export default function ExecDashboardPage() {
             </div>
             <div className="space-y-1.5">
               {teamLoad.filter((t) => t.total_load_pct > 100).map((t) => (
-                <div key={t.person_id} className="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 flex justify-between">
+                <button
+                  key={t.person_id}
+                  onClick={() => navigate("/cabinet/exec/workload?overload=1")}
+                  className="w-full text-left text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 flex justify-between hover:bg-amber-100"
+                >
                   <span>{t.display_name} — перегрузка</span>
                   <span className="font-medium">{t.total_load_pct}% ({t.assignment_count} проектов)</span>
-                </div>
+                </button>
               ))}
               {vacancies.length > 0 && (
-                <div className="text-xs text-muted-foreground px-1">Вакантных ролей: {vacancies.length}</div>
+                <button
+                  onClick={() => navigate("/cabinet/exec/team")}
+                  className="text-xs text-violet-600 px-1 hover:underline"
+                >
+                  Вакантных ролей: {vacancies.length} — открыть команду
+                </button>
               )}
               {teamLoad.filter((t) => t.total_load_pct > 100).length === 0 && vacancies.length === 0 && (
                 <div className="text-xs text-muted-foreground px-1">Перегрузок и вакансий нет</div>
@@ -160,16 +194,24 @@ export default function ExecDashboardPage() {
             </div>
             <div className="space-y-1.5">
               {reqDash.overdue.map((r) => (
-                <div key={`ov${r.id}`} className="text-xs bg-red-50 text-red-700 rounded-lg px-3 py-1.5 flex justify-between">
+                <button
+                  key={`ov${r.id}`}
+                  onClick={() => openRequirement(r)}
+                  className="w-full text-left text-xs bg-red-50 text-red-700 rounded-lg px-3 py-1.5 flex justify-between hover:bg-red-100"
+                >
                   <span>{r.role_title_ref || r.role_title} — просрочена ({r.project_title})</span>
                   <span className="font-medium">на {r.days_overdue} дн.</span>
-                </div>
+                </button>
               ))}
               {reqDash.start_search_now.map((r) => (
-                <div key={`ss${r.id}`} className="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 flex justify-between">
+                <button
+                  key={`ss${r.id}`}
+                  onClick={() => openRequirement(r)}
+                  className="w-full text-left text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 flex justify-between hover:bg-amber-100"
+                >
                   <span>{r.role_title_ref || r.role_title} — пора начинать поиск ({r.project_title})</span>
                   <span className="font-medium">найти до {r.need_by_date ? fmtDate(r.need_by_date) : "—"}</span>
-                </div>
+                </button>
               ))}
               {reqDash.without_funding.length > 0 && (
                 <div className="text-xs text-muted-foreground px-1">
@@ -204,12 +246,12 @@ export default function ExecDashboardPage() {
                       </div>
                     </div>
                   </div>
-                  {a.project_id && (
+                  {(a.project_id || a.kind === "person_overload") && (
                     <button
-                      onClick={() => navigate(`/cabinet/exec/portfolio/projects/${a.project_id}`)}
+                      onClick={() => openAttentionItem(a)}
                       className="text-[11px] text-violet-600 flex-shrink-0"
                     >
-                      Открыть
+                      {a.kind === "person_overload" ? "Загрузка команды" : "Открыть"}
                     </button>
                   )}
                 </div>

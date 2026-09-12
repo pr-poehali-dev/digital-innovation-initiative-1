@@ -52,8 +52,12 @@ function Tag({ label, cls }: { label: string; cls: string }) {
   );
 }
 
+const TAB_IDS: Tab[] = ["milestones", "issues", "risks", "escalations"];
+
 export default function ExecControlPage() {
-  const [tab, setTab] = useState<Tab>("milestones");
+  const [searchParams] = useSearchParams();
+  const urlTab = searchParams.get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(urlTab && TAB_IDS.includes(urlTab) ? urlTab : "milestones");
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [risks, setRisks] = useState<Risk[]>([]);
@@ -63,8 +67,9 @@ export default function ExecControlPage() {
   const [decisions, setDecisions] = useState<{ id: number; question: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [searchParams] = useSearchParams();
   const [initFilter, setInitFilter] = useState(searchParams.get("initiative") || "");
+  // ?level=critical (переход с дашборда) — фильтр по критическим рискам на вкладке risks
+  const urlLevel = searchParams.get("level");
   const [showClosed, setShowClosed] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [access, setAccess] = useState<CabinetAccess | null>(null);
@@ -131,8 +136,10 @@ export default function ExecControlPage() {
   );
   const fRisks = useMemo(
     () =>
-      byInit(risks).filter((r) => showClosed || !["closed", "irrelevant"].includes(r.status)),
-    [risks, initFilter, showClosed],
+      byInit(risks)
+        .filter((r) => showClosed || !["closed", "irrelevant"].includes(r.status))
+        .filter((r) => urlLevel !== "critical" || r.risk_score >= 15),
+    [risks, initFilter, showClosed, urlLevel],
   );
   const fEscalations = useMemo(
     () => escalations.filter((e) => showClosed || !["closed", "decided"].includes(e.status)),
