@@ -30,6 +30,19 @@ const PROJECT_STATUS_LABEL: Record<string, string> = Object.fromEntries(PROJECT_
 const TASK_STATUS_LABEL: Record<string, string> = Object.fromEntries(TASK_STATUSES.map((s) => [s.value, s.label]));
 
 type MainTab = "dashboard" | "projects" | "tasks" | "risks" | "roadmap" | "milestones";
+type ViewMode = "projects" | "roadmap" | "milestones";
+type SubTab = "dashboard" | "projects" | "tasks" | "risks";
+
+const VIEW_MODE_ICON: Record<ViewMode, string> = { projects: "List", roadmap: "CalendarRange", milestones: "Diamond" };
+const VIEW_MODE_LABEL: Record<ViewMode, string> = { projects: "Список", roadmap: "Дорожная карта", milestones: "Вехи" };
+
+function subTabLabel(t: SubTab, projectsCount: number, tasksCount: number, risksCount: number): string {
+  const labels: Record<SubTab, string> = {
+    dashboard: "Сводка", projects: `Список (${projectsCount})`,
+    tasks: `Задачи (${tasksCount})`, risks: `Риски (${risksCount})`,
+  };
+  return labels[t];
+}
 
 export default function ExecPortfolioPage() {
   const navigate = useNavigate();
@@ -178,11 +191,11 @@ export default function ExecPortfolioPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
-              <Icon name="LayoutDashboard" size={22} className="text-violet-600" />
-              Поручения и портфель
+              <Icon name="GanttChartSquare" size={22} className="text-violet-600" />
+              Проекты и дорожная карта
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Что поручено, что в работе, что просрочено и что требует вашего решения.
+              Поручения, проекты, портфель, риски — списком, на дорожной карте или шкале вех.
             </p>
           </div>
           <div className="flex gap-2 flex-shrink-0">
@@ -213,7 +226,7 @@ export default function ExecPortfolioPage() {
           </div>
         </div>
 
-        <PageGuide {...execPageGuides.portfolio} />
+        {mainTab !== "roadmap" && mainTab !== "milestones" && <PageGuide {...execPageGuides.portfolio} />}
 
         {error && <ErrorBox message={error} onRetry={() => { loadDashboard(); loadProjects(); loadTasks(); }} />}
         {snapMsg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3 py-2">{snapMsg}</div>}
@@ -225,28 +238,44 @@ export default function ExecPortfolioPage() {
           </div>
         )}
 
-        <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-          {(["dashboard", "projects", "tasks", "risks", "roadmap", "milestones"] as MainTab[]).map((t) => (
+        {/* Главный переключатель представления портфеля — три равнозначных
+            режима просмотра одних и тех же проектов/вех. */}
+        <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+          {(["projects", "roadmap", "milestones"] as ViewMode[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`text-sm px-3 py-2 font-medium border-b-2 whitespace-nowrap ${
-                mainTab === t ? "border-violet-600 text-violet-700" : "border-transparent text-muted-foreground"
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
+                mainTab === t ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              {{
-                dashboard: "Сводка", projects: `Проекты (${filteredProjects.length})`,
-                tasks: `Задачи (${filteredTasks.length})`, risks: `Риски (${filteredRisks.length})`,
-                roadmap: "Дорожная карта", milestones: "Вехи",
-              }[t]}
+              <Icon name={VIEW_MODE_ICON[t]} size={14} />
+              {VIEW_MODE_LABEL[t]}
             </button>
           ))}
         </div>
+
+        {mainTab !== "roadmap" && mainTab !== "milestones" && (
+          <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+            {(["dashboard", "projects", "tasks", "risks"] as SubTab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`text-sm px-3 py-2 font-medium border-b-2 whitespace-nowrap ${
+                  mainTab === t ? "border-violet-600 text-violet-700" : "border-transparent text-muted-foreground"
+                }`}
+              >
+                {subTabLabel(t, filteredProjects.length, filteredTasks.length, filteredRisks.length)}
+              </button>
+            ))}
+          </div>
+        )}
 
         {mainTab === "dashboard" && data && <DashboardTab data={data} />}
 
         {mainTab === "roadmap" && (
           <div className="space-y-3">
+            <PageGuide {...execPageGuides.roadmap} />
             <RoadmapFiltersBar filters={roadmapFilters} onChange={setRoadmapFilter} initiatives={initiatives} />
             <RoadmapView
               filters={roadmapFilters} scale={scale} onScaleChange={setRoadmapScale}
@@ -257,6 +286,7 @@ export default function ExecPortfolioPage() {
 
         {mainTab === "milestones" && (
           <div className="space-y-3">
+            <PageGuide {...execPageGuides.milestonesTimeline} />
             <RoadmapFiltersBar
               filters={{ initiative_id: roadmapFilters.initiative_id, status: milestoneStatus, overdue_only: milestoneOverdueOnly }}
               onChange={setMilestoneFilter}
