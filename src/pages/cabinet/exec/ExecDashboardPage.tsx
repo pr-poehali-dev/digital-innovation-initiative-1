@@ -6,7 +6,7 @@ import { Metric, Empty, Loading, ErrorBox, fmtDate } from "@/components/exec/Exe
 import {
   execReportsApi, DashboardKpi, AttentionItem, PortfolioRow, UpcomingEvents,
 } from "@/lib/execReportsApi";
-import { execResourcesApi, TeamLoadRow } from "@/lib/execResourcesApi";
+import { execResourcesApi, TeamLoadRow, RequirementDashboard } from "@/lib/execResourcesApi";
 
 const KPI_CARDS: Array<{ key: keyof DashboardKpi; label: string; icon: string; tone: "default" | "danger" | "warning" | "success"; filter?: Record<string, string> }> = [
   { key: "active_actions", label: "Активные поручения", icon: "ClipboardCheck", tone: "default" },
@@ -40,6 +40,7 @@ export default function ExecDashboardPage() {
   const [finKpi, setFinKpi] = useState<Awaited<ReturnType<typeof execResourcesApi.portfolioFinancialKpi>> | null>(null);
   const [teamLoad, setTeamLoad] = useState<TeamLoadRow[]>([]);
   const [vacancies, setVacancies] = useState<Array<{ id: number; role_title: string | null; role_title_ref: string | null; project_title: string | null; initiative_title: string | null }>>([]);
+  const [reqDash, setReqDash] = useState<RequirementDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -54,6 +55,7 @@ export default function ExecDashboardPage() {
       execResourcesApi.portfolioFinancialKpi().then(setFinKpi).catch(() => {}),
       execResourcesApi.teamLoad().then((d) => setTeamLoad(d.items)).catch(() => {}),
       execResourcesApi.vacantRoles().then((d) => setVacancies(d.items)).catch(() => {}),
+      execResourcesApi.requirementDashboard().then(setReqDash).catch(() => {}),
     ])
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
@@ -111,7 +113,7 @@ export default function ExecDashboardPage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               <Metric label="Бюджет на год" value={`${finKpi.total_budget.toLocaleString("ru-RU")} ₽`} icon="PiggyBank" />
               <Metric label="Факт" value={`${finKpi.total_fact.toLocaleString("ru-RU")} ₽`} icon="Receipt" />
-              <Metric label="Обязательства" value={`${finKpi.total_commitments.toLocaleString("ru-RU")} ₽`} icon="FileSignature" />
+              <Metric label="Обязательства (открыто)" value={`${finKpi.total_commitments_open.toLocaleString("ru-RU")} ₽`} icon="FileSignature" />
               <Metric label="Прогноз" value={`${finKpi.total_forecast.toLocaleString("ru-RU")} ₽`} icon="TrendingUp" />
               <Metric label="Остаток" value={`${finKpi.remaining.toLocaleString("ru-RU")} ₽`} tone={finKpi.remaining < 0 ? "danger" : "default"} icon="Coins" />
               <Metric label="ФОТ" value={`${finKpi.total_fot.toLocaleString("ru-RU")} ₽`} icon="Users" />
@@ -146,6 +148,36 @@ export default function ExecDashboardPage() {
               )}
               {teamLoad.filter((t) => t.total_load_pct > 100).length === 0 && vacancies.length === 0 && (
                 <div className="text-xs text-muted-foreground px-1">Перегрузок и вакансий нет</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {reqDash && (reqDash.overdue.length > 0 || reqDash.start_search_now.length > 0 || reqDash.without_funding.length > 0 || reqDash.upcoming_90.length > 0) && (
+          <div>
+            <div className="text-sm font-semibold mb-2 flex items-center gap-1.5">
+              <Icon name="UserSearch" size={15} className="text-violet-700" /> Ресурсные потребности
+            </div>
+            <div className="space-y-1.5">
+              {reqDash.overdue.map((r) => (
+                <div key={`ov${r.id}`} className="text-xs bg-red-50 text-red-700 rounded-lg px-3 py-1.5 flex justify-between">
+                  <span>{r.role_title_ref || r.role_title} — просрочена ({r.project_title})</span>
+                  <span className="font-medium">на {r.days_overdue} дн.</span>
+                </div>
+              ))}
+              {reqDash.start_search_now.map((r) => (
+                <div key={`ss${r.id}`} className="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-1.5 flex justify-between">
+                  <span>{r.role_title_ref || r.role_title} — пора начинать поиск ({r.project_title})</span>
+                  <span className="font-medium">найти до {r.need_by_date ? fmtDate(r.need_by_date) : "—"}</span>
+                </div>
+              ))}
+              {reqDash.without_funding.length > 0 && (
+                <div className="text-xs text-muted-foreground px-1">
+                  Без финансирования: {reqDash.without_funding.length} · расчётная стоимость незакрытых: {reqDash.total_unresolved_cost.toLocaleString("ru-RU")} ₽
+                </div>
+              )}
+              {reqDash.upcoming_90.length > 0 && (
+                <div className="text-xs text-muted-foreground px-1">На ближайшие 90 дней: {reqDash.upcoming_90.length} потребностей</div>
               )}
             </div>
           </div>

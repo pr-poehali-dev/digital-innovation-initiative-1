@@ -148,6 +148,65 @@ export interface FinancialExpected {
   comment: string | null;
 }
 
+export interface ResourceRequirement {
+  id: number;
+  project_id: number | null;
+  initiative_id: number | null;
+  task_id: number | null;
+  task_title: string | null;
+  milestone_id: number | null;
+  milestone_title: string | null;
+  stage_id: number | null;
+  stage_title: string | null;
+  role_id: number | null;
+  role_title: string | null;
+  role_title_ref: string | null;
+  headcount: number;
+  required_load_pct: number;
+  period_start: string | null;
+  period_end: string | null;
+  need_by_date: string | null;
+  search_start_date: string | null;
+  reason: string | null;
+  criticality: "low" | "medium" | "high" | "critical";
+  required_competencies: string | null;
+  closing_method: string | null;
+  status: string;
+  estimated_monthly_cost: number | null;
+  estimated_total_cost: number | null;
+  funding_confirmed: boolean;
+  budget_line_id: number | null;
+  cost_category_id: number | null;
+  cost_category_title: string | null;
+  resolved_assignment_id: number | null;
+  closed_at: string | null;
+  is_overdue: boolean;
+  comment: string | null;
+}
+
+export interface RequirementDashboardItem {
+  id: number;
+  role_title: string | null;
+  role_title_ref: string | null;
+  project_id: number | null;
+  initiative_id: number | null;
+  project_title: string | null;
+  need_by_date: string | null;
+  search_start_date?: string | null;
+  criticality?: string;
+  days_overdue?: number;
+  estimated_total_cost?: number | null;
+}
+
+export interface RequirementDashboard {
+  start_search_now: RequirementDashboardItem[];
+  overdue: RequirementDashboardItem[];
+  upcoming_90: RequirementDashboardItem[];
+  without_funding: RequirementDashboardItem[];
+  total_unresolved_cost: number;
+  tasks_without_resource: Array<{ id: number; title: string; project_id: number | null; due_at: string | null }>;
+}
+
 async function req(path: string, method: "GET" | "POST" = "GET", body?: unknown) {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -213,4 +272,14 @@ export const execResourcesApi = {
   financialSnapshot: (id: number) => req(`/?action=financial_snapshot&id=${id}`),
   exportFinancialXlsx: (id: number): Promise<{ filename: string; content_base64: string }> =>
     req(`/?action=export_financial_xlsx&id=${id}`),
+
+  requirements: (kind: "project" | "initiative", id: number): Promise<{ items: ResourceRequirement[] }> =>
+    req(`/?action=requirements&kind=${kind}&id=${id}`),
+  saveRequirement: (data: Record<string, unknown>) => req("/?action=save_requirement", "POST", data),
+  archiveRequirement: (id: number) => req("/?action=archive_requirement", "POST", { id }),
+  resolveRequirement: (data: Record<string, unknown>): Promise<{ assignment_id: number; requirement_id: number; was_overdue: boolean }> =>
+    req("/?action=resolve_requirement", "POST", data),
+  requirementDashboard: (): Promise<RequirementDashboard> => req("/?action=requirement_dashboard"),
+  hiringLeadTimes: (): Promise<{ items: Array<{ closing_method: string; lead_time_days: number }> }> =>
+    req("/?action=hiring_lead_times"),
 };

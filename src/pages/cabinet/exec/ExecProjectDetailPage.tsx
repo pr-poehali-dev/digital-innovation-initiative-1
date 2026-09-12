@@ -15,16 +15,18 @@ import {
 import { execPortfolioApi, ProjectDetail, ExecResult, ExecEffect, HistoryEntry } from "@/lib/execPortfolioApi";
 import { execApi } from "@/lib/execCabinetApi";
 import { TeamTab, BudgetTab, CapacityTab, FotTab, PlanFactTab } from "@/components/exec/ProjectResourcesTab";
+import { RequirementsTab } from "@/components/exec/ResourceRequirementsTab";
 
 function labelOf(list: { value: string; label: string }[], v: string) {
   return list.find((x) => x.value === v)?.label || v;
 }
 
-const TABS = ["overview", "team", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
+const TABS = ["overview", "team", "requirements", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
-  overview: "Обзор", team: "Команда", capacity: "Загрузка", budget: "Бюджет", fot: "ФОТ",
+  overview: "Обзор", team: "Команда", requirements: "Потребности в ресурсах",
+  capacity: "Загрузка", budget: "Бюджет", fot: "ФОТ",
   planfact: "План-факт", tasks: "Задачи",
   milestones: "Контрольные точки", results: "Результаты",
   effects: "Эффекты", risks: "Риски", issues: "Проблемы", documents: "Документы",
@@ -41,6 +43,8 @@ export default function ExecProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("overview");
+  const [expandedTaskRes, setExpandedTaskRes] = useState<number | null>(null);
+  const [expandedMilestoneRes, setExpandedMilestoneRes] = useState<number | null>(null);
 
   const [editOpen, setEditOpen] = useState(false);
   const [resultDialog, setResultDialog] = useState<{ open: boolean; item: ExecResult | null }>({ open: false, item: null });
@@ -167,6 +171,7 @@ export default function ExecProjectDetailPage() {
         )}
 
         {tab === "team" && <TeamTab kind="project" parentId={pid} />}
+        {tab === "requirements" && <RequirementsTab kind="project" parentId={pid} />}
         {tab === "capacity" && <CapacityTab kind="project" parentId={pid} />}
         {tab === "budget" && <BudgetTab kind="project" parentId={pid} />}
         {tab === "fot" && <FotTab kind="project" parentId={pid} />}
@@ -176,12 +181,27 @@ export default function ExecProjectDetailPage() {
           data.tasks.length === 0 ? <Empty text="Задач пока нет" icon="ListTodo" /> :
           <div className="space-y-1.5">
             {data.tasks.map((t) => (
-              <div key={t.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 flex items-center justify-between">
-                <div className="min-w-0">
-                  <div className="text-sm truncate">{t.title}</div>
-                  <div className="text-[11px] text-muted-foreground">{t.due_at ? fmtDate(t.due_at) : "Без срока"} · {t.progress_pct}%</div>
+              <div key={t.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm truncate">{t.title}</div>
+                    <div className="text-[11px] text-muted-foreground">{t.due_at ? fmtDate(t.due_at) : "Без срока"} · {t.progress_pct}%</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {t.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">просрочена</span>}
+                    <button
+                      onClick={() => setExpandedTaskRes(expandedTaskRes === t.id ? null : t.id)}
+                      className="text-[11px] text-violet-600 flex items-center gap-1"
+                    >
+                      <Icon name="UserSearch" size={12} /> Ресурсы
+                    </button>
+                  </div>
                 </div>
-                {t.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0">просрочена</span>}
+                {expandedTaskRes === t.id && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <RequirementsTab kind="project" parentId={pid} taskId={t.id} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -191,9 +211,24 @@ export default function ExecProjectDetailPage() {
           data.milestones.length === 0 ? <Empty text="Контрольных точек пока нет" icon="Flag" /> :
           <div className="space-y-1.5">
             {data.milestones.map((m) => (
-              <div key={m.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 flex items-center justify-between">
-                <span className="text-sm">{m.title}</span>
-                <span className="text-[11px] text-muted-foreground">{fmtDate(m.plan_date)} · {m.status}</span>
+              <div key={m.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">{m.title}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-muted-foreground">{fmtDate(m.plan_date)} · {m.status}</span>
+                    <button
+                      onClick={() => setExpandedMilestoneRes(expandedMilestoneRes === m.id ? null : m.id)}
+                      className="text-[11px] text-violet-600 flex items-center gap-1"
+                    >
+                      <Icon name="UserSearch" size={12} /> Ресурсы
+                    </button>
+                  </div>
+                </div>
+                {expandedMilestoneRes === m.id && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <RequirementsTab kind="project" parentId={pid} milestoneId={m.id} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

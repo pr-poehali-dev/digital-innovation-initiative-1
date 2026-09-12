@@ -933,7 +933,37 @@ def export_financial_xlsx(snapshot: dict) -> str:
     sheet("Факт", "actuals", [("category_title", "Статья"), ("month", "Месяц"), ("amount", "Сумма"), ("paid_amount", "Оплачено")])
     sheet("Обязательства", "commitments", [("category_title", "Статья"), ("contract_ref", "Договор"),
                                             ("amount", "Сумма"), ("paid_amount", "Оплачено"), ("status", "Статус")])
-    sheet("Прогноз без обязательств", "expected", [("category_title", "Статья"), ("month", "Месяц"), ("amount", "Сумма")])
+    sheet("Ожидаемые расходы без обязат.", "expected", [("category_title", "Статья"), ("month", "Месяц"), ("amount", "Сумма")])
+
+    ws_forecast = wb.add_worksheet("Прогноз")
+    ws_forecast.write_row(0, 0, ["Составляющая", "Сумма"], bold)
+    forecast_rows = [
+        ("Факт", fs.get("fact", 0)),
+        ("+ Открытые обязательства (неоплаченная часть)", fs.get("commitments_open", 0)),
+        ("+ Ожидаемые расходы без обязательств", fs.get("expected", 0)),
+        ("= Прогноз до конца года", fs.get("forecast", 0)),
+        ("Утверждённый бюджет", fs.get("approved_budget", 0)),
+        ("Остаток (бюджет - прогноз)", fs.get("remaining", 0)),
+    ]
+    for i, (k, val) in enumerate(forecast_rows, start=1):
+        ws_forecast.write_row(i, 0, [k, val])
+
+    ws_pf = wb.add_worksheet("План-факт")
+    ws_pf.write_row(0, 0, ["Показатель", "Значение"], bold)
+    pf_rows = [
+        ("Утверждённый бюджет (план)", fs.get("approved_budget")),
+        ("Факт", fs.get("fact")),
+        ("Обязательства всего", fs.get("commitments_total")),
+        ("Обязательства оплачено", fs.get("commitments_paid")),
+        ("Обязательства открыто", fs.get("commitments_open")),
+        ("Ожидаемые расходы без обязательств", fs.get("expected")),
+        ("Прогноз (факт + открытые обязательства + ожидаемые)", fs.get("forecast")),
+        ("Остаток", fs.get("remaining")),
+        ("Отклонение, руб.", fs.get("deviation")),
+        ("Отклонение, %", fs.get("deviation_pct")),
+    ]
+    for i, (k, val) in enumerate(pf_rows, start=1):
+        ws_pf.write_row(i, 0, [k, val if val is not None else ""])
 
     ws_month = wb.add_worksheet("Бюджет по месяцам")
     ws_month.write_row(0, 0, ["Месяц", "Сумма плана"], bold)
@@ -961,6 +991,266 @@ def export_financial_xlsx(snapshot: dict) -> str:
     wb.close()
     buf.seek(0)
     return base64.b64encode(buf.read()).decode("ascii")
+
+
+# ============ РЕСУРСНАЯ ПОТРЕБНОСТЬ ============
+# Шире вакансии: закрывается внутренним сотрудником, перераспределением
+# загрузки, наймом, подрядчиком или временным экспертом. Хранит историю от
+# возникновения до закрытия, даже после перевода в assignment.
+
+REQUIREMENT_FIELDS = ["task_id", "milestone_id", "stage_id", "role_id", "role_title",
+    "headcount", "required_load_pct", "period_start", "period_end", "need_by_date",
+    "reason", "criticality", "required_competencies", "closing_method", "status",
+    "estimated_monthly_cost", "funding_confirmed", "budget_line_id", "cost_category_id", "comment"]
+
+
+def get_lead_time_days(cur, closing_method):
+    if not closing_method:
+        return 30
+    cur.execute(f"SELECT lead_time_days FROM {SCHEMA}.exec_hiring_lead_time WHERE closing_method = %s", (closing_method,))
+    r = cur.fetchone()
+    return r[0] if r else 30
+
+
+def compute_search_start_date(cur, period_start, closing_method):
+    if not period_start:
+        return None
+    lead_days = get_lead_time_days(cur, closing_method)
+    if isinstance(period_start, str):
+        period_start = datetime.date.fromisoformat(period_start)
+    return period_start - datetime.timedelta(days=lead_days)
+
+
+def list_requirements(cur, parent_kind, parent_id, include_archived=False, include_test_data=False):
+    conds = [f"r.{parent_kind}_id = %s"]
+    params = [parent_id]
+    if not include_archived:
+        conds.append("r.archived_at IS NULL")
+    if not include_test_data:
+        conds.append("r.is_test_data = false")
+    where = "WHERE " + " AND ".join(conds)
+    cur.execute(f"""
+        SELECT r.*, rc.title AS role_title_ref, t.title AS task_title, m.title AS milestone_title,
+               s.title AS stage_title, cc.title AS cost_category_title,
+               (r.need_by_date IS NOT NULL AND r.need_by_date < CURRENT_DATE
+                   AND r.status NOT IN ('closed','cancelled')) AS is_overdue
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_task t ON t.id = r.task_id
+        LEFT JOIN {SCHEMA}.exec_milestone m ON m.id = r.milestone_id
+        LEFT JOIN {SCHEMA}.exec_project_stage s ON s.id = r.stage_id
+        LEFT JOIN {SCHEMA}.exec_cost_category cc ON cc.id = r.cost_category_id
+        {where}
+        ORDER BY (r.need_by_date IS NULL), r.need_by_date
+    """, params)
+    return rows(cur)
+
+
+def save_requirement(cur, body: dict, actor: str):
+    rid = as_int(body.get("id"))
+    parent_key, parent_val = PARENT_FIELD(body)
+    if not rid and not parent_val:
+        return None, "Не указан проект или инициатива"
+
+    fields = {}
+    for k in REQUIREMENT_FIELDS:
+        if k not in body:
+            continue
+        if k in ("task_id", "milestone_id", "stage_id", "role_id", "budget_line_id", "cost_category_id"):
+            fields[k] = as_int(body[k])
+        elif k in ("period_start", "period_end", "need_by_date"):
+            fields[k] = body[k] or None
+        elif k in ("headcount", "required_load_pct", "estimated_monthly_cost"):
+            fields[k] = as_num(body[k]) if body[k] not in (None, "") else None
+        elif k == "funding_confirmed":
+            fields[k] = bool(body[k])
+        else:
+            fields[k] = body.get(k)
+
+    if not fields.get("role_id") and not fields.get("role_title"):
+        return None, "Укажите роль из справочника или её название"
+
+    # Расчётная дата начала поиска и оценка стоимости (не утверждённый бюджет)
+    period_start = fields.get("period_start")
+    period_end = fields.get("period_end")
+    closing_method = fields.get("closing_method")
+    if period_start:
+        fields["search_start_date"] = compute_search_start_date(cur, period_start, closing_method)
+    if fields.get("estimated_monthly_cost") and period_start and period_end:
+        months = 1
+        ps = period_start if not isinstance(period_start, str) else datetime.date.fromisoformat(period_start)
+        pe = period_end if not isinstance(period_end, str) else datetime.date.fromisoformat(period_end)
+        months = max(1, (pe.year - ps.year) * 12 + (pe.month - ps.month) + 1)
+        load_ratio = float(fields.get("required_load_pct") or 100) / 100
+        fields["estimated_total_cost"] = float(fields["estimated_monthly_cost"]) * load_ratio * months
+
+    existing = fetch_one(cur, "exec_resource_requirement", rid) if rid else None
+
+    if rid:
+        sets = ", ".join(f"{k} = %s" for k in fields)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_resource_requirement SET {sets}, updated_at = now() WHERE id = %s RETURNING id",
+            (*fields.values(), rid),
+        )
+        new_id = cur.fetchone()[0]
+        log_change(cur, actor, "resource_requirement", new_id, "update", changed_fields=diff_fields(existing, fields))
+    else:
+        fields[parent_key] = parent_val
+        fields.setdefault("status", "draft")
+        cols = ", ".join(fields.keys())
+        ph = ", ".join(["%s"] * len(fields))
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_resource_requirement ({cols}, created_by) VALUES ({ph}, %s) RETURNING id",
+            (*fields.values(), actor),
+        )
+        new_id = cur.fetchone()[0]
+        log_change(cur, actor, "resource_requirement", new_id, "create", after=fields)
+    return new_id, None
+
+
+def archive_requirement(cur, rid, actor):
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_resource_requirement SET archived_at = now(), archived_by = %s "
+        f"WHERE id = %s AND archived_at IS NULL RETURNING id",
+        (actor, rid),
+    )
+    r = cur.fetchone()
+    if r:
+        log_change(cur, actor, "resource_requirement", rid, "archive")
+    return r[0] if r else None
+
+
+def resolve_requirement(cur, body: dict, actor: str):
+    """Преобразует подтверждённую потребность в назначение: создаёт
+    exec_resource_assignment, переносит плановую загрузку, сохраняет ссылку
+    на исходную потребность и закрывает её (запись НЕ удаляется - история
+    сохранена: когда возникла, какой срок был, кто назначен, была ли задержка)."""
+    rid = as_int(body.get("requirement_id"))
+    requirement = fetch_one(cur, "exec_resource_requirement", rid) if rid else None
+    if not requirement:
+        return None, "Ресурсная потребность не найдена"
+    if requirement["status"] in ("closed", "cancelled"):
+        return None, "Потребность уже закрыта или отменена"
+
+    assignment_fields = {
+        "person_id": as_int(body.get("person_id")),
+        "role_id": requirement.get("role_id"),
+        "role_title": requirement.get("role_title"),
+        "project_role": body.get("project_role", "member"),
+        "is_external": bool(body.get("is_external")),
+        "is_vacant": False,
+        "period_start": requirement.get("period_start"),
+        "period_end": requirement.get("period_end"),
+        "plan_load_pct": requirement.get("required_load_pct") or 100,
+        "comment": f"Создано из ресурсной потребности #{rid}",
+    }
+    if requirement.get("project_id"):
+        assignment_fields["project_id"] = requirement["project_id"]
+    else:
+        assignment_fields["initiative_id"] = requirement["initiative_id"]
+
+    if not assignment_fields.get("person_id") and not body.get("is_external_contractor_name"):
+        return None, "Укажите назначаемого сотрудника"
+
+    cols = ", ".join(assignment_fields.keys())
+    ph = ", ".join(["%s"] * len(assignment_fields))
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_resource_assignment ({cols}, created_by) VALUES ({ph}, %s) RETURNING id",
+        (*assignment_fields.values(), actor),
+    )
+    assignment_id = cur.fetchone()[0]
+    log_change(cur, actor, "resource_assignment", assignment_id, "create",
+               after={**assignment_fields, "from_requirement_id": rid})
+
+    is_overdue = bool(requirement.get("need_by_date")) and requirement["need_by_date"] < datetime.date.today()
+    cur.execute(
+        f"""UPDATE {SCHEMA}.exec_resource_requirement
+            SET status = 'closed', resolved_assignment_id = %s, closed_at = now(), closed_by = %s, updated_at = now()
+            WHERE id = %s""",
+        (assignment_id, actor, rid),
+    )
+    log_change(cur, actor, "resource_requirement", rid, "resolve",
+               after={"assignment_id": assignment_id, "was_overdue": is_overdue})
+    return {"assignment_id": assignment_id, "requirement_id": rid, "was_overdue": is_overdue}, None
+
+
+def requirement_dashboard(cur, include_test_data=False):
+    """Показатели для дашборда руководителя: потребности по срочности поиска,
+    просроченные, задачи/вехи без обеспеченного ресурса, потребности без
+    финансирования, суммарная расчётная стоимость незакрытых."""
+    tnd = "" if include_test_data else "AND r.is_test_data = false"
+    open_statuses = "('draft','confirmed','searching','candidate_identified')"
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.initiative_id,
+               r.need_by_date, r.search_start_date, r.criticality, p.title AS project_title
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+          AND r.search_start_date IS NOT NULL AND r.search_start_date <= CURRENT_DATE
+          AND (r.need_by_date IS NULL OR r.need_by_date >= CURRENT_DATE)
+        ORDER BY r.need_by_date
+    """)
+    start_search_now = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.initiative_id,
+               r.need_by_date, r.criticality, p.title AS project_title,
+               (CURRENT_DATE - r.need_by_date) AS days_overdue
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+          AND r.need_by_date IS NOT NULL AND r.need_by_date < CURRENT_DATE
+        ORDER BY r.need_by_date
+    """)
+    overdue = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.project_id, r.need_by_date, p.title AS project_title
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+          AND r.need_by_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days'
+        ORDER BY r.need_by_date
+    """)
+    upcoming_90 = rows(cur)
+
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.estimated_total_cost, p.title AS project_title
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} AND r.funding_confirmed = false
+        ORDER BY r.estimated_total_cost DESC NULLS LAST
+    """)
+    without_funding = rows(cur)
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(estimated_total_cost), 0) FROM {SCHEMA}.exec_resource_requirement r
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+    """)
+    total_unresolved_cost = float(cur.fetchone()[0] or 0)
+
+    cur.execute(f"""
+        SELECT t.id, t.title, t.project_id, t.due_at
+        FROM {SCHEMA}.exec_task t
+        WHERE t.archived_at IS NULL AND t.is_test_data = false AND t.status NOT IN ('done','cancelled')
+          AND EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_resource_requirement r
+            WHERE r.task_id = t.id AND r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+          )
+        ORDER BY (t.due_at IS NULL), t.due_at
+    """)
+    tasks_without_resource = rows(cur)
+
+    return {
+        "start_search_now": start_search_now, "overdue": overdue, "upcoming_90": upcoming_90,
+        "without_funding": without_funding, "total_unresolved_cost": total_unresolved_cost,
+        "tasks_without_resource": tasks_without_resource,
+    }
 
 
 def handler(event: dict, context) -> dict:
@@ -1149,6 +1439,40 @@ def handler(event: dict, context) -> dict:
             v = snap["payload"].get("version", {})
             filename = f"Бюджет {v.get('version_label', '')} {v.get('year', '')}.xlsx"
             return cors({"ok": True, "data": {"filename": filename, "content_base64": xlsx_b64}})
+
+        if action == "requirements":
+            if not parent_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
+            return cors({"ok": True, "data": {"items": list_requirements(
+                cur, parent_kind, parent_id, qs.get("include_archived") == "1", itd)}})
+
+        if action == "save_requirement":
+            rid, err = save_requirement(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "archive_requirement":
+            rid = archive_requirement(cur, as_int(body.get("id")), user["email"])
+            conn.commit()
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не найдено или уже архивировано"}}, 404)
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "resolve_requirement":
+            result, err = resolve_requirement(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": result})
+
+        if action == "requirement_dashboard":
+            return cors({"ok": True, "data": requirement_dashboard(cur, itd)})
+
+        if action == "hiring_lead_times":
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_hiring_lead_time ORDER BY lead_time_days")
+            return cors({"ok": True, "data": {"items": rows(cur)}})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
     finally:
