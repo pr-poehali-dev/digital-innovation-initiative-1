@@ -74,6 +74,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "chief.model", label: "Модель Центра", icon: "Network", href: "/cabinet/exec/model", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.orgModel", label: "Организационная модель", icon: "FolderTree", href: "/cabinet/exec/org-model", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.goals", label: "Цели и показатели", icon: "Target", href: "/cabinet/exec/goals", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.documentsHub", label: "Управленческие документы", icon: "FileStack", href: "/cabinet/exec/documents-hub", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.centerCase", label: "Обоснование создания", icon: "FileText", href: "/cabinet/exec/center-case", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.deck", label: "Презентация Центра", icon: "Presentation", href: "/cabinet/exec/deck", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.planner", label: "Планировщик", icon: "GanttChartSquare", href: "/cabinet/exec/planner", active: true, badge: { text: "Новое", tone: "info" } },

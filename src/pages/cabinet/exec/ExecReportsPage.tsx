@@ -19,6 +19,7 @@ const REPORT_KIND_LABEL: Record<string, string> = {
   risks_issues: "Риски и проблемы", results_effects: "Результаты и эффекты",
   resources_load: "Отчёт по ресурсам и загрузке", budget_planfact: "Финансовый отчёт (план-факт)",
   resource_requirements: "Отчёт по ресурсным потребностям",
+  goals_kpi: "Отчёт по целям и KPI",
 };
 
 export default function ExecReportsPage() {

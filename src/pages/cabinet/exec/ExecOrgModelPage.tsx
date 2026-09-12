@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Card, Empty, ErrorBox, Loading, Metric } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { centerApi, Center, CenterRefs } from "@/lib/execCenterApi";
 import { orgModelApi, OrgOverview } from "@/lib/execOrgModelApi";
 import OrgStructureTab from "@/components/exec/orgmodel/OrgStructureTab";
@@ -97,6 +99,10 @@ export default function ExecOrgModelPage() {
             </p>
           </div>
         </header>
+
+        <div className="mb-5">
+          <PageGuide {...execPageGuides.orgModel} />
+        </div>
 
         <div className="border-b border-slate-200 mb-5 overflow-x-auto">
           <div className="flex gap-1 min-w-max">

@@ -72,6 +72,13 @@ def rows(cur):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def as_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 RISK_LEVEL_SQL = """
     CASE WHEN r.risk_score >= 16 THEN 'critical'
          WHEN r.risk_score >= 10 THEN 'high'
@@ -1058,6 +1065,118 @@ def handler(event: dict, context) -> dict:
             log(cur, actor, "meeting", new_id, "update" if mid else "create", data)
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "publish_agenda":
+            # Повестка: фиксирует неизменяемый снимок (дата/время, участники,
+            # вопросы, материалы, требуемые решения, плановая длительность)
+            # на момент публикации — последующие изменения встречи снимок не меняют.
+            mid = as_int(body.get("meeting_id"))
+            if not mid:
+                return cors({"ok": False, "error": {"message": "Не указана встреча"}}, 400)
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            m = rows(cur)
+            if not m:
+                return cors({"ok": False, "error": {"message": "Встреча не найдена"}}, 404)
+            meeting = m[0]
+            cur.execute(f"""
+                SELECT p.id, p.display_name, p.position_title FROM {SCHEMA}.exec_meeting_participant mp
+                JOIN {SCHEMA}.exec_person p ON p.id = mp.person_id WHERE mp.meeting_id = %s
+            """, (mid,))
+            participants = rows(cur)
+            cur.execute(f"""
+                SELECT i.id, i.title FROM {SCHEMA}.exec_meeting_initiative mi
+                JOIN {SCHEMA}.exec_initiative i ON i.id = mi.initiative_id WHERE mi.meeting_id = %s
+            """, (mid,))
+            initiatives = rows(cur)
+            payload = {
+                "meeting_id": mid, "title": meeting["title"], "meeting_at": str(meeting["meeting_at"]),
+                "location": meeting["location"], "agenda": meeting["agenda"], "materials": meeting["materials"],
+                "planned_duration_minutes": meeting.get("planned_duration_minutes"),
+                "participants": participants, "initiatives": initiatives,
+                "published_at": datetime.datetime.utcnow().isoformat(),
+            }
+            payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+            payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+            cur.execute(f"""
+                UPDATE {SCHEMA}.exec_meeting SET agenda_payload_json = %s, agenda_payload_sha256 = %s,
+                    agenda_published_at = now() WHERE id = %s
+            """, (payload_str, payload_hash, mid))
+            log(cur, actor, "meeting_agenda", mid, "publish", {"payload_sha256": payload_hash})
+            conn.commit()
+            return cors({"ok": True, "data": {"meeting_id": mid, "payload_sha256": payload_hash}})
+
+        if action == "publish_protocol":
+            # Протокол: фиксирует неизменяемый снимок фактических участников,
+            # рассмотренных вопросов, принятых решений и поручений на момент
+            # публикации. Поручения уже связаны через exec_meeting_outcome.action_id
+            # (add_meeting_outcome) — здесь их данные только читаются в снимок.
+            mid = as_int(body.get("meeting_id"))
+            if not mid:
+                return cors({"ok": False, "error": {"message": "Не указана встреча"}}, 400)
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            m = rows(cur)
+            if not m:
+                return cors({"ok": False, "error": {"message": "Встреча не найдена"}}, 404)
+            meeting = m[0]
+            cur.execute(f"""
+                SELECT p.id, p.display_name FROM {SCHEMA}.exec_meeting_participant mp
+                JOIN {SCHEMA}.exec_person p ON p.id = mp.person_id WHERE mp.meeting_id = %s
+            """, (mid,))
+            participants = rows(cur)
+            cur.execute(f"""
+                SELECT o.id, o.outcome_type, o.text, o.action_id, a.title AS action_title,
+                       a.responsible_person_id, a.due_at AS action_due_at,
+                       o.decision_id, d.question AS decision_question
+                FROM {SCHEMA}.exec_meeting_outcome o
+                LEFT JOIN {SCHEMA}.exec_action a ON a.id = o.action_id
+                LEFT JOIN {SCHEMA}.exec_decision_instance d ON d.id = o.decision_id
+                WHERE o.meeting_id = %s ORDER BY o.created_at
+            """, (mid,))
+            outcomes = rows(cur)
+            payload = {
+                "meeting_id": mid, "title": meeting["title"], "meeting_at": str(meeting["meeting_at"]),
+                "actual_participants": participants, "outcomes": outcomes, "notes": meeting["notes"],
+                "published_at": datetime.datetime.utcnow().isoformat(),
+            }
+            payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+            payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+            cur.execute(f"""
+                UPDATE {SCHEMA}.exec_meeting SET protocol_payload_json = %s, protocol_payload_sha256 = %s,
+                    protocol_published_at = now(), status = 'held' WHERE id = %s
+            """, (payload_str, payload_hash, mid))
+            log(cur, actor, "meeting_protocol", mid, "publish", {"payload_sha256": payload_hash})
+            conn.commit()
+            return cors({"ok": True, "data": {"meeting_id": mid, "payload_sha256": payload_hash}})
+
+        if action == "meeting_agenda":
+            mid = as_int(qs.get("id"))
+            cur.execute(f"SELECT agenda_payload_json, agenda_payload_sha256, agenda_published_at "
+                        f"FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            r = rows(cur)
+            if not r or not r[0]["agenda_payload_json"]:
+                return cors({"ok": False, "error": {"message": "Повестка не опубликована"}}, 404)
+            row = r[0]
+            payload_str = row["agenda_payload_json"]
+            integrity_ok = hashlib.sha256(payload_str.encode("utf-8")).hexdigest() == row["agenda_payload_sha256"]
+            return cors({"ok": True, "data": {
+                "payload": json.loads(payload_str), "payload_sha256": row["agenda_payload_sha256"],
+                "published_at": row["agenda_published_at"], "integrity_ok": integrity_ok,
+            }})
+
+        if action == "meeting_protocol":
+            mid = as_int(qs.get("id"))
+            cur.execute(f"SELECT protocol_payload_json, protocol_payload_sha256, protocol_published_at "
+                        f"FROM {SCHEMA}.exec_meeting WHERE id = %s", (mid,))
+            r = rows(cur)
+            if not r or not r[0]["protocol_payload_json"]:
+                return cors({"ok": False, "error": {"message": "Протокол не опубликован"}}, 404)
+            row = r[0]
+            payload_str = row["protocol_payload_json"]
+            integrity_ok = hashlib.sha256(payload_str.encode("utf-8")).hexdigest() == row["protocol_payload_sha256"]
+            return cors({"ok": True, "data": {
+                "payload": json.loads(payload_str), "payload_sha256": row["protocol_payload_sha256"],
+                "published_at": row["protocol_published_at"], "integrity_ok": integrity_ok,
+            }})
 
         if action == "delete_meeting":
             mid = body.get("id")

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { ErrorBox, Loading } from "@/components/exec/ExecUI";
+import PageGuide from "@/components/exec/PageGuide";
+import { execPageGuides } from "@/config/execPageGuides";
 import { centerApi, Center } from "@/lib/execCenterApi";
 import GoalsOverviewTab from "@/components/exec/goals/GoalsOverviewTab";
 import GoalsTreeTab from "@/components/exec/goals/GoalsTreeTab";
@@ -85,6 +87,10 @@ export default function ExecGoalsPage() {
             </p>
           </div>
         </header>
+
+        <div className="mb-5">
+          <PageGuide {...execPageGuides.goals} />
+        </div>
 
         <div className="border-b border-slate-200 mb-5 overflow-x-auto">
           <div className="flex gap-1 min-w-max">

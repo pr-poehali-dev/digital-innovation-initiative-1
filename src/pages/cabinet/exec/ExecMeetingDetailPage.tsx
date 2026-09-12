@@ -10,6 +10,7 @@ import {
   controlApi,
 } from "@/lib/execControlApi";
 import { execApi, RefsData } from "@/lib/execCabinetApi";
+import { execDocumentsApi } from "@/lib/execDocumentsApi";
 
 interface MeetingDetail {
   meeting: {
@@ -22,6 +23,8 @@ interface MeetingDetail {
     notes: string | null;
     next_meeting_at: string | null;
     status: string;
+    agenda_published_at: string | null;
+    protocol_published_at: string | null;
   };
   participants: { id: number; display_name: string; position_title: string | null }[];
   initiatives: { id: number; title: string }[];
@@ -47,6 +50,8 @@ export default function ExecMeetingDetailPage() {
   const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
   const [outcomeForm, setOutcomeForm] = useState(false);
+  const [publishing, setPublishing] = useState<"agenda" | "protocol" | null>(null);
+  const [publishMsg, setPublishMsg] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -71,6 +76,36 @@ export default function ExecMeetingDetailPage() {
       load();
     } finally {
       setSavingNotes(false);
+    }
+  };
+
+  const publishAgenda = async () => {
+    if (!data) return;
+    setPublishing("agenda");
+    setPublishMsg("");
+    try {
+      await execDocumentsApi.publishAgenda(data.meeting.id);
+      setPublishMsg("Повестка опубликована — зафиксирован неизменяемый снимок");
+      load();
+    } catch (e) {
+      setPublishMsg((e as Error).message);
+    } finally {
+      setPublishing(null);
+    }
+  };
+
+  const publishProtocol = async () => {
+    if (!data) return;
+    setPublishing("protocol");
+    setPublishMsg("");
+    try {
+      await execDocumentsApi.publishProtocol(data.meeting.id);
+      setPublishMsg("Протокол опубликован — зафиксирован неизменяемый снимок");
+      load();
+    } catch (e) {
+      setPublishMsg((e as Error).message);
+    } finally {
+      setPublishing(null);
     }
   };
 
@@ -134,6 +169,32 @@ export default function ExecMeetingDetailPage() {
               <p className="text-sm text-slate-700 whitespace-pre-line">{data.meeting.agenda}</p>
             </div>
           )}
+
+          <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
+            <button
+              onClick={publishAgenda}
+              disabled={publishing === "agenda"}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-violet-300 text-xs font-medium text-slate-700 hover:text-violet-700 transition-colors flex items-center gap-1.5"
+            >
+              <Icon name="Send" size={12} />
+              {data.meeting.agenda_published_at ? "Опубликовать повестку заново" : "Опубликовать повестку"}
+            </button>
+            <button
+              onClick={publishProtocol}
+              disabled={publishing === "protocol"}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-violet-300 text-xs font-medium text-slate-700 hover:text-violet-700 transition-colors flex items-center gap-1.5"
+            >
+              <Icon name="Send" size={12} />
+              {data.meeting.protocol_published_at ? "Опубликовать протокол заново" : "Опубликовать протокол"}
+            </button>
+            {data.meeting.agenda_published_at && (
+              <span className="text-[11px] text-slate-400">повестка опубликована {fmtDate(data.meeting.agenda_published_at)}</span>
+            )}
+            {data.meeting.protocol_published_at && (
+              <span className="text-[11px] text-slate-400">протокол опубликован {fmtDate(data.meeting.protocol_published_at)}</span>
+            )}
+          </div>
+          {publishMsg && <p className="text-xs text-violet-700 mt-2">{publishMsg}</p>}
         </header>
 
         <Card title="Заметки" icon="StickyNote">
