@@ -221,7 +221,8 @@ def list_centers(cur):
         SELECT c.*, p.display_name AS head_name,
                (SELECT COUNT(*) FROM {SCHEMA}.exec_center_function f WHERE f.center_id = c.id) AS functions_count,
                (SELECT COUNT(*) FROM {SCHEMA}.exec_center_goal g WHERE g.center_id = c.id AND g.kind = 'goal') AS goals_count,
-               (SELECT COALESCE(SUM(r.headcount), 0) FROM {SCHEMA}.exec_center_role r WHERE r.center_id = c.id) AS roles_headcount
+               (SELECT COALESCE(SUM(r.headcount), 0) FROM {SCHEMA}.exec_center_role r
+                 WHERE r.center_id = c.id AND r.is_test_data = false) AS roles_headcount
         FROM {SCHEMA}.exec_center c
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = c.head_person_id
         WHERE c.status <> 'archived'
@@ -1118,20 +1119,24 @@ def org_unit_detail(cur, unit_id: int):
 
 def staffing_summary(cur, center_id: int):
     """Штатная и фактическая численность по Центру и подразделениям —
-    для главной страницы раздела «Организационная модель»."""
+    для главной страницы раздела «Организационная модель». Тестовые роли
+    (is_test_data=true) и тестовые штатные позиции исключены из расчёта."""
     cur.execute(f"""
         SELECT u.id AS org_unit_id, u.name AS org_unit_name,
                COALESCE((SELECT SUM(r.headcount) FROM {SCHEMA}.exec_center_role r
-                          WHERE r.org_unit_id = u.id), 0) AS staff_plan_fte,
+                          WHERE r.org_unit_id = u.id AND r.is_test_data = false), 0) AS staff_plan_fte,
                COALESCE((SELECT SUM(rp.fte) FROM {SCHEMA}.exec_role_position rp
                           JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
-                         WHERE r.org_unit_id = u.id AND rp.status = 'occupied'), 0) AS staff_fact_fte,
+                         WHERE r.org_unit_id = u.id AND rp.status = 'occupied'
+                           AND r.is_test_data = false AND rp.is_test_data = false), 0) AS staff_fact_fte,
                (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
                  JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
-                WHERE r.org_unit_id = u.id AND rp.status = 'vacant') AS vacancy_count,
+                WHERE r.org_unit_id = u.id AND rp.status = 'vacant'
+                  AND r.is_test_data = false AND rp.is_test_data = false) AS vacancy_count,
                (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
                  JOIN {SCHEMA}.exec_center_role r ON r.id = rp.role_id
-                WHERE r.org_unit_id = u.id AND rp.status = 'frozen') AS frozen_count
+                WHERE r.org_unit_id = u.id AND rp.status = 'frozen'
+                  AND r.is_test_data = false AND rp.is_test_data = false) AS frozen_count
         FROM {SCHEMA}.org_units u
         WHERE u.center_id = %s AND u.is_archived = false
         ORDER BY u.sort_order
@@ -1143,14 +1148,17 @@ def staffing_summary(cur, center_id: int):
           COALESCE(SUM(r.headcount), 0) AS staff_plan_fte,
           (SELECT COALESCE(SUM(rp.fte), 0) FROM {SCHEMA}.exec_role_position rp
             JOIN {SCHEMA}.exec_center_role r2 ON r2.id = rp.role_id
-           WHERE r2.center_id = %s AND rp.status = 'occupied') AS staff_fact_fte,
+           WHERE r2.center_id = %s AND rp.status = 'occupied'
+             AND r2.is_test_data = false AND rp.is_test_data = false) AS staff_fact_fte,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_role_position rp
             JOIN {SCHEMA}.exec_center_role r2 ON r2.id = rp.role_id
-           WHERE r2.center_id = %s AND rp.status = 'vacant') AS vacancy_count,
+           WHERE r2.center_id = %s AND rp.status = 'vacant'
+             AND r2.is_test_data = false AND rp.is_test_data = false) AS vacancy_count,
           (SELECT COUNT(DISTINCT a.person_id) FROM {SCHEMA}.exec_resource_assignment a
             JOIN {SCHEMA}.exec_center_role r2 ON r2.id = a.role_id
-           WHERE r2.center_id = %s AND a.is_external = true AND a.archived_at IS NULL) AS external_count
-        FROM {SCHEMA}.exec_center_role r WHERE r.center_id = %s
+           WHERE r2.center_id = %s AND a.is_external = true AND a.archived_at IS NULL
+             AND r2.is_test_data = false) AS external_count
+        FROM {SCHEMA}.exec_center_role r WHERE r.center_id = %s AND r.is_test_data = false
     """, (center_id, center_id, center_id, center_id))
     total = rows(cur)[0]
 
@@ -1175,7 +1183,7 @@ def competency_gap_report(cur, center_id: int):
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = rp.person_id
         LEFT JOIN {SCHEMA}.exec_person_competency pc
                ON pc.person_id = rp.person_id AND pc.competency_id = c.id
-        WHERE r.center_id = %s
+        WHERE r.center_id = %s AND r.is_test_data = false
         ORDER BY gap DESC, rc.is_critical DESC
     """, (center_id,))
     all_rows = rows(cur)
@@ -1193,6 +1201,7 @@ def competency_gap_report(cur, center_id: int):
         LEFT JOIN {SCHEMA}.exec_center_role_competency rc ON rc.role_id = r.id
         LEFT JOIN {SCHEMA}.professional_competencies c ON c.id = rc.competency_id
         WHERE r.center_id = %s AND rp.status = 'vacant'
+          AND r.is_test_data = false AND rp.is_test_data = false
         GROUP BY r.id, r.title, r.org_unit_id, u.name
     """, (center_id,))
     vacant_roles = rows(cur)
@@ -1276,6 +1285,7 @@ def org_model_overview(cur, center_id: int):
         JOIN {SCHEMA}.exec_center_role r ON r.id = rq.role_id
         WHERE r.center_id = %s AND rq.archived_at IS NULL
           AND rq.status NOT IN ('closed','cancelled')
+          AND rq.is_test_data = false AND r.is_test_data = false
     """, (center_id,))
     open_requirements = cur.fetchone()[0]
 
@@ -1367,7 +1377,7 @@ def build_org_resource_plan_payload(cur, version_id: int):
             interval '1 month'
         ) AS gs
         WHERE rq.archived_at IS NULL AND rq.status NOT IN ('closed','cancelled')
-          AND rq.role_id IS NOT NULL
+          AND rq.role_id IS NOT NULL AND rq.is_test_data = false
         GROUP BY 1, rq.role_id
     """)
     demand_by_month_role = {(r["month"], r["role_id"]): float(r["project_demand_fte"] or 0)

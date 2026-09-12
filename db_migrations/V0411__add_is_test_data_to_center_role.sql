@@ -1,0 +1,1 @@
+ALTER TABLE exec_center_role ADD COLUMN IF NOT EXISTS is_test_data BOOLEAN NOT NULL DEFAULT false;
