@@ -13,6 +13,11 @@ import { ProjectFormDialog, TaskFormDialog, PROJECT_STATUSES, TASK_STATUSES } fr
 import { execPortfolioApi, PortfolioDashboard, ExecProject, ExecTask } from "@/lib/execPortfolioApi";
 import { execApi } from "@/lib/execCabinetApi";
 import { controlApi, Risk } from "@/lib/execControlApi";
+import RoadmapView from "@/components/exec/roadmap/RoadmapView";
+import MilestonesTimelineView from "@/components/exec/roadmap/MilestonesTimelineView";
+import RoadmapFiltersBar from "@/components/exec/roadmap/RoadmapFilters";
+import { ScaleKind, autoScale, diffDays, parseISODate, defaultRangeForScale } from "@/lib/timeScale";
+import { RoadmapFilters } from "@/lib/execRoadmapApi";
 
 const PRIORITY_CLS: Record<string, string> = {
   urgent: "bg-red-100 text-red-700",
@@ -24,11 +29,11 @@ const PRIORITY_CLS: Record<string, string> = {
 const PROJECT_STATUS_LABEL: Record<string, string> = Object.fromEntries(PROJECT_STATUSES.map((s) => [s.value, s.label]));
 const TASK_STATUS_LABEL: Record<string, string> = Object.fromEntries(TASK_STATUSES.map((s) => [s.value, s.label]));
 
-type MainTab = "dashboard" | "projects" | "tasks" | "risks";
+type MainTab = "dashboard" | "projects" | "tasks" | "risks" | "roadmap" | "milestones";
 
 export default function ExecPortfolioPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [mainTab, setMainTab] = useState<MainTab>((searchParams.get("tab") as MainTab) || "dashboard");
   const [risks, setRisks] = useState<Risk[]>([]);
   const [data, setData] = useState<PortfolioDashboard | null>(null);
@@ -76,6 +81,76 @@ export default function ExecPortfolioPage() {
   const urlStatus = searchParams.get("status");
   const urlLevel = searchParams.get("level");
 
+  // Дорожная карта / шкала вех: масштаб и диапазон дат хранятся в URL,
+  // чтобы представление можно было сохранить или передать ссылкой.
+  const scale: ScaleKind = (searchParams.get("scale") as ScaleKind) || "quarter";
+  const dateFrom = searchParams.get("from") || defaultRangeForScale(scale).from;
+  const dateTo = searchParams.get("to") || defaultRangeForScale(scale).to;
+
+  const setTab = (t: MainTab) => {
+    setMainTab(t);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", t);
+    setSearchParams(next, { replace: true });
+  };
+
+  const setRoadmapRange = (from: string, to: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("from", from);
+    next.set("to", to);
+    const nextScale = autoScale(diffDays(parseISODate(from) || new Date(), parseISODate(to) || new Date()));
+    next.set("scale", nextScale);
+    setSearchParams(next, { replace: true });
+  };
+
+  const setRoadmapScale = (s: ScaleKind) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("scale", s);
+    setSearchParams(next, { replace: true });
+  };
+
+  const roadmapFilters: RoadmapFilters = {
+    initiative_id: searchParams.get("initiative_id") ? Number(searchParams.get("initiative_id")) : undefined,
+    project_kind: searchParams.get("project_kind") || undefined,
+    status: searchParams.get("rstatus") || undefined,
+    priority: searchParams.get("priority") || undefined,
+    overdue_only: searchParams.get("r_overdue") === "1",
+    critical_risk_only: searchParams.get("r_risk") === "1",
+    resource_gap_only: searchParams.get("r_gap") === "1",
+    overbudget_only: searchParams.get("r_budget") === "1",
+  };
+
+  const ROADMAP_FILTER_KEY_MAP: Record<string, string> = {
+    initiative_id: "initiative_id", project_kind: "project_kind", status: "rstatus", priority: "priority",
+    overdue_only: "r_overdue", critical_risk_only: "r_risk", resource_gap_only: "r_gap", overbudget_only: "r_budget",
+  };
+
+  const setRoadmapFilter = (patch: Record<string, unknown>) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(patch).forEach(([k, v]) => {
+      const key = ROADMAP_FILTER_KEY_MAP[k] || k;
+      if (v === undefined || v === "" || v === false) next.delete(key);
+      else next.set(key, v === true ? "1" : String(v));
+    });
+    setSearchParams(next, { replace: true });
+  };
+
+  const milestoneStatus = searchParams.get("mstatus") || undefined;
+  const milestoneOverdueOnly = searchParams.get("m_overdue") === "1";
+
+  const setMilestoneFilter = (patch: Record<string, unknown>) => {
+    const next = new URLSearchParams(searchParams);
+    const map: Record<string, string> = {
+      initiative_id: "initiative_id", status: "mstatus", overdue_only: "m_overdue",
+    };
+    Object.entries(patch).forEach(([k, v]) => {
+      const key = map[k] || k;
+      if (v === undefined || v === "" || v === false) next.delete(key);
+      else next.set(key, v === true ? "1" : String(v));
+    });
+    setSearchParams(next, { replace: true });
+  };
+
   const filteredTasks = tasks.filter((t) => (!urlOverdue || t.is_overdue) && (!urlStatus || t.status === urlStatus));
   const filteredProjects = projects.filter((p) => !urlStatus || p.status === urlStatus);
   const filteredRisks = risks.filter((r) => !urlLevel || (urlLevel === "critical" ? r.probability * r.impact >= 15 : true));
@@ -95,9 +170,11 @@ export default function ExecPortfolioPage() {
 
   if (loading) return <Layout><Loading /></Layout>;
 
+  const isWideTab = mainTab === "roadmap" || mainTab === "milestones";
+
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
+      <div className={`mx-auto px-4 py-6 space-y-5 ${isWideTab ? "max-w-[1400px]" : "max-w-4xl"}`}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
@@ -148,21 +225,52 @@ export default function ExecPortfolioPage() {
           </div>
         )}
 
-        <div className="flex gap-1 border-b border-slate-200">
-          {(["dashboard", "projects", "tasks", "risks"] as MainTab[]).map((t) => (
+        <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+          {(["dashboard", "projects", "tasks", "risks", "roadmap", "milestones"] as MainTab[]).map((t) => (
             <button
               key={t}
-              onClick={() => setMainTab(t)}
-              className={`text-sm px-3 py-2 font-medium border-b-2 ${
+              onClick={() => setTab(t)}
+              className={`text-sm px-3 py-2 font-medium border-b-2 whitespace-nowrap ${
                 mainTab === t ? "border-violet-600 text-violet-700" : "border-transparent text-muted-foreground"
               }`}
             >
-              {{ dashboard: "Сводка", projects: `Проекты (${filteredProjects.length})`, tasks: `Задачи (${filteredTasks.length})`, risks: `Риски (${filteredRisks.length})` }[t]}
+              {{
+                dashboard: "Сводка", projects: `Проекты (${filteredProjects.length})`,
+                tasks: `Задачи (${filteredTasks.length})`, risks: `Риски (${filteredRisks.length})`,
+                roadmap: "Дорожная карта", milestones: "Вехи",
+              }[t]}
             </button>
           ))}
         </div>
 
         {mainTab === "dashboard" && data && <DashboardTab data={data} />}
+
+        {mainTab === "roadmap" && (
+          <div className="space-y-3">
+            <RoadmapFiltersBar filters={roadmapFilters} onChange={setRoadmapFilter} initiatives={initiatives} />
+            <RoadmapView
+              filters={roadmapFilters} scale={scale} onScaleChange={setRoadmapScale}
+              dateFrom={dateFrom} dateTo={dateTo} onRangeChange={setRoadmapRange}
+            />
+          </div>
+        )}
+
+        {mainTab === "milestones" && (
+          <div className="space-y-3">
+            <RoadmapFiltersBar
+              filters={{ initiative_id: roadmapFilters.initiative_id, status: milestoneStatus, overdue_only: milestoneOverdueOnly }}
+              onChange={setMilestoneFilter}
+              initiatives={initiatives} showMilestoneStatus
+            />
+            <MilestonesTimelineView
+              filters={{
+                initiative_id: roadmapFilters.initiative_id, status: milestoneStatus,
+                overdue_only: milestoneOverdueOnly,
+              }}
+              scale={scale} dateFrom={dateFrom} dateTo={dateTo}
+            />
+          </div>
+        )}
 
         {mainTab === "projects" && (
           filteredProjects.length === 0 ? <Empty text="Проектов пока нет" icon="Folder" /> :

@@ -657,7 +657,7 @@ def handler(event: dict, context) -> dict:
 
         if action == "save_milestone":
             mid = body.get("id")
-            fields = ["initiative_id", "title", "milestone_type", "plan_date", "fact_date",
+            fields = ["initiative_id", "project_id", "title", "milestone_type", "plan_date", "fact_date",
                       "status", "responsible_person_id", "depends_on_milestone_id", "decision_id",
                       "achievement_criteria", "achievement_evidence", "confirmed_by_person_id",
                       "reschedule_reason", "reschedule_approved_by", "comment"]

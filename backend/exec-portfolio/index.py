@@ -682,6 +682,372 @@ def get_snapshot(cur, sid: int):
     return item
 
 
+# ============================================================
+# ДОРОЖНАЯ КАРТА И ШКАЛА ВЕХ (Фаза 1) + ЗАВИСИМОСТИ И BASELINE (Фаза 3)
+#
+# Roadmap читает существующие exec_project/exec_project_stage/exec_milestone
+# с серверной фильтрацией по диапазону дат — не отдаёт весь портфель разом.
+# Зависимости и baseline — новые служебные таблицы exec_schedule_dependency/
+# exec_schedule_baseline, без дублирования уже существующих plan_*/fact_*
+# полей на проектах/задачах/вехах.
+# ============================================================
+
+DEPENDENCY_KINDS = ("task", "milestone", "project", "stage")
+DEPENDENCY_KIND_TABLE = {
+    "task": "exec_task", "milestone": "exec_milestone",
+    "project": "exec_project", "stage": "exec_project_stage",
+}
+DEPENDENCY_TYPES = ("FS", "SS", "FF", "SF")
+
+
+def roadmap_data(cur, date_from, date_to, filters: dict):
+    """Дорожная карта портфеля: инициативы → проекты, с этапами и вехами
+    внутри. Диапазон дат обязателен для ограничения объёма — на масштабе
+    «год» вехи агрегируются по месяцам на фронте, а не здесь (сырые даты
+    отдаются, агрегация — вопрос отрисовки)."""
+    conds = ["p.archived_at IS NULL", "p.is_test_data = false"]
+    params = []
+
+    # Проект попадает в диапазон, если его период пересекается с [date_from, date_to]
+    if date_from and date_to:
+        conds.append("(p.plan_start IS NULL OR p.plan_start <= %s) AND (p.plan_end IS NULL OR p.plan_end >= %s)")
+        params += [date_to, date_from]
+
+    if filters.get("initiative_id"):
+        conds.append("p.initiative_id = %s")
+        params.append(filters["initiative_id"])
+    if filters.get("project_kind"):
+        conds.append("p.project_kind = %s")
+        params.append(filters["project_kind"])
+    if filters.get("status"):
+        conds.append("p.status = %s")
+        params.append(filters["status"])
+    if filters.get("priority"):
+        conds.append("p.priority = %s")
+        params.append(filters["priority"])
+    if filters.get("owner_person_id"):
+        conds.append("(p.manager_person_id = %s OR p.result_owner_person_id = %s)")
+        params += [filters["owner_person_id"], filters["owner_person_id"]]
+    if filters.get("overdue_only"):
+        conds.append("p.plan_end IS NOT NULL AND p.plan_end < CURRENT_DATE AND p.status NOT IN ('completed','cancelled')")
+
+    where = "WHERE " + " AND ".join(conds)
+    cur.execute(f"""
+        SELECT p.id, p.title, p.project_kind, p.status, p.priority, p.progress_pct,
+               p.initiative_id, ei.title AS initiative_title,
+               p.plan_start, p.plan_end, p.fact_start, p.fact_end, p.forecast_end,
+               p.manager_person_id, mp.display_name AS manager_name,
+               (p.plan_end IS NOT NULL AND p.plan_end < CURRENT_DATE
+                   AND p.status NOT IN ('completed','cancelled')) AS is_overdue,
+               (SELECT count(*) FROM {SCHEMA}.exec_risk r
+                 WHERE r.project_id = p.id AND r.status = 'active' AND r.probability * r.impact >= 15) AS critical_risk_count,
+               (SELECT count(*) FROM {SCHEMA}.exec_issue i
+                 WHERE i.project_id = p.id AND i.status IN ('open','in_progress')) AS open_issue_count,
+               (SELECT count(*) FROM {SCHEMA}.exec_resource_requirement rr
+                 WHERE rr.project_id = p.id AND rr.status NOT IN ('closed','cancelled')) AS resource_gap_count
+        FROM {SCHEMA}.exec_project p
+        LEFT JOIN {SCHEMA}.exec_initiative ei ON ei.id = p.initiative_id
+        LEFT JOIN {SCHEMA}.exec_person mp ON mp.id = p.manager_person_id
+        {where}
+        ORDER BY ei.title NULLS LAST, p.plan_start NULLS LAST
+    """, params)
+    projects = rows(cur)
+    if not projects:
+        return {"initiatives": [], "projects": []}
+
+    project_ids = [p["id"] for p in projects]
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_project_stage WHERE project_id = ANY(%s) ORDER BY project_id, sort_order, id
+    """, (project_ids,))
+    stages_by_project: dict = {}
+    for s in rows(cur):
+        stages_by_project.setdefault(s["project_id"], []).append(s)
+
+    cur.execute(f"""
+        SELECT id, title, project_id, initiative_id, plan_date_original, plan_date, fact_date,
+               status, milestone_type, responsible_person_id, reschedule_count
+        FROM {SCHEMA}.exec_milestone
+        WHERE project_id = ANY(%s) AND is_test_data = false
+        ORDER BY project_id, plan_date
+    """, (project_ids,))
+    milestones_by_project: dict = {}
+    for m in rows(cur):
+        milestones_by_project.setdefault(m["project_id"], []).append(m)
+
+    # Прогнозируемый перерасход: активная версия бюджета проекта, у которой
+    # план по строкам меньше уже свершившегося факта.
+    cur.execute(f"""
+        SELECT p.id FROM {SCHEMA}.exec_project p
+        WHERE p.id = ANY(%s) AND p.archived_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_budget_version v
+            WHERE v.project_id = p.id AND v.is_active = true
+              AND (SELECT COALESCE(SUM(l.amount_plan),0) FROM {SCHEMA}.exec_budget_line l WHERE l.version_id = v.id)
+                  < (SELECT COALESCE(SUM(a.amount),0) FROM {SCHEMA}.exec_financial_actual a WHERE a.project_id = p.id)
+          )
+    """, (project_ids,))
+    budget_overrun_ids = {r["id"] for r in rows(cur)}
+
+    for p in projects:
+        p["stages"] = stages_by_project.get(p["id"], [])
+        p["milestones"] = milestones_by_project.get(p["id"], [])
+        p["is_overbudget"] = p["id"] in budget_overrun_ids
+
+    if filters.get("overbudget_only"):
+        projects = [p for p in projects if p["is_overbudget"]]
+    if filters.get("critical_risk_only"):
+        projects = [p for p in projects if p["critical_risk_count"] > 0]
+    if filters.get("resource_gap_only"):
+        projects = [p for p in projects if p["resource_gap_count"] > 0]
+    if filters.get("overdue_only"):
+        projects = [p for p in projects if p["is_overdue"]]
+
+    initiatives_map = {}
+    for p in projects:
+        iid = p["initiative_id"] or 0
+        if iid not in initiatives_map:
+            initiatives_map[iid] = {"id": p["initiative_id"], "title": p["initiative_title"] or "Без инициативы", "projects": []}
+        initiatives_map[iid]["projects"].append(p)
+
+    return {"initiatives": list(initiatives_map.values()), "projects": projects}
+
+
+def milestones_timeline(cur, date_from, date_to, filters: dict):
+    """Отдельная шкала контрольных точек всех проектов. Отклонение в днях
+    считается между актуальным planned (plan_date) и исходным
+    (plan_date_original), а также между planned и fact для достигнутых."""
+    conds = ["m.is_test_data = false"]
+    params = []
+    if date_from and date_to:
+        conds.append("m.plan_date BETWEEN %s AND %s")
+        params += [date_from, date_to]
+    if filters.get("project_id"):
+        conds.append("m.project_id = %s")
+        params.append(filters["project_id"])
+    if filters.get("initiative_id"):
+        conds.append("m.initiative_id = %s")
+        params.append(filters["initiative_id"])
+    if filters.get("status"):
+        conds.append("m.status = %s")
+        params.append(filters["status"])
+    if filters.get("overdue_only"):
+        conds.append("m.status <> 'achieved' AND m.plan_date < CURRENT_DATE")
+
+    where = "WHERE " + " AND ".join(conds)
+    cur.execute(f"""
+        SELECT m.id, m.title, m.milestone_type, m.plan_date_original, m.plan_date, m.fact_date,
+               m.status, m.achievement_criteria, m.achievement_evidence, m.reschedule_count,
+               m.reschedule_reason, m.project_id, p.title AS project_title,
+               m.initiative_id, ei.title AS initiative_title,
+               m.responsible_person_id, per.display_name AS responsible_name,
+               m.confirmed_by_person_id, m.confirmed_at,
+               (m.status <> 'achieved' AND m.plan_date < CURRENT_DATE) AS is_overdue,
+               CASE WHEN m.plan_date_original IS NOT NULL
+                    THEN (m.plan_date - m.plan_date_original) ELSE NULL END AS deviation_days,
+               (SELECT count(*) FROM {SCHEMA}.exec_task t WHERE t.milestone_id = m.id AND t.archived_at IS NULL) AS dependent_task_count
+        FROM {SCHEMA}.exec_milestone m
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = m.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative ei ON ei.id = m.initiative_id
+        LEFT JOIN {SCHEMA}.exec_person per ON per.id = m.responsible_person_id
+        {where}
+        ORDER BY m.plan_date
+    """, params)
+    return rows(cur)
+
+
+# ---------- ЗАВИСИМОСТИ РАСПИСАНИЯ ----------
+
+def _dependency_object_exists(cur, kind: str, oid: int) -> bool:
+    table = DEPENDENCY_KIND_TABLE.get(kind)
+    if not table:
+        return False
+    cur.execute(f"SELECT 1 FROM {SCHEMA}.{table} WHERE id = %s", (oid,))
+    return cur.fetchone() is not None
+
+
+def _has_dependency_cycle(cur, new_src_kind, new_src_id, new_tgt_kind, new_tgt_id) -> bool:
+    """Обходит граф зависимостей от новой цели (tgt) — если можно дойти
+    обратно до источника (src), добавление создаст цикл."""
+    cur.execute(f"""
+        SELECT src_kind, src_id, tgt_kind, tgt_id FROM {SCHEMA}.exec_schedule_dependency
+        WHERE archived_at IS NULL
+    """)
+    edges = rows(cur)
+    edges.append({"src_kind": new_src_kind, "src_id": new_src_id, "tgt_kind": new_tgt_kind, "tgt_id": new_tgt_id})
+
+    adjacency: dict = {}
+    for e in edges:
+        key = (e["src_kind"], e["src_id"])
+        adjacency.setdefault(key, []).append((e["tgt_kind"], e["tgt_id"]))
+
+    start = (new_tgt_kind, new_tgt_id)
+    target = (new_src_kind, new_src_id)
+    visited = set()
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        if node == target:
+            return True
+        if node in visited:
+            continue
+        visited.add(node)
+        stack.extend(adjacency.get(node, []))
+    return False
+
+
+def save_dependency(cur, body: dict, actor: str):
+    dep_type = body.get("dependency_type", "FS")
+    src_kind, src_id = body.get("src_kind"), as_int(body.get("src_id"))
+    tgt_kind, tgt_id = body.get("tgt_kind"), as_int(body.get("tgt_id"))
+
+    if dep_type not in DEPENDENCY_TYPES:
+        return None, "Недопустимый тип зависимости"
+    if src_kind not in DEPENDENCY_KINDS or tgt_kind not in DEPENDENCY_KINDS:
+        return None, "Недопустимый тип объекта зависимости"
+    if not src_id or not tgt_id:
+        return None, "Не указан один из объектов зависимости"
+    if src_kind == tgt_kind and src_id == tgt_id:
+        return None, "Нельзя создать зависимость объекта от самого себя"
+    if not _dependency_object_exists(cur, src_kind, src_id):
+        return None, f"Исходный объект ({src_kind} #{src_id}) не найден"
+    if not _dependency_object_exists(cur, tgt_kind, tgt_id):
+        return None, f"Целевой объект ({tgt_kind} #{tgt_id}) не найден"
+
+    cur.execute(f"""
+        SELECT id FROM {SCHEMA}.exec_schedule_dependency
+        WHERE dependency_type = %s AND src_kind = %s AND src_id = %s
+          AND tgt_kind = %s AND tgt_id = %s AND archived_at IS NULL
+    """, (dep_type, src_kind, src_id, tgt_kind, tgt_id))
+    if cur.fetchone():
+        return None, "Такая зависимость уже существует"
+
+    if _has_dependency_cycle(cur, src_kind, src_id, tgt_kind, tgt_id):
+        return None, "Эта зависимость создаёт цикл (объект косвенно зависит сам от себя) — сохранение отклонено"
+
+    lag_days = as_int(body.get("lag_days")) or 0
+    lag_kind = body.get("lag_kind", "calendar")
+    if lag_kind not in ("calendar", "working"):
+        return None, "Недопустимый вид лага"
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_schedule_dependency
+            (dependency_type, src_kind, src_id, tgt_kind, tgt_id, lag_days, lag_kind, note, created_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+    """, (dep_type, src_kind, src_id, tgt_kind, tgt_id, lag_days, lag_kind, body.get("note"), actor))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "schedule_dependency", new_id, "create",
+               after={"type": dep_type, "src": f"{src_kind}#{src_id}", "tgt": f"{tgt_kind}#{tgt_id}"})
+    return new_id, None
+
+
+def archive_dependency(cur, did, actor):
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_schedule_dependency SET archived_at = now(), archived_by = %s
+        WHERE id = %s AND archived_at IS NULL RETURNING id
+    """, (actor, did))
+    r = cur.fetchone()
+    if r:
+        log_change(cur, actor, "schedule_dependency", did, "archive")
+    return r[0] if r else None
+
+
+def list_dependencies(cur, kind: str = None, oid: int = None):
+    conds = ["archived_at IS NULL"]
+    params = []
+    if kind and oid:
+        conds.append("((src_kind = %s AND src_id = %s) OR (tgt_kind = %s AND tgt_id = %s))")
+        params += [kind, oid, kind, oid]
+    where = "WHERE " + " AND ".join(conds)
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_schedule_dependency {where} ORDER BY created_at DESC", params)
+    return rows(cur)
+
+
+# ---------- BASELINE (ВЕРСИИ РАСПИСАНИЯ) ----------
+
+def _project_schedule_payload(cur, project_id: int):
+    p = fetch_one(cur, "exec_project", project_id)
+    if not p:
+        return None
+    cur.execute(f"SELECT id, title, plan_start, plan_end FROM {SCHEMA}.exec_project_stage WHERE project_id = %s", (project_id,))
+    stages = rows(cur)
+    cur.execute(f"SELECT id, title, due_at FROM {SCHEMA}.exec_task WHERE project_id = %s AND archived_at IS NULL", (project_id,))
+    tasks = rows(cur)
+    cur.execute(f"SELECT id, title, plan_date FROM {SCHEMA}.exec_milestone WHERE project_id = %s", (project_id,))
+    milestones = rows(cur)
+    return {
+        "project": {"id": p["id"], "title": p["title"], "plan_start": p["plan_start"], "plan_end": p["plan_end"]},
+        "stages": stages, "tasks": tasks, "milestones": milestones,
+    }
+
+
+def create_baseline(cur, body: dict, actor: str):
+    scope_kind = body.get("scope_kind", "project")
+    scope_id = as_int(body.get("scope_id"))
+    if scope_kind not in ("project", "portfolio"):
+        return None, "Недопустимая область baseline"
+    if scope_kind == "project" and not scope_id:
+        return None, "Не указан проект"
+
+    if scope_kind == "project":
+        payload = _project_schedule_payload(cur, scope_id)
+        if payload is None:
+            return None, "Проект не найден"
+    else:
+        cur.execute(f"SELECT id FROM {SCHEMA}.exec_project WHERE archived_at IS NULL AND is_test_data = false")
+        pids = [r["id"] for r in rows(cur)]
+        payload = {"projects": [_project_schedule_payload(cur, pid) for pid in pids]}
+
+    payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+
+    cur.execute(f"""
+        SELECT COALESCE(MAX(version_number), 0) FROM {SCHEMA}.exec_schedule_baseline
+        WHERE scope_kind = %s AND scope_id IS NOT DISTINCT FROM %s
+    """, (scope_kind, scope_id))
+    next_version = cur.fetchone()[0] + 1
+    title = body.get("title") or f"Baseline {scope_kind} — версия {next_version}"
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_schedule_baseline
+            (scope_kind, scope_id, title, version_number, payload_json, payload_sha256, is_test_data, created_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id, created_at
+    """, (scope_kind, scope_id, title, next_version, payload_str, payload_hash, bool(body.get("is_test_data")), actor))
+    row = cur.fetchone()
+    log_change(cur, actor, "schedule_baseline", row[0], "create",
+               after={"scope_kind": scope_kind, "scope_id": scope_id, "version_number": next_version})
+    return {"id": row[0], "created_at": row[1], "version_number": next_version, "payload_sha256": payload_hash, "title": title}, None
+
+
+def list_baselines(cur, scope_kind=None, scope_id=None):
+    conds = []
+    params = []
+    if scope_kind:
+        conds.append("scope_kind = %s")
+        params.append(scope_kind)
+    if scope_id:
+        conds.append("scope_id = %s")
+        params.append(scope_id)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    cur.execute(f"""
+        SELECT id, scope_kind, scope_id, title, version_number, payload_sha256, created_by, created_at, is_test_data
+        FROM {SCHEMA}.exec_schedule_baseline {where} ORDER BY created_at DESC
+    """, params)
+    return rows(cur)
+
+
+def get_baseline(cur, bid: int):
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_schedule_baseline WHERE id = %s", (bid,))
+    r = rows(cur)
+    if not r:
+        return None
+    item = r[0]
+    payload_str = item.pop("payload_json")
+    actual_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    item["payload"] = json.loads(payload_str)
+    item["integrity_ok"] = item.get("payload_sha256") == actual_hash
+    return item
+
+
 def handler(event: dict, context) -> dict:
     """Поручения и портфель: проекты/мероприятия, задачи, результаты, эффекты,
     гибкие связи (exec_link) и сводный дашборд руководителя. AI не используется."""
@@ -819,6 +1185,73 @@ def handler(event: dict, context) -> dict:
             if not snap:
                 return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
             return cors({"ok": True, "data": snap})
+
+        # ============ ДОРОЖНАЯ КАРТА И ШКАЛА ВЕХ ============
+
+        if action == "roadmap":
+            filters = {
+                "initiative_id": as_int(qs.get("initiative_id")),
+                "project_kind": qs.get("project_kind"),
+                "status": qs.get("status"),
+                "priority": qs.get("priority"),
+                "owner_person_id": as_int(qs.get("owner_person_id")),
+                "overdue_only": qs.get("overdue_only") == "1",
+                "critical_risk_only": qs.get("critical_risk_only") == "1",
+                "resource_gap_only": qs.get("resource_gap_only") == "1",
+                "overbudget_only": qs.get("overbudget_only") == "1",
+            }
+            data = roadmap_data(cur, qs.get("date_from"), qs.get("date_to"), filters)
+            return cors({"ok": True, "data": data})
+
+        if action == "milestones_timeline":
+            filters = {
+                "project_id": as_int(qs.get("project_id")),
+                "initiative_id": as_int(qs.get("initiative_id")),
+                "status": qs.get("status"),
+                "overdue_only": qs.get("overdue_only") == "1",
+            }
+            items = milestones_timeline(cur, qs.get("date_from"), qs.get("date_to"), filters)
+            return cors({"ok": True, "data": {"items": items}})
+
+        # ============ ЗАВИСИМОСТИ РАСПИСАНИЯ ============
+
+        if action == "save_dependency":
+            did, err = save_dependency(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": did}})
+
+        if action == "archive_dependency":
+            did = archive_dependency(cur, as_int(body.get("id")), user["email"])
+            conn.commit()
+            if not did:
+                return cors({"ok": False, "error": {"message": "Зависимость не найдена или уже архивирована"}}, 404)
+            return cors({"ok": True, "data": {"id": did}})
+
+        if action == "dependencies":
+            items = list_dependencies(cur, qs.get("kind"), as_int(qs.get("id")))
+            return cors({"ok": True, "data": {"items": items}})
+
+        # ============ BASELINE (ВЕРСИИ РАСПИСАНИЯ) ============
+
+        if action == "create_baseline":
+            result, err = create_baseline(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": result})
+
+        if action == "baselines":
+            items = list_baselines(cur, qs.get("scope_kind"), as_int(qs.get("scope_id")))
+            return cors({"ok": True, "data": {"items": items}})
+
+        if action == "baseline":
+            bid = as_int(qs.get("id"))
+            item = get_baseline(cur, bid) if bid else None
+            if not item:
+                return cors({"ok": False, "error": {"message": "Baseline не найден"}}, 404)
+            return cors({"ok": True, "data": item})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
     finally:
