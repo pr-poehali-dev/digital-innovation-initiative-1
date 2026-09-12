@@ -38,6 +38,9 @@ LINKABLE = {
     "issue": ("exec_issue", "title"),
     "decision": ("exec_decision_instance", "question"),
     "doc_source": ("doc_source", "title"),
+    "goal": ("exec_center_goal", "title"),
+    "indicator": ("exec_indicator", "title"),
+    "center_function": ("exec_center_function", "title"),
 }
 
 LINK_TYPE_LABEL = {

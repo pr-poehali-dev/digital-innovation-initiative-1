@@ -1,6 +1,9 @@
 import json
 import os
+import io
+import base64
 import hashlib
+import datetime
 import psycopg2
 
 DB = os.environ["DATABASE_URL"]
@@ -114,7 +117,38 @@ GOAL_FIELDS = [
     "center_id", "parent_goal_id", "kind", "title", "description", "metric",
     "baseline_value", "target_value", "horizon", "due_date",
     "owner_person_id", "status", "progress_pct", "sort_order",
+    "goal_level", "code", "org_unit_id", "priority", "valid_from", "valid_to",
+    "achievement_criteria", "actual_date", "progress_mode", "manual_status_confirmed",
 ]
+GOAL_LEVELS = ("strategic", "organization", "center", "org_unit", "initiative", "project")
+GOAL_STATUSES = ("draft", "agreed", "active", "achieved", "paused", "cancelled", "archived")
+
+INDICATOR_FIELDS = [
+    "code", "title", "purpose", "indicator_type", "unit", "improvement_direction",
+    "periodicity", "owner_person_id", "data_entry_person_id", "data_source",
+    "baseline_value", "target_value", "threshold_yellow", "threshold_red",
+    "range_min", "range_max", "is_calculated", "active_methodology_id",
+    "applicability", "status",
+]
+INDICATOR_TYPES = ("kpi", "performance", "effect", "process", "quality",
+                    "deadline", "financial", "resource", "risk", "informational")
+IMPROVEMENT_DIRECTIONS = ("higher_is_better", "lower_is_better", "in_range", "target_exact", "observe_only")
+
+METHODOLOGY_FIELDS = [
+    "indicator_id", "description_text", "formula_kind", "numerator_desc",
+    "denominator_desc", "rounding_rule", "period_kind", "exceptions_text",
+    "component_sources", "document_source_id", "approved_at", "approved_by", "status",
+]
+FORMULA_KINDS = ("manual", "sum", "average", "percentage", "ratio", "difference", "running_total")
+
+INDICATOR_VALUE_FIELDS = [
+    "indicator_id", "methodology_id", "period_kind", "period_start", "period_end",
+    "plan_value", "actual_value", "forecast_value", "threshold_value", "unit",
+    "data_source", "received_at", "entered_by", "confirmed_by",
+    "verification_status", "comment",
+]
+
+GOAL_INDICATOR_FIELDS = ["goal_id", "indicator_id", "weight_pct", "note"]
 FUNC_FIELDS = [
     "center_id", "code", "title", "description", "purpose", "result_description",
     "goal_id", "criticality", "work_category",
@@ -166,16 +200,30 @@ INT_KEYS = {
     "competency_id", "required_level", "function_id", "dept_function_id",
     "step_id", "share_pct", "org_unit_id", "parent_id", "role_id",
     "version_id", "requirement_id", "year",
+    "indicator_id", "methodology_id", "data_entry_person_id",
+    "active_methodology_id", "document_source_id",
 }
 NUM_KEYS = {
     "hours_per_month", "fte_estimate", "headcount", "hours_per_week",
     "center_hours_per_week", "reserve_pct", "annual_fund_hours", "backup_coverage_pct",
     "cost_per_month", "fte", "planned_fte", "available_fte",
-    "operational_demand_fte", "external_fte", "fot_plan_amount",
+    "operational_demand_fte", "external_fte", "fot_plan_amount", "weight_pct",
+}
+# baseline_value/target_value/threshold_*/range_*/plan_value/actual_value/
+# forecast_value/threshold_value НЕ включены в глобальный NUM_KEYS: те же
+# имена в exec_center_goal (baseline_value/target_value) — свободный текст
+# VARCHAR ("15%", "3 месяца"), а в exec_indicator/exec_indicator_value —
+# NUMERIC. clean() определяет тип по имени поля без учёта таблицы, поэтому
+# для показателей и значений числа приводятся явно в save_indicator*/
+# save_indicator_value ниже, а не через общий upsert().
+INDICATOR_NUM_KEYS = {
+    "baseline_value", "target_value", "threshold_yellow", "threshold_red",
+    "range_min", "range_max", "plan_value", "actual_value",
+    "forecast_value", "threshold_value",
 }
 
 
-def clean(d: dict, fields: list) -> dict:
+def clean(d: dict, fields: list, extra_num_keys: set = frozenset()) -> dict:
     vals = {}
     for f in fields:
         if f not in d:
@@ -183,7 +231,7 @@ def clean(d: dict, fields: list) -> dict:
         v = d.get(f)
         if f in INT_KEYS:
             v = as_int(v)
-        elif f in NUM_KEYS:
+        elif f in NUM_KEYS or f in extra_num_keys:
             v = as_num(v)
         else:
             v = nz(v)
@@ -191,18 +239,20 @@ def clean(d: dict, fields: list) -> dict:
     return vals
 
 
-def upsert(cur, table: str, fields: list, d: dict, require_title: bool = True):
+def upsert(cur, table: str, fields: list, d: dict, require_title: bool = True,
+           extra_num_keys: set = frozenset(), has_updated_at: bool = True):
     """Создаёт или обновляет запись. Возвращает (id, ошибка)."""
     rid = as_int(d.get("id"))
-    vals = clean(d, fields)
+    vals = clean(d, fields, extra_num_keys)
     if require_title and not rid and not vals.get("title"):
         return None, "Не указано название"
     if not vals:
         return rid, None
     if rid:
         sets = ", ".join(f"{k} = %s" for k in vals)
+        touch = ", updated_at = now()" if has_updated_at else ""
         cur.execute(
-            f"UPDATE {SCHEMA}.{table} SET {sets}, updated_at = now() WHERE id = %s RETURNING id",
+            f"UPDATE {SCHEMA}.{table} SET {sets}{touch} WHERE id = %s RETURNING id",
             list(vals.values()) + [rid],
         )
     else:
@@ -1442,6 +1492,756 @@ def get_org_resource_plan_snapshot(cur, sid: int):
     return item
 
 
+# ============================================================
+# ЦЕЛИ, KPI И ЭФФЕКТЫ
+# Иерархия: стратегическая цель → цель организации → цель Центра →
+# цель подразделения → цель инициативы → цель проекта (exec_center_goal,
+# goal_level). Показатели — единый реестр exec_indicator, значения по
+# периодам — exec_indicator_value, методика — версионируемая
+# exec_indicator_methodology. Связи цели с функциями/инициативами/
+# проектами/результатами/эффектами — через exec_link (goal/indicator в
+# LINKABLE в exec-portfolio), без дублирования данных объектов.
+# ============================================================
+
+def save_indicator(cur, body, actor):
+    iid = as_int(body.get("id"))
+    ind_type = body.get("indicator_type", "kpi")
+    direction = body.get("improvement_direction", "higher_is_better")
+    if ind_type not in INDICATOR_TYPES:
+        return None, "Недопустимый тип показателя"
+    if direction not in IMPROVEMENT_DIRECTIONS:
+        return None, "Недопустимое направление улучшения"
+    if body.get("is_calculated") and not as_int(body.get("active_methodology_id")):
+        return None, "Показатель нельзя пометить автоматически рассчитываемым без активной методики"
+    new_id, err = upsert(cur, "exec_indicator", INDICATOR_FIELDS, body,
+                          extra_num_keys=INDICATOR_NUM_KEYS)
+    if err:
+        return None, err
+    log_change(cur, actor, "indicator", new_id, "update" if iid else "create",
+               after=clean(body, INDICATOR_FIELDS, INDICATOR_NUM_KEYS))
+    return new_id, None
+
+
+def save_methodology(cur, body, actor):
+    """Новая методика — это ВСЕГДА новая версия (INSERT), не UPDATE
+    существующей: старые значения показателя должны сохранить ссылку на
+    версию методики, по которой были рассчитаны, и не пересчитываются
+    задним числом при изменении формулы."""
+    indicator_id = as_int(body.get("indicator_id"))
+    if not indicator_id:
+        return None, "Не указан показатель"
+    formula_kind = body.get("formula_kind", "manual")
+    if formula_kind not in FORMULA_KINDS:
+        return None, "Недопустимый вид формулы"
+
+    cur.execute(
+        f"SELECT COALESCE(MAX(version_number), 0) FROM {SCHEMA}.exec_indicator_methodology "
+        f"WHERE indicator_id = %s", (indicator_id,))
+    next_version = cur.fetchone()[0] + 1
+
+    vals = clean(body, METHODOLOGY_FIELDS)
+    vals["indicator_id"] = indicator_id
+    vals["version_number"] = next_version
+    vals["formula_kind"] = formula_kind
+    vals.setdefault("status", "active")
+    cols = ", ".join(vals)
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_indicator_methodology ({cols}) VALUES ({ph}) RETURNING id",
+        list(vals.values()))
+    new_id = cur.fetchone()[0]
+
+    # Предыдущие активные версии этого показателя помечаем superseded —
+    # они остаются в таблице (история не удаляется), просто больше не активны.
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_indicator_methodology SET status = 'superseded'
+        WHERE indicator_id = %s AND id <> %s AND status = 'active'
+    """, (indicator_id, new_id))
+
+    if vals.get("status") == "active":
+        cur.execute(f"""
+            UPDATE {SCHEMA}.exec_indicator SET active_methodology_id = %s, updated_at = now()
+            WHERE id = %s
+        """, (new_id, indicator_id))
+
+    log_change(cur, actor, "indicator_methodology", new_id, "create",
+               after={"indicator_id": indicator_id, "version_number": next_version})
+    return new_id, None
+
+
+def save_indicator_value(cur, body, actor):
+    """Исправление факта не перезаписывает существующую строку: если для
+    (indicator_id, period_start) уже есть значение — старое помечается
+    superseded_by_id, новое создаётся отдельной строкой (история сохраняется)."""
+    indicator_id = as_int(body.get("indicator_id"))
+    period_start = body.get("period_start")
+    if not indicator_id or not period_start:
+        return None, "Укажите показатель и начало периода"
+    period_kind = body.get("period_kind", "monthly")
+    if period_kind not in ("date", "monthly", "quarterly", "yearly", "custom"):
+        return None, "Недопустимый тип периода"
+
+    cur.execute(f"""
+        SELECT id FROM {SCHEMA}.exec_indicator_value
+        WHERE indicator_id = %s AND period_start = %s AND superseded_by_id IS NULL
+        ORDER BY id DESC LIMIT 1
+    """, (indicator_id, period_start))
+    prev = cur.fetchone()
+
+    vals = clean(body, INDICATOR_VALUE_FIELDS, INDICATOR_NUM_KEYS)
+    vals["indicator_id"] = indicator_id
+    vals.setdefault("entered_by", actor)
+    cols = ", ".join(vals)
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_indicator_value ({cols}) VALUES ({ph}) RETURNING id",
+        list(vals.values()))
+    new_id = cur.fetchone()[0]
+
+    if prev:
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_indicator_value SET superseded_by_id = %s WHERE id = %s",
+            (new_id, prev[0]))
+
+    log_change(cur, actor, "indicator_value", new_id, "create",
+               after={"indicator_id": indicator_id, "period_start": str(period_start)})
+    return new_id, None
+
+
+def confirm_indicator_value(cur, body, actor):
+    vid = as_int(body.get("id"))
+    if not vid:
+        return None, "Не указано значение"
+    status = body.get("verification_status", "confirmed")
+    if status not in ("unconfirmed", "confirmed", "disputed"):
+        return None, "Недопустимый статус подтверждения"
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_indicator_value SET verification_status = %s, confirmed_by = %s
+        WHERE id = %s RETURNING id
+    """, (status, actor, vid))
+    r = cur.fetchone()
+    if not r:
+        return None, "Значение не найдено"
+    log_change(cur, actor, "indicator_value", vid, "confirm", after={"verification_status": status})
+    return vid, None
+
+
+def indicator_latest_value(cur, indicator_id: int):
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_indicator_value
+        WHERE indicator_id = %s AND superseded_by_id IS NULL
+        ORDER BY period_start DESC LIMIT 1
+    """, (indicator_id,))
+    r = rows(cur)
+    return r[0] if r else None
+
+
+def indicator_status_light(indicator: dict, latest_value: dict | None):
+    """Светофор: зелёный/жёлтый/красный/серый. Правила прозрачны и
+    возвращаются вместе со статусом (план, факт, отклонение, формула).
+    Нельзя показать зелёный при отсутствии фактических данных."""
+    direction = indicator.get("improvement_direction", "higher_is_better")
+    if not latest_value or latest_value.get("actual_value") is None:
+        return {"color": "gray", "reason": "Нет фактических данных",
+                "plan": None, "actual": None, "deviation": None}
+
+    actual = float(latest_value["actual_value"])
+    plan = float(latest_value["plan_value"]) if latest_value.get("plan_value") is not None else None
+    target = float(indicator["target_value"]) if indicator.get("target_value") is not None else plan
+    yellow = float(indicator["threshold_yellow"]) if indicator.get("threshold_yellow") is not None else None
+    red = float(indicator["threshold_red"]) if indicator.get("threshold_red") is not None else None
+    range_min = float(indicator["range_min"]) if indicator.get("range_min") is not None else None
+    range_max = float(indicator["range_max"]) if indicator.get("range_max") is not None else None
+
+    deviation = (actual - target) if target is not None else None
+
+    if direction == "observe_only":
+        return {"color": "gray", "reason": "Показатель только наблюдается, статус не рассчитывается",
+                "plan": plan, "actual": actual, "deviation": deviation}
+
+    if direction == "in_range":
+        if range_min is not None and range_max is not None:
+            if range_min <= actual <= range_max:
+                color, reason = "green", f"Значение {actual} в диапазоне [{range_min}; {range_max}]"
+            else:
+                color, reason = "red", f"Значение {actual} вне диапазона [{range_min}; {range_max}]"
+        else:
+            color, reason = "gray", "Диапазон не задан"
+        return {"color": color, "reason": reason, "plan": plan, "actual": actual, "deviation": deviation}
+
+    if direction == "target_exact":
+        color = "green" if target is not None and actual == target else "red"
+        reason = f"Требуется точное значение {target}, факт {actual}"
+        return {"color": color, "reason": reason, "plan": plan, "actual": actual, "deviation": deviation}
+
+    # higher_is_better / lower_is_better — по порогам относительно target
+    if target is None:
+        return {"color": "gray", "reason": "Не задано целевое значение",
+                "plan": plan, "actual": actual, "deviation": deviation}
+
+    better = (lambda a, b: a >= b) if direction == "higher_is_better" else (lambda a, b: a <= b)
+
+    if better(actual, target):
+        color, reason = "green", f"Факт {actual} достигает цели {target}"
+    elif red is not None and not better(actual, red):
+        color, reason = "red", f"Факт {actual} хуже порога критичности {red}"
+    elif yellow is not None and not better(actual, yellow):
+        color, reason = "yellow", f"Факт {actual} между порогом предупреждения {yellow} и целью {target}"
+    elif yellow is not None or red is not None:
+        color, reason = "yellow", f"Факт {actual} отклоняется от цели {target}, но выше заданных порогов"
+    else:
+        color, reason = "yellow", f"Факт {actual} не достигает цели {target}, пороги не заданы — требует внимания"
+
+    return {"color": color, "reason": reason, "plan": plan, "actual": actual, "deviation": deviation}
+
+
+def indicator_with_status(cur, indicator: dict):
+    latest = indicator_latest_value(cur, indicator["id"])
+    indicator["latest_value"] = latest
+    indicator["status_light"] = indicator_status_light(indicator, latest)
+    warnings = []
+    if not indicator.get("owner_person_id"):
+        warnings.append("Нет владельца показателя")
+    if indicator.get("is_calculated") and not indicator.get("active_methodology_id"):
+        warnings.append("Нет активной методики расчёта")
+    if not indicator.get("data_source"):
+        warnings.append("Не указан источник данных")
+    if indicator.get("baseline_value") is None:
+        warnings.append("Не задано базовое значение")
+    if latest and latest.get("verification_status") != "confirmed":
+        warnings.append("Факт не подтверждён")
+    if latest and latest.get("actual_value") is not None:
+        try:
+            from datetime import date, timedelta
+            period_end = latest.get("period_end") or latest.get("period_start")
+            if isinstance(period_end, str):
+                period_end = date.fromisoformat(period_end)
+            if period_end and (date.today() - period_end) > timedelta(days=95):
+                warnings.append("Фактическое значение устарело (более 3 месяцев)")
+        except (TypeError, ValueError):
+            pass
+    indicator["data_quality_warnings"] = warnings
+    return indicator
+
+
+def list_indicators(cur, applicability="active"):
+    cur.execute(f"""
+        SELECT i.*, p.display_name AS owner_name, de.display_name AS data_entry_name
+        FROM {SCHEMA}.exec_indicator i
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = i.owner_person_id
+        LEFT JOIN {SCHEMA}.exec_person de ON de.id = i.data_entry_person_id
+        WHERE i.is_test_data = false AND i.applicability = %s
+        ORDER BY i.title
+    """, (applicability,))
+    items = rows(cur)
+    return [indicator_with_status(cur, it) for it in items]
+
+
+def indicator_detail(cur, indicator_id: int):
+    cur.execute(f"""
+        SELECT i.*, p.display_name AS owner_name, de.display_name AS data_entry_name
+        FROM {SCHEMA}.exec_indicator i
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = i.owner_person_id
+        LEFT JOIN {SCHEMA}.exec_person de ON de.id = i.data_entry_person_id
+        WHERE i.id = %s
+    """, (indicator_id,))
+    item = rows(cur)
+    if not item:
+        return None
+    indicator = indicator_with_status(cur, item[0])
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_indicator_methodology
+        WHERE indicator_id = %s ORDER BY version_number DESC
+    """, (indicator_id,))
+    indicator["methodology_versions"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_indicator_value
+        WHERE indicator_id = %s ORDER BY period_start DESC LIMIT 36
+    """, (indicator_id,))
+    indicator["values"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT gi.goal_id, g.title AS goal_title, gi.weight_pct
+        FROM {SCHEMA}.exec_goal_indicator gi
+        JOIN {SCHEMA}.exec_center_goal g ON g.id = gi.goal_id
+        WHERE gi.indicator_id = %s
+    """, (indicator_id,))
+    indicator["goals"] = rows(cur)
+    return indicator
+
+
+def save_goal_indicator(cur, body, actor):
+    goal_id = as_int(body.get("goal_id"))
+    indicator_id = as_int(body.get("indicator_id"))
+    if not goal_id or not indicator_id:
+        return None, "Укажите цель и показатель"
+    weight = as_num(body.get("weight_pct"))
+
+    if weight is not None:
+        cur.execute(f"""
+            SELECT COALESCE(SUM(weight_pct), 0) FROM {SCHEMA}.exec_goal_indicator
+            WHERE goal_id = %s AND indicator_id <> %s
+        """, (goal_id, indicator_id))
+        other_weight = float(cur.fetchone()[0] or 0)
+        if other_weight + weight > 100.01:
+            return None, f"Сумма весов превысит 100% (уже занято {other_weight}%, добавляется {weight}%)"
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_goal_indicator (goal_id, indicator_id, weight_pct, note)
+        VALUES (%s,%s,%s,%s)
+        ON CONFLICT (goal_id, indicator_id) DO UPDATE SET weight_pct = EXCLUDED.weight_pct, note = EXCLUDED.note
+        RETURNING id
+    """, (goal_id, indicator_id, weight, nz(body.get("note"))))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "goal_indicator", new_id, "create",
+               after={"goal_id": goal_id, "indicator_id": indicator_id, "weight_pct": weight})
+    return new_id, None
+
+
+def goal_progress(cur, goal_id: int, goal_row: dict | None = None):
+    """Прогресс цели по progress_mode. Автоматический расчёт — подсказка:
+    manual_status_confirmed фиксирует, что владелец видел и подтвердил
+    расчёт (сами исходные значения остаются видимыми в любом случае)."""
+    if goal_row is None:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_center_goal WHERE id = %s", (goal_id,))
+        r = rows(cur)
+        if not r:
+            return None
+        goal_row = r[0]
+
+    mode = goal_row.get("progress_mode", "manual")
+
+    if mode == "manual":
+        return {"mode": "manual", "progress_pct": goal_row.get("progress_pct"), "details": []}
+
+    if mode in ("by_indicators", "weighted"):
+        cur.execute(f"""
+            SELECT gi.indicator_id, gi.weight_pct, i.*
+            FROM {SCHEMA}.exec_goal_indicator gi
+            JOIN {SCHEMA}.exec_indicator i ON i.id = gi.indicator_id
+            WHERE gi.goal_id = %s
+        """, (goal_id,))
+        links = rows(cur)
+        if not links:
+            return {"mode": mode, "progress_pct": None, "details": [],
+                    "warning": "К цели не привязано ни одного показателя"}
+
+        details = []
+        weighted_sum = 0.0
+        weight_total = 0.0
+        no_data = []
+        for link in links:
+            latest = indicator_latest_value(cur, link["indicator_id"])
+            light = indicator_status_light(link, latest)
+            achievement = None
+            if light["actual"] is not None and link.get("target_value") is not None:
+                target = float(link["target_value"])
+                baseline = float(link["baseline_value"]) if link.get("baseline_value") is not None else 0.0
+                direction = link.get("improvement_direction", "higher_is_better")
+                span = (target - baseline)
+                if span != 0:
+                    progress = (light["actual"] - baseline) / span * 100
+                    if direction == "lower_is_better":
+                        progress = 100 - progress if baseline != target else progress
+                    achievement = max(0.0, min(100.0, progress))
+            details.append({
+                "indicator_id": link["indicator_id"], "title": link["title"],
+                "weight_pct": link.get("weight_pct"), "status_light": light,
+                "achievement_pct": achievement,
+            })
+            if achievement is None:
+                no_data.append(link["title"])
+                continue
+            w = float(link.get("weight_pct") or 0) if mode == "weighted" else (100.0 / len(links))
+            weighted_sum += achievement * w
+            weight_total += w
+
+        progress_pct = round(weighted_sum / weight_total, 1) if weight_total > 0 else None
+        result = {"mode": mode, "progress_pct": progress_pct, "details": details}
+        if no_data:
+            result["warning"] = f"Нет данных для показателей: {', '.join(no_data)} — исключены из расчёта"
+        if mode == "weighted":
+            total_weight = sum(float(l.get("weight_pct") or 0) for l in links)
+            if abs(total_weight - 100) > 0.5:
+                result["weight_warning"] = f"Сумма весов показателей цели равна {total_weight}%, а не 100%"
+        return result
+
+    if mode == "by_children":
+        cur.execute(f"""
+            SELECT * FROM {SCHEMA}.exec_center_goal WHERE parent_goal_id = %s
+              AND status NOT IN ('cancelled','archived')
+        """, (goal_id,))
+        children = rows(cur)
+        if not children:
+            return {"mode": "by_children", "progress_pct": None, "details": [],
+                    "warning": "У цели нет активных подцелей"}
+        child_progresses = []
+        for child in children:
+            cp = goal_progress(cur, child["id"], child)
+            child_progresses.append({"goal_id": child["id"], "title": child["title"],
+                                      "progress_pct": cp.get("progress_pct") if cp else None})
+        valid = [c["progress_pct"] for c in child_progresses if c["progress_pct"] is not None]
+        avg = round(sum(valid) / len(valid), 1) if valid else None
+        return {"mode": "by_children", "progress_pct": avg, "details": child_progresses}
+
+    return {"mode": mode, "progress_pct": goal_row.get("progress_pct"), "details": []}
+
+
+def goal_is_overdue(goal_row: dict) -> bool:
+    if not goal_row.get("due_date") or goal_row.get("status") in ("achieved", "cancelled", "archived"):
+        return False
+    from datetime import date
+    due = goal_row["due_date"]
+    if isinstance(due, str):
+        due = date.fromisoformat(due)
+    return due < date.today()
+
+
+def goal_detail(cur, goal_id: int):
+    cur.execute(f"""
+        SELECT g.*, p.display_name AS owner_name, u.name AS org_unit_name,
+               pg.title AS parent_goal_title
+        FROM {SCHEMA}.exec_center_goal g
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = g.owner_person_id
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = g.org_unit_id
+        LEFT JOIN {SCHEMA}.exec_center_goal pg ON pg.id = g.parent_goal_id
+        WHERE g.id = %s
+    """, (goal_id,))
+    item = rows(cur)
+    if not item:
+        return None
+    goal = item[0]
+    goal["is_overdue"] = goal_is_overdue(goal)
+    goal["progress"] = goal_progress(cur, goal_id, goal)
+
+    cur.execute(f"""
+        SELECT id, title, status, goal_level FROM {SCHEMA}.exec_center_goal
+        WHERE parent_goal_id = %s ORDER BY sort_order, id
+    """, (goal_id,))
+    goal["children"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT gi.indicator_id, i.title, i.status AS indicator_status, gi.weight_pct
+        FROM {SCHEMA}.exec_goal_indicator gi
+        JOIN {SCHEMA}.exec_indicator i ON i.id = gi.indicator_id
+        WHERE gi.goal_id = %s
+    """, (goal_id,))
+    goal["indicators"] = rows(cur)
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_link
+        WHERE ((src_kind = 'goal' AND src_id = %s) OR (tgt_kind = 'goal' AND tgt_id = %s))
+          AND archived_at IS NULL
+    """, (goal_id, goal_id))
+    goal["links"] = rows(cur)
+    return goal
+
+
+def goals_tree(cur, center_id: int):
+    """Дерево целей: карточки с раскрытием, без графового редактора.
+    Возвращает плоский список с parent_goal_id — построение дерева на фронте."""
+    cur.execute(f"""
+        SELECT g.*, p.display_name AS owner_name, u.name AS org_unit_name
+        FROM {SCHEMA}.exec_center_goal g
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = g.owner_person_id
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = g.org_unit_id
+        WHERE g.center_id = %s AND g.is_test_data = false AND g.status <> 'archived'
+        ORDER BY g.goal_level, g.sort_order, g.id
+    """, (center_id,))
+    goals = rows(cur)
+    for g in goals:
+        g["is_overdue"] = goal_is_overdue(g)
+        prog = goal_progress(cur, g["id"], g)
+        g["progress"] = prog
+
+        cur.execute(f"""
+            SELECT COUNT(*) FROM {SCHEMA}.exec_link
+            WHERE src_kind = 'goal' AND src_id = %s AND archived_at IS NULL
+        """, (g["id"],))
+        g["links_count"] = cur.fetchone()[0]
+    return goals
+
+
+def goals_dashboard(cur, center_id: int):
+    """Главная страница раздела «Цели и показатели»."""
+    goals = goals_tree(cur, center_id)
+    active_goals = [g for g in goals if g["status"] in ("agreed", "active")]
+    achieved_goals = [g for g in goals if g["status"] == "achieved"]
+    overdue_goals = [g for g in goals if g["is_overdue"]]
+    at_risk_goals = [g for g in goals if g["progress"].get("progress_pct") is not None
+                      and g["progress"]["progress_pct"] < 50 and g["status"] == "active"]
+    goals_without_owner = [g for g in goals if not g.get("owner_person_id")]
+
+    indicators = list_indicators(cur)
+    indicators_no_data = [i for i in indicators if i["status_light"]["color"] == "gray"]
+    indicators_red = [i for i in indicators if i["status_light"]["color"] == "red"]
+    indicators_no_methodology_or_source = [
+        i for i in indicators if "Не указан источник данных" in i["data_quality_warnings"]
+        or "Нет активной методики расчёта" in i["data_quality_warnings"]
+    ]
+
+    cur.execute(f"""
+        SELECT r.id, r.title, r.result_kind FROM {SCHEMA}.exec_result r
+        WHERE r.archived_at IS NULL AND r.is_test_data = false AND r.verification_status = 'user_draft'
+        ORDER BY r.created_at DESC LIMIT 10
+    """)
+    results_pending = rows(cur)
+
+    cur.execute(f"""
+        SELECT e.id, e.title, e.metric FROM {SCHEMA}.exec_effect e
+        WHERE e.archived_at IS NULL AND COALESCE(e.is_test_data, false) = false
+          AND e.confirmation_status IN ('not_confirmed', 'pending_review')
+        ORDER BY e.updated_at DESC LIMIT 10
+    """)
+    effects_pending = rows(cur)
+
+    cur.execute(f"""
+        SELECT e.id, e.title, e.metric, e.actual_value, e.measured_at FROM {SCHEMA}.exec_effect e
+        WHERE e.archived_at IS NULL AND COALESCE(e.is_test_data, false) = false
+          AND e.confirmation_status = 'confirmed'
+          AND e.measured_at >= CURRENT_DATE - INTERVAL '90 days'
+        ORDER BY e.measured_at DESC LIMIT 20
+    """)
+    effects_confirmed_recent = rows(cur)
+
+    return {
+        "goals_total": len(goals), "active_goals_count": len(active_goals),
+        "achieved_goals_count": len(achieved_goals), "overdue_goals_count": len(overdue_goals),
+        "at_risk_goals": at_risk_goals, "goals_without_owner": goals_without_owner,
+        "indicators_total": len(indicators), "indicators_no_data_count": len(indicators_no_data),
+        "indicators_red_count": len(indicators_red),
+        "indicators_quality_issues": indicators_no_methodology_or_source,
+        "results_pending": results_pending, "effects_pending": effects_pending,
+        "effects_confirmed_recent": effects_confirmed_recent,
+        "goals": goals,
+    }
+
+
+def confirm_effect(cur, body, actor):
+    """Эффект нельзя подтвердить только потому, что проект завершён — нужны
+    фактическое значение, дата измерения, методика и источник."""
+    eid = as_int(body.get("id"))
+    if not eid:
+        return None, "Не указан эффект"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_effect WHERE id = %s", (eid,))
+    r = rows(cur)
+    if not r:
+        return None, "Эффект не найден"
+    effect = r[0]
+    missing = []
+    if effect.get("actual_value") is None:
+        missing.append("фактическое значение")
+    if not effect.get("measured_at"):
+        missing.append("дата измерения")
+    if not effect.get("calculation_method"):
+        missing.append("методика")
+    if not effect.get("data_source"):
+        missing.append("источник данных")
+    if missing:
+        return None, "Для подтверждения эффекта не хватает: " + ", ".join(missing)
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_effect SET confirmation_status = 'confirmed',
+            confirmed_by_person_id = %s, updated_at = now()
+        WHERE id = %s
+    """, (as_int(body.get("confirmed_by_person_id")) or None, eid))
+    log_change(cur, actor, "effect", eid, "confirm")
+    return eid, None
+
+
+def build_goals_report_payload(cur, center_id: int, period_from, period_to):
+    """Отчёт по достижению целей/KPI/эффектам — данные читаются один раз на
+    момент публикации и больше не меняются (снимок)."""
+    goals = goals_tree(cur, center_id)
+    indicators = list_indicators(cur)
+
+    cur.execute(f"""
+        SELECT v.*, i.title AS indicator_title FROM {SCHEMA}.exec_indicator_value v
+        JOIN {SCHEMA}.exec_indicator i ON i.id = v.indicator_id
+        WHERE v.superseded_by_id IS NULL AND v.is_test_data = false
+          {"AND v.period_start BETWEEN %s AND %s" if period_from and period_to else ""}
+        ORDER BY v.period_start DESC
+    """, (period_from, period_to) if period_from and period_to else ())
+    values = rows(cur)
+
+    deviations = [v for v in values if v.get("plan_value") is not None and v.get("actual_value") is not None
+                  and abs(float(v["actual_value"]) - float(v["plan_value"])) > 0]
+
+    cur.execute(f"""
+        SELECT r.id, r.title, r.result_kind, r.achieved_at, r.project_id, r.initiative_id
+        FROM {SCHEMA}.exec_result r WHERE r.archived_at IS NULL AND r.is_test_data = false
+        ORDER BY r.achieved_at DESC NULLS LAST
+    """)
+    results = rows(cur)
+
+    cur.execute(f"""
+        SELECT e.id, e.title, e.metric, e.baseline_value, e.plan_value, e.actual_value,
+               e.confirmation_status, e.result_id, e.calculation_method, e.data_source
+        FROM {SCHEMA}.exec_effect e WHERE e.archived_at IS NULL AND COALESCE(e.is_test_data, false) = false
+        ORDER BY e.updated_at DESC
+    """)
+    effects = rows(cur)
+
+    cur.execute(f"""
+        SELECT indicator_id, version_number, formula_kind, status, approved_at
+        FROM {SCHEMA}.exec_indicator_methodology WHERE is_test_data = false
+        ORDER BY indicator_id, version_number DESC
+    """)
+    methodologies = rows(cur)
+
+    return {
+        "generated_at": datetime.datetime.utcnow().isoformat(),
+        "goals": goals, "indicators": indicators, "values": values,
+        "deviations": deviations, "results": results, "effects": effects,
+        "methodologies": methodologies,
+        "indicators_no_data": [i for i in indicators if i["status_light"]["color"] == "gray"],
+    }
+
+
+def create_goals_report_snapshot(cur, body: dict, actor: str):
+    center_id = as_int(body.get("center_id"))
+    if not center_id:
+        return None, "Не указан центр"
+    period_from = body.get("period_from") or None
+    period_to = body.get("period_to") or None
+    report_kind = body.get("report_kind", "goals_achievement")
+
+    payload = build_goals_report_payload(cur, center_id, period_from, period_to)
+    payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+    payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    version_group = body.get("version_group") or f"{report_kind}_{center_id}"
+
+    cur.execute(
+        f"SELECT COALESCE(MAX(version_number), 0) FROM {SCHEMA}.exec_goals_report_snapshot "
+        f"WHERE version_group = %s", (version_group,))
+    next_version = cur.fetchone()[0] + 1
+    title = body.get("title") or f"Достижение целей — версия {next_version}"
+
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_goals_report_snapshot
+            (title, report_kind, period_from, period_to, payload_json, payload_sha256,
+             version_group, version_number, is_test_data, created_by)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id, created_at
+    """, (title, report_kind, period_from, period_to, payload_str, payload_hash,
+          version_group, next_version, bool(body.get("is_test_data")), actor))
+    row = cur.fetchone()
+    log_change(cur, actor, "goals_report_snapshot", row[0], "create",
+               after={"version_group": version_group, "payload_sha256": payload_hash})
+    return {"id": row[0], "created_at": row[1], "version_group": version_group,
+            "version_number": next_version, "payload_sha256": payload_hash, "title": title}, None
+
+
+def get_goals_report_snapshot(cur, sid: int):
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_goals_report_snapshot WHERE id = %s", (sid,))
+    r = rows(cur)
+    if not r:
+        return None
+    item = r[0]
+    payload_str = item.pop("payload_json")
+    actual_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    item["payload"] = json.loads(payload_str)
+    item["integrity_ok"] = item.get("payload_sha256") == actual_hash
+    return item
+
+
+def export_goals_report_html(snapshot: dict) -> str:
+    p = snapshot["payload"]
+    parts = [f"<html><head><meta charset='utf-8'><title>{snapshot['title']}</title>",
+             "<style>body{font-family:sans-serif;padding:24px}table{border-collapse:collapse;width:100%;margin-bottom:24px}",
+             "td,th{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px}th{background:#f3f3f3}",
+             ".g{color:#16a34a}.y{color:#ca8a04}.r{color:#dc2626}.gr{color:#6b7280}",
+             "h1{font-size:20px}h2{font-size:16px;margin-top:28px}</style></head><body>"]
+    parts.append(f"<h1>{snapshot['title']}</h1>")
+    parts.append(f"<p>Сформирован: {snapshot['created_at']} · Автор: {snapshot['created_by']}</p>")
+    if not snapshot.get("integrity_ok", True):
+        parts.append("<p style='color:red;font-weight:bold'>ВНИМАНИЕ: целостность снимка нарушена</p>")
+
+    parts.append("<h2>Цели</h2><table><tr><th>Название</th><th>Уровень</th><th>Статус</th>"
+                 "<th>Прогресс, %</th><th>Просрочена</th><th>Владелец</th></tr>")
+    for g in p.get("goals", []):
+        prog = g.get("progress", {}).get("progress_pct")
+        parts.append(f"<tr><td>{g['title']}</td><td>{g.get('goal_level','')}</td>"
+                     f"<td>{g.get('status','')}</td><td>{prog if prog is not None else '—'}</td>"
+                     f"<td>{'да' if g.get('is_overdue') else 'нет'}</td><td>{g.get('owner_name') or '—'}</td></tr>")
+    parts.append("</table>")
+
+    color_cls = {"green": "g", "yellow": "y", "red": "r", "gray": "gr"}
+    parts.append("<h2>Показатели</h2><table><tr><th>Название</th><th>Тип</th><th>Статус</th>"
+                 "<th>План</th><th>Факт</th><th>Отклонение</th></tr>")
+    for i in p.get("indicators", []):
+        sl = i.get("status_light", {})
+        cls = color_cls.get(sl.get("color"), "")
+        parts.append(f"<tr><td>{i['title']}</td><td>{i.get('indicator_type','')}</td>"
+                     f"<td class='{cls}'>{sl.get('color','')}</td><td>{sl.get('plan','—')}</td>"
+                     f"<td>{sl.get('actual','—')}</td><td>{sl.get('deviation','—')}</td></tr>")
+    parts.append("</table>")
+
+    parts.append("<h2>Результаты</h2><table><tr><th>Название</th><th>Тип</th><th>Дата</th></tr>")
+    for r in p.get("results", []):
+        parts.append(f"<tr><td>{r['title']}</td><td>{r.get('result_kind','')}</td><td>{r.get('achieved_at') or '—'}</td></tr>")
+    parts.append("</table>")
+
+    parts.append("<h2>Эффекты</h2><table><tr><th>Название</th><th>Показатель</th><th>Факт</th><th>Статус</th></tr>")
+    for e in p.get("effects", []):
+        parts.append(f"<tr><td>{e['title']}</td><td>{e.get('metric') or '—'}</td>"
+                     f"<td>{e.get('actual_value') or '—'}</td><td>{e.get('confirmation_status','')}</td></tr>")
+    parts.append("</table>")
+    parts.append("</body></html>")
+    return "".join(parts)
+
+
+def export_goals_report_xlsx_b64(snapshot: dict) -> str:
+    import xlsxwriter
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
+    bold = wb.add_format({"bold": True, "bg_color": "#f0f0f0"})
+    p = snapshot["payload"]
+
+    ws = wb.add_worksheet("Сводка")
+    ws.write_row(0, 0, ["Показатель", "Значение"], bold)
+    ws.write_row(1, 0, ["Целей всего", len(p.get("goals", []))])
+    ws.write_row(2, 0, ["Показателей всего", len(p.get("indicators", []))])
+    ws.write_row(3, 0, ["Показателей без данных", len(p.get("indicators_no_data", []))])
+    ws.write_row(4, 0, ["Результатов", len(p.get("results", []))])
+    ws.write_row(5, 0, ["Эффектов", len(p.get("effects", []))])
+
+    def sheet(name, key, cols):
+        items = p.get(key) or []
+        s = wb.add_worksheet(name[:31])
+        s.write_row(0, 0, [c[1] for c in cols], bold)
+        for i, it in enumerate(items, start=1):
+            s.write_row(i, 0, [str(it.get(c[0], "") or "") for c in cols])
+
+    sheet("Цели", "goals", [("title", "Название"), ("goal_level", "Уровень"), ("status", "Статус"),
+                             ("due_date", "Срок"), ("owner_name", "Владелец")])
+    sheet("Показатели", "indicators", [("title", "Название"), ("indicator_type", "Тип"), ("unit", "Единица"),
+                                        ("target_value", "Целевое"), ("owner_name", "Владелец")])
+    sheet("Значения", "values", [("indicator_title", "Показатель"), ("period_start", "Период"),
+                                  ("plan_value", "План"), ("actual_value", "Факт"),
+                                  ("verification_status", "Статус проверки")])
+    sheet("Отклонения", "deviations", [("indicator_title", "Показатель"), ("period_start", "Период"),
+                                        ("plan_value", "План"), ("actual_value", "Факт")])
+    sheet("Результаты", "results", [("title", "Название"), ("result_kind", "Тип"), ("achieved_at", "Дата")])
+    sheet("Эффекты", "effects", [("title", "Название"), ("metric", "Показатель"), ("baseline_value", "База"),
+                                  ("plan_value", "План"), ("actual_value", "Факт"),
+                                  ("confirmation_status", "Статус")])
+    sheet("Методики", "methodologies", [("indicator_id", "ID показателя"), ("version_number", "Версия"),
+                                         ("formula_kind", "Вид формулы"), ("status", "Статус")])
+
+    params_sheet = wb.add_worksheet("Параметры отчёта")
+    params_sheet.write_row(0, 0, ["Параметр", "Значение"], bold)
+    meta = {"Название": snapshot["title"], "Сформирован": str(snapshot["created_at"]),
+            "Автор": snapshot["created_by"], "SHA-256": snapshot.get("payload_sha256"),
+            "Целостность": snapshot.get("integrity_ok")}
+    for i, (kk, vv) in enumerate(meta.items(), start=1):
+        params_sheet.write_row(i, 0, [kk, str(vv)])
+
+    wb.close()
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("ascii")
+
+
 def handler(event: dict, context) -> dict:
     """Паспорт центра: цели, задачи, функции и штатная потребность."""
     method = event.get("httpMethod", "GET")
@@ -1497,9 +2297,17 @@ def handler(event: dict, context) -> dict:
         if action == "save_goal":
             if not as_int(body.get("id")) and not as_int(body.get("center_id")):
                 return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            level = body.get("goal_level")
+            if level and level not in GOAL_LEVELS:
+                return cors({"ok": False, "error": {"message": "Недопустимый уровень цели"}}, 400)
+            status = body.get("status")
+            if status and status not in GOAL_STATUSES:
+                return cors({"ok": False, "error": {"message": "Недопустимый статус цели"}}, 400)
             new_id, err = upsert(cur, "exec_center_goal", GOAL_FIELDS, body)
             if err:
                 return cors({"ok": False, "error": {"message": err}}, 400)
+            log_change(cur, user["email"], "goal", new_id,
+                       "update" if as_int(body.get("id")) else "create", after=clean(body, GOAL_FIELDS))
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
 
@@ -2113,6 +2921,9 @@ def handler(event: dict, context) -> dict:
             role_id = as_int(body.get("role_id"))
             if not as_int(body.get("id")) and not role_id:
                 return cors({"ok": False, "error": {"message": "Не указана роль"}}, 400)
+            if body.get("status") == "occupied" and not as_int(body.get("person_id")):
+                return cors({"ok": False, "error": {
+                    "message": "Для занятой штатной позиции необходимо выбрать сотрудника"}}, 400)
             new_id, err = upsert(cur, "exec_role_position", ROLE_POSITION_FIELDS, body, require_title=False)
             if err:
                 return cors({"ok": False, "error": {"message": err}}, 400)
@@ -2323,6 +3134,113 @@ def handler(event: dict, context) -> dict:
             if not snap:
                 return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
             return cors({"ok": True, "data": snap})
+
+        # ============ ЦЕЛИ, KPI И ЭФФЕКТЫ ============
+
+        if action == "goals_dashboard":
+            cid = as_int(qs.get("center_id"))
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": goals_dashboard(cur, cid)})
+
+        if action == "goals_tree":
+            cid = as_int(qs.get("center_id"))
+            if not cid:
+                return cors({"ok": False, "error": {"message": "Не указан центр"}}, 400)
+            return cors({"ok": True, "data": {"items": goals_tree(cur, cid)}})
+
+        if action == "goal_detail":
+            gid = as_int(qs.get("id"))
+            detail = goal_detail(cur, gid) if gid else None
+            if not detail:
+                return cors({"ok": False, "error": {"message": "Цель не найдена"}}, 404)
+            return cors({"ok": True, "data": detail})
+
+        if action == "list_indicators":
+            applicability = qs.get("applicability", "active")
+            return cors({"ok": True, "data": {"items": list_indicators(cur, applicability)}})
+
+        if action == "indicator_detail":
+            iid = as_int(qs.get("id"))
+            detail = indicator_detail(cur, iid) if iid else None
+            if not detail:
+                return cors({"ok": False, "error": {"message": "Показатель не найден"}}, 404)
+            return cors({"ok": True, "data": detail})
+
+        if action == "save_indicator":
+            new_id, err = save_indicator(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "save_methodology":
+            new_id, err = save_methodology(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "save_indicator_value":
+            new_id, err = save_indicator_value(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "confirm_indicator_value":
+            vid, err = confirm_indicator_value(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": vid}})
+
+        if action == "save_goal_indicator":
+            new_id, err = save_goal_indicator(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "confirm_effect":
+            eid, err = confirm_effect(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": eid}})
+
+        if action == "create_goals_report_snapshot":
+            snap, err = create_goals_report_snapshot(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": snap})
+
+        if action == "goals_report_snapshot":
+            sid = as_int(qs.get("id"))
+            snap = get_goals_report_snapshot(cur, sid) if sid else None
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
+            return cors({"ok": True, "data": snap})
+
+        if action == "export_goals_report_html":
+            sid = as_int(qs.get("id"))
+            snap = get_goals_report_snapshot(cur, sid) if sid else None
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
+            return {
+                "statusCode": 200,
+                "headers": {"Access-Control-Allow-Origin": "*", "Content-Type": "text/html; charset=utf-8"},
+                "body": export_goals_report_html(snap),
+            }
+
+        if action == "export_goals_report_xlsx":
+            sid = as_int(qs.get("id"))
+            snap = get_goals_report_snapshot(cur, sid) if sid else None
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
+            return cors({"ok": True, "data": {"filename": f"{snap['title']}.xlsx",
+                                               "content_base64": export_goals_report_xlsx_b64(snap)}})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
     finally:

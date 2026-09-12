@@ -60,6 +60,7 @@ import ExecAssignPage from "./pages/cabinet/exec/ExecAssignPage";
 import ExecCenterDashboardPage from "./pages/cabinet/exec/ExecCenterDashboardPage";
 import ExecCenterModelPage from "./pages/cabinet/exec/ExecCenterModelPage";
 import ExecOrgModelPage from "./pages/cabinet/exec/ExecOrgModelPage";
+import ExecGoalsPage from "./pages/cabinet/exec/ExecGoalsPage";
 import ExecCenterWizardPage from "./pages/cabinet/exec/ExecCenterWizardPage";
 import ExecCenterCasePage from "./pages/cabinet/exec/ExecCenterCasePage";
 import ExecCenterDeckPage from "./pages/cabinet/exec/ExecCenterDeckPage";
@@ -219,6 +220,7 @@ const App = () => (
               <Route path="/cabinet/exec/model" element={<ExecRoute><ExecCenterModelPage /></ExecRoute>} />
               <Route path="/cabinet/exec/model/wizard" element={<ExecRoute><ExecCenterWizardPage /></ExecRoute>} />
               <Route path="/cabinet/exec/org-model" element={<ExecRoute><ExecOrgModelPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/goals" element={<ExecRoute><ExecGoalsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/center-case" element={<ExecRoute><ExecCenterCasePage /></ExecRoute>} />
               <Route path="/cabinet/exec/deck" element={<ExecRoute><ExecCenterDeckPage /></ExecRoute>} />
               <Route path="/cabinet/exec/deck/present" element={<ExecRoute><ExecCenterDeckPresentPage /></ExecRoute>} />
