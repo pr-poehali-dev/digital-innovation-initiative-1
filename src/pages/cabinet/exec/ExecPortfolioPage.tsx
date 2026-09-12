@@ -131,11 +131,13 @@ export default function ExecPortfolioPage() {
     critical_risk_only: searchParams.get("r_risk") === "1",
     resource_gap_only: searchParams.get("r_gap") === "1",
     overbudget_only: searchParams.get("r_budget") === "1",
+    cross_dependency_only: searchParams.get("r_cross") === "1",
   };
 
   const ROADMAP_FILTER_KEY_MAP: Record<string, string> = {
     initiative_id: "initiative_id", project_kind: "project_kind", status: "rstatus", priority: "priority",
     overdue_only: "r_overdue", critical_risk_only: "r_risk", resource_gap_only: "r_gap", overbudget_only: "r_budget",
+    cross_dependency_only: "r_cross",
   };
 
   const setRoadmapFilter = (patch: Record<string, unknown>) => {

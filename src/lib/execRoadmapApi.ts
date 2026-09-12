@@ -40,6 +40,7 @@ export interface RoadmapProject {
   manager_name: string | null;
   is_overdue: boolean;
   is_overbudget: boolean;
+  has_cross_project_dependency: boolean;
   critical_risk_count: number;
   open_issue_count: number;
   resource_gap_count: number;
@@ -99,6 +100,7 @@ export interface RoadmapFilters {
   critical_risk_only?: boolean;
   resource_gap_only?: boolean;
   overbudget_only?: boolean;
+  cross_dependency_only?: boolean;
 }
 
 export interface MilestoneFilters {
@@ -205,6 +207,87 @@ export interface ProjectGanttData {
   latest_baseline: ScheduleBaselineSummary | null;
 }
 
+export interface DependencyGraphNode {
+  kind: DependencyKind;
+  id: number;
+  title: string;
+  status: string | null;
+  plan_start: string | null;
+  plan_end: string | null;
+  is_overdue: boolean;
+  progress_pct: number | null;
+  responsible_name: string | null;
+  stage_id: number | null;
+  stage_title?: string | null;
+  external: boolean;
+  external_project_id?: number | null;
+  in_count: number;
+  out_count: number;
+}
+
+export interface DependencyGraphEdge {
+  id: number;
+  dependency_type: DependencyType;
+  src_kind: DependencyKind;
+  src_id: number;
+  tgt_kind: DependencyKind;
+  tgt_id: number;
+  lag_days: number;
+  lag_kind: "calendar" | "working";
+  is_cross_project: boolean;
+  violated: boolean;
+}
+
+export interface DependencyGraphData {
+  project: { id: number; title: string };
+  nodes: DependencyGraphNode[];
+  edges: DependencyGraphEdge[];
+}
+
+export interface CriticalPathNode {
+  kind: DependencyKind;
+  id: number;
+  title: string;
+  status: string;
+  early_start: string;
+  early_finish: string;
+  late_start: string;
+  late_finish: string;
+  total_float_days: number;
+  free_float_days: number;
+  is_critical: boolean;
+  criticality_reason: string | null;
+  next_critical: { kind: DependencyKind; id: number; title: string } | null;
+}
+
+export interface CriticalPathData {
+  project: { id: number; title: string };
+  computable: boolean;
+  warnings: string[];
+  incomplete_objects: { kind: DependencyKind; id: number; title: string; reason: string }[];
+  cycle: { chain: { kind: DependencyKind; id: number; title: string }[] } | null;
+  nodes: CriticalPathNode[];
+  project_duration_days: number | null;
+}
+
+export interface ExternalDependencyRow {
+  dependency_type: DependencyType;
+  lag_days: number;
+  external_kind: DependencyKind;
+  external_id: number;
+  external_title: string;
+  external_project_id: number | null;
+  local_kind: DependencyKind;
+  local_id: number;
+  local_title: string;
+  local_status: string;
+}
+
+export interface ProjectExternalDependencies {
+  blocking_in: ExternalDependencyRow[];
+  blocking_out: ExternalDependencyRow[];
+}
+
 export const execRoadmapApi = {
   roadmap: (filters: RoadmapFilters): Promise<RoadmapData> => req(`/?action=roadmap${toQuery(filters)}`),
   milestonesTimeline: (filters: MilestoneFilters): Promise<{ items: TimelineMilestone[] }> =>
@@ -226,4 +309,11 @@ export const execRoadmapApi = {
   baseline: (id: number): Promise<ScheduleBaseline> => req(`/?action=baseline&id=${id}`),
 
   projectGantt: (projectId: number): Promise<ProjectGanttData> => req(`/?action=project_gantt&id=${projectId}`),
+
+  dependencyGraph: (projectId: number): Promise<DependencyGraphData> =>
+    req(`/?action=dependency_graph&id=${projectId}`),
+  criticalPath: (projectId: number): Promise<CriticalPathData> =>
+    req(`/?action=critical_path&id=${projectId}`),
+  projectExternalDependencies: (projectId: number): Promise<ProjectExternalDependencies> =>
+    req(`/?action=project_external_dependencies&id=${projectId}`),
 };

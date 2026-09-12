@@ -18,6 +18,7 @@ AI не используется нигде в этом модуле.
 import json
 import os
 import hashlib
+import datetime
 import psycopg2
 
 DB = os.environ["DATABASE_URL"]
@@ -788,10 +789,50 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
     """, (project_ids,))
     budget_overrun_ids = {r["id"] for r in rows(cur)}
 
+    # Межпроектная зависимость: строим карту "kind:id -> project_id" для
+    # задач/вех/проектов этого списка, затем одним проходом по активным
+    # зависимостям находим пары, где оба конца разрешились в РАЗНЫЕ проекты.
+    cur.execute(f"""
+        SELECT 'task' AS kind, id, project_id FROM {SCHEMA}.exec_task WHERE project_id = ANY(%(pids)s)
+        UNION ALL
+        SELECT 'milestone' AS kind, id, project_id FROM {SCHEMA}.exec_milestone WHERE project_id = ANY(%(pids)s)
+        UNION ALL
+        SELECT 'project' AS kind, id, id AS project_id FROM {SCHEMA}.exec_project WHERE id = ANY(%(pids)s)
+    """, {"pids": project_ids})
+    owner_of = {(r["kind"], r["id"]): r["project_id"] for r in rows(cur)}
+
+    cur.execute(f"""
+        SELECT src_kind, src_id, tgt_kind, tgt_id FROM {SCHEMA}.exec_schedule_dependency
+        WHERE archived_at IS NULL AND (
+            (src_kind = ANY(ARRAY['task','milestone','project']) AND src_id = ANY(
+                SELECT id FROM {SCHEMA}.exec_task WHERE project_id = ANY(%(pids)s)
+                UNION SELECT id FROM {SCHEMA}.exec_milestone WHERE project_id = ANY(%(pids)s)
+                UNION SELECT id FROM {SCHEMA}.exec_project WHERE id = ANY(%(pids)s)
+            ))
+            OR (tgt_kind = ANY(ARRAY['task','milestone','project']) AND tgt_id = ANY(
+                SELECT id FROM {SCHEMA}.exec_task WHERE project_id = ANY(%(pids)s)
+                UNION SELECT id FROM {SCHEMA}.exec_milestone WHERE project_id = ANY(%(pids)s)
+                UNION SELECT id FROM {SCHEMA}.exec_project WHERE id = ANY(%(pids)s)
+            ))
+        )
+    """, {"pids": project_ids})
+    cross_dependency_ids = set()
+    for e in rows(cur):
+        src_pid = owner_of.get((e["src_kind"], e["src_id"]))
+        tgt_pid = owner_of.get((e["tgt_kind"], e["tgt_id"]))
+        if src_pid and tgt_pid and src_pid != tgt_pid:
+            cross_dependency_ids.add(src_pid)
+            cross_dependency_ids.add(tgt_pid)
+        elif src_pid and not tgt_pid:
+            cross_dependency_ids.add(src_pid)
+        elif tgt_pid and not src_pid:
+            cross_dependency_ids.add(tgt_pid)
+
     for p in projects:
         p["stages"] = stages_by_project.get(p["id"], [])
         p["milestones"] = milestones_by_project.get(p["id"], [])
         p["is_overbudget"] = p["id"] in budget_overrun_ids
+        p["has_cross_project_dependency"] = p["id"] in cross_dependency_ids
 
     if filters.get("overbudget_only"):
         projects = [p for p in projects if p["is_overbudget"]]
@@ -801,6 +842,8 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
         projects = [p for p in projects if p["resource_gap_count"] > 0]
     if filters.get("overdue_only"):
         projects = [p for p in projects if p["is_overdue"]]
+    if filters.get("cross_dependency_only"):
+        projects = [p for p in projects if p["has_cross_project_dependency"]]
 
     initiatives_map = {}
     for p in projects:
@@ -1101,6 +1144,448 @@ def project_gantt(cur, pid: int):
     }
 
 
+# ---------- КАРТА ЗАВИСИМОСТЕЙ И КРИТИЧЕСКИЙ ПУТЬ ----------
+
+def _build_schedule_graph(cur, pid: int):
+    """Строит узлы (этапы/задачи/вехи проекта) и рёбра (зависимости между
+    ними, включая межпроектные — второй конец тогда помечен external=true)
+    для карты зависимостей и расчёта критического пути. Не рассчитывает
+    портфель целиком — только выбранный проект и его прямых соседей по
+    зависимостям (глубина внешних связей ограничена одним шагом)."""
+    cur.execute(f"""
+        SELECT id, title, status, plan_start, plan_end, sort_order
+        FROM {SCHEMA}.exec_project_stage WHERE project_id = %s ORDER BY sort_order, id
+    """, (pid,))
+    stages = rows(cur)
+
+    cur.execute(f"""
+        SELECT t.id, t.title, t.status, t.progress_pct, t.due_at, t.stage_id,
+               t.responsible_person_id, per.display_name AS responsible_name,
+               (t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE
+                   AND t.status NOT IN ('done','cancelled')) AS is_overdue
+        FROM {SCHEMA}.exec_task t
+        LEFT JOIN {SCHEMA}.exec_person per ON per.id = t.responsible_person_id
+        WHERE t.project_id = %s AND t.archived_at IS NULL
+    """, (pid,))
+    tasks = rows(cur)
+
+    cur.execute(f"""
+        SELECT m.id, m.title, m.status, m.plan_date, m.fact_date,
+               m.responsible_person_id, per.display_name AS responsible_name,
+               (m.status <> 'achieved' AND m.plan_date < CURRENT_DATE) AS is_overdue
+        FROM {SCHEMA}.exec_milestone m
+        LEFT JOIN {SCHEMA}.exec_person per ON per.id = m.responsible_person_id
+        WHERE m.project_id = %s
+    """, (pid,))
+    milestones = rows(cur)
+
+    node_ids = {"stage": {s["id"] for s in stages}, "task": {t["id"] for t in tasks}, "milestone": {m["id"] for m in milestones}}
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_schedule_dependency
+        WHERE archived_at IS NULL AND (
+            (src_kind = 'project' AND src_id = %(pid)s) OR (tgt_kind = 'project' AND tgt_id = %(pid)s)
+            OR (src_kind = 'task' AND src_id = ANY(%(task_ids)s)) OR (tgt_kind = 'task' AND tgt_id = ANY(%(task_ids)s))
+            OR (src_kind = 'milestone' AND src_id = ANY(%(milestone_ids)s)) OR (tgt_kind = 'milestone' AND tgt_id = ANY(%(milestone_ids)s))
+            OR (src_kind = 'stage' AND src_id = ANY(%(stage_ids)s)) OR (tgt_kind = 'stage' AND tgt_id = ANY(%(stage_ids)s))
+        )
+    """, {"pid": pid, "task_ids": list(node_ids["task"]) or [0],
+          "milestone_ids": list(node_ids["milestone"]) or [0], "stage_ids": list(node_ids["stage"]) or [0]})
+    raw_edges = rows(cur)
+
+    def is_local(kind, oid):
+        return kind in node_ids and oid in node_ids[kind]
+
+    # Внешние узлы одним шагом наружу — только заголовок и принадлежность
+    # к другому проекту, без рекурсивного разворачивания их собственных связей.
+    external_refs = set()
+    for e in raw_edges:
+        if not is_local(e["src_kind"], e["src_id"]):
+            external_refs.add((e["src_kind"], e["src_id"]))
+        if not is_local(e["tgt_kind"], e["tgt_id"]):
+            external_refs.add((e["tgt_kind"], e["tgt_id"]))
+
+    external_nodes = {}
+    for kind, oid in external_refs:
+        table = DEPENDENCY_KIND_TABLE.get(kind)
+        if not table:
+            continue
+        if kind == "project":
+            cur.execute(f"SELECT id, title, id AS project_id FROM {SCHEMA}.exec_project WHERE id = %s", (oid,))
+        else:
+            cur.execute(f"SELECT id, title, project_id FROM {SCHEMA}.{table} WHERE id = %s", (oid,))
+        r = rows(cur)
+        if r:
+            external_nodes[(kind, oid)] = {"kind": kind, "id": oid, "title": r[0]["title"], "project_id": r[0].get("project_id")}
+
+    return {
+        "stages": stages, "tasks": tasks, "milestones": milestones,
+        "edges": raw_edges, "node_ids": node_ids, "external_nodes": external_nodes,
+        "is_local": is_local,
+    }
+
+
+def dependency_graph(cur, pid: int):
+    """Карта зависимостей проекта: узлы (этап/задача/веха) с датами,
+    статусом, готовностью, ответственным, просрочкой, принадлежностью к
+    этапу и числом входящих/исходящих связей; рёбра — с типом, лагом,
+    межпроектным признаком и нарушением (просрочен предшественник, а
+    последователь уже должен был начаться/завершиться)."""
+    p = fetch_one(cur, "exec_project", pid)
+    if not p:
+        return None
+    g = _build_schedule_graph(cur, pid)
+
+    nodes = []
+    stage_title = {s["id"]: s["title"] for s in g["stages"]}
+
+    for s in g["stages"]:
+        nodes.append({
+            "kind": "stage", "id": s["id"], "title": s["title"], "status": s["status"],
+            "plan_start": s["plan_start"], "plan_end": s["plan_end"], "is_overdue": False,
+            "progress_pct": None, "responsible_name": None, "stage_id": None, "external": False,
+        })
+    for t in g["tasks"]:
+        nodes.append({
+            "kind": "task", "id": t["id"], "title": t["title"], "status": t["status"],
+            "plan_start": None, "plan_end": t["due_at"], "is_overdue": t["is_overdue"],
+            "progress_pct": t["progress_pct"], "responsible_name": t["responsible_name"],
+            "stage_id": t["stage_id"], "stage_title": stage_title.get(t["stage_id"]), "external": False,
+        })
+    for m in g["milestones"]:
+        nodes.append({
+            "kind": "milestone", "id": m["id"], "title": m["title"], "status": m["status"],
+            "plan_start": m["plan_date"], "plan_end": m["plan_date"], "is_overdue": m["is_overdue"],
+            "progress_pct": None, "responsible_name": m["responsible_name"], "stage_id": None, "external": False,
+        })
+    for (kind, oid), ext in g["external_nodes"].items():
+        nodes.append({
+            "kind": kind, "id": oid, "title": ext["title"], "status": None,
+            "plan_start": None, "plan_end": None, "is_overdue": False,
+            "progress_pct": None, "responsible_name": None, "stage_id": None,
+            "external": True, "external_project_id": ext.get("project_id"),
+        })
+
+    in_count = {}
+    out_count = {}
+    edges_out = []
+    for e in g["edges"]:
+        src_key, tgt_key = (e["src_kind"], e["src_id"]), (e["tgt_kind"], e["tgt_id"])
+        out_count[src_key] = out_count.get(src_key, 0) + 1
+        in_count[tgt_key] = in_count.get(tgt_key, 0) + 1
+        edges_out.append({
+            "id": e["id"], "dependency_type": e["dependency_type"],
+            "src_kind": e["src_kind"], "src_id": e["src_id"],
+            "tgt_kind": e["tgt_kind"], "tgt_id": e["tgt_id"],
+            "lag_days": e["lag_days"], "lag_kind": e["lag_kind"],
+            "is_cross_project": not (g["is_local"](e["src_kind"], e["src_id"]) and g["is_local"](e["tgt_kind"], e["tgt_id"])),
+        })
+
+    node_by_key = {}
+    for n in nodes:
+        key = (n["kind"], n["id"])
+        n["in_count"] = in_count.get(key, 0)
+        n["out_count"] = out_count.get(key, 0)
+        node_by_key[key] = n
+
+    # Нарушение зависимости: предшественник просрочен/не завершён, а срок
+    # последователя уже наступил или прошёл — сигнал, что связь фактически нарушена.
+    for e in edges_out:
+        src = node_by_key.get((e["src_kind"], e["src_id"]))
+        tgt = node_by_key.get((e["tgt_kind"], e["tgt_id"]))
+        violated = False
+        if src and tgt and not src.get("external") and not tgt.get("external"):
+            src_done = src["status"] in ("done", "achieved", "cancelled")
+            if not src_done and tgt.get("plan_end") and tgt["plan_end"] <= datetime.date.today():
+                violated = True
+        e["violated"] = violated
+
+    return {"project": {"id": p["id"], "title": p["title"]}, "nodes": nodes, "edges": edges_out}
+
+
+# ---------- КРИТИЧЕСКИЙ ПУТЬ (CPM) ----------
+
+def critical_path(cur, pid: int):
+    """Метод критического пути (Critical Path Method) для одного проекта.
+    Режим расчёта — календарные дни (лаг с lag_kind='working' применяется
+    как календарный с явным предупреждением: рабочего календаря с
+    праздниками в системе пока нет, смешивать режимы незаметно нельзя).
+
+    Узлы без достаточных дат исключаются из графа расчёта и перечисляются
+    в incomplete_objects — путь не выдумывается поверх отсутствующих данных.
+    При обнаружении цикла расчёт блокируется, цепочка возвращается отдельно."""
+    p = fetch_one(cur, "exec_project", pid)
+    if not p:
+        return None, "Проект не найден"
+
+    g = _build_schedule_graph(cur, pid)
+    warnings = []
+    incomplete = []
+
+    nodes = {}  # (kind, id) -> {duration, plan_start, plan_end, title, ...}
+    for s in g["stages"]:
+        if s["plan_start"] and s["plan_end"]:
+            nodes[("stage", s["id"])] = {
+                "kind": "stage", "id": s["id"], "title": s["title"],
+                "duration": max(0, (s["plan_end"] - s["plan_start"]).days),
+                "anchor_start": s["plan_start"], "status": s["status"],
+            }
+        else:
+            incomplete.append({"kind": "stage", "id": s["id"], "title": s["title"], "reason": "нет плановых дат начала/окончания этапа"})
+    for t in g["tasks"]:
+        if t["due_at"]:
+            nodes[("task", t["id"])] = {
+                "kind": "task", "id": t["id"], "title": t["title"], "duration": 0,
+                "anchor_start": t["due_at"], "status": t["status"], "responsible_name": t["responsible_name"],
+            }
+        else:
+            incomplete.append({"kind": "task", "id": t["id"], "title": t["title"], "reason": "нет срока выполнения (due_at) — задача без даты не может участвовать в расчёте"})
+    for m in g["milestones"]:
+        if m["plan_date"]:
+            nodes[("milestone", m["id"])] = {
+                "kind": "milestone", "id": m["id"], "title": m["title"], "duration": 0,
+                "anchor_start": m["plan_date"], "status": m["status"], "responsible_name": m["responsible_name"],
+            }
+        else:
+            incomplete.append({"kind": "milestone", "id": m["id"], "title": m["title"], "reason": "нет плановой даты вехи"})
+
+    # Только рёбра, у которых ОБА конца — узлы этого проекта с известными
+    # датами (внешние/неполные узлы не участвуют в расчёте резерва, но
+    # отмечаются отдельно как ограничение расчёта).
+    local_edges = []
+    working_lag_seen = False
+    for e in g["edges"]:
+        src_key, tgt_key = (e["src_kind"], e["src_id"]), (e["tgt_kind"], e["tgt_id"])
+        if src_key not in nodes or tgt_key not in nodes:
+            continue
+        if e["lag_kind"] == "working":
+            working_lag_seen = True
+        local_edges.append(e)
+
+    if working_lag_seen:
+        warnings.append("Часть зависимостей задана в рабочих днях, но рабочий календарь (выходные, праздники) в системе пока не реализован — такой лаг применён как календарные дни, чтобы не смешивать режимы незаметно.")
+
+    if incomplete:
+        warnings.append(f"{len(incomplete)} объект(ов) исключены из расчёта из-за отсутствующих дат — см. incomplete_objects.")
+
+    if len(nodes) < 2 or not local_edges:
+        return {
+            "project": {"id": p["id"], "title": p["title"]},
+            "computable": False,
+            "warnings": warnings + ["Недостаточно данных для расчёта критического пути: нужно минимум два объекта с датами, связанных зависимостью."],
+            "incomplete_objects": incomplete,
+            "cycle": None, "nodes": [], "project_duration_days": None,
+        }, None
+
+    # Топологическая сортировка (Kahn) для обнаружения цикла и порядка обхода.
+    adjacency: dict = {k: [] for k in nodes}
+    indegree = {k: 0 for k in nodes}
+    for e in local_edges:
+        src_key, tgt_key = (e["src_kind"], e["src_id"]), (e["tgt_kind"], e["tgt_id"])
+        adjacency[src_key].append((tgt_key, e))
+        indegree[tgt_key] += 1
+
+    queue = [k for k, d in indegree.items() if d == 0]
+    order = []
+    indegree_work = dict(indegree)
+    while queue:
+        node = queue.pop()
+        order.append(node)
+        for nxt, _ in adjacency[node]:
+            indegree_work[nxt] -= 1
+            if indegree_work[nxt] == 0:
+                queue.append(nxt)
+
+    if len(order) != len(nodes):
+        # Цикл найден — восстанавливаем цепочку через DFS по непосещённым узлам.
+        remaining = set(nodes) - set(order)
+        chain = _find_cycle_chain(remaining, adjacency)
+        return {
+            "project": {"id": p["id"], "title": p["title"]},
+            "computable": False,
+            "warnings": warnings,
+            "incomplete_objects": incomplete,
+            "cycle": {"chain": [{"kind": k[0], "id": k[1], "title": nodes[k]["title"]} for k in chain]},
+            "nodes": [], "project_duration_days": None,
+        }, None
+
+    day0 = min(n["anchor_start"] for n in nodes.values())
+
+    def to_days(d):
+        return (d - day0).days
+
+    ES = {k: 0 for k in nodes}
+    EF = {k: nodes[k]["duration"] for k in nodes}
+
+    for node_key in order:
+        preds_applied = False
+        for e in local_edges:
+            src_key, tgt_key = (e["src_kind"], e["src_id"]), (e["tgt_kind"], e["tgt_id"])
+            if tgt_key != node_key:
+                continue
+            lag = e["lag_days"] or 0
+            dtype = e["dependency_type"]
+            if dtype == "FS":
+                candidate = EF[src_key] + lag
+            elif dtype == "SS":
+                candidate = ES[src_key] + lag
+            elif dtype == "FF":
+                candidate = EF[src_key] + lag - nodes[node_key]["duration"]
+            else:  # SF
+                candidate = ES[src_key] + lag - nodes[node_key]["duration"]
+            if not preds_applied or candidate > ES[node_key]:
+                ES[node_key] = candidate
+                preds_applied = True
+        EF[node_key] = ES[node_key] + nodes[node_key]["duration"]
+
+    project_duration = max(EF.values())
+
+    LF = {k: project_duration for k in nodes}
+    LS = {k: project_duration - nodes[k]["duration"] for k in nodes}
+    for node_key in reversed(order):
+        succs = [(tgt_key, e) for tgt_key, e in adjacency[node_key]]
+        if not succs:
+            continue
+        candidates = []
+        for tgt_key, e in succs:
+            lag = e["lag_days"] or 0
+            dtype = e["dependency_type"]
+            if dtype == "FS":
+                candidates.append(LS[tgt_key] - lag)
+            elif dtype == "SS":
+                candidates.append(LS[tgt_key] - lag + nodes[node_key]["duration"])
+            elif dtype == "FF":
+                candidates.append(LF[tgt_key] - lag)
+            else:  # SF
+                candidates.append(LF[tgt_key] - lag + nodes[node_key]["duration"])
+        LF[node_key] = min(candidates)
+        LS[node_key] = LF[node_key] - nodes[node_key]["duration"]
+
+    # Свободный резерв: строго рассчитывается для FS-последователей (самый
+    # частый тип). Для узлов, у которых все исходящие связи не FS, свободный
+    # резерв не может быть корректно упрощён без искажения смысла — в этом
+    # случае он совпадает с полным резервом (задокументированное упрощение
+    # первой версии, а не фиктивное число).
+    free_float = {}
+    for node_key in nodes:
+        fs_succ_es = [ES[tgt_key] - (e["lag_days"] or 0) for tgt_key, e in adjacency[node_key] if e["dependency_type"] == "FS"]
+        if fs_succ_es:
+            free_float[node_key] = min(fs_succ_es) - EF[node_key]
+        else:
+            free_float[node_key] = LS[node_key] - ES[node_key]
+
+    result_nodes = []
+    for k in order:
+        n = nodes[k]
+        total_float = LS[k] - ES[k]
+        is_critical = total_float <= 0
+        next_critical = None
+        if is_critical:
+            for tgt_key, e in adjacency[k]:
+                if (LS[tgt_key] - ES[tgt_key]) <= 0:
+                    next_critical = {"kind": tgt_key[0], "id": tgt_key[1], "title": nodes[tgt_key]["title"]}
+                    break
+        reason = None
+        if is_critical:
+            reason = "Резерв времени равен нулю — любая задержка этого объекта немедленно сдвигает срок проекта."
+        result_nodes.append({
+            "kind": n["kind"], "id": n["id"], "title": n["title"], "status": n["status"],
+            "early_start": (day0 + datetime.timedelta(days=ES[k])).isoformat(),
+            "early_finish": (day0 + datetime.timedelta(days=EF[k])).isoformat(),
+            "late_start": (day0 + datetime.timedelta(days=LS[k])).isoformat(),
+            "late_finish": (day0 + datetime.timedelta(days=LF[k])).isoformat(),
+            "total_float_days": total_float, "free_float_days": free_float[k],
+            "is_critical": is_critical, "criticality_reason": reason, "next_critical": next_critical,
+        })
+
+    return {
+        "project": {"id": p["id"], "title": p["title"]},
+        "computable": True, "warnings": warnings, "incomplete_objects": incomplete,
+        "cycle": None, "nodes": result_nodes, "project_duration_days": project_duration,
+    }, None
+
+
+def _find_cycle_chain(remaining, adjacency):
+    """DFS для восстановления одной конкретной цикличной цепочки среди
+    узлов, не попавших в топологический порядок (то есть входящих в цикл
+    или зависящих от цикла)."""
+    color = {k: 0 for k in remaining}  # 0=white,1=gray,2=black
+    path = []
+
+    def dfs(node):
+        color[node] = 1
+        path.append(node)
+        for nxt, _ in adjacency.get(node, []):
+            if nxt not in remaining:
+                continue
+            if color.get(nxt) == 1:
+                idx = path.index(nxt)
+                return path[idx:] + [nxt]
+            if color.get(nxt, 0) == 0:
+                found = dfs(nxt)
+                if found:
+                    return found
+        path.pop()
+        color[node] = 2
+        return None
+
+    for start in remaining:
+        if color[start] == 0:
+            found = dfs(start)
+            if found:
+                return found
+    return list(remaining)[:2]
+
+
+# ---------- МЕЖПРОЕКТНЫЕ ЗАВИСИМОСТИ (СВОДКА ДЛЯ КАРТОЧКИ ПРОЕКТА) ----------
+
+def project_external_dependencies(cur, pid: int):
+    """Что блокирует этот проект и какие проекты блокирует он — сводка по
+    межпроектным зависимостям с внешней датой, ответственным владельцем и
+    признаком текущего нарушения."""
+    g = _build_schedule_graph(cur, pid)
+    blocking_in = []   # внешний объект -> блокирует объект этого проекта
+    blocking_out = []  # объект этого проекта -> блокирует внешний объект
+
+    local_nodes = {}
+    for s in g["stages"]:
+        local_nodes[("stage", s["id"])] = {"title": s["title"], "status": s["status"], "plan_end": s["plan_end"]}
+    for t in g["tasks"]:
+        local_nodes[("task", t["id"])] = {"title": t["title"], "status": t["status"], "plan_end": t["due_at"]}
+    for m in g["milestones"]:
+        local_nodes[("milestone", m["id"])] = {"title": m["title"], "status": m["status"], "plan_end": m["plan_date"]}
+
+    for e in g["edges"]:
+        src_key, tgt_key = (e["src_kind"], e["src_id"]), (e["tgt_kind"], e["tgt_id"])
+        src_local, tgt_local = g["is_local"](*src_key), g["is_local"](*tgt_key)
+        if src_local == tgt_local:
+            continue  # не межпроектная связь
+        if not src_local:
+            ext = g["external_nodes"].get(src_key)
+            loc = local_nodes.get(tgt_key)
+            if ext and loc:
+                blocking_in.append({
+                    "dependency_type": e["dependency_type"], "lag_days": e["lag_days"],
+                    "external_kind": ext["kind"], "external_id": ext["id"], "external_title": ext["title"],
+                    "external_project_id": ext.get("project_id"),
+                    "local_kind": tgt_key[0], "local_id": tgt_key[1], "local_title": loc["title"],
+                    "local_status": loc["status"],
+                })
+        else:
+            ext = g["external_nodes"].get(tgt_key)
+            loc = local_nodes.get(src_key)
+            if ext and loc:
+                blocking_out.append({
+                    "dependency_type": e["dependency_type"], "lag_days": e["lag_days"],
+                    "external_kind": ext["kind"], "external_id": ext["id"], "external_title": ext["title"],
+                    "external_project_id": ext.get("project_id"),
+                    "local_kind": src_key[0], "local_id": src_key[1], "local_title": loc["title"],
+                    "local_status": loc["status"],
+                })
+
+    return {"blocking_in": blocking_in, "blocking_out": blocking_out}
+
+
 def get_baseline(cur, bid: int):
     cur.execute(f"SELECT * FROM {SCHEMA}.exec_schedule_baseline WHERE id = %s", (bid,))
     r = rows(cur)
@@ -1261,6 +1746,30 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Проект не найден"}}, 404)
             return cors({"ok": True, "data": item})
 
+        # ============ КАРТА ЗАВИСИМОСТЕЙ И КРИТИЧЕСКИЙ ПУТЬ ============
+
+        if action == "dependency_graph":
+            gpid = as_int(qs.get("id"))
+            item = dependency_graph(cur, gpid) if gpid else None
+            if not item:
+                return cors({"ok": False, "error": {"message": "Проект не найден"}}, 404)
+            return cors({"ok": True, "data": item})
+
+        if action == "critical_path":
+            gpid = as_int(qs.get("id"))
+            if not gpid:
+                return cors({"ok": False, "error": {"message": "Не указан проект"}}, 400)
+            result, err = critical_path(cur, gpid)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 404)
+            return cors({"ok": True, "data": result})
+
+        if action == "project_external_dependencies":
+            gpid = as_int(qs.get("id"))
+            if not gpid:
+                return cors({"ok": False, "error": {"message": "Не указан проект"}}, 400)
+            return cors({"ok": True, "data": project_external_dependencies(cur, gpid)})
+
         # ============ ДОРОЖНАЯ КАРТА И ШКАЛА ВЕХ ============
 
         if action == "roadmap":
@@ -1274,6 +1783,7 @@ def handler(event: dict, context) -> dict:
                 "critical_risk_only": qs.get("critical_risk_only") == "1",
                 "resource_gap_only": qs.get("resource_gap_only") == "1",
                 "overbudget_only": qs.get("overbudget_only") == "1",
+                "cross_dependency_only": qs.get("cross_dependency_only") == "1",
             }
             data = roadmap_data(cur, qs.get("date_from"), qs.get("date_to"), filters)
             return cors({"ok": True, "data": data})

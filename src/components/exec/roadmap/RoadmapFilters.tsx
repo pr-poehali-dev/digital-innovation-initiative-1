@@ -88,6 +88,8 @@ export default function RoadmapFiltersBar({
                         onClick={() => onChange({ resource_gap_only: !filters.resource_gap_only })} />
           <FilterToggle active={!!filters.overbudget_only} label="Перерасход" icon="TrendingUp"
                         onClick={() => onChange({ overbudget_only: !filters.overbudget_only })} />
+          <FilterToggle active={!!filters.cross_dependency_only} label="Межпроектные связи" icon="Link2"
+                        onClick={() => onChange({ cross_dependency_only: !filters.cross_dependency_only })} />
         </>
       )}
 
@@ -95,6 +97,7 @@ export default function RoadmapFiltersBar({
         <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400" onClick={() => onChange({
           initiative_id: undefined, project_kind: undefined, status: undefined, priority: undefined,
           overdue_only: false, critical_risk_only: false, resource_gap_only: false, overbudget_only: false,
+          cross_dependency_only: false,
         })}>
           Сбросить
         </Button>

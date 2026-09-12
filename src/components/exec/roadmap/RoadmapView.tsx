@@ -179,6 +179,7 @@ function ProjectRow({
   if (p.critical_risk_count > 0) warnings.push(`${p.critical_risk_count} критич. риск(ов)`);
   if (p.resource_gap_count > 0) warnings.push(`дефицит ресурсов`);
   if (p.is_overbudget) warnings.push("прогноз перерасхода");
+  if (p.has_cross_project_dependency) warnings.push("есть межпроектная зависимость");
 
   const nextMilestone = p.milestones
     .filter((m) => m.status !== "achieved")
@@ -198,6 +199,9 @@ function ProjectRow({
             <button onClick={onOpen} className="text-xs text-slate-800 hover:text-violet-700 truncate text-left min-w-0" title={p.title}>
               {p.title}
             </button>
+            {p.has_cross_project_dependency && (
+              <Icon name="Link2" size={11} className="text-amber-600 flex-shrink-0" />
+            )}
           </div>
           {warnings.length > 0 && (
             <p className="text-[10px] text-amber-700 mt-0.5 pl-4 truncate" title={warnings.join(" · ")}>{warnings.join(" · ")}</p>

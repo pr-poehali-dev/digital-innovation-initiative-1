@@ -20,17 +20,19 @@ import { execApi } from "@/lib/execCabinetApi";
 import { TeamTab, BudgetTab, CapacityTab, FotTab, PlanFactTab } from "@/components/exec/ProjectResourcesTab";
 import { RequirementsTab } from "@/components/exec/ResourceRequirementsTab";
 import ProjectGanttView from "@/components/exec/roadmap/ProjectGanttView";
+import DependencyGraphView from "@/components/exec/roadmap/DependencyGraphView";
+import ExternalDependenciesPanel from "@/components/exec/roadmap/ExternalDependenciesPanel";
 import { ScaleKind, autoScale, diffDays, parseISODate, defaultRangeForScale } from "@/lib/timeScale";
 
 function labelOf(list: { value: string; label: string }[], v: string) {
   return list.find((x) => x.value === v)?.label || v;
 }
 
-const TABS = ["overview", "gantt", "team", "requirements", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
+const TABS = ["overview", "gantt", "dependencies", "team", "requirements", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
-  overview: "Обзор", gantt: "Гант", team: "Команда", requirements: "Потребности в ресурсах",
+  overview: "Обзор", gantt: "Гант", dependencies: "Зависимости", team: "Команда", requirements: "Потребности в ресурсах",
   capacity: "Загрузка", budget: "Бюджет", fot: "ФОТ",
   planfact: "План-факт", tasks: "Задачи",
   milestones: "Контрольные точки", results: "Результаты",
@@ -141,7 +143,7 @@ export default function ExecProjectDetailPage() {
 
   return (
     <Layout>
-      <div className={`mx-auto px-4 py-6 space-y-4 ${tab === "gantt" ? "max-w-[1400px]" : "max-w-4xl"}`}>
+      <div className={`mx-auto px-4 py-6 space-y-4 ${tab === "gantt" || tab === "dependencies" ? "max-w-[1400px]" : "max-w-4xl"}`}>
         <button onClick={() => navigate("/cabinet/exec/portfolio")} className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground">
           <Icon name="ArrowLeft" size={14} /> К портфелю
         </button>
@@ -171,7 +173,7 @@ export default function ExecProjectDetailPage() {
 
         {data.description && <p className="text-sm text-muted-foreground">{data.description}</p>}
 
-        <PageGuide {...(tab === "gantt" ? execPageGuides.projectGantt : execPageGuides.projectDetail)} />
+        <PageGuide {...(tab === "gantt" ? execPageGuides.projectGantt : tab === "dependencies" ? execPageGuides.dependencyGraph : execPageGuides.projectDetail)} />
 
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
           {(TABS as readonly Tab[]).map((t) => (
@@ -196,12 +198,18 @@ export default function ExecProjectDetailPage() {
         </div>
 
         {tab === "overview" && (
-          <div className="space-y-2 text-sm">
+          <div className="space-y-4 text-sm">
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div><span className="text-muted-foreground">Начало план:</span> {data.plan_start ? fmtDate(data.plan_start) : "—"}</div>
               <div><span className="text-muted-foreground">Завершение план:</span> {data.plan_end ? fmtDate(data.plan_end) : "—"}</div>
               <div><span className="text-muted-foreground">Начало факт:</span> {data.fact_start ? fmtDate(data.fact_start) : "—"}</div>
               <div><span className="text-muted-foreground">Завершение факт:</span> {data.fact_end ? fmtDate(data.fact_end) : "—"}</div>
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1.5">
+                <Icon name="Link2" size={13} /> Межпроектные зависимости
+              </h3>
+              <ExternalDependenciesPanel projectId={pid} />
             </div>
           </div>
         )}
@@ -212,6 +220,8 @@ export default function ExecProjectDetailPage() {
             dateFrom={ganttFrom} dateTo={ganttTo} onRangeChange={setGanttRange}
           />
         )}
+
+        {tab === "dependencies" && <DependencyGraphView projectId={pid} />}
 
         {tab === "team" && <TeamTab kind="project" parentId={pid} />}
         {tab === "requirements" && <RequirementsTab kind="project" parentId={pid} />}
