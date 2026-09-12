@@ -13,8 +13,11 @@ import {
 import { Empty, Loading } from "@/components/exec/ExecUI";
 import {
   execResourcesApi, ResourceAssignment, CostCategory, BudgetVersion, BudgetLine,
-  FinancialSummary,
+  FinancialSummary, CapacityAssignmentRow, FotRow, FinancialActual, FinancialCommitment,
+  FinancialExpected,
 } from "@/lib/execResourcesApi";
+
+const MONTHS_SHORT = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
 
 const PROJECT_ROLE_LABEL: Record<string, string> = {
   leader: "Руководитель", result_owner: "Владелец результата", coordinator: "Координатор",
@@ -182,10 +185,12 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
   });
   const [snapMsg, setSnapMsg] = useState("");
 
+  const pickDefaultVersion = (items: BudgetVersion[]) => items.find((v) => v.is_active) || items[0] || null;
+
   const loadVersions = useCallback(() => {
     execResourcesApi.budgetVersions(kind, parentId).then((d) => {
       setVersions(d.items);
-      if (d.items.length > 0 && !activeVersion) setActiveVersion(d.items[0]);
+      if (d.items.length > 0 && !activeVersion) setActiveVersion(pickDefaultVersion(d.items));
     });
   }, [kind, parentId, activeVersion]);
 
@@ -193,7 +198,7 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
     setLoading(true);
     Promise.all([
       execResourcesApi.costCategories().then((d) => setCategories(d.items)),
-      execResourcesApi.budgetVersions(kind, parentId).then((d) => { setVersions(d.items); if (d.items.length > 0) setActiveVersion(d.items[0]); }),
+      execResourcesApi.budgetVersions(kind, parentId).then((d) => { setVersions(d.items); setActiveVersion(pickDefaultVersion(d.items)); }),
       execResourcesApi.financialSummary(kind, parentId).then(setFinancial),
     ]).finally(() => setLoading(false));
   }, [kind, parentId]);
@@ -214,11 +219,15 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
     }
   };
 
+  const [lastSnapshotId, setLastSnapshotId] = useState<number | null>(null);
+
   const approveVersion = async () => {
     if (!activeVersion) return;
     await execResourcesApi.setBudgetVersionStatus(activeVersion.id, "approved");
-    loadVersions();
-    setActiveVersion({ ...activeVersion, version_status: "approved", is_locked: true });
+    const d = await execResourcesApi.budgetVersions(kind, parentId);
+    setVersions(d.items);
+    setActiveVersion(d.items.find((v) => v.id === activeVersion.id) || null);
+    execResourcesApi.financialSummary(kind, parentId).then(setFinancial);
   };
 
   const addLine = async () => {
@@ -234,7 +243,17 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
   const publishSnapshot = async () => {
     if (!activeVersion) return;
     const r = await execResourcesApi.createFinancialSnapshot({ budget_version_id: activeVersion.id });
+    setLastSnapshotId(r.id);
     setSnapMsg(`Финансовый снимок №${r.id} опубликован (версия ${r.version_number})`);
+  };
+
+  const exportSnapshotXlsx = async () => {
+    if (!lastSnapshotId) return;
+    const r = await execResourcesApi.exportFinancialXlsx(lastSnapshotId);
+    const link = document.createElement("a");
+    link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${r.content_base64}`;
+    link.download = r.filename;
+    link.click();
   };
 
   if (loading) return <Loading />;
@@ -247,7 +266,8 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
             <>
               <MiniMetric label="Утверждено" value={financial.approved_budget} />
               <MiniMetric label="Факт" value={financial.fact} />
-              <MiniMetric label="Обязательства" value={financial.commitments} />
+              <MiniMetric label="Обязательства (открыто)" value={financial.commitments_open} />
+              <MiniMetric label="Ожидаемые расходы" value={financial.expected} />
               <MiniMetric label="Прогноз" value={financial.forecast} />
               <MiniMetric label="Остаток" value={financial.remaining} tone={((financial.remaining ?? 0) < 0) ? "danger" : "default"} />
               {financial.deviation_pct !== null && financial.deviation_pct !== undefined && (
@@ -259,20 +279,34 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
             <>
               <MiniMetric label="Бюджет всего" value={financial.total_budget} />
               <MiniMetric label="Из проектов" value={financial.projects_budget} />
-              <MiniMetric label="Собственные" value={financial.own_budget} />
+              <MiniMetric label="Собственные (нераспределённые)" value={financial.own_budget} />
               <MiniMetric label="Факт" value={financial.total_fact} />
             </>
           )}
         </div>
       )}
 
+      {financial?.by_project && financial.by_project.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <div className="text-xs font-semibold text-muted-foreground mb-2">Расшифровка по проектам (без двойного счёта)</div>
+          <div className="space-y-1">
+            {financial.by_project.map((p) => (
+              <a key={p.id} href={`/cabinet/exec/portfolio/projects/${p.id}`} className="text-xs flex justify-between border-b border-slate-100 py-1.5 hover:text-violet-700">
+                <span>{p.title}</span>
+                <span>{p.budget.toLocaleString("ru-RU")} ₽ (факт {p.fact.toLocaleString("ru-RU")} ₽)</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 flex-wrap">
         <Select value={activeVersion ? String(activeVersion.id) : ""} onValueChange={(v) => setActiveVersion(versions.find((x) => String(x.id) === v) || null)}>
-          <SelectTrigger className="text-sm w-56"><SelectValue placeholder="Выберите версию" /></SelectTrigger>
+          <SelectTrigger className="text-sm w-64"><SelectValue placeholder="Выберите версию" /></SelectTrigger>
           <SelectContent>
             {versions.map((v) => (
               <SelectItem key={v.id} value={String(v.id)}>
-                {v.year} — {v.version_label} ({BUDGET_STATUS_LABEL[v.version_status]})
+                {v.year} — {v.version_label} ({BUDGET_STATUS_LABEL[v.version_status]}){v.is_active ? " · действующая" : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -283,7 +317,7 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
         </Button>
         {activeVersion && !activeVersion.is_locked && (
           <Button size="sm" variant="outline" className="text-emerald-700" onClick={approveVersion}>
-            <Icon name="CheckCircle2" size={13} className="mr-1" /> Утвердить
+            <Icon name="CheckCircle2" size={13} className="mr-1" /> Утвердить (станет действующей)
           </Button>
         )}
         {activeVersion && (
@@ -291,7 +325,19 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
             <Icon name="Camera" size={13} className="mr-1" /> Снимок
           </Button>
         )}
+        {lastSnapshotId && (
+          <Button size="sm" variant="outline" onClick={exportSnapshotXlsx}>
+            <Icon name="Table" size={13} className="mr-1" /> XLSX снимка
+          </Button>
+        )}
       </div>
+
+      {activeVersion?.is_active && (
+        <div className="text-xs bg-emerald-50 text-emerald-800 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          <Icon name="CheckCircle2" size={12} /> Это действующая версия бюджета
+          {activeVersion.effective_date && ` с ${activeVersion.effective_date}`}
+        </div>
+      )}
 
       {snapMsg && <div className="text-xs bg-emerald-50 text-emerald-800 rounded-lg px-3 py-2">{snapMsg}</div>}
 
@@ -342,6 +388,335 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============ ВКЛАДКА ЗАГРУЗКА (помесячный план/факт) ============
+
+export function CapacityTab({ kind, parentId }: { kind: "project" | "initiative"; parentId: number }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [rows, setRows] = useState<CapacityAssignmentRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editCell, setEditCell] = useState<{ assignmentId: number; month: number; plan: string; fact: string; days: string } | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    execResourcesApi.capacityPlan(kind, parentId, year).then((d) => setRows(d.items)).finally(() => setLoading(false));
+  }, [kind, parentId, year]);
+
+  useEffect(load, [load]);
+
+  const saveCell = async () => {
+    if (!editCell) return;
+    await execResourcesApi.saveCapacityCell({
+      assignment_id: editCell.assignmentId, year, month: editCell.month,
+      plan_load_pct: editCell.plan || undefined, fact_load_pct: editCell.fact || undefined,
+      plan_days: editCell.days || undefined,
+    });
+    setEditCell(null);
+    load();
+  };
+
+  if (loading) return <Loading />;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setYear(year - 1)}><Icon name="ChevronLeft" size={14} /></Button>
+        <div className="text-sm font-semibold w-16 text-center">{year}</div>
+        <Button size="sm" variant="outline" onClick={() => setYear(year + 1)}><Icon name="ChevronRight" size={14} /></Button>
+      </div>
+
+      {rows.length === 0 ? <Empty text="Команда пока не сформирована" icon="CalendarRange" /> : (
+        <div className="overflow-x-auto">
+          <table className="text-xs w-full">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className="text-left py-1.5 pr-2 sticky left-0 bg-white">Участник</th>
+                {MONTHS_SHORT.map((m) => <th key={m} className="px-1 py-1.5 text-center font-medium">{m}</th>)}
+                <th className="px-1 py-1.5 text-center font-medium">Год, ср.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.assignment_id} className="border-b border-slate-100">
+                  <td className="py-1.5 pr-2 sticky left-0 bg-white whitespace-nowrap">
+                    {r.person_name || r.role_title_ref || r.role_title || "—"}
+                    {r.is_vacant && <span className="ml-1 text-amber-600">(вак.)</span>}
+                  </td>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+                    const cell = r.months[String(m)] || r.months[m];
+                    const overload = (r.overload_by_month[String(m)] || r.overload_by_month[m] || 0) > 100;
+                    return (
+                      <td key={m} className="px-1 py-1.5 text-center">
+                        <button
+                          onClick={() => setEditCell({
+                            assignmentId: r.assignment_id, month: m,
+                            plan: String(cell?.plan_load_pct ?? ""), fact: String(cell?.fact_load_pct ?? ""), days: String(cell?.plan_days ?? ""),
+                          })}
+                          className={`w-full rounded px-1 py-0.5 ${overload ? "bg-red-100 text-red-700" : "bg-slate-50 hover:bg-slate-100"}`}
+                          title={overload ? "Перегрузка по всем проектам в этом месяце" : ""}
+                        >
+                          {cell?.plan_load_pct ?? 0}%
+                        </button>
+                      </td>
+                    );
+                  })}
+                  <td className="px-1 py-1.5 text-center font-medium">{r.year_avg_plan_pct}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Dialog open={!!editCell} onOpenChange={(v) => !v && setEditCell(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Загрузка за {editCell ? MONTHS_SHORT[editCell.month - 1] : ""}</DialogTitle></DialogHeader>
+          {editCell && (
+            <div className="space-y-3">
+              <Field label="Плановая загрузка, %">
+                <Input type="number" value={editCell.plan} onChange={(e) => setEditCell({ ...editCell, plan: e.target.value })} />
+              </Field>
+              <Field label="Фактическая загрузка, %">
+                <Input type="number" value={editCell.fact} onChange={(e) => setEditCell({ ...editCell, fact: e.target.value })} />
+              </Field>
+              <Field label="Человеко-дни (план)">
+                <Input type="number" value={editCell.days} onChange={(e) => setEditCell({ ...editCell, days: e.target.value })} />
+              </Field>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditCell(null)}>Отмена</Button>
+            <Button onClick={saveCell}>Сохранить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ============ ВКЛАДКА ФОТ ============
+
+export function FotTab({ kind, parentId }: { kind: "project" | "initiative"; parentId: number }) {
+  const [items, setItems] = useState<FotRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<Record<string, string>>({ cost_basis: "role_average" });
+  const [assignments, setAssignments] = useState<ResourceAssignment[]>([]);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      execResourcesApi.fot(kind, parentId).then((d) => setItems(d.items)),
+      execResourcesApi.assignments(kind, parentId).then((d) => setAssignments(d.items)),
+    ]).finally(() => setLoading(false));
+  }, [kind, parentId]);
+
+  useEffect(load, [load]);
+
+  const add = async () => {
+    if (!form.month) return;
+    await execResourcesApi.saveFot({
+      ...form, [`${kind}_id`]: parentId,
+      assignment_id: form.assignment_id ? Number(form.assignment_id) : undefined,
+    });
+    setForm({ cost_basis: "role_average" });
+    load();
+  };
+
+  const totalPlan = items.reduce((s, f) => s + Number(f.plan_total), 0);
+  const totalFact = items.reduce((s, f) => s + Number(f.fact_total || 0), 0);
+
+  if (loading) return <Loading />;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        <MiniMetric label="ФОТ план (год)" value={totalPlan} />
+        <MiniMetric label="ФОТ факт (год)" value={totalFact} />
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+        <div className="text-xs font-semibold text-muted-foreground">Добавить строку ФОТ</div>
+        <div className="grid grid-cols-2 gap-2">
+          <Select value={form.assignment_id || "none"} onValueChange={(v) => setForm({ ...form, assignment_id: v === "none" ? "" : v })}>
+            <SelectTrigger className="text-sm"><SelectValue placeholder="Участник (необязательно)" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Без привязки к участнику</SelectItem>
+              {assignments.map((a) => (
+                <SelectItem key={a.id} value={String(a.id)}>{a.person_name || a.role_title || a.role_title_ref}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input type="month" value={form.month || ""} onChange={(e) => setForm({ ...form, month: e.target.value ? `${e.target.value}-01` : "" })} />
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          <Input type="number" placeholder="Базовая ставка" value={form.base_cost || ""} onChange={(e) => setForm({ ...form, base_cost: e.target.value })} />
+          <Input type="number" placeholder="Премии" value={form.bonus || ""} onChange={(e) => setForm({ ...form, bonus: e.target.value })} />
+          <Input type="number" placeholder="Начисления" value={form.accruals || ""} onChange={(e) => setForm({ ...form, accruals: e.target.value })} />
+          <Input type="number" placeholder="Прочее" value={form.other_payments || ""} onChange={(e) => setForm({ ...form, other_payments: e.target.value })} />
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          По умолчанию используется обезличенная стоимость роли, а не индивидуальный оклад
+        </div>
+        <Button size="sm" onClick={add}>Добавить</Button>
+      </div>
+
+      {items.length === 0 ? <Empty text="Строк ФОТ пока нет" icon="Wallet" /> : (
+        <div className="space-y-1">
+          {items.map((f) => (
+            <div key={f.id} className="text-xs flex justify-between border-b border-slate-100 py-1.5">
+              <span>{f.person_name || f.role_title || "Роль"} · {f.month}</span>
+              <span className="font-medium">{Number(f.plan_total).toLocaleString("ru-RU")} ₽</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ ВКЛАДКА ПЛАН-ФАКТ ============
+
+export function PlanFactTab({ kind, parentId }: { kind: "project" | "initiative"; parentId: number }) {
+  const [summary, setSummary] = useState<FinancialSummary | null>(null);
+  const [actuals, setActuals] = useState<FinancialActual[]>([]);
+  const [commitments, setCommitments] = useState<FinancialCommitment[]>([]);
+  const [expected, setExpected] = useState<FinancialExpected[]>([]);
+  const [categories, setCategories] = useState<CostCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [actualForm, setActualForm] = useState<Record<string, string>>({});
+  const [commitmentForm, setCommitmentForm] = useState<Record<string, string>>({});
+  const [expectedForm, setExpectedForm] = useState<Record<string, string>>({});
+
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      execResourcesApi.financialSummary(kind, parentId).then(setSummary),
+      execResourcesApi.actuals(kind, parentId).then((d) => setActuals(d.items)),
+      execResourcesApi.commitments(kind, parentId).then((d) => setCommitments(d.items)),
+      execResourcesApi.expected(kind, parentId).then((d) => setExpected(d.items)),
+      execResourcesApi.costCategories().then((d) => setCategories(d.items)),
+    ]).finally(() => setLoading(false));
+  }, [kind, parentId]);
+
+  useEffect(load, [load]);
+
+  const addActual = async () => {
+    if (!actualForm.category_id || !actualForm.month || !actualForm.amount) return;
+    await execResourcesApi.saveActual({ ...actualForm, [`${kind}_id`]: parentId, month: `${actualForm.month}-01` });
+    setActualForm({});
+    load();
+  };
+
+  const addCommitment = async () => {
+    if (!commitmentForm.category_id || !commitmentForm.amount) return;
+    await execResourcesApi.saveCommitment({ ...commitmentForm, [`${kind}_id`]: parentId });
+    setCommitmentForm({});
+    load();
+  };
+
+  const addExpected = async () => {
+    if (!expectedForm.category_id || !expectedForm.month || !expectedForm.amount) return;
+    await execResourcesApi.saveExpected({ ...expectedForm, [`${kind}_id`]: parentId, month: `${expectedForm.month}-01` });
+    setExpectedForm({});
+    load();
+  };
+
+  if (loading) return <Loading />;
+
+  return (
+    <div className="space-y-5">
+      {summary && "approved_budget" in summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <MiniMetric label="Утверждённый бюджет" value={summary.approved_budget} />
+          <MiniMetric label="Факт" value={summary.fact} />
+          <MiniMetric label="Обязательства всего" value={summary.commitments_total} />
+          <MiniMetric label="Обязательства оплачено" value={summary.commitments_paid} />
+          <MiniMetric label="Обязательства открыто" value={summary.commitments_open} />
+          <MiniMetric label="Ожидаемые расходы" value={summary.expected} />
+          <MiniMetric label="Прогноз" value={summary.forecast} />
+          <MiniMetric label="Остаток" value={summary.remaining} tone={(summary.remaining ?? 0) < 0 ? "danger" : "default"} />
+          {summary.deviation_pct !== null && summary.deviation_pct !== undefined && (
+            <MiniMetric label="Отклонение" value={`${summary.deviation_pct}%`} tone={summary.deviation_pct > 0 ? "danger" : "default"} isText />
+          )}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+        <div className="text-xs font-semibold">Фактические расходы</div>
+        <div className="grid grid-cols-3 gap-2">
+          <Select value={actualForm.category_id || ""} onValueChange={(v) => setActualForm({ ...actualForm, category_id: v })}>
+            <SelectTrigger className="text-sm"><SelectValue placeholder="Статья" /></SelectTrigger>
+            <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.title}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input type="month" value={actualForm.month || ""} onChange={(e) => setActualForm({ ...actualForm, month: e.target.value })} />
+          <Input type="number" placeholder="Сумма" value={actualForm.amount || ""} onChange={(e) => setActualForm({ ...actualForm, amount: e.target.value })} />
+        </div>
+        <Button size="sm" onClick={addActual}>Добавить</Button>
+        {actuals.length > 0 && (
+          <div className="space-y-1 pt-2">
+            {actuals.map((a) => (
+              <div key={a.id} className="text-xs flex justify-between border-b border-slate-100 py-1">
+                <span>{a.category_title} · {a.month}</span><span>{Number(a.amount).toLocaleString("ru-RU")} ₽</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+        <div className="text-xs font-semibold">Обязательства (договоры)</div>
+        <div className="text-[11px] text-muted-foreground">
+          Указывайте отдельно общую сумму и уже оплаченную часть — оплаченное не задваивается с фактом
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Select value={commitmentForm.category_id || ""} onValueChange={(v) => setCommitmentForm({ ...commitmentForm, category_id: v })}>
+            <SelectTrigger className="text-sm"><SelectValue placeholder="Статья" /></SelectTrigger>
+            <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.title}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input placeholder="Номер договора" value={commitmentForm.contract_ref || ""} onChange={(e) => setCommitmentForm({ ...commitmentForm, contract_ref: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Input type="number" placeholder="Общая сумма" value={commitmentForm.amount || ""} onChange={(e) => setCommitmentForm({ ...commitmentForm, amount: e.target.value })} />
+          <Input type="number" placeholder="Оплачено" value={commitmentForm.paid_amount || ""} onChange={(e) => setCommitmentForm({ ...commitmentForm, paid_amount: e.target.value })} />
+        </div>
+        <Button size="sm" onClick={addCommitment}>Добавить</Button>
+        {commitments.length > 0 && (
+          <div className="space-y-1 pt-2">
+            {commitments.map((c) => (
+              <div key={c.id} className="text-xs flex justify-between border-b border-slate-100 py-1">
+                <span>{c.category_title} · {c.contract_ref || "без номера"}</span>
+                <span>{Number(c.amount).toLocaleString("ru-RU")} ₽ (оплачено {Number(c.paid_amount).toLocaleString("ru-RU")})</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+        <div className="text-xs font-semibold">Ожидаемые расходы без оформленного обязательства</div>
+        <div className="grid grid-cols-3 gap-2">
+          <Select value={expectedForm.category_id || ""} onValueChange={(v) => setExpectedForm({ ...expectedForm, category_id: v })}>
+            <SelectTrigger className="text-sm"><SelectValue placeholder="Статья" /></SelectTrigger>
+            <SelectContent>{categories.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.title}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input type="month" value={expectedForm.month || ""} onChange={(e) => setExpectedForm({ ...expectedForm, month: e.target.value })} />
+          <Input type="number" placeholder="Сумма" value={expectedForm.amount || ""} onChange={(e) => setExpectedForm({ ...expectedForm, amount: e.target.value })} />
+        </div>
+        <Button size="sm" onClick={addExpected}>Добавить</Button>
+        {expected.length > 0 && (
+          <div className="space-y-1 pt-2">
+            {expected.map((e) => (
+              <div key={e.id} className="text-xs flex justify-between border-b border-slate-100 py-1">
+                <span>{e.category_title} · {e.month}</span><span>{Number(e.amount).toLocaleString("ru-RU")} ₽</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

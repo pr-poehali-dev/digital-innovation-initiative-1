@@ -23,8 +23,9 @@ import StakeholderForm from "@/components/exec/StakeholderForm";
 import DecisionForm from "@/components/exec/DecisionForm";
 import QuickIssueForm from "@/components/exec/QuickIssueForm";
 import QuickRiskForm from "@/components/exec/QuickRiskForm";
+import { TeamTab, BudgetTab, CapacityTab, FotTab, PlanFactTab } from "@/components/exec/ProjectResourcesTab";
 
-type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect" | "budget";
+type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect" | "budget" | "resources";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Основное", icon: "FileText" },
@@ -32,7 +33,8 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "decisions", label: "Решения", icon: "GitPullRequest" },
   { id: "roles", label: "Роли", icon: "Shield" },
   { id: "effect", label: "Эффект", icon: "TrendingUp" },
-  { id: "budget", label: "Бюджет", icon: "Wallet" },
+  { id: "budget", label: "Бюджетная заявка", icon: "Wallet" },
+  { id: "resources", label: "Ресурсы и финансы", icon: "PiggyBank" },
 ];
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -633,6 +635,26 @@ export default function ExecInitiativeDetailPage() {
                 <Field label="Бюджетная потребность (общая)" value={i.budget_need} />
                 <Field label="Источник финансирования (общий)" value={i.budget_source} />
               </div>
+            </Card>
+          </div>
+        )}
+
+        {tab === "resources" && (
+          <div className="space-y-6">
+            <Card title="Команда инициативы" icon="Users">
+              <TeamTab kind="initiative" parentId={i.id} />
+            </Card>
+            <Card title="Загрузка" icon="CalendarRange">
+              <CapacityTab kind="initiative" parentId={i.id} />
+            </Card>
+            <Card title="Бюджет по годам" icon="Wallet">
+              <BudgetTab kind="initiative" parentId={i.id} />
+            </Card>
+            <Card title="ФОТ" icon="Banknote">
+              <FotTab kind="initiative" parentId={i.id} />
+            </Card>
+            <Card title="План-факт" icon="TrendingUp">
+              <PlanFactTab kind="initiative" parentId={i.id} />
             </Card>
           </div>
         )}

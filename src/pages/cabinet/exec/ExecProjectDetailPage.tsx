@@ -14,17 +14,18 @@ import {
 } from "@/components/exec/PortfolioForms";
 import { execPortfolioApi, ProjectDetail, ExecResult, ExecEffect, HistoryEntry } from "@/lib/execPortfolioApi";
 import { execApi } from "@/lib/execCabinetApi";
-import { TeamTab, BudgetTab } from "@/components/exec/ProjectResourcesTab";
+import { TeamTab, BudgetTab, CapacityTab, FotTab, PlanFactTab } from "@/components/exec/ProjectResourcesTab";
 
 function labelOf(list: { value: string; label: string }[], v: string) {
   return list.find((x) => x.value === v)?.label || v;
 }
 
-const TABS = ["overview", "team", "budget", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
+const TABS = ["overview", "team", "capacity", "budget", "fot", "planfact", "tasks", "milestones", "results", "effects", "risks", "issues", "documents", "links", "history"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
-  overview: "Обзор", team: "Команда", budget: "Бюджет", tasks: "Задачи",
+  overview: "Обзор", team: "Команда", capacity: "Загрузка", budget: "Бюджет", fot: "ФОТ",
+  planfact: "План-факт", tasks: "Задачи",
   milestones: "Контрольные точки", results: "Результаты",
   effects: "Эффекты", risks: "Риски", issues: "Проблемы", documents: "Документы",
   links: "Связи", history: "История",
@@ -166,7 +167,10 @@ export default function ExecProjectDetailPage() {
         )}
 
         {tab === "team" && <TeamTab kind="project" parentId={pid} />}
+        {tab === "capacity" && <CapacityTab kind="project" parentId={pid} />}
         {tab === "budget" && <BudgetTab kind="project" parentId={pid} />}
+        {tab === "fot" && <FotTab kind="project" parentId={pid} />}
+        {tab === "planfact" && <PlanFactTab kind="project" parentId={pid} />}
 
         {tab === "tasks" && (
           data.tasks.length === 0 ? <Empty text="Задач пока нет" icon="ListTodo" /> :

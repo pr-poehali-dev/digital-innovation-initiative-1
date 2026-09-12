@@ -254,6 +254,96 @@ def team_load_summary(cur, include_test_data=False):
     return result
 
 
+def capacity_plan_year(cur, kind, parent_id, year, include_test_data=False):
+    """Помесячная загрузка (план/факт) по всем назначениям проекта/инициативы за год."""
+    tnd = "" if include_test_data else "AND a.is_test_data = false"
+    cur.execute(f"""
+        SELECT a.id AS assignment_id, a.role_title, a.person_id, a.is_vacant,
+               p.display_name AS person_name, r.title AS role_title_ref, a.plan_load_pct AS default_plan_load
+        FROM {SCHEMA}.exec_resource_assignment a
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        LEFT JOIN {SCHEMA}.exec_center_role r ON r.id = a.role_id
+        WHERE a.{kind}_id = %s AND a.archived_at IS NULL {tnd}
+        ORDER BY a.created_at
+    """, (parent_id,))
+    assignments = rows(cur)
+
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_capacity_plan
+        WHERE assignment_id IN (
+            SELECT id FROM {SCHEMA}.exec_resource_assignment WHERE {kind}_id = %s
+        ) AND year = %s
+    """, (parent_id, year))
+    plans = rows(cur)
+    by_assignment = {}
+    for p in plans:
+        by_assignment.setdefault(p["assignment_id"], {})[p["month"]] = p
+
+    for a in assignments:
+        months = {}
+        for m in range(1, 13):
+            cell = by_assignment.get(a["assignment_id"], {}).get(m)
+            months[m] = {
+                "plan_load_pct": float(cell["plan_load_pct"]) if cell and cell["plan_load_pct"] is not None else float(a["default_plan_load"] or 0),
+                "fact_load_pct": float(cell["fact_load_pct"]) if cell and cell["fact_load_pct"] is not None else None,
+                "plan_days": float(cell["plan_days"]) if cell and cell["plan_days"] is not None else None,
+                "fact_days": float(cell["fact_days"]) if cell and cell["fact_days"] is not None else None,
+            }
+        a["months"] = months
+        a["year_avg_plan_pct"] = round(sum(m["plan_load_pct"] for m in months.values()) / 12, 1)
+
+    # Перегрузка по месяцу — сумма плановой загрузки человека по ВСЕМ проектам/
+    # инициативам, не только текущей. Через generate_series(1,12), чтобы для
+    # месяца без явной записи в exec_capacity_plan корректно подставлялся
+    # дефолт plan_load_pct назначения (иначе LEFT JOIN даёт cp.month=NULL и
+    # такие назначения "выпадают" из подсчёта конкретного месяца).
+    person_ids = [a["person_id"] for a in assignments if a["person_id"]]
+    overload_by_month = {}
+    if person_ids:
+        tnd_ap = "" if include_test_data else "AND ap.is_test_data = false"
+        cur.execute(f"""
+            SELECT ap.person_id, mm.month, SUM(COALESCE(cp.plan_load_pct, ap.plan_load_pct)) AS total_pct
+            FROM {SCHEMA}.exec_resource_assignment ap
+            CROSS JOIN generate_series(1, 12) AS mm(month)
+            LEFT JOIN {SCHEMA}.exec_capacity_plan cp ON cp.assignment_id = ap.id AND cp.year = %s AND cp.month = mm.month
+            WHERE ap.person_id = ANY(%s) AND ap.archived_at IS NULL {tnd_ap}
+            GROUP BY ap.person_id, mm.month
+        """, (year, person_ids))
+        for pid, month, total in cur.fetchall():
+            overload_by_month.setdefault(pid, {})[month] = float(total or 0)
+
+    for a in assignments:
+        a["overload_by_month"] = overload_by_month.get(a["person_id"], {}) if a["person_id"] else {}
+
+    return assignments
+
+
+def save_capacity_cell(cur, body: dict, actor: str):
+    assignment_id = as_int(body.get("assignment_id"))
+    year = as_int(body.get("year"))
+    month = as_int(body.get("month"))
+    if not assignment_id or not year or not month or not (1 <= month <= 12):
+        return None, "Укажите назначение, год и месяц (1-12)"
+
+    fields = {
+        "plan_load_pct": as_num(body.get("plan_load_pct")) if body.get("plan_load_pct") not in (None, "") else None,
+        "fact_load_pct": as_num(body.get("fact_load_pct")) if body.get("fact_load_pct") not in (None, "") else None,
+        "plan_days": as_num(body.get("plan_days")) if body.get("plan_days") not in (None, "") else None,
+        "fact_days": as_num(body.get("fact_days")) if body.get("fact_days") not in (None, "") else None,
+    }
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_capacity_plan (assignment_id, year, month, plan_load_pct, fact_load_pct, plan_days, fact_days)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (assignment_id, year, month) DO UPDATE SET
+            plan_load_pct = EXCLUDED.plan_load_pct, fact_load_pct = EXCLUDED.fact_load_pct,
+            plan_days = EXCLUDED.plan_days, fact_days = EXCLUDED.fact_days, updated_at = now()
+        RETURNING id
+    """, (assignment_id, year, month, fields["plan_load_pct"], fields["fact_load_pct"], fields["plan_days"], fields["fact_days"]))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "capacity_plan", new_id, "upsert", after={**fields, "year": year, "month": month})
+    return new_id, None
+
+
 def vacant_roles(cur, include_test_data=False):
     tnd = "" if include_test_data else "AND is_test_data = false"
     cur.execute(f"""
@@ -280,7 +370,7 @@ def portfolio_financial_kpi(cur, year=None, include_test_data=False):
     cur.execute(f"""
         SELECT COALESCE(SUM(l.amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.version_status = 'approved' AND v.year = %s {tnd_v}
+        WHERE v.is_active = true AND v.year = %s {tnd_v}
     """, (yr,))
     total_budget = float(cur.fetchone()[0] or 0)
 
@@ -291,37 +381,49 @@ def portfolio_financial_kpi(cur, year=None, include_test_data=False):
     total_fact = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_commitment
-        WHERE status = 'active' {tnd_c}
+        SELECT COALESCE(SUM(amount), 0), COALESCE(SUM(paid_amount), 0)
+        FROM {SCHEMA}.exec_financial_commitment WHERE status = 'active' {tnd_c}
     """)
-    total_commitments = float(cur.fetchone()[0] or 0)
+    commitments_total, commitments_paid = cur.fetchone()
+    total_commitments_open = float(commitments_total or 0) - float(commitments_paid or 0)
+
+    cur.execute(f"""
+        SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_expected
+        WHERE EXTRACT(YEAR FROM month) = %s {tnd_a}
+    """, (yr,))
+    total_expected = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
         SELECT COALESCE(SUM(plan_total), 0) FROM {SCHEMA}.exec_fot_plan
-        WHERE EXTRACT(YEAR FROM month) = %s {tnd_a.replace('is_test_data', 'is_test_data')}
+        WHERE EXTRACT(YEAR FROM month) = %s {tnd_a}
     """, (yr,))
     total_fot = float(cur.fetchone()[0] or 0)
+
+    total_forecast = total_fact + total_commitments_open + total_expected
 
     cur.execute(f"""
         SELECT p.id, p.title,
             COALESCE((SELECT SUM(l.amount_plan) FROM {SCHEMA}.exec_budget_line l
                 JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-                WHERE v.project_id = p.id AND v.version_status = 'approved' AND v.year = %s), 0) AS budget,
+                WHERE v.project_id = p.id AND v.is_active = true AND v.year = %s), 0) AS budget,
             COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_actual
                 WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) +
-            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_commitment
-                WHERE project_id = p.id AND status='active'), 0) AS forecast
+            COALESCE((SELECT SUM(amount) - SUM(paid_amount) FROM {SCHEMA}.exec_financial_commitment
+                WHERE project_id = p.id AND status='active'), 0) +
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_expected
+                WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) AS forecast
         FROM {SCHEMA}.exec_project p
         WHERE p.archived_at IS NULL AND p.is_test_data = false
-    """, (yr, yr))
+    """, (yr, yr, yr))
     over_budget = [dict(id=r[0], title=r[1], budget=float(r[2]), forecast=float(r[3]),
                         deviation=float(r[3]) - float(r[2]))
                    for r in cur.fetchall() if float(r[2]) > 0 and float(r[3]) > float(r[2])]
 
     return {
         "year": yr, "total_budget": total_budget, "total_fact": total_fact,
-        "total_commitments": total_commitments, "total_forecast": total_fact + total_commitments,
-        "remaining": total_budget - total_fact - total_commitments, "total_fot": total_fot,
+        "total_commitments_open": total_commitments_open, "total_expected": total_expected,
+        "total_forecast": total_forecast,
+        "remaining": total_budget - total_forecast, "total_fot": total_fot,
         "projects_over_budget": over_budget,
     }
 
@@ -359,17 +461,36 @@ def create_budget_version(cur, body: dict, actor: str):
 
 
 def set_budget_version_status(cur, vid: int, status: str, actor: str):
+    """При переходе в approved версия становится ЕДИНСТВЕННОЙ действующей
+    (is_active=true) для (проект/инициатива, год, сценарий) — старая
+    действующая версия теряет is_active, но остаётся в истории со своим
+    статусом (не удаляется и не переименовывается)."""
     if status not in ("draft", "review", "approved", "revised", "forecast"):
         return None, "Недопустимый статус версии"
+    version = fetch_one(cur, "exec_budget_version", vid)
+    if not version:
+        return None, "Версия не найдена"
+
     is_locked = status == "approved"
+    becomes_active = status == "approved"
+
+    if becomes_active:
+        parent_kind = "project_id" if version.get("project_id") else "initiative_id"
+        cur.execute(
+            f"""UPDATE {SCHEMA}.exec_budget_version SET is_active = false, updated_at = now()
+                WHERE {parent_kind} = %s AND year = %s AND scenario = %s AND is_active = true AND id != %s""",
+            (version[parent_kind], version["year"], version["scenario"], vid),
+        )
+
     cur.execute(
         f"""UPDATE {SCHEMA}.exec_budget_version
-            SET version_status = %s, is_locked = %s,
+            SET version_status = %s, is_locked = %s, is_active = %s,
+                effective_date = CASE WHEN %s THEN CURRENT_DATE ELSE effective_date END,
                 locked_at = CASE WHEN %s THEN now() ELSE locked_at END,
                 locked_by = CASE WHEN %s THEN %s ELSE locked_by END,
                 updated_at = now()
             WHERE id = %s RETURNING id""",
-        (status, is_locked, is_locked, is_locked, actor, vid),
+        (status, is_locked, becomes_active, becomes_active, is_locked, is_locked, actor, vid),
     )
     r = cur.fetchone()
     if not r:
@@ -499,11 +620,15 @@ def save_commitment(cur, body: dict, actor: str):
     parent_key, parent_val = PARENT_FIELD(body)
     if not parent_val:
         return None, "Не указан проект или инициатива"
+    amount = as_num(body.get("amount"))
+    paid_amount = as_num(body.get("paid_amount")) if body.get("paid_amount") not in (None, "") else 0
+    if paid_amount > amount:
+        return None, "Оплаченная часть не может превышать общую сумму обязательства"
     fields = {
         parent_key: parent_val,
         "category_id": as_int(body.get("category_id")),
         "contract_ref": body.get("contract_ref"),
-        "amount": as_num(body.get("amount")),
+        "amount": amount, "paid_amount": paid_amount,
         "start_date": body.get("start_date") or None,
         "end_date": body.get("end_date") or None,
         "status": body.get("status", "active"),
@@ -517,6 +642,39 @@ def save_commitment(cur, body: dict, actor: str):
                 (*fields.values(), actor))
     new_id = cur.fetchone()[0]
     log_change(cur, actor, "financial_commitment", new_id, "create", after=fields)
+    return new_id, None
+
+
+def list_expected(cur, parent_kind, parent_id, include_test_data=False):
+    tnd = "" if include_test_data else "AND e.is_test_data = false"
+    cur.execute(f"""
+        SELECT e.*, c.title AS category_title FROM {SCHEMA}.exec_financial_expected e
+        JOIN {SCHEMA}.exec_cost_category c ON c.id = e.category_id
+        WHERE e.{parent_kind}_id = %s {tnd}
+        ORDER BY e.month
+    """, (parent_id,))
+    return rows(cur)
+
+
+def save_expected(cur, body: dict, actor: str):
+    parent_key, parent_val = PARENT_FIELD(body)
+    if not parent_val:
+        return None, "Не указан проект или инициатива"
+    fields = {
+        parent_key: parent_val,
+        "category_id": as_int(body.get("category_id")),
+        "month": body.get("month"),
+        "amount": as_num(body.get("amount")),
+        "comment": body.get("comment"),
+    }
+    if not fields["category_id"] or not fields["month"]:
+        return None, "Укажите статью и месяц"
+    cols = ", ".join(fields.keys())
+    ph = ", ".join(["%s"] * len(fields))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_financial_expected ({cols}, created_by) VALUES ({ph}, %s) RETURNING id",
+                (*fields.values(), actor))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "financial_expected", new_id, "create", after=fields)
     return new_id, None
 
 
@@ -566,10 +724,14 @@ def save_fot(cur, body: dict, actor: str):
 # ============ СВОДКА ПРОЕКТА / ИНИЦИАТИВЫ ============
 
 def project_financial_summary(cur, project_id: int):
+    """Прогноз = факт + ОТКРЫТАЯ (неоплаченная) часть обязательств + ожидаемые
+    расходы без обязательств. Оплаченная часть обязательства (paid_amount)
+    обычно уже отражена в exec_financial_actual — суммировать всю сумму
+    обязательства вместе с фактом было бы двойным счётом."""
     cur.execute(f"""
         SELECT COALESCE(SUM(amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.project_id = %s AND v.version_status = 'approved' AND v.is_test_data = false
+        WHERE v.project_id = %s AND v.is_active = true AND v.is_test_data = false
     """, (project_id,))
     approved_budget = float(cur.fetchone()[0] or 0)
 
@@ -580,14 +742,26 @@ def project_financial_summary(cur, project_id: int):
     fact = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_commitment
+        SELECT COALESCE(SUM(amount), 0), COALESCE(SUM(paid_amount), 0)
+        FROM {SCHEMA}.exec_financial_commitment
         WHERE project_id = %s AND status = 'active' AND is_test_data = false
     """, (project_id,))
-    commitments = float(cur.fetchone()[0] or 0)
+    commitments_total, commitments_paid = cur.fetchone()
+    commitments_total = float(commitments_total or 0)
+    commitments_paid = float(commitments_paid or 0)
+    commitments_open = commitments_total - commitments_paid
 
-    forecast = fact + commitments
+    cur.execute(f"""
+        SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_expected
+        WHERE project_id = %s AND is_test_data = false
+    """, (project_id,))
+    expected = float(cur.fetchone()[0] or 0)
+
+    forecast = fact + commitments_open + expected
     return {
-        "approved_budget": approved_budget, "fact": fact, "commitments": commitments,
+        "approved_budget": approved_budget, "fact": fact,
+        "commitments_total": commitments_total, "commitments_paid": commitments_paid,
+        "commitments_open": commitments_open, "expected": expected,
         "forecast": forecast, "remaining": approved_budget - forecast,
         "deviation": forecast - approved_budget,
         "deviation_pct": round((forecast - approved_budget) / approved_budget * 100, 1) if approved_budget else None,
@@ -602,14 +776,14 @@ def initiative_financial_summary(cur, initiative_id: int):
         SELECT COALESCE(SUM(amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
         JOIN {SCHEMA}.exec_project p ON p.id = v.project_id
-        WHERE p.initiative_id = %s AND v.version_status = 'approved' AND v.is_test_data = false
+        WHERE p.initiative_id = %s AND v.is_active = true AND v.is_test_data = false
     """, (initiative_id,))
     projects_budget = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
         SELECT COALESCE(SUM(amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.initiative_id = %s AND v.version_status = 'approved' AND v.is_test_data = false
+        WHERE v.initiative_id = %s AND v.is_active = true AND v.is_test_data = false
     """, (initiative_id,))
     own_budget = float(cur.fetchone()[0] or 0)
 
@@ -626,11 +800,29 @@ def initiative_financial_summary(cur, initiative_id: int):
     """, (initiative_id,))
     own_fact = float(cur.fetchone()[0] or 0)
 
+    # Расшифровка по проектам — для интерфейса инициативы (переход к проекту,
+    # из которого собрана сумма). exec_project.initiative_id — обычный FK
+    # "один проект -> максимум одна инициатива", поэтому задвоения здесь
+    # конструктивно быть не может (в отличие от M2M через exec_link).
+    cur.execute(f"""
+        SELECT p.id, p.title,
+            COALESCE((SELECT SUM(l.amount_plan) FROM {SCHEMA}.exec_budget_line l
+                JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
+                WHERE v.project_id = p.id AND v.is_active = true AND v.is_test_data = false), 0) AS budget,
+            COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_actual
+                WHERE project_id = p.id AND is_test_data = false), 0) AS fact
+        FROM {SCHEMA}.exec_project p
+        WHERE p.initiative_id = %s AND p.archived_at IS NULL AND p.is_test_data = false
+        ORDER BY p.title
+    """, (initiative_id,))
+    by_project = [{"id": r[0], "title": r[1], "budget": float(r[2]), "fact": float(r[3])} for r in cur.fetchall()]
+
     return {
         "total_budget": projects_budget + own_budget,
         "projects_budget": projects_budget, "own_budget": own_budget,
         "total_fact": projects_fact + own_fact,
         "projects_fact": projects_fact, "own_fact": own_fact,
+        "by_project": by_project,
     }
 
 
@@ -651,6 +843,13 @@ def create_financial_snapshot(cur, body: dict, actor: str):
         "summary": budget_summary(cur, version_id),
         "financial_summary": (project_financial_summary(cur, parent_id) if parent_kind == "project"
                               else initiative_financial_summary(cur, parent_id)),
+        "team": list_assignments(cur, parent_kind, parent_id),
+        "capacity": capacity_plan_year(cur, parent_kind, parent_id, version["year"]),
+        "fot": list_fot(cur, parent_kind, parent_id),
+        "actuals": list_actuals(cur, parent_kind, parent_id),
+        "commitments": list_commitments(cur, parent_kind, parent_id),
+        "expected": list_expected(cur, parent_kind, parent_id),
+        "currency": "RUB", "unit": "рубли",
     }
     payload_str = json.dumps(payload, ensure_ascii=False, default=str)
     payload_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
@@ -689,6 +888,79 @@ def get_financial_snapshot(cur, sid: int):
     item["payload"] = json.loads(payload_str)
     item["integrity_ok"] = stored_hash == actual_hash
     return item
+
+
+def export_financial_xlsx(snapshot: dict) -> str:
+    """XLSX строго из содержимого неизменяемого снимка (snapshot['payload']),
+    а не из текущих таблиц — выгрузка соответствует ровно той версии, которая
+    была утверждена."""
+    import io
+    import base64
+    import xlsxwriter
+
+    p = snapshot["payload"]
+    v = p.get("version", {})
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
+    bold = wb.add_format({"bold": True, "bg_color": "#f0f0f0"})
+
+    ws = wb.add_worksheet("Сводка")
+    fs = p.get("financial_summary", {})
+    ws.write_row(0, 0, ["Параметр", "Значение"], bold)
+    meta_rows = [("Год", v.get("year")), ("Версия", v.get("version_label")),
+                 ("Статус версии", v.get("version_status")), ("Действующая", v.get("is_active")),
+                 ("Валюта", p.get("currency", "RUB")), ("Утверждённый бюджет", fs.get("approved_budget")),
+                 ("Факт", fs.get("fact")), ("Обязательства всего", fs.get("commitments_total")),
+                 ("Обязательства оплачено", fs.get("commitments_paid")),
+                 ("Обязательства открыто", fs.get("commitments_open")),
+                 ("Ожидаемые расходы", fs.get("expected")), ("Прогноз", fs.get("forecast")),
+                 ("Остаток", fs.get("remaining")), ("Отклонение %", fs.get("deviation_pct"))]
+    for i, (k, val) in enumerate(meta_rows, start=1):
+        ws.write_row(i, 0, [k, val if val is not None else ""])
+
+    def sheet(name, key, cols):
+        items = p.get(key) or []
+        s = wb.add_worksheet(name[:31])
+        s.write_row(0, 0, [c[1] for c in cols], bold)
+        for i, it in enumerate(items, start=1):
+            s.write_row(i, 0, [str(it.get(c[0], "") or "") for c in cols])
+
+    sheet("Бюджет по статьям", "lines", [("category_title", "Статья"), ("month", "Месяц"), ("amount_plan", "Сумма плана")])
+    sheet("Команда", "team", [("person_name", "Сотрудник"), ("role_title", "Роль"), ("project_role", "Роль в проекте"),
+                               ("plan_load_pct", "Плановая загрузка %"), ("is_vacant", "Вакансия")])
+    sheet("ФОТ", "fot", [("person_name", "Сотрудник"), ("role_title", "Роль"), ("month", "Месяц"),
+                          ("plan_total", "План"), ("fact_total", "Факт")])
+    sheet("Факт", "actuals", [("category_title", "Статья"), ("month", "Месяц"), ("amount", "Сумма"), ("paid_amount", "Оплачено")])
+    sheet("Обязательства", "commitments", [("category_title", "Статья"), ("contract_ref", "Договор"),
+                                            ("amount", "Сумма"), ("paid_amount", "Оплачено"), ("status", "Статус")])
+    sheet("Прогноз без обязательств", "expected", [("category_title", "Статья"), ("month", "Месяц"), ("amount", "Сумма")])
+
+    ws_month = wb.add_worksheet("Бюджет по месяцам")
+    ws_month.write_row(0, 0, ["Месяц", "Сумма плана"], bold)
+    summary = p.get("summary", {})
+    for i, (m, val) in enumerate(sorted((summary.get("total_by_month") or {}).items()), start=1):
+        ws_month.write_row(i, 0, [m, val])
+
+    ws_load = wb.add_worksheet("Загрузка")
+    ws_load.write_row(0, 0, ["Сотрудник/Роль"] + [f"Месяц {m}" for m in range(1, 13)], bold)
+    for i, a in enumerate(p.get("capacity") or [], start=1):
+        months = a.get("months", {})
+        ws_load.write_row(i, 0, [a.get("person_name") or a.get("role_title") or ""] +
+                          [months.get(str(m), months.get(m, {})).get("plan_load_pct", "") for m in range(1, 13)])
+
+    ws_params = wb.add_worksheet("Параметры версии")
+    ws_params.write_row(0, 0, ["Параметр", "Значение"], bold)
+    params_rows = [("Название", snapshot["title"] if "title" in snapshot else v.get("version_label")),
+                   ("Версия снимка", f"{snapshot.get('version_group')} v{snapshot.get('version_number')}"),
+                   ("Автор", snapshot.get("created_by")), ("Дата формирования", str(snapshot.get("created_at"))),
+                   ("SHA-256", snapshot.get("payload_sha256")), ("Целостность", snapshot.get("integrity_ok")),
+                   ("Валюта", p.get("currency")), ("Единица измерения", p.get("unit"))]
+    for i, (k, val) in enumerate(params_rows, start=1):
+        ws_params.write_row(i, 0, [k, str(val) if val is not None else ""])
+
+    wb.close()
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("ascii")
 
 
 def handler(event: dict, context) -> dict:
@@ -743,6 +1015,19 @@ def handler(event: dict, context) -> dict:
 
         if action == "vacant_roles":
             return cors({"ok": True, "data": {"items": vacant_roles(cur, itd)}})
+
+        if action == "capacity_plan":
+            if not parent_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
+            year = as_int(qs.get("year")) or datetime.date.today().year
+            return cors({"ok": True, "data": {"items": capacity_plan_year(cur, parent_kind, parent_id, year, itd), "year": year}})
+
+        if action == "save_capacity_cell":
+            cid, err = save_capacity_cell(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": cid}})
 
         if action == "portfolio_financial_kpi":
             year = as_int(qs.get("year"))
@@ -808,6 +1093,18 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True, "data": {"id": cid}})
 
+        if action == "expected":
+            if not parent_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
+            return cors({"ok": True, "data": {"items": list_expected(cur, parent_kind, parent_id, itd)}})
+
+        if action == "save_expected":
+            eid, err = save_expected(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": eid}})
+
         if action == "fot":
             if not parent_id:
                 return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
@@ -840,6 +1137,18 @@ def handler(event: dict, context) -> dict:
             if not snap:
                 return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
             return cors({"ok": True, "data": snap})
+
+        if action == "export_financial_xlsx":
+            sid = as_int(qs.get("id"))
+            snap = get_financial_snapshot(cur, sid) if sid else None
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Снимок не найден"}}, 404)
+            if not snap.get("integrity_ok", True):
+                return cors({"ok": False, "error": {"message": "Целостность снимка нарушена — экспорт заблокирован"}}, 409)
+            xlsx_b64 = export_financial_xlsx(snap)
+            v = snap["payload"].get("version", {})
+            filename = f"Бюджет {v.get('version_label', '')} {v.get('year', '')}.xlsx"
+            return cors({"ok": True, "data": {"filename": filename, "content_base64": xlsx_b64}})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
     finally:

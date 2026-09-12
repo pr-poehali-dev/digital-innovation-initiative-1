@@ -47,6 +47,9 @@ export interface BudgetVersion {
   version_label: string;
   version_status: string;
   is_locked: boolean;
+  is_active: boolean;
+  effective_date: string | null;
+  scenario: string;
   created_at: string;
 }
 
@@ -65,7 +68,10 @@ export interface BudgetLine {
 export interface FinancialSummary {
   approved_budget?: number;
   fact?: number;
-  commitments?: number;
+  commitments_total?: number;
+  commitments_paid?: number;
+  commitments_open?: number;
+  expected?: number;
   forecast?: number;
   remaining?: number;
   deviation?: number;
@@ -74,6 +80,72 @@ export interface FinancialSummary {
   projects_budget?: number;
   own_budget?: number;
   total_fact?: number;
+  by_project?: Array<{ id: number; title: string; budget: number; fact: number }>;
+}
+
+export interface CapacityMonthCell {
+  plan_load_pct: number;
+  fact_load_pct: number | null;
+  plan_days: number | null;
+  fact_days: number | null;
+}
+
+export interface CapacityAssignmentRow {
+  assignment_id: number;
+  person_id: number | null;
+  person_name: string | null;
+  role_title: string | null;
+  role_title_ref: string | null;
+  is_vacant: boolean;
+  months: Record<string, CapacityMonthCell>;
+  year_avg_plan_pct: number;
+  overload_by_month: Record<string, number>;
+}
+
+export interface FotRow {
+  id: number;
+  assignment_id: number | null;
+  person_id: number | null;
+  person_name: string | null;
+  role_title: string | null;
+  month: string;
+  cost_basis: string;
+  bonus: number;
+  accruals: number;
+  other_payments: number;
+  plan_total: number;
+  fact_total: number | null;
+}
+
+export interface FinancialActual {
+  id: number;
+  category_id: number;
+  category_title: string;
+  month: string;
+  amount: number;
+  paid_amount: number | null;
+  source_ref: string | null;
+}
+
+export interface FinancialCommitment {
+  id: number;
+  category_id: number;
+  category_title: string;
+  contract_ref: string | null;
+  amount: number;
+  paid_amount: number;
+  start_date: string | null;
+  end_date: string | null;
+  status: string;
+}
+
+export interface FinancialExpected {
+  id: number;
+  category_id: number;
+  category_title: string;
+  month: string;
+  amount: number;
+  comment: string | null;
 }
 
 async function req(path: string, method: "GET" | "POST" = "GET", body?: unknown) {
@@ -97,8 +169,8 @@ export const execResourcesApi = {
   vacantRoles: (): Promise<{ items: Array<{ id: number; role_title: string | null; role_title_ref: string | null; project_title: string | null; initiative_title: string | null }> }> =>
     req("/?action=vacant_roles"),
   portfolioFinancialKpi: (year?: number): Promise<{
-    year: number; total_budget: number; total_fact: number; total_commitments: number;
-    total_forecast: number; remaining: number; total_fot: number;
+    year: number; total_budget: number; total_fact: number; total_commitments_open: number;
+    total_expected: number; total_forecast: number; remaining: number; total_fot: number;
     projects_over_budget: Array<{ id: number; title: string; budget: number; forecast: number; deviation: number }>;
   }> => req(`/?action=portfolio_financial_kpi${year ? `&year=${year}` : ""}`),
 
@@ -114,13 +186,24 @@ export const execResourcesApi = {
     req(`/?action=budget_lines&version_id=${versionId}`),
   saveBudgetLine: (data: Record<string, unknown>) => req("/?action=save_budget_line", "POST", data),
 
-  actuals: (kind: "project" | "initiative", id: number) => req(`/?action=actuals&kind=${kind}&id=${id}`),
+  capacityPlan: (kind: "project" | "initiative", id: number, year: number): Promise<{ items: CapacityAssignmentRow[]; year: number }> =>
+    req(`/?action=capacity_plan&kind=${kind}&id=${id}&year=${year}`),
+  saveCapacityCell: (data: Record<string, unknown>) => req("/?action=save_capacity_cell", "POST", data),
+
+  actuals: (kind: "project" | "initiative", id: number): Promise<{ items: FinancialActual[] }> =>
+    req(`/?action=actuals&kind=${kind}&id=${id}`),
   saveActual: (data: Record<string, unknown>) => req("/?action=save_actual", "POST", data),
 
-  commitments: (kind: "project" | "initiative", id: number) => req(`/?action=commitments&kind=${kind}&id=${id}`),
+  commitments: (kind: "project" | "initiative", id: number): Promise<{ items: FinancialCommitment[] }> =>
+    req(`/?action=commitments&kind=${kind}&id=${id}`),
   saveCommitment: (data: Record<string, unknown>) => req("/?action=save_commitment", "POST", data),
 
-  fot: (kind: "project" | "initiative", id: number) => req(`/?action=fot&kind=${kind}&id=${id}`),
+  expected: (kind: "project" | "initiative", id: number): Promise<{ items: FinancialExpected[] }> =>
+    req(`/?action=expected&kind=${kind}&id=${id}`),
+  saveExpected: (data: Record<string, unknown>) => req("/?action=save_expected", "POST", data),
+
+  fot: (kind: "project" | "initiative", id: number): Promise<{ items: FotRow[] }> =>
+    req(`/?action=fot&kind=${kind}&id=${id}`),
   saveFot: (data: Record<string, unknown>) => req("/?action=save_fot", "POST", data),
 
   financialSummary: (kind: "project" | "initiative", id: number): Promise<FinancialSummary> =>
@@ -128,4 +211,6 @@ export const execResourcesApi = {
 
   createFinancialSnapshot: (data: Record<string, unknown>) => req("/?action=create_financial_snapshot", "POST", data),
   financialSnapshot: (id: number) => req(`/?action=financial_snapshot&id=${id}`),
+  exportFinancialXlsx: (id: number): Promise<{ filename: string; content_base64: string }> =>
+    req(`/?action=export_financial_xlsx&id=${id}`),
 };
