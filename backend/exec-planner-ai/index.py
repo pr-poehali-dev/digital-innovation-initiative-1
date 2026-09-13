@@ -209,7 +209,7 @@ class AIDisabledError(Exception):
     pass
 
 
-def _ai_enabled() -> bool:
+def _ai_enabled(module_code: str = "exec_knowledge") -> bool:
     """Единое управление AI («Настройки AI»): глобальный + модульный переключатель.
     Дополняет (не заменяет) существующий фильтр exec_knowledge.use_in_ai."""
     conn = psycopg2.connect(DB)
@@ -219,23 +219,23 @@ def _ai_enabled() -> bool:
         g = cur.fetchone()
         if not g or not g[0]:
             return False
-        cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_module_settings WHERE module_code = 'exec_knowledge'")
+        cur.execute(f"SELECT is_enabled FROM {SCHEMA}.ai_module_settings WHERE module_code = %s", (module_code,))
         m = cur.fetchone()
         return bool(m and m[0])
     finally:
         conn.close()
 
 
-def _log_ai_op(action, result, data_kind=None, approx_volume=None):
+def _log_ai_op(action, result, data_kind=None, approx_volume=None, module_code="exec_knowledge", initiated_by=None):
     try:
         conn = psycopg2.connect(DB)
         try:
             cur = conn.cursor()
             cur.execute(
                 f"""INSERT INTO {SCHEMA}.ai_operation_log
-                    (module_code, service, action, data_kind, approx_volume, result)
-                    VALUES ('exec_knowledge', 'YandexGPT', %s, %s, %s, %s)""",
-                (action, data_kind, approx_volume, result),
+                    (module_code, service, action, data_kind, approx_volume, result, initiated_by)
+                    VALUES (%s, 'YandexGPT', %s, %s, %s, %s, %s)""",
+                (module_code, action, data_kind, approx_volume, result, initiated_by),
             )
             conn.commit()
         finally:
@@ -244,15 +244,17 @@ def _log_ai_op(action, result, data_kind=None, approx_volume=None):
         pass
 
 
-def call_gpt(system: str, prompt: str) -> str:
-    if not _ai_enabled():
-        _log_ai_op("planner_suggest", "disabled", data_kind="exec_knowledge_context")
-        raise AIDisabledError("AI-обработка временно отключена владельцем платформы. Включите модуль «База знаний и RAG» в разделе «Настройки AI».")
+def call_gpt(system: str, prompt: str, module_code: str = "exec_knowledge",
+             disabled_action: str = "planner_suggest", module_label: str = "«База знаний и RAG»",
+             max_tokens: int = 3000, temperature: float = 0.3) -> str:
+    if not _ai_enabled(module_code):
+        _log_ai_op(disabled_action, "disabled", data_kind=module_code, module_code=module_code)
+        raise AIDisabledError(f"AI-обработка временно отключена владельцем платформы. Включите модуль {module_label} в разделе «Настройки AI».")
     if not YANDEX_GPT_KEY or not YANDEX_FOLDER_ID:
         raise RuntimeError("AI недоступен: не настроен ключ YandexGPT")
     payload = json.dumps({
         "modelUri": MODEL_URI,
-        "completionOptions": {"stream": False, "temperature": 0.3, "maxTokens": 3000},
+        "completionOptions": {"stream": False, "temperature": temperature, "maxTokens": max_tokens},
         "messages": [
             {"role": "system", "text": system},
             {"role": "user", "text": prompt},
@@ -388,12 +390,188 @@ def ai_suggest(cur, body: dict):
             "used_knowledge": used_docs}, None
 
 
+# ============ УПРАВЛЕНЧЕСКИЙ AI-ПОМОЩНИК (сводки, отклонения, риски) ============
+#
+# Отдельный модуль AI ('exec_ai_assistant' в ai_module_settings) — ТОЛЬКО
+# рекомендательный режим: собирает уже существующие данные проекта одним
+# набором SQL-запросов (без записи) и просит YandexGPT сформулировать
+# ответ человеческим языком. Никогда не пишет в БД, не переносит сроки,
+# не меняет бюджет/KPI/назначения/роли/факт — эти данные текстом
+# передаются модели только для чтения. Каждый вызов логируется в
+# ai_operation_log с усечённым объёмом данных, без секретов и без полного
+# чувствительного текста.
+
+SUMMARY_SYSTEM = (
+    "Ты — аналитик проектного офиса. Отвечаешь ТОЛЬКО на основе присланных данных — "
+    "ничего не придумываешь и не оцениваешь сотрудников персонально. "
+    "Пишешь по-деловому, по-русски, структурированно, без воды. "
+    "Ты не принимаешь решений и не даёшь распоряжений — только объясняешь текущее состояние "
+    "и, если прямо попросили, называешь варианты для рассмотрения руководителем."
+)
+
+SUMMARY_MODES = {
+    "overview": "Кратко сведи текущее состояние проекта: статус, готовность, ближайшие риски внимания.",
+    "schedule_deviation": "Объясни отклонения сроков: что сдвинулось относительно baseline/плана, на сколько и почему (если причина указана в данных).",
+    "overdue": "Перечисли просроченные задачи и вехи, по каждой — на сколько дней просрочена и кто ответственный (если указан).",
+    "critical_path": "Объясни критический путь проекта: какие задачи/вехи на нём и почему сдвиг любой из них сдвигает срок всего проекта.",
+    "risks": "Сведи риски и проблемы проекта: что активно, что критично, что требует внимания в первую очередь.",
+    "resource_conflicts": "Объясни ресурсные конфликты: кто перегружен, какие роли не закрыты, что требует решения — ничего не назначай сам.",
+    "management_note": "Сформируй ЧЕРНОВИК короткой управленческой справки по проекту (статус/риски/что нужно решить) — это черновик для правки руководителем, не финальный документ.",
+    "goals_kpi": "Сведи цели и показатели (KPI) проекта кратко: план/факт, отклонение, что просрочено.",
+}
+
+
+def _project_ai_context(cur, project_id: int) -> tuple[str, dict]:
+    """Собирает СУЩЕСТВУЮЩИЕ данные проекта одним проходом — только чтение,
+    ничего не пересчитывает и не хранит отдельно. Возвращает готовый текст
+    для промпта и структуру data_used (что именно попало в контекст, чтобы
+    показать пользователю источники ответа)."""
+    cur.execute(f"""
+        SELECT title, status, priority, progress_pct, plan_start, plan_end,
+               forecast_end, fact_start, fact_end, is_test_data, archived_at
+        FROM {SCHEMA}.exec_project WHERE id = %s
+    """, (project_id,))
+    row = cur.fetchone()
+    if not row:
+        return "", {}
+    cols = ["title", "status", "priority", "progress_pct", "plan_start", "plan_end",
+            "forecast_end", "fact_start", "fact_end", "is_test_data", "archived_at"]
+    proj = dict(zip(cols, row))
+
+    parts = [f"ПРОЕКT: {proj['title']}",
+             f"Статус: {proj['status']}, приоритет: {proj['priority']}, готовность: {proj['progress_pct']}%",
+             f"План: {proj['plan_start']} — {proj['plan_end']}"]
+    if proj["forecast_end"]:
+        parts.append(f"Прогноз окончания: {proj['forecast_end']}")
+    if proj["fact_start"] or proj["fact_end"]:
+        parts.append(f"Факт: {proj['fact_start'] or '—'} — {proj['fact_end'] or '—'}")
+
+    used = {"project": True}
+
+    cur.execute(f"""
+        SELECT title, status, due_at, progress_pct, responsible_person_id,
+               (due_at IS NOT NULL AND due_at < CURRENT_DATE AND status NOT IN ('done','cancelled')) AS overdue
+        FROM {SCHEMA}.exec_task
+        WHERE project_id = %s AND archived_at IS NULL AND is_test_data = false
+        ORDER BY (due_at IS NULL), due_at LIMIT 60
+    """, (project_id,))
+    tasks = rows(cur)
+    overdue_tasks = [t for t in tasks if t.get("overdue")]
+    if tasks:
+        parts.append(f"\nЗАДАЧИ (всего {len(tasks)}, просрочено {len(overdue_tasks)}):")
+        for t in overdue_tasks[:20]:
+            parts.append(f"- ПРОСРОЧЕНА: «{t['title']}», срок {t['due_at']}, статус {t['status']}")
+        used["tasks_count"] = len(tasks)
+        used["overdue_tasks_count"] = len(overdue_tasks)
+
+    cur.execute(f"""
+        SELECT title, status, plan_date, fact_date,
+               (plan_date < CURRENT_DATE AND status NOT IN ('achieved','cancelled')) AS overdue
+        FROM {SCHEMA}.exec_milestone
+        WHERE project_id = %s AND is_test_data = false
+        ORDER BY plan_date LIMIT 40
+    """, (project_id,))
+    milestones = rows(cur)
+    if milestones:
+        parts.append(f"\nВЕХИ (всего {len(milestones)}):")
+        for m in milestones:
+            flag = " — ПРОСРОЧЕНА" if m.get("overdue") else ""
+            parts.append(f"- «{m['title']}»: план {m['plan_date']}, статус {m['status']}{flag}")
+        used["milestones_count"] = len(milestones)
+
+    cur.execute(f"""
+        SELECT description, probability, impact, probability*impact AS score, status
+        FROM {SCHEMA}.exec_risk WHERE project_id = %s AND status = 'active'
+        ORDER BY probability*impact DESC LIMIT 15
+    """, (project_id,))
+    risks = rows(cur)
+    if risks:
+        parts.append(f"\nРИСКИ (активных {len(risks)}):")
+        for r in risks:
+            parts.append(f"- {r['description'][:200]} (score {r['score']})")
+        used["risks_count"] = len(risks)
+
+    cur.execute(f"""
+        SELECT title, status, criticality FROM {SCHEMA}.exec_issue
+        WHERE project_id = %s AND status IN ('open','in_progress','awaiting_decision')
+        ORDER BY criticality DESC LIMIT 15
+    """, (project_id,))
+    issues = rows(cur)
+    if issues:
+        parts.append(f"\nПРОБЛЕМЫ (открытых {len(issues)}):")
+        for i in issues:
+            parts.append(f"- «{i['title']}», критичность {i['criticality']}, статус {i['status']}")
+        used["issues_count"] = len(issues)
+
+    # Ресурсные конфликты считаем тем же SQL, что и resource_conflicts,
+    # без импорта из другого backend-файла — переиспользуем напрямую нельзя
+    # (разные cloud functions), поэтому короткая сводка по тем же таблицам.
+    cur.execute(f"""
+        SELECT p.display_name, SUM(a.plan_load_pct) AS total_pct
+        FROM {SCHEMA}.exec_resource_assignment a
+        JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        WHERE a.project_id = %s AND a.archived_at IS NULL AND a.is_test_data = false
+        GROUP BY p.display_name
+    """, (project_id,))
+    project_people_load = rows(cur)
+    cur.execute(f"""
+        SELECT role_title, status FROM {SCHEMA}.exec_resource_requirement
+        WHERE project_id = %s AND archived_at IS NULL AND is_test_data = false
+          AND status IN ('draft','confirmed','searching','candidate_identified')
+        LIMIT 15
+    """, (project_id,))
+    open_reqs = rows(cur)
+    if project_people_load or open_reqs:
+        parts.append("\nРЕСУРСЫ:")
+        for pl in project_people_load:
+            parts.append(f"- {pl['display_name']}: занятость {pl['total_pct']}% (в этом проекте)")
+        for r in open_reqs:
+            parts.append(f"- Незакрытая роль: {r['role_title']} (статус {r['status']})")
+        used["resource_people_count"] = len(project_people_load)
+        used["open_requirements_count"] = len(open_reqs)
+
+    return "\n".join(parts), used
+
+
+def management_summary(cur, body: dict, actor: str):
+    """Формирует управленческую сводку по проекту — читает данные, просит
+    модель сформулировать ответ, ничего не сохраняет и не изменяет."""
+    project_id = body.get("project_id")
+    if not project_id:
+        return None, "Не указан проект"
+    mode = body.get("mode") or "overview"
+    if mode not in SUMMARY_MODES:
+        return None, "Неизвестный режим сводки"
+
+    context_text, used = _project_ai_context(cur, int(project_id))
+    if not context_text:
+        return None, "Проект не найден"
+
+    prompt = (
+        f"{context_text}\n\n"
+        f"ЗАДАНИЕ: {SUMMARY_MODES[mode]}\n"
+        "Отвечай только по приведённым выше данным. Если данных недостаточно — прямо скажи об этом."
+    )
+    answer = call_gpt(
+        SUMMARY_SYSTEM, prompt, module_code="exec_ai_assistant",
+        disabled_action=f"summary_{mode}", module_label="«AI-помощник руководителя»",
+        max_tokens=1200, temperature=0.2,
+    )
+    _log_ai_op(f"summary_{mode}", "success", data_kind="project_context",
+               approx_volume=len(context_text), module_code="exec_ai_assistant", initiated_by=actor)
+    return {"answer": answer, "mode": mode, "data_used": used, "generated_by": "YandexGPT"}, None
+
+
 def handler(event: dict, context) -> dict:
-    """AI-помощник планировщика: раскладывает задачу руководителя на шаги и вехи."""
+    """AI-помощник планировщика и управленческий AI-помощник (сводки/отклонения/
+    риски/ресурсные конфликты) — только рекомендательный режим, ничего не
+    сохраняет в БД."""
     if event.get("httpMethod") == "OPTIONS":
         return cors({})
 
     headers = event.get("headers") or {}
+    qs = event.get("queryStringParameters") or {}
+    action = qs.get("action", "ai_suggest")
     conn = psycopg2.connect(DB)
     try:
         user = authenticate(conn, headers)
@@ -402,6 +580,19 @@ def handler(event: dict, context) -> dict:
 
         body = json.loads(event["body"]) if event.get("body") else {}
         cur = conn.cursor()
+
+        if action == "management_summary":
+            if user.get("role") != "head":
+                return cors({"ok": False, "error": {"message": "Доступ только для владельца кабинета"}}, 403)
+            try:
+                data, err = management_summary(cur, body, user["email"])
+            except AIDisabledError as e:
+                return cors({"ok": False, "error": {"message": str(e)}}, 423)
+            except Exception as e:
+                return cors({"ok": False, "error": {"message": f"Не удалось сформировать сводку: {e}"}}, 502)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            return cors({"ok": True, "data": data})
 
         try:
             data, err = ai_suggest(cur, body)

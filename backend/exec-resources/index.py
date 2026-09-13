@@ -219,14 +219,21 @@ def archive_assignment(cur, aid, actor):
 
 
 def overload_check(cur, person_id: int, exclude_assignment_id=None):
-    """Суммарная плановая загрузка сотрудника по всем активным назначениям."""
-    conds = ["person_id = %s", "archived_at IS NULL", "is_test_data = false"]
+    """Суммарная плановая загрузка сотрудника по всем активным назначениям
+    на НЕархивные нетестовые проекты/инициативы — иначе предупреждение о
+    перегрузке может ложно сработать из-за назначений на архивный/тестовый
+    проект."""
+    conds = ["a.person_id = %s", "a.archived_at IS NULL", "a.is_test_data = false",
+              "(a.project_id IS NULL OR (proj.archived_at IS NULL AND proj.is_test_data = false))",
+              "(a.initiative_id IS NULL OR init.is_test_data = false)"]
     params = [person_id]
     if exclude_assignment_id:
-        conds.append("id != %s")
+        conds.append("a.id != %s")
         params.append(exclude_assignment_id)
     cur.execute(f"""
-        SELECT COALESCE(SUM(plan_load_pct), 0) FROM {SCHEMA}.exec_resource_assignment
+        SELECT COALESCE(SUM(a.plan_load_pct), 0) FROM {SCHEMA}.exec_resource_assignment a
+        LEFT JOIN {SCHEMA}.exec_project proj ON proj.id = a.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative init ON init.id = a.initiative_id
         WHERE {" AND ".join(conds)}
     """, params)
     return float(cur.fetchone()[0] or 0)
@@ -236,15 +243,26 @@ def team_load_summary(cur, include_test_data=False):
     """Загрузка по всем сотрудникам во всех проектах — для дашборда.
     NUMERIC из PostgreSQL сериализуется как строка (json default=str), поэтому
     total_load_pct явно приводится к float, иначе сравнение > 100 на фронтенде
-    ненадёжно."""
+    ненадёжно.
+
+    Родительский проект/инициатива тоже проверяются на архивность/
+    тестовость — назначение само по себе может быть is_test_data=false,
+    но принадлежать архивному или тестовому проекту, и тогда его нельзя
+    учитывать в рабочей загрузке человека."""
     tnd = "" if include_test_data else "AND a.is_test_data = false"
+    parent_filter = "" if include_test_data else """
+        AND (a.project_id IS NULL OR (proj.archived_at IS NULL AND proj.is_test_data = false))
+        AND (a.initiative_id IS NULL OR init.is_test_data = false)
+    """
     cur.execute(f"""
         SELECT a.person_id, p.display_name, p.position_title,
                SUM(a.plan_load_pct) AS total_load_pct,
                count(*) AS assignment_count
         FROM {SCHEMA}.exec_resource_assignment a
         JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
-        WHERE a.archived_at IS NULL {tnd} AND a.person_id IS NOT NULL
+        LEFT JOIN {SCHEMA}.exec_project proj ON proj.id = a.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative init ON init.id = a.initiative_id
+        WHERE a.archived_at IS NULL {tnd} AND a.person_id IS NOT NULL {parent_filter}
         GROUP BY a.person_id, p.display_name, p.position_title
         ORDER BY total_load_pct DESC
     """)
@@ -345,7 +363,15 @@ def save_capacity_cell(cur, body: dict, actor: str):
 
 
 def vacant_roles(cur, include_test_data=False):
-    tnd = "" if include_test_data else "AND is_test_data = false"
+    """Вакансии по всему портфелю. Родительский проект/инициатива тоже
+    проверяются на архивность/тестовость — иначе тестовый или архивный
+    проект может «протекать» в рабочий дашборд через собственные
+    нетестовые назначения."""
+    tnd = "" if include_test_data else "AND a.is_test_data = false"
+    parent_filter = "" if include_test_data else """
+        AND (a.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
+        AND (a.initiative_id IS NULL OR i.is_test_data = false)
+    """
     cur.execute(f"""
         SELECT a.id, a.role_title, r.title AS role_title_ref, a.project_id, a.initiative_id,
                p.title AS project_title, i.title AS initiative_title
@@ -353,7 +379,7 @@ def vacant_roles(cur, include_test_data=False):
         LEFT JOIN {SCHEMA}.exec_center_role r ON r.id = a.role_id
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = a.project_id
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
-        WHERE a.archived_at IS NULL {tnd} AND a.is_vacant = true
+        WHERE a.archived_at IS NULL {tnd} AND a.is_vacant = true {parent_filter}
         ORDER BY a.created_at DESC
     """)
     return rows(cur)
@@ -361,41 +387,66 @@ def vacant_roles(cur, include_test_data=False):
 
 def portfolio_financial_kpi(cur, year=None, include_test_data=False):
     """Сводка по всему портфелю для дашборда руководителя: бюджет, факт,
-    обязательства, прогноз, остаток по утверждённым версиям текущего года."""
+    обязательства, прогноз, остаток по утверждённым версиям текущего года.
+
+    Каждая сумма проверяет архивность/тестовость родительского проекта
+    ИЛИ инициативы (запись может быть привязана к любому из двух) — сама
+    финансовая запись может быть is_test_data=false, но принадлежать
+    архивному/тестовому проекту, и тогда её нельзя показывать в рабочем
+    портфельном дашборде."""
     tnd_v = "" if include_test_data else "AND v.is_test_data = false"
     tnd_a = "" if include_test_data else "AND is_test_data = false"
     tnd_c = "" if include_test_data else "AND is_test_data = false"
+    parent_v = "" if include_test_data else """
+        AND (v.project_id IS NULL OR (vp.archived_at IS NULL AND vp.is_test_data = false))
+        AND (v.initiative_id IS NULL OR vi.is_test_data = false)
+    """
+    parent_rec = lambda alias: "" if include_test_data else f"""
+        AND ({alias}.project_id IS NULL OR (p_{alias}.archived_at IS NULL AND p_{alias}.is_test_data = false))
+        AND ({alias}.initiative_id IS NULL OR i_{alias}.is_test_data = false)
+    """
     yr = year or datetime.date.today().year
 
     cur.execute(f"""
         SELECT COALESCE(SUM(l.amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.is_active = true AND v.year = %s {tnd_v}
+        LEFT JOIN {SCHEMA}.exec_project vp ON vp.id = v.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative vi ON vi.id = v.initiative_id
+        WHERE v.is_active = true AND v.version_status = 'approved' AND v.year = %s {tnd_v} {parent_v}
     """, (yr,))
     total_budget = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_actual
-        WHERE EXTRACT(YEAR FROM month) = %s {tnd_a}
+        SELECT COALESCE(SUM(a.amount), 0) FROM {SCHEMA}.exec_financial_actual a
+        LEFT JOIN {SCHEMA}.exec_project p_a ON p_a.id = a.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i_a ON i_a.id = a.initiative_id
+        WHERE EXTRACT(YEAR FROM a.month) = %s {tnd_a.replace('is_test_data', 'a.is_test_data')} {parent_rec('a')}
     """, (yr,))
     total_fact = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(amount), 0), COALESCE(SUM(paid_amount), 0)
-        FROM {SCHEMA}.exec_financial_commitment WHERE status = 'active' {tnd_c}
+        SELECT COALESCE(SUM(c.amount), 0), COALESCE(SUM(c.paid_amount), 0)
+        FROM {SCHEMA}.exec_financial_commitment c
+        LEFT JOIN {SCHEMA}.exec_project p_c ON p_c.id = c.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i_c ON i_c.id = c.initiative_id
+        WHERE c.status = 'active' {tnd_c.replace('is_test_data', 'c.is_test_data')} {parent_rec('c')}
     """)
     commitments_total, commitments_paid = cur.fetchone()
     total_commitments_open = float(commitments_total or 0) - float(commitments_paid or 0)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_expected
-        WHERE EXTRACT(YEAR FROM month) = %s {tnd_a}
+        SELECT COALESCE(SUM(e.amount), 0) FROM {SCHEMA}.exec_financial_expected e
+        LEFT JOIN {SCHEMA}.exec_project p_e ON p_e.id = e.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i_e ON i_e.id = e.initiative_id
+        WHERE EXTRACT(YEAR FROM e.month) = %s {tnd_a.replace('is_test_data', 'e.is_test_data')} {parent_rec('e')}
     """, (yr,))
     total_expected = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(plan_total), 0) FROM {SCHEMA}.exec_fot_plan
-        WHERE EXTRACT(YEAR FROM month) = %s {tnd_a}
+        SELECT COALESCE(SUM(f.plan_total), 0) FROM {SCHEMA}.exec_fot_plan f
+        LEFT JOIN {SCHEMA}.exec_project p_f ON p_f.id = f.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i_f ON i_f.id = f.initiative_id
+        WHERE EXTRACT(YEAR FROM f.month) = %s {tnd_a.replace('is_test_data', 'f.is_test_data')} {parent_rec('f')}
     """, (yr,))
     total_fot = float(cur.fetchone()[0] or 0)
 
@@ -405,7 +456,7 @@ def portfolio_financial_kpi(cur, year=None, include_test_data=False):
         SELECT p.id, p.title,
             COALESCE((SELECT SUM(l.amount_plan) FROM {SCHEMA}.exec_budget_line l
                 JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-                WHERE v.project_id = p.id AND v.is_active = true AND v.year = %s), 0) AS budget,
+                WHERE v.project_id = p.id AND v.is_active = true AND v.version_status = 'approved' AND v.year = %s), 0) AS budget,
             COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_actual
                 WHERE project_id = p.id AND EXTRACT(YEAR FROM month) = %s), 0) +
             COALESCE((SELECT SUM(amount) - SUM(paid_amount) FROM {SCHEMA}.exec_financial_commitment
@@ -731,7 +782,7 @@ def project_financial_summary(cur, project_id: int):
     cur.execute(f"""
         SELECT COALESCE(SUM(amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.project_id = %s AND v.is_active = true AND v.is_test_data = false
+        WHERE v.project_id = %s AND v.is_active = true AND v.version_status = 'approved' AND v.is_test_data = false
     """, (project_id,))
     approved_budget = float(cur.fetchone()[0] or 0)
 
@@ -782,11 +833,20 @@ def financial_timeline(cur, project_id: int, year: int):
     months = {m: {"budget_plan": 0.0, "fot_plan": 0.0, "fot_fact": 0.0, "fact": 0.0,
                    "commitments_open": 0.0, "expected": 0.0} for m in range(1, 13)}
 
+    # Явно проверяем, есть ли ВООБЩЕ утверждённая версия бюджета на этот
+    # проект (независимо от года) — фронт должен отличать "утверждённой
+    # версии нет" от "утверждённый бюджет по строкам равен нулю".
+    cur.execute(f"""
+        SELECT count(*) FROM {SCHEMA}.exec_budget_version
+        WHERE project_id = %s AND version_status = 'approved' AND is_test_data = false
+    """, (project_id,))
+    has_approved_budget = cur.fetchone()[0] > 0
+
     cur.execute(f"""
         SELECT EXTRACT(MONTH FROM l.month)::int AS m, SUM(l.amount_plan) AS s
         FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.project_id = %s AND v.is_active = true AND v.is_test_data = false
+        WHERE v.project_id = %s AND v.is_active = true AND v.version_status = 'approved' AND v.is_test_data = false
           AND EXTRACT(YEAR FROM l.month) = %s
         GROUP BY m
     """, (project_id, year))
@@ -893,7 +953,7 @@ def financial_timeline(cur, project_id: int, year: int):
     milestones = rows(cur)
 
     return {"year": year, "months": result_months, "key_payments": key_payments, "milestones": milestones,
-            "commitments_without_dates": commitments_without_dates}
+            "commitments_without_dates": commitments_without_dates, "has_approved_budget": has_approved_budget}
 
 
 def initiative_financial_summary(cur, initiative_id: int):
@@ -904,14 +964,14 @@ def initiative_financial_summary(cur, initiative_id: int):
         SELECT COALESCE(SUM(amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
         JOIN {SCHEMA}.exec_project p ON p.id = v.project_id
-        WHERE p.initiative_id = %s AND v.is_active = true AND v.is_test_data = false
+        WHERE p.initiative_id = %s AND v.is_active = true AND v.version_status = 'approved' AND v.is_test_data = false
     """, (initiative_id,))
     projects_budget = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
         SELECT COALESCE(SUM(amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
         JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-        WHERE v.initiative_id = %s AND v.is_active = true AND v.is_test_data = false
+        WHERE v.initiative_id = %s AND v.is_active = true AND v.version_status = 'approved' AND v.is_test_data = false
     """, (initiative_id,))
     own_budget = float(cur.fetchone()[0] or 0)
 
@@ -936,7 +996,7 @@ def initiative_financial_summary(cur, initiative_id: int):
         SELECT p.id, p.title,
             COALESCE((SELECT SUM(l.amount_plan) FROM {SCHEMA}.exec_budget_line l
                 JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
-                WHERE v.project_id = p.id AND v.is_active = true AND v.is_test_data = false), 0) AS budget,
+                WHERE v.project_id = p.id AND v.is_active = true AND v.version_status = 'approved' AND v.is_test_data = false), 0) AS budget,
             COALESCE((SELECT SUM(amount) FROM {SCHEMA}.exec_financial_actual
                 WHERE project_id = p.id AND is_test_data = false), 0) AS fact
         FROM {SCHEMA}.exec_project p
@@ -1305,8 +1365,16 @@ def resolve_requirement(cur, body: dict, actor: str):
 def requirement_dashboard(cur, include_test_data=False):
     """Показатели для дашборда руководителя: потребности по срочности поиска,
     просроченные, задачи/вехи без обеспеченного ресурса, потребности без
-    финансирования, суммарная расчётная стоимость незакрытых."""
+    финансирования, суммарная расчётная стоимость незакрытых.
+
+    Каждый запрос проверяет архивность/тестовость родительского проекта
+    ИЛИ инициативы — потребность может сама быть is_test_data=false, но
+    принадлежать архивному/тестовому проекту."""
     tnd = "" if include_test_data else "AND r.is_test_data = false"
+    parent_filter = "" if include_test_data else """
+        AND (r.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
+        AND (r.initiative_id IS NULL OR i.is_test_data = false)
+    """
     open_statuses = "('draft','confirmed','searching','candidate_identified')"
 
     cur.execute(f"""
@@ -1315,7 +1383,8 @@ def requirement_dashboard(cur, include_test_data=False):
         FROM {SCHEMA}.exec_resource_requirement r
         LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
-        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} {parent_filter}
           AND r.search_start_date IS NOT NULL AND r.search_start_date <= CURRENT_DATE
           AND (r.need_by_date IS NULL OR r.need_by_date >= CURRENT_DATE)
         ORDER BY r.need_by_date
@@ -1329,7 +1398,8 @@ def requirement_dashboard(cur, include_test_data=False):
         FROM {SCHEMA}.exec_resource_requirement r
         LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
-        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} {parent_filter}
           AND r.need_by_date IS NOT NULL AND r.need_by_date < CURRENT_DATE
         ORDER BY r.need_by_date
     """)
@@ -1340,7 +1410,8 @@ def requirement_dashboard(cur, include_test_data=False):
         FROM {SCHEMA}.exec_resource_requirement r
         LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
-        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} {parent_filter}
           AND r.need_by_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days'
         ORDER BY r.need_by_date
     """)
@@ -1351,21 +1422,26 @@ def requirement_dashboard(cur, include_test_data=False):
         FROM {SCHEMA}.exec_resource_requirement r
         LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
-        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} AND r.funding_confirmed = false
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} AND r.funding_confirmed = false {parent_filter}
         ORDER BY r.estimated_total_cost DESC NULLS LAST
     """)
     without_funding = rows(cur)
 
     cur.execute(f"""
-        SELECT COALESCE(SUM(estimated_total_cost), 0) FROM {SCHEMA}.exec_resource_requirement r
-        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}
+        SELECT COALESCE(SUM(r.estimated_total_cost), 0) FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = r.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.archived_at IS NULL {tnd} AND r.status IN {open_statuses} {parent_filter}
     """)
     total_unresolved_cost = float(cur.fetchone()[0] or 0)
 
     cur.execute(f"""
         SELECT t.id, t.title, t.project_id, t.due_at
         FROM {SCHEMA}.exec_task t
+        LEFT JOIN {SCHEMA}.exec_project tp ON tp.id = t.project_id
         WHERE t.archived_at IS NULL AND t.is_test_data = false AND t.status NOT IN ('done','cancelled')
+          {"" if include_test_data else "AND (t.project_id IS NULL OR (tp.archived_at IS NULL AND tp.is_test_data = false))"}
           AND EXISTS (
             SELECT 1 FROM {SCHEMA}.exec_resource_requirement r
             WHERE r.task_id = t.id AND r.archived_at IS NULL {tnd} AND r.status IN {open_statuses}

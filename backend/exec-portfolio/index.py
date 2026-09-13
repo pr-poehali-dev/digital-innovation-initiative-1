@@ -698,21 +698,27 @@ def dashboard(cur):
     upcoming_actions = rows(cur)
 
     cur.execute(f"""
-        SELECT id, title, status, priority, project_id, due_at,
-            (due_at IS NOT NULL AND due_at < CURRENT_DATE) AS is_overdue
-        FROM {SCHEMA}.exec_task
-        WHERE archived_at IS NULL AND is_test_data = false AND status NOT IN ('done','cancelled')
-          AND due_at IS NOT NULL AND due_at < CURRENT_DATE
-        ORDER BY due_at
+        SELECT t.id, t.title, t.status, t.priority, t.project_id, t.due_at,
+            (t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE) AS is_overdue
+        FROM {SCHEMA}.exec_task t
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = t.project_id
+        WHERE t.archived_at IS NULL AND t.is_test_data = false AND t.status NOT IN ('done','cancelled')
+          AND t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE
+          AND (t.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
+        ORDER BY t.due_at
     """)
     overdue_tasks = rows(cur)
 
     cur.execute(f"""
-        SELECT id, title, plan_date, status, initiative_id, project_id
-        FROM {SCHEMA}.exec_milestone
-        WHERE COALESCE(is_test_data, false) = false AND status NOT IN ('achieved','cancelled')
-          AND plan_date IS NOT NULL AND plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
-        ORDER BY plan_date
+        SELECT m.id, m.title, m.plan_date, m.status, m.initiative_id, m.project_id
+        FROM {SCHEMA}.exec_milestone m
+        LEFT JOIN {SCHEMA}.exec_project p ON p.id = m.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = m.initiative_id
+        WHERE COALESCE(m.is_test_data, false) = false AND m.status NOT IN ('achieved','cancelled')
+          AND m.plan_date IS NOT NULL AND m.plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
+          AND (m.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
+          AND (m.initiative_id IS NULL OR COALESCE(i.is_test_data, false) = false)
+        ORDER BY m.plan_date
     """)
     upcoming_milestones = rows(cur)
 

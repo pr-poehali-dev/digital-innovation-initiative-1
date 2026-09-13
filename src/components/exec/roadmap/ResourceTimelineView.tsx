@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
 import {
@@ -9,18 +9,44 @@ import { ScaleKind } from "@/lib/timeScale";
 
 const MONTHS_SHORT = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
 type ResourceMode = "schedule" | "people" | "roles" | "deficit";
+const MODES: ResourceMode[] = ["schedule", "people", "roles", "deficit"];
 const MODE_LABEL: Record<ResourceMode, string> = { schedule: "Расписание", people: "Люди", roles: "Роли", deficit: "Дефицит" };
+const RES_SCALES: ScaleKind[] = ["week", "month", "quarter", "year"];
 
 /** Ресурсная шкала проекта: люди, роли, загрузка и дефицит на той же
  * временной модели, что и Гант — без копирования данных в новые таблицы.
  * Источники: exec_resource_assignment, exec_resource_requirement,
  * exec_capacity_plan (те же, что во вкладке «Команда» проекта). Первый
  * выпуск — только просмотр и явное «предупреждение», без автоматических
- * кадровых решений. */
+ * кадровых решений.
+ *
+ * Режим/год/масштаб хранятся в URL (r_mode/r_year/r_scale), а не только в
+ * useState — обновление страницы (F5) не должно сбрасывать выбранное. */
 export default function ResourceTimelineView({ projectId }: { projectId: number }) {
-  const [mode, setMode] = useState<ResourceMode>("schedule");
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [scale, setScale] = useState<ScaleKind>("month");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlMode = searchParams.get("r_mode") as ResourceMode | null;
+  const mode: ResourceMode = urlMode && MODES.includes(urlMode) ? urlMode : "schedule";
+  const urlYear = Number(searchParams.get("r_year"));
+  const year = urlYear && !Number.isNaN(urlYear) ? urlYear : new Date().getFullYear();
+  const urlScale = searchParams.get("r_scale") as ScaleKind | null;
+  const scale: ScaleKind = urlScale && RES_SCALES.includes(urlScale) ? urlScale : "month";
+
+  const setMode = (m: ResourceMode) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("r_mode", m);
+    setSearchParams(next, { replace: true });
+  };
+  const setYear = (y: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("r_year", String(y));
+    setSearchParams(next, { replace: true });
+  };
+  const setScale = (s: ScaleKind) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("r_scale", s);
+    setSearchParams(next, { replace: true });
+  };
+
   const [capacity, setCapacity] = useState<CapacityAssignmentRow[]>([]);
   const [assignments, setAssignments] = useState<ResourceAssignment[]>([]);
   const [requirements, setRequirements] = useState<ResourceRequirement[]>([]);

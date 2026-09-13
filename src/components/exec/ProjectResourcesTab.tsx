@@ -304,13 +304,19 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
         </div>
       )}
 
+      {versions.length > 0 && !versions.some((v) => v.version_status === "approved") && (
+        <div className="text-xs bg-amber-50 text-amber-800 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          <Icon name="TriangleAlert" size={12} /> Утверждённая версия бюджета отсутствует — показатели ниже рассчитаны без нее и не считаются официальными.
+        </div>
+      )}
+
       <div className="flex items-center gap-2 flex-wrap">
         <Select value={activeVersion ? String(activeVersion.id) : ""} onValueChange={(v) => setActiveVersion(versions.find((x) => String(x.id) === v) || null)}>
           <SelectTrigger className="text-sm w-64"><SelectValue placeholder="Выберите версию" /></SelectTrigger>
           <SelectContent>
             {versions.map((v) => (
               <SelectItem key={v.id} value={String(v.id)}>
-                {v.year} — {v.version_label} ({BUDGET_STATUS_LABEL[v.version_status]}){v.is_active ? " · действующая" : ""}
+                {v.version_status !== "approved" && "Черновик · "}{v.year} — {v.version_label} ({BUDGET_STATUS_LABEL[v.version_status]}){v.is_active && v.version_status === "approved" ? " · действующая" : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -336,10 +342,16 @@ export function BudgetTab({ kind, parentId }: { kind: "project" | "initiative"; 
         )}
       </div>
 
-      {activeVersion?.is_active && (
+      {activeVersion?.is_active && activeVersion.version_status === "approved" && (
         <div className="text-xs bg-emerald-50 text-emerald-800 rounded-lg px-3 py-2 flex items-center gap-1.5">
-          <Icon name="CheckCircle2" size={12} /> Это действующая версия бюджета
+          <Icon name="CheckCircle2" size={12} /> Это действующая утверждённая версия бюджета
           {activeVersion.effective_date && ` с ${activeVersion.effective_date}`}
+        </div>
+      )}
+
+      {activeVersion && activeVersion.version_status !== "approved" && (
+        <div className="text-xs bg-slate-100 text-slate-600 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          <Icon name="FileEdit" size={12} /> Черновик — не участвует в официальных план-факт и прогнозных показателях, пока не утверждён.
         </div>
       )}
 

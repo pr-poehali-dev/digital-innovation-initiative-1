@@ -153,7 +153,7 @@ export default function ProjectGanttView({
                 scale === s ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              {{ month: "Месяц", quarter: "Квартал", year: "Год" }[s]}
+              {{ week: "Неделя", month: "Месяц", quarter: "Квартал", year: "Год" }[s]}
             </button>
           ))}
         </div>

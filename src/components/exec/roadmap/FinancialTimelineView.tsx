@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
 import { execResourcesApi, FinancialTimeline } from "@/lib/execResourcesApi";
@@ -15,9 +16,19 @@ function fmtMoney(v: number): string {
  * утверждённый бюджет, ФОТ, факт, обязательства, ожидаемые расходы,
  * прогноз и отклонение по месяцам. Читает существующий финансовый контур
  * (бюджет/ФОТ/факт/обязательства проекта) — суммы не копируются в новые
- * структуры, только раскладываются по месяцам года для отображения. */
+ * структуры, только раскладываются по месяцам года для отображения.
+ *
+ * Год хранится в URL (f_year), а не только в useState — обновление
+ * страницы (F5) не должно сбрасывать выбранный период. */
 export default function FinancialTimelineView({ projectId }: { projectId: number }) {
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlYear = Number(searchParams.get("f_year"));
+  const year = urlYear && !Number.isNaN(urlYear) ? urlYear : new Date().getFullYear();
+  const setYear = (y: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("f_year", String(y));
+    setSearchParams(next, { replace: true });
+  };
   const [data, setData] = useState<FinancialTimeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -54,6 +65,12 @@ export default function FinancialTimelineView({ projectId }: { projectId: number
           <Icon name="ChevronRight" size={14} />
         </button>
       </div>
+
+      {!data.has_approved_budget && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 flex items-center gap-1.5">
+          <Icon name="TriangleAlert" size={13} /> Утверждённая версия бюджета отсутствует — «Утверждённый бюджет» и отклонение ниже не являются официальными.
+        </div>
+      )}
 
       {!hasAnyData ? (
         <Empty text="Финансовые данные за этот год пока не заведены — во вкладке «Бюджет»" icon="Wallet" />

@@ -94,6 +94,9 @@ def validate(kind: str, d: dict, existing: dict = None):
     cur_val = lambda k: d.get(k, (existing or {}).get(k))
 
     if kind == "milestone":
+        mt = cur_val("milestone_type")
+        if mt and mt not in VALID_MILESTONE_TYPES:
+            return f"Недопустимый тип контрольной точки: «{mt}»"
         if cur_val("status") == "achieved":
             if not cur_val("achievement_evidence"):
                 return "Нельзя отметить достижение без подтверждающего результата"
@@ -298,6 +301,13 @@ def risks(cur, initiative_id=None, include_closed=True):
 
 
 ASSIGNMENT_DONE_STATUSES = ("done", "done_by_executor", "accepted_by_head", "cancelled")
+
+# Тот же список кодов, что во frontend src/lib/execControlApi.ts (MILESTONE_TYPES).
+# milestone_type в БД — обычная VARCHAR без CHECK-constraint (изменение схемы
+# сюда не входит, см. технический долг), поэтому whitelist проверяется здесь,
+# на входе save_milestone — не по подстроке в названии, а по точному коду.
+VALID_MILESTONE_TYPES = ("decision", "document", "approval", "development",
+                          "pilot", "rollout", "result", "financial", "other")
 
 # Активный статусный цикл поручения. Старые action по рискам/проблемам
 # (not_started/in_progress/done) поддерживаются наравне через ASSIGNMENT_STATUS_MAP.

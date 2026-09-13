@@ -272,6 +272,7 @@ export interface FinancialTimeline {
   key_payments: FinancialKeyPayment[];
   milestones: FinancialMilestone[];
   commitments_without_dates: number;
+  has_approved_budget: boolean;
 }
 
 async function req(path: string, method: "GET" | "POST" = "GET", body?: unknown) {

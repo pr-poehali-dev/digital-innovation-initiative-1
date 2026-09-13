@@ -24,6 +24,7 @@ import DependencyGraphView from "@/components/exec/roadmap/DependencyGraphView";
 import ScheduleComparisonView from "@/components/exec/roadmap/ScheduleComparisonView";
 import ResourceTimelineView from "@/components/exec/roadmap/ResourceTimelineView";
 import FinancialTimelineView from "@/components/exec/roadmap/FinancialTimelineView";
+import ProjectAiSummary from "@/components/exec/roadmap/ProjectAiSummary";
 import ExternalDependenciesPanel from "@/components/exec/roadmap/ExternalDependenciesPanel";
 import { ScaleKind, autoScale, diffDays, parseISODate, defaultRangeForScale } from "@/lib/timeScale";
 
@@ -202,6 +203,7 @@ export default function ExecProjectDetailPage() {
 
         {tab === "overview" && (
           <div className="space-y-4 text-sm">
+            <ProjectAiSummary projectId={pid} />
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div><span className="text-muted-foreground">Начало план:</span> {data.plan_start ? fmtDate(data.plan_start) : "—"}</div>
               <div><span className="text-muted-foreground">Завершение план:</span> {data.plan_end ? fmtDate(data.plan_end) : "—"}</div>

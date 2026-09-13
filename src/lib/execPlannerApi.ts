@@ -178,6 +178,17 @@ export interface AiSuggestion {
   used_knowledge?: string[];
 }
 
+export type ManagementSummaryMode =
+  | "overview" | "schedule_deviation" | "overdue" | "critical_path"
+  | "risks" | "resource_conflicts" | "management_note" | "goals_kpi";
+
+export interface ManagementSummary {
+  answer: string;
+  mode: ManagementSummaryMode;
+  data_used: Record<string, number | boolean>;
+  generated_by: string;
+}
+
 export const plannerApi = {
   list: (): Promise<{ plans: Plan[]; refs: PlannerRefs }> => req("/?action=list"),
 
@@ -217,6 +228,11 @@ export const plannerApi = {
   deleteStep: (id: number): Promise<{ id: number }> => post("delete_step", { id }),
 
   deletePlan: (id: number): Promise<{ id: number }> => post("delete_plan", { id }),
+
+  /** Управленческая AI-сводка по проекту — только рекомендательный режим,
+   * ничего не сохраняет. Доступно только владельцу кабинета (head). */
+  managementSummary: (projectId: number, mode: ManagementSummaryMode): Promise<ManagementSummary> =>
+    req("/?action=management_summary", { method: "POST", body: JSON.stringify({ project_id: projectId, mode }) }, AI_BASE),
 };
 
 /** Строит дерево шагов из плоского списка. */

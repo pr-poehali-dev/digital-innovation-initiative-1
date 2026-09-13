@@ -555,6 +555,7 @@ export const MILESTONE_TYPES = [
   { code: "pilot", title: "Пилот" },
   { code: "rollout", title: "Внедрение" },
   { code: "result", title: "Результат" },
+  { code: "financial", title: "Финансовая контрольная точка" },
   { code: "other", title: "Иное" },
 ];
 
