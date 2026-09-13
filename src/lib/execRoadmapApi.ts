@@ -148,6 +148,7 @@ export interface ScheduleBaselineSummary {
   created_by: string;
   created_at: string;
   is_test_data: boolean;
+  is_active: boolean;
 }
 
 export interface ScheduleBaseline extends ScheduleBaselineSummary {
@@ -163,6 +164,7 @@ export interface GanttStage {
   status: string;
   plan_start: string | null;
   plan_end: string | null;
+  forecast_end: string | null;
   fact_start: string | null;
   fact_end: string | null;
 }
@@ -176,6 +178,8 @@ export interface GanttTask {
   responsible_person_id: number | null;
   responsible_name: string | null;
   due_at: string | null;
+  forecast_date: string | null;
+  fact_date: string | null;
   priority: string;
   status: string;
   progress_pct: number;
@@ -188,6 +192,7 @@ export interface GanttMilestone {
   project_id: number;
   plan_date_original: string | null;
   plan_date: string;
+  forecast_date: string | null;
   fact_date: string | null;
   status: string;
   responsible_person_id: number | null;
@@ -288,6 +293,66 @@ export interface ProjectExternalDependencies {
   blocking_out: ExternalDependencyRow[];
 }
 
+export type ScheduleRowKind = "project" | "stage" | "task" | "milestone";
+
+export interface ScheduleComparisonRow {
+  kind: ScheduleRowKind;
+  id: number;
+  title: string;
+  status: string;
+  responsible_name?: string | null;
+  baseline_start?: string | null;
+  baseline_end?: string | null;
+  actual_start?: string | null;
+  actual_end?: string | null;
+  forecast_end?: string | null;
+  fact_start?: string | null;
+  fact_end?: string | null;
+  progress_pct?: number | null;
+  deviation_start_days?: number | null;
+  deviation_end_days?: number | null;
+  data_quality_warning?: string;
+  baseline_missing?: boolean;
+}
+
+export interface ScheduleComparisonSummary {
+  project_end_shift_days: number | null;
+  shifted_tasks_count: number;
+  shifted_milestones_count: number;
+  newly_critical: { kind: ScheduleRowKind; id: number }[];
+  no_longer_critical: { kind: ScheduleRowKind; id: number }[];
+  overdue_count: number;
+  no_fact_data_count: number;
+  top_shifts: ScheduleComparisonRow[];
+}
+
+export interface ScheduleComparisonData {
+  project: { id: number; title: string };
+  baseline: { id: number; version_number: number; created_at: string; created_by: string; integrity_ok: boolean } | null;
+  warnings: string[];
+  rows: {
+    project: ScheduleComparisonRow;
+    stages: ScheduleComparisonRow[];
+    tasks: ScheduleComparisonRow[];
+    milestones: ScheduleComparisonRow[];
+  };
+  current_cpm_computable: boolean;
+  baseline_cpm_computable: boolean;
+  summary: ScheduleComparisonSummary;
+  calendar_mode: "calendar_days";
+}
+
+export interface BaselineVersionsComparison {
+  baseline_a: { id: number; version_number: number; created_at: string };
+  baseline_b: { id: number; version_number: number; created_at: string };
+  diffs: {
+    project: { plan_start_a: string | null; plan_start_b: string | null; plan_end_a: string | null; plan_end_b: string | null } | null;
+    stages: { id: number; title: string; change: string; value_a?: string; value_b?: string }[];
+    tasks: { id: number; title: string; change: string; value_a?: string; value_b?: string }[];
+    milestones: { id: number; title: string; change: string; value_a?: string; value_b?: string }[];
+  };
+}
+
 export const execRoadmapApi = {
   roadmap: (filters: RoadmapFilters): Promise<RoadmapData> => req(`/?action=roadmap${toQuery(filters)}`),
   milestonesTimeline: (filters: MilestoneFilters): Promise<{ items: TimelineMilestone[] }> =>
@@ -316,4 +381,10 @@ export const execRoadmapApi = {
     req(`/?action=critical_path&id=${projectId}`),
   projectExternalDependencies: (projectId: number): Promise<ProjectExternalDependencies> =>
     req(`/?action=project_external_dependencies&id=${projectId}`),
+
+  setActiveBaseline: (id: number): Promise<{ id: number }> => post("set_active_baseline", { id }),
+  compareBaselines: (a: number, b: number): Promise<BaselineVersionsComparison> =>
+    req(`/?action=compare_baselines&a=${a}&b=${b}`),
+  scheduleComparison: (projectId: number, baselineId?: number): Promise<ScheduleComparisonData> =>
+    req(`/?action=schedule_comparison&id=${projectId}${baselineId ? `&baseline_id=${baselineId}` : ""}`),
 };

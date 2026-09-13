@@ -1,2 +1,18 @@
+-- ИСПРАВЛЕНО ПОСТФАКТУМ: исходная версия вставляла тестовую зависимость
+-- с жёстко заданными src_id=15/tgt_id=13 (задачи, созданные вручную через
+-- API в существующей БД для проверки обнаружения цикла в расчёте
+-- критического пути). exec_schedule_dependency не имеет FK на src_id/
+-- tgt_id (полиморфная ссылка, проверяется в backend), поэтому на чистом
+-- развёртывании эта вставка не упала бы, но создала бы "висячую" запись,
+-- указывающую на случайные/несуществующие объекты — а следующая миграция
+-- V0449 сразу архивирует именно эту тестовую запись по created_by.
+--
+-- Исправление: вставка выполняется только если ОБА объекта реально
+-- существуют — тогда сценарий воспроизводится там, где он изначально
+-- проверялся; на чистом развёртывании, где id=13/15 не существуют или
+-- принадлежат другим объектам, вставка безопасно не выполняется.
+
 INSERT INTO exec_schedule_dependency (dependency_type, src_kind, src_id, tgt_kind, tgt_id, lag_days, lag_kind, is_test_data, created_by)
-VALUES ('FS', 'task', 15, 'task', 13, 0, 'calendar', true, 'cpm_scenario_test_direct_insert');
+SELECT 'FS', 'task', 15, 'task', 13, 0, 'calendar', true, 'cpm_scenario_test_direct_insert'
+WHERE EXISTS (SELECT 1 FROM exec_task WHERE id = 15)
+  AND EXISTS (SELECT 1 FROM exec_task WHERE id = 13);

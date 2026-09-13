@@ -188,13 +188,13 @@ def get_project(cur, pid):
 PROJECT_FIELDS = ["title", "project_kind", "description", "goal", "customer_person_id",
     "result_owner_person_id", "manager_person_id", "coordinator_person_id",
     "initiative_id", "status", "priority", "progress_pct",
-    "plan_start", "plan_end", "fact_start", "fact_end"]
+    "plan_start", "plan_end", "fact_start", "fact_end", "forecast_end"]
 
 
 def save_project(cur, body: dict, actor: str):
     pid = as_int(body.get("id"))
     fields = {k: (as_int(body[k]) if k.endswith("_id") else (body[k] or None if k in
-              ("plan_start", "plan_end", "fact_start", "fact_end") else body.get(k)))
+              ("plan_start", "plan_end", "fact_start", "fact_end", "forecast_end") else body.get(k)))
               for k in PROJECT_FIELDS if k in body}
     if "progress_pct" in fields:
         fields["progress_pct"] = as_int(fields["progress_pct"]) or 0
@@ -262,7 +262,7 @@ def list_tasks(cur, project_id=None, include_archived=False, include_test_data=F
 TASK_FIELDS = ["title", "description", "project_id", "stage_id", "milestone_id", "action_id",
     "responsible_person_id", "due_at", "priority", "status", "progress_pct",
     "expected_result", "actual_result", "delay_reason", "blocker", "fact_date",
-    "result_confirmed_by_person_id"]
+    "result_confirmed_by_person_id", "forecast_date"]
 
 
 def save_task(cur, body: dict, actor: str):
@@ -274,7 +274,7 @@ def save_task(cur, body: dict, actor: str):
         if k in ("project_id", "stage_id", "milestone_id", "action_id",
                   "responsible_person_id", "result_confirmed_by_person_id"):
             fields[k] = as_int(body[k])
-        elif k in ("due_at", "fact_date"):
+        elif k in ("due_at", "fact_date", "forecast_date"):
             fields[k] = body[k] or None
         elif k == "progress_pct":
             fields[k] = as_int(body[k]) or 0
@@ -1008,6 +1008,11 @@ def list_dependencies(cur, kind: str = None, oid: int = None):
 # ---------- BASELINE (ВЕРСИИ РАСПИСАНИЯ) ----------
 
 def _project_schedule_payload(cur, project_id: int):
+    """Снимок расписания для baseline. Фиксирует ПЛАН (даты, на которые
+    ориентируются при сравнении) и зависимости между объектами на момент
+    фиксации — не факт и не прогноз, у них нет смысла в неизменяемом
+    историческом снимке точки старта. Зависимости нужны, чтобы можно было
+    воспроизвести критический путь baseline и сравнить его с текущим."""
     p = fetch_one(cur, "exec_project", project_id)
     if not p:
         return None
@@ -1017,9 +1022,23 @@ def _project_schedule_payload(cur, project_id: int):
     tasks = rows(cur)
     cur.execute(f"SELECT id, title, plan_date FROM {SCHEMA}.exec_milestone WHERE project_id = %s", (project_id,))
     milestones = rows(cur)
+
+    task_ids, milestone_ids, stage_ids = [t["id"] for t in tasks], [m["id"] for m in milestones], [s["id"] for s in stages]
+    cur.execute(f"""
+        SELECT dependency_type, src_kind, src_id, tgt_kind, tgt_id, lag_days, lag_kind
+        FROM {SCHEMA}.exec_schedule_dependency
+        WHERE archived_at IS NULL AND (
+            (src_kind = 'project' AND src_id = %(pid)s) OR (tgt_kind = 'project' AND tgt_id = %(pid)s)
+            OR (src_kind = 'task' AND src_id = ANY(%(task_ids)s)) OR (tgt_kind = 'task' AND tgt_id = ANY(%(task_ids)s))
+            OR (src_kind = 'milestone' AND src_id = ANY(%(milestone_ids)s)) OR (tgt_kind = 'milestone' AND tgt_id = ANY(%(milestone_ids)s))
+            OR (src_kind = 'stage' AND src_id = ANY(%(stage_ids)s)) OR (tgt_kind = 'stage' AND tgt_id = ANY(%(stage_ids)s))
+        )
+    """, {"pid": project_id, "task_ids": task_ids or [0], "milestone_ids": milestone_ids or [0], "stage_ids": stage_ids or [0]})
+    dependencies = rows(cur)
+
     return {
         "project": {"id": p["id"], "title": p["title"], "plan_start": p["plan_start"], "plan_end": p["plan_end"]},
-        "stages": stages, "tasks": tasks, "milestones": milestones,
+        "stages": stages, "tasks": tasks, "milestones": milestones, "dependencies": dependencies,
     }
 
 
@@ -1072,10 +1091,271 @@ def list_baselines(cur, scope_kind=None, scope_id=None):
         params.append(scope_id)
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     cur.execute(f"""
-        SELECT id, scope_kind, scope_id, title, version_number, payload_sha256, created_by, created_at, is_test_data
-        FROM {SCHEMA}.exec_schedule_baseline {where} ORDER BY created_at DESC
+        SELECT id, scope_kind, scope_id, title, version_number, payload_sha256, created_by, created_at, is_test_data, is_active
+        FROM {SCHEMA}.exec_schedule_baseline {where} ORDER BY version_number DESC
     """, params)
     return rows(cur)
+
+
+def set_active_baseline(cur, bid: int, actor: str):
+    """Явно помечает версию baseline как действующую для её scope.
+    Частичный уникальный индекс на (scope_kind, scope_id) WHERE is_active
+    гарантирует ровно одну активную версию — снимаем флаг со старой перед
+    установкой на новую в одной транзакции."""
+    cur.execute(f"SELECT scope_kind, scope_id FROM {SCHEMA}.exec_schedule_baseline WHERE id = %s", (bid,))
+    r = rows(cur)
+    if not r:
+        return None, "Baseline не найден"
+    scope_kind, scope_id = r[0]["scope_kind"], r[0]["scope_id"]
+    cur.execute(f"""
+        UPDATE {SCHEMA}.exec_schedule_baseline SET is_active = false
+        WHERE scope_kind = %s AND scope_id IS NOT DISTINCT FROM %s AND is_active = true
+    """, (scope_kind, scope_id))
+    cur.execute(f"UPDATE {SCHEMA}.exec_schedule_baseline SET is_active = true WHERE id = %s", (bid,))
+    log_change(cur, actor, "schedule_baseline", bid, "set_active")
+    return bid, None
+
+
+def compare_baseline_versions(cur, baseline_id_a: int, baseline_id_b: int):
+    """Сравнение двух версий baseline друг с другом (не с текущим планом) —
+    что изменилось между двумя историческими снимками."""
+    a = get_baseline(cur, baseline_id_a)
+    b = get_baseline(cur, baseline_id_b)
+    if not a or not b:
+        return None, "Одна из версий baseline не найдена"
+
+    def index_by_id(items):
+        return {i["id"]: i for i in items}
+
+    diffs = {"project": None, "stages": [], "tasks": [], "milestones": []}
+    pa, pb = a["payload"].get("project", {}), b["payload"].get("project", {})
+    if pa.get("plan_start") != pb.get("plan_start") or pa.get("plan_end") != pb.get("plan_end"):
+        diffs["project"] = {
+            "plan_start_a": pa.get("plan_start"), "plan_start_b": pb.get("plan_start"),
+            "plan_end_a": pa.get("plan_end"), "plan_end_b": pb.get("plan_end"),
+        }
+    for key, date_field in (("stages", "plan_end"), ("tasks", "due_at"), ("milestones", "plan_date")):
+        idx_a, idx_b = index_by_id(a["payload"].get(key, [])), index_by_id(b["payload"].get(key, []))
+        for oid, item_b in idx_b.items():
+            item_a = idx_a.get(oid)
+            if item_a is None:
+                diffs[key].append({"id": oid, "title": item_b["title"], "change": "added_in_b"})
+            elif item_a.get(date_field) != item_b.get(date_field):
+                diffs[key].append({
+                    "id": oid, "title": item_b["title"], "change": "date_changed",
+                    "value_a": item_a.get(date_field), "value_b": item_b.get(date_field),
+                })
+        for oid, item_a in idx_a.items():
+            if oid not in idx_b:
+                diffs[key].append({"id": oid, "title": item_a["title"], "change": "removed_in_b"})
+
+    return {
+        "baseline_a": {"id": a["id"], "version_number": a["version_number"], "created_at": a["created_at"]},
+        "baseline_b": {"id": b["id"], "version_number": b["version_number"], "created_at": b["created_at"]},
+        "diffs": diffs,
+    }, None
+
+
+# ---------- СРАВНЕНИЕ РАСПИСАНИЙ: BASELINE / АКТУАЛЬНЫЙ ПЛАН / ПРОГНОЗ / ФАКТ ----------
+
+def _to_date(v):
+    """Нормализует дату из любого источника к datetime.date: значения из
+    текущих таблиц приходят как datetime.date (psycopg2), а значения из
+    JSON-снимка baseline — как строки ISO (JSON не имеет типа даты)."""
+    if v is None:
+        return None
+    if isinstance(v, datetime.date):
+        return v
+    return datetime.date.fromisoformat(str(v)[:10])
+
+
+def _diff_days(a, b):
+    """b − a в днях, либо None если одна из дат отсутствует."""
+    da, db = _to_date(a), _to_date(b)
+    if da is None or db is None:
+        return None
+    return (db - da).days
+
+
+def schedule_comparison(cur, pid: int, baseline_id: int = None):
+    """Сравнение четырёх слоёв расписания проекта на одной шкале:
+    baseline (зафиксированный снимок) / актуальный план / прогноз / факт.
+    Не путает прогноз с планом — если прогнозное поле не заполнено,
+    явно возвращает null, а не подменяет его текущим планом.
+
+    Если baseline не передан явно — берётся ДЕЙСТВУЮЩАЯ (is_active) версия
+    для этого проекта. Если действующей версии нет вовсе — сравнение
+    выполняется без слоя baseline, с явным предупреждением."""
+    p = fetch_one(cur, "exec_project", pid)
+    if not p:
+        return None, "Проект не найден"
+
+    warnings = []
+
+    if baseline_id:
+        baseline = get_baseline(cur, baseline_id)
+        if not baseline:
+            return None, "Указанная версия baseline не найдена"
+    else:
+        cur.execute(f"""
+            SELECT id FROM {SCHEMA}.exec_schedule_baseline
+            WHERE scope_kind = 'project' AND scope_id = %s AND is_active = true LIMIT 1
+        """, (pid,))
+        r = rows(cur)
+        baseline = get_baseline(cur, r[0]["id"]) if r else None
+        if not baseline:
+            warnings.append("Для проекта нет действующей версии baseline — сравнение показывает только актуальный план, прогноз и факт.")
+
+    if baseline and not baseline["integrity_ok"]:
+        return None, "Целостность выбранного baseline нарушена (SHA-256 не совпадает) — сравнение и экспорт заблокированы до расследования."
+
+    bp = baseline["payload"] if baseline else None
+    b_stage = {s["id"]: s for s in (bp["stages"] if bp else [])}
+    b_task = {t["id"]: t for t in (bp["tasks"] if bp else [])}
+    b_milestone = {m["id"]: m for m in (bp["milestones"] if bp else [])}
+
+    g = _build_schedule_graph(cur, pid)
+
+    rows_out = {"project": None, "stages": [], "tasks": [], "milestones": []}
+
+    # --- Проект ---
+    b_proj = bp["project"] if bp else {}
+    proj_row = {
+        "kind": "project", "id": p["id"], "title": p["title"], "status": p["status"],
+        "baseline_start": b_proj.get("plan_start"), "baseline_end": b_proj.get("plan_end"),
+        "actual_start": p["plan_start"], "actual_end": p["plan_end"],
+        "forecast_end": p.get("forecast_end"),
+        "fact_start": p["fact_start"], "fact_end": p["fact_end"],
+        "progress_pct": p["progress_pct"],
+    }
+    proj_row["deviation_start_days"] = _diff_days(proj_row["baseline_start"], proj_row["actual_start"] or proj_row["fact_start"])
+    proj_row["deviation_end_days"] = _diff_days(proj_row["baseline_end"], proj_row["fact_end"] or proj_row["forecast_end"] or proj_row["actual_end"])
+    if proj_row["status"] == "completed" and not proj_row["fact_end"]:
+        proj_row["data_quality_warning"] = "Статус «Завершено», но фактическая дата завершения не указана."
+    rows_out["project"] = proj_row
+
+    # --- Этапы ---
+    for s in g["stages"]:
+        b = b_stage.get(s["id"])
+        row = {
+            "kind": "stage", "id": s["id"], "title": s["title"], "status": s["status"],
+            "baseline_start": b.get("plan_start") if b else None, "baseline_end": b.get("plan_end") if b else None,
+            "actual_start": s["plan_start"], "actual_end": s["plan_end"],
+            "forecast_end": s.get("forecast_end"),
+            "fact_start": s["fact_start"], "fact_end": s["fact_end"],
+        }
+        row["deviation_start_days"] = _diff_days(row["baseline_start"], row["actual_start"] or row["fact_start"])
+        row["deviation_end_days"] = _diff_days(row["baseline_end"], row["fact_end"] or row["forecast_end"] or row["actual_end"])
+        if row["status"] == "done" and not row["fact_end"]:
+            row["data_quality_warning"] = "Статус «Готово», но фактическая дата завершения не указана."
+        if not b and bp is not None:
+            row["baseline_missing"] = True
+        rows_out["stages"].append(row)
+
+    # --- Задачи ---
+    for t in g["tasks"]:
+        b = b_task.get(t["id"])
+        row = {
+            "kind": "task", "id": t["id"], "title": t["title"], "status": t["status"],
+            "responsible_name": t.get("responsible_name"),
+            "baseline_end": b.get("due_at") if b else None,
+            "actual_end": t["due_at"], "forecast_end": t.get("forecast_date"),
+            "fact_end": t.get("fact_date"), "progress_pct": t.get("progress_pct"),
+        }
+        row["deviation_end_days"] = _diff_days(row["baseline_end"], row["fact_end"] or row["forecast_end"] or row["actual_end"])
+        if row["status"] == "done" and not row["fact_end"]:
+            row["data_quality_warning"] = "Статус «Выполнена», но фактическая дата не указана."
+        if not b and bp is not None:
+            row["baseline_missing"] = True
+        rows_out["tasks"].append(row)
+
+    # --- Вехи ---
+    for m in g["milestones"]:
+        b = b_milestone.get(m["id"])
+        row = {
+            "kind": "milestone", "id": m["id"], "title": m["title"], "status": m["status"],
+            "responsible_name": m.get("responsible_name"),
+            "baseline_end": b.get("plan_date") if b else None,
+            "actual_end": m["plan_date"], "forecast_end": m.get("forecast_date"),
+            "fact_end": m.get("fact_date"),
+        }
+        row["deviation_end_days"] = _diff_days(row["baseline_end"], row["fact_end"] or row["forecast_end"] or row["actual_end"])
+        if row["status"] == "achieved" and not row["fact_end"]:
+            row["data_quality_warning"] = "Статус «Достигнута», но фактическая дата не указана."
+        if not b and bp is not None:
+            row["baseline_missing"] = True
+        rows_out["milestones"].append(row)
+
+    # --- Критический путь: текущий vs baseline ---
+    current_nodes, _ = _cpm_nodes_from_current(g)
+    current_cpm_nodes, _, current_cycle = _cpm_compute(current_nodes, g["edges"])
+    current_critical = {(n["kind"], n["id"]) for n in current_cpm_nodes if n["is_critical"]} if not current_cycle else set()
+
+    baseline_critical = set()
+    baseline_duration = None
+    if bp:
+        # Даты в payload baseline — строки ISO (JSON не имеет типа даты),
+        # приводим к datetime.date, иначе арифметика в _cpm_compute упадёт.
+        b_nodes = {}
+        for s in bp["stages"]:
+            ps, pe = _to_date(s.get("plan_start")), _to_date(s.get("plan_end"))
+            if ps and pe:
+                b_nodes[("stage", s["id"])] = {"kind": "stage", "id": s["id"], "title": s["title"],
+                    "duration": max(0, (pe - ps).days), "anchor_start": ps}
+        for t in bp["tasks"]:
+            due = _to_date(t.get("due_at"))
+            if due:
+                b_nodes[("task", t["id"])] = {"kind": "task", "id": t["id"], "title": t["title"],
+                    "duration": 0, "anchor_start": due}
+        for m in bp["milestones"]:
+            pd = _to_date(m.get("plan_date"))
+            if pd:
+                b_nodes[("milestone", m["id"])] = {"kind": "milestone", "id": m["id"], "title": m["title"],
+                    "duration": 0, "anchor_start": pd}
+        b_edges = bp.get("dependencies", [])
+        b_cpm_nodes, baseline_duration, b_cycle = _cpm_compute(b_nodes, b_edges)
+        if not b_cycle:
+            baseline_critical = {(n["kind"], n["id"]) for n in b_cpm_nodes if n["is_critical"]}
+
+    newly_critical = current_critical - baseline_critical
+    no_longer_critical = baseline_critical - current_critical
+
+    # --- Сводка ---
+    all_rows = rows_out["stages"] + rows_out["tasks"] + rows_out["milestones"]
+    shifted = [r for r in all_rows if r.get("deviation_end_days")]
+    shifted_tasks = [r for r in shifted if r["kind"] == "task"]
+    shifted_milestones = [r for r in shifted if r["kind"] == "milestone"]
+    today = datetime.date.today()
+    overdue_count = sum(1 for r in all_rows if r.get("status") not in ("done", "achieved", "cancelled")
+                         and _to_date(r.get("actual_end") or r.get("forecast_end"))
+                         and _to_date(r.get("actual_end") or r.get("forecast_end")) < today)
+    no_fact_count = sum(1 for r in all_rows if r.get("status") in ("done", "achieved") and not r.get("fact_end"))
+
+    summary = {
+        "project_end_shift_days": proj_row["deviation_end_days"],
+        "shifted_tasks_count": len(shifted_tasks),
+        "shifted_milestones_count": len(shifted_milestones),
+        "newly_critical": [{"kind": k, "id": i} for k, i in newly_critical],
+        "no_longer_critical": [{"kind": k, "id": i} for k, i in no_longer_critical],
+        "overdue_count": overdue_count,
+        "no_fact_data_count": no_fact_count,
+        "top_shifts": sorted(
+            [r for r in shifted], key=lambda r: abs(r["deviation_end_days"]), reverse=True
+        )[:10],
+    }
+
+    return {
+        "project": {"id": p["id"], "title": p["title"]},
+        "baseline": ({"id": baseline["id"], "version_number": baseline["version_number"],
+                      "created_at": baseline["created_at"], "created_by": baseline["created_by"],
+                      "integrity_ok": baseline["integrity_ok"]} if baseline else None),
+        "warnings": warnings,
+        "rows": rows_out,
+        "current_cpm_computable": not current_cycle,
+        "baseline_cpm_computable": bool(bp) and baseline_duration is not None,
+        "summary": summary,
+        "calendar_mode": "calendar_days",
+    }, None
 
 
 def project_gantt(cur, pid: int):
@@ -1153,13 +1433,13 @@ def _build_schedule_graph(cur, pid: int):
     портфель целиком — только выбранный проект и его прямых соседей по
     зависимостям (глубина внешних связей ограничена одним шагом)."""
     cur.execute(f"""
-        SELECT id, title, status, plan_start, plan_end, sort_order
+        SELECT id, title, status, plan_start, plan_end, forecast_end, fact_start, fact_end, sort_order
         FROM {SCHEMA}.exec_project_stage WHERE project_id = %s ORDER BY sort_order, id
     """, (pid,))
     stages = rows(cur)
 
     cur.execute(f"""
-        SELECT t.id, t.title, t.status, t.progress_pct, t.due_at, t.stage_id,
+        SELECT t.id, t.title, t.status, t.progress_pct, t.due_at, t.forecast_date, t.fact_date, t.stage_id,
                t.responsible_person_id, per.display_name AS responsible_name,
                (t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE
                    AND t.status NOT IN ('done','cancelled')) AS is_overdue
@@ -1170,7 +1450,7 @@ def _build_schedule_graph(cur, pid: int):
     tasks = rows(cur)
 
     cur.execute(f"""
-        SELECT m.id, m.title, m.status, m.plan_date, m.fact_date,
+        SELECT m.id, m.title, m.status, m.plan_date, m.forecast_date, m.fact_date,
                m.responsible_person_id, per.display_name AS responsible_name,
                (m.status <> 'achieved' AND m.plan_date < CURRENT_DATE) AS is_overdue
         FROM {SCHEMA}.exec_milestone m
@@ -1305,79 +1585,18 @@ def dependency_graph(cur, pid: int):
 
 # ---------- КРИТИЧЕСКИЙ ПУТЬ (CPM) ----------
 
-def critical_path(cur, pid: int):
-    """Метод критического пути (Critical Path Method) для одного проекта.
-    Режим расчёта — календарные дни (лаг с lag_kind='working' применяется
-    как календарный с явным предупреждением: рабочего календаря с
-    праздниками в системе пока нет, смешивать режимы незаметно нельзя).
-
-    Узлы без достаточных дат исключаются из графа расчёта и перечисляются
-    в incomplete_objects — путь не выдумывается поверх отсутствующих данных.
-    При обнаружении цикла расчёт блокируется, цепочка возвращается отдельно."""
-    p = fetch_one(cur, "exec_project", pid)
-    if not p:
-        return None, "Проект не найден"
-
-    g = _build_schedule_graph(cur, pid)
-    warnings = []
-    incomplete = []
-
-    nodes = {}  # (kind, id) -> {duration, plan_start, plan_end, title, ...}
-    for s in g["stages"]:
-        if s["plan_start"] and s["plan_end"]:
-            nodes[("stage", s["id"])] = {
-                "kind": "stage", "id": s["id"], "title": s["title"],
-                "duration": max(0, (s["plan_end"] - s["plan_start"]).days),
-                "anchor_start": s["plan_start"], "status": s["status"],
-            }
-        else:
-            incomplete.append({"kind": "stage", "id": s["id"], "title": s["title"], "reason": "нет плановых дат начала/окончания этапа"})
-    for t in g["tasks"]:
-        if t["due_at"]:
-            nodes[("task", t["id"])] = {
-                "kind": "task", "id": t["id"], "title": t["title"], "duration": 0,
-                "anchor_start": t["due_at"], "status": t["status"], "responsible_name": t["responsible_name"],
-            }
-        else:
-            incomplete.append({"kind": "task", "id": t["id"], "title": t["title"], "reason": "нет срока выполнения (due_at) — задача без даты не может участвовать в расчёте"})
-    for m in g["milestones"]:
-        if m["plan_date"]:
-            nodes[("milestone", m["id"])] = {
-                "kind": "milestone", "id": m["id"], "title": m["title"], "duration": 0,
-                "anchor_start": m["plan_date"], "status": m["status"], "responsible_name": m["responsible_name"],
-            }
-        else:
-            incomplete.append({"kind": "milestone", "id": m["id"], "title": m["title"], "reason": "нет плановой даты вехи"})
-
-    # Только рёбра, у которых ОБА конца — узлы этого проекта с известными
-    # датами (внешние/неполные узлы не участвуют в расчёте резерва, но
-    # отмечаются отдельно как ограничение расчёта).
-    local_edges = []
-    working_lag_seen = False
-    for e in g["edges"]:
-        src_key, tgt_key = (e["src_kind"], e["src_id"]), (e["tgt_kind"], e["tgt_id"])
-        if src_key not in nodes or tgt_key not in nodes:
-            continue
-        if e["lag_kind"] == "working":
-            working_lag_seen = True
-        local_edges.append(e)
-
-    if working_lag_seen:
-        warnings.append("Часть зависимостей задана в рабочих днях, но рабочий календарь (выходные, праздники) в системе пока не реализован — такой лаг применён как календарные дни, чтобы не смешивать режимы незаметно.")
-
-    if incomplete:
-        warnings.append(f"{len(incomplete)} объект(ов) исключены из расчёта из-за отсутствующих дат — см. incomplete_objects.")
-
+def _cpm_compute(nodes: dict, edges: list):
+    """Ядро метода критического пути, не зависящее от источника данных —
+    переиспользуется и для текущего состояния проекта, и для дат,
+    зафиксированных в снимке baseline (чтобы сравнить критические пути).
+    nodes: (kind,id) -> {duration, anchor_start, title, status, ...}
+    edges: список зависимостей с полями dependency_type/src_*/tgt_*/lag_days.
+    Возвращает (result_nodes, project_duration, cycle_chain_or_None)."""
+    local_edges = [e for e in edges
+                   if (e["src_kind"], e["src_id"]) in nodes and (e["tgt_kind"], e["tgt_id"]) in nodes]
     if len(nodes) < 2 or not local_edges:
-        return {
-            "project": {"id": p["id"], "title": p["title"]},
-            "computable": False,
-            "warnings": warnings + ["Недостаточно данных для расчёта критического пути: нужно минимум два объекта с датами, связанных зависимостью."],
-            "incomplete_objects": incomplete,
-            "cycle": None, "nodes": [], "project_duration_days": None,
-        }, None
+        return [], None, None
 
-    # Топологическая сортировка (Kahn) для обнаружения цикла и порядка обхода.
     adjacency: dict = {k: [] for k in nodes}
     indegree = {k: 0 for k in nodes}
     for e in local_edges:
@@ -1397,23 +1616,11 @@ def critical_path(cur, pid: int):
                 queue.append(nxt)
 
     if len(order) != len(nodes):
-        # Цикл найден — восстанавливаем цепочку через DFS по непосещённым узлам.
         remaining = set(nodes) - set(order)
         chain = _find_cycle_chain(remaining, adjacency)
-        return {
-            "project": {"id": p["id"], "title": p["title"]},
-            "computable": False,
-            "warnings": warnings,
-            "incomplete_objects": incomplete,
-            "cycle": {"chain": [{"kind": k[0], "id": k[1], "title": nodes[k]["title"]} for k in chain]},
-            "nodes": [], "project_duration_days": None,
-        }, None
+        return [], None, [{"kind": k[0], "id": k[1], "title": nodes[k]["title"]} for k in chain]
 
     day0 = min(n["anchor_start"] for n in nodes.values())
-
-    def to_days(d):
-        return (d - day0).days
-
     ES = {k: 0 for k in nodes}
     EF = {k: nodes[k]["duration"] for k in nodes}
 
@@ -1461,11 +1668,6 @@ def critical_path(cur, pid: int):
         LF[node_key] = min(candidates)
         LS[node_key] = LF[node_key] - nodes[node_key]["duration"]
 
-    # Свободный резерв: строго рассчитывается для FS-последователей (самый
-    # частый тип). Для узлов, у которых все исходящие связи не FS, свободный
-    # резерв не может быть корректно упрощён без искажения смысла — в этом
-    # случае он совпадает с полным резервом (задокументированное упрощение
-    # первой версии, а не фиктивное число).
     free_float = {}
     for node_key in nodes:
         fs_succ_es = [ES[tgt_key] - (e["lag_days"] or 0) for tgt_key, e in adjacency[node_key] if e["dependency_type"] == "FS"]
@@ -1485,11 +1687,9 @@ def critical_path(cur, pid: int):
                 if (LS[tgt_key] - ES[tgt_key]) <= 0:
                     next_critical = {"kind": tgt_key[0], "id": tgt_key[1], "title": nodes[tgt_key]["title"]}
                     break
-        reason = None
-        if is_critical:
-            reason = "Резерв времени равен нулю — любая задержка этого объекта немедленно сдвигает срок проекта."
+        reason = "Резерв времени равен нулю — любая задержка этого объекта немедленно сдвигает срок проекта." if is_critical else None
         result_nodes.append({
-            "kind": n["kind"], "id": n["id"], "title": n["title"], "status": n["status"],
+            "kind": n["kind"], "id": n["id"], "title": n["title"], "status": n.get("status"),
             "early_start": (day0 + datetime.timedelta(days=ES[k])).isoformat(),
             "early_finish": (day0 + datetime.timedelta(days=EF[k])).isoformat(),
             "late_start": (day0 + datetime.timedelta(days=LS[k])).isoformat(),
@@ -1497,6 +1697,82 @@ def critical_path(cur, pid: int):
             "total_float_days": total_float, "free_float_days": free_float[k],
             "is_critical": is_critical, "criticality_reason": reason, "next_critical": next_critical,
         })
+    return result_nodes, project_duration, None
+
+
+def _cpm_nodes_from_current(g: dict):
+    """Строит узлы CPM из текущего состояния графа проекта (актуальные
+    plan_*/due_at даты). Возвращает (nodes, incomplete_objects)."""
+    nodes = {}
+    incomplete = []
+    for s in g["stages"]:
+        if s["plan_start"] and s["plan_end"]:
+            nodes[("stage", s["id"])] = {
+                "kind": "stage", "id": s["id"], "title": s["title"],
+                "duration": max(0, (s["plan_end"] - s["plan_start"]).days),
+                "anchor_start": s["plan_start"], "status": s["status"],
+            }
+        else:
+            incomplete.append({"kind": "stage", "id": s["id"], "title": s["title"], "reason": "нет плановых дат начала/окончания этапа"})
+    for t in g["tasks"]:
+        if t["due_at"]:
+            nodes[("task", t["id"])] = {
+                "kind": "task", "id": t["id"], "title": t["title"], "duration": 0,
+                "anchor_start": t["due_at"], "status": t["status"], "responsible_name": t.get("responsible_name"),
+            }
+        else:
+            incomplete.append({"kind": "task", "id": t["id"], "title": t["title"], "reason": "нет срока выполнения (due_at) — задача без даты не может участвовать в расчёте"})
+    for m in g["milestones"]:
+        if m["plan_date"]:
+            nodes[("milestone", m["id"])] = {
+                "kind": "milestone", "id": m["id"], "title": m["title"], "duration": 0,
+                "anchor_start": m["plan_date"], "status": m["status"], "responsible_name": m.get("responsible_name"),
+            }
+        else:
+            incomplete.append({"kind": "milestone", "id": m["id"], "title": m["title"], "reason": "нет плановой даты вехи"})
+    return nodes, incomplete
+
+
+def critical_path(cur, pid: int):
+    """Метод критического пути (Critical Path Method) для одного проекта
+    на ТЕКУЩИХ данных. Режим расчёта — календарные дни (лаг с
+    lag_kind='working' применяется как календарный с явным предупреждением:
+    рабочего календаря с праздниками в системе пока нет, смешивать режимы
+    незаметно нельзя).
+
+    Узлы без достаточных дат исключаются из графа расчёта и перечисляются
+    в incomplete_objects — путь не выдумывается поверх отсутствующих данных.
+    При обнаружении цикла расчёт блокируется, цепочка возвращается отдельно."""
+    p = fetch_one(cur, "exec_project", pid)
+    if not p:
+        return None, "Проект не найден"
+
+    g = _build_schedule_graph(cur, pid)
+    warnings = []
+    nodes, incomplete = _cpm_nodes_from_current(g)
+
+    working_lag_seen = any(e["lag_kind"] == "working" for e in g["edges"])
+    if working_lag_seen:
+        warnings.append("Часть зависимостей задана в рабочих днях, но рабочий календарь (выходные, праздники) в системе пока не реализован — такой лаг применён как календарные дни, чтобы не смешивать режимы незаметно.")
+    if incomplete:
+        warnings.append(f"{len(incomplete)} объект(ов) исключены из расчёта из-за отсутствующих дат — см. incomplete_objects.")
+
+    if len(nodes) < 2 or not [e for e in g["edges"] if (e["src_kind"], e["src_id"]) in nodes and (e["tgt_kind"], e["tgt_id"]) in nodes]:
+        return {
+            "project": {"id": p["id"], "title": p["title"]},
+            "computable": False,
+            "warnings": warnings + ["Недостаточно данных для расчёта критического пути: нужно минимум два объекта с датами, связанных зависимостью."],
+            "incomplete_objects": incomplete,
+            "cycle": None, "nodes": [], "project_duration_days": None,
+        }, None
+
+    result_nodes, project_duration, cycle_chain = _cpm_compute(nodes, g["edges"])
+    if cycle_chain:
+        return {
+            "project": {"id": p["id"], "title": p["title"]},
+            "computable": False, "warnings": warnings, "incomplete_objects": incomplete,
+            "cycle": {"chain": cycle_chain}, "nodes": [], "project_duration_days": None,
+        }, None
 
     return {
         "project": {"id": p["id"], "title": p["title"]},
@@ -1837,6 +2113,36 @@ def handler(event: dict, context) -> dict:
             if not item:
                 return cors({"ok": False, "error": {"message": "Baseline не найден"}}, 404)
             return cors({"ok": True, "data": item})
+
+        if action == "set_active_baseline":
+            bid = as_int(body.get("id"))
+            if not bid:
+                return cors({"ok": False, "error": {"message": "Не указан baseline"}}, 400)
+            result, err = set_active_baseline(cur, bid, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 404)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": result}})
+
+        if action == "compare_baselines":
+            bid_a, bid_b = as_int(qs.get("a")), as_int(qs.get("b"))
+            if not bid_a or not bid_b:
+                return cors({"ok": False, "error": {"message": "Нужно указать обе версии для сравнения (a и b)"}}, 400)
+            result, err = compare_baseline_versions(cur, bid_a, bid_b)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 404)
+            return cors({"ok": True, "data": result})
+
+        # ============ СРАВНЕНИЕ РАСПИСАНИЙ ============
+
+        if action == "schedule_comparison":
+            gpid = as_int(qs.get("id"))
+            if not gpid:
+                return cors({"ok": False, "error": {"message": "Не указан проект"}}, 400)
+            result, err = schedule_comparison(cur, gpid, as_int(qs.get("baseline_id")))
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            return cors({"ok": True, "data": result})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
     finally:
