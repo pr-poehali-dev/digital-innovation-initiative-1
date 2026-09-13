@@ -114,6 +114,8 @@ export default function RoadmapFiltersBar({
                         onClick={() => onChange({ no_fact_only: !filters.no_fact_only })} />
           <FilterToggle active={!!filters.integrity_violated_only} label="Нарушена целостность" icon="ShieldAlert"
                         onClick={() => onChange({ integrity_violated_only: !filters.integrity_violated_only })} />
+          <FilterToggle active={!!filters.critical_path_changed_only} label="Изменился критический путь" icon="Zap"
+                        onClick={() => onChange({ critical_path_changed_only: !filters.critical_path_changed_only })} />
         </>
       )}
 
@@ -123,6 +125,7 @@ export default function RoadmapFiltersBar({
           overdue_only: false, critical_risk_only: false, resource_gap_only: false, overbudget_only: false,
           cross_dependency_only: false, shifted_only: false, min_shift_days: undefined,
           no_baseline_only: false, no_forecast_only: false, no_fact_only: false, integrity_violated_only: false,
+          critical_path_changed_only: false,
         })}>
           Сбросить
         </Button>

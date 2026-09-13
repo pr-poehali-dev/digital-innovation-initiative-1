@@ -145,6 +145,7 @@ export default function ExecPortfolioPage() {
     no_forecast_only: searchParams.get("r_no_forecast") === "1",
     no_fact_only: searchParams.get("r_no_fact") === "1",
     integrity_violated_only: searchParams.get("r_bad_integrity") === "1",
+    critical_path_changed_only: searchParams.get("r_cpm_changed") === "1",
   };
 
   const ROADMAP_FILTER_KEY_MAP: Record<string, string> = {
@@ -152,7 +153,7 @@ export default function ExecPortfolioPage() {
     overdue_only: "r_overdue", critical_risk_only: "r_risk", resource_gap_only: "r_gap", overbudget_only: "r_budget",
     cross_dependency_only: "r_cross", shifted_only: "r_shifted", min_shift_days: "r_min_shift",
     no_baseline_only: "r_no_baseline", no_forecast_only: "r_no_forecast", no_fact_only: "r_no_fact",
-    integrity_violated_only: "r_bad_integrity",
+    integrity_violated_only: "r_bad_integrity", critical_path_changed_only: "r_cpm_changed",
   };
 
   const setRoadmapFilter = (patch: Record<string, unknown>) => {

@@ -59,6 +59,7 @@ export interface RoadmapProject {
   open_issue_count: number;
   resource_gap_count: number;
   baseline_deviation: RoadmapBaselineDeviation;
+  critical_path_changed?: boolean;
   stages: { id: number; title: string; status: string; plan_start: string | null; plan_end: string | null }[];
   milestones: {
     id: number; title: string; project_id: number | null; initiative_id: number | null;
@@ -122,6 +123,7 @@ export interface RoadmapFilters {
   no_forecast_only?: boolean;
   no_fact_only?: boolean;
   integrity_violated_only?: boolean;
+  critical_path_changed_only?: boolean;
 }
 
 export interface MilestoneFilters {

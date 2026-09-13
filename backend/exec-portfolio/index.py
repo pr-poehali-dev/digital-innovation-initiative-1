@@ -1011,6 +1011,42 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
                     deviation["shifted_milestones_count"] += 1
         p["baseline_deviation"] = deviation
 
+    # "Изменился критический путь" — единственный признак, требующий
+    # полного CPM, поэтому считается ЛЕНИВО: только когда фильтр реально
+    # запрошен, и только для проектов с целым baseline (без него сравнивать
+    # не с чем). Переиспользует то же ядро _cpm_compute, что и карточка
+    # проекта/schedule_comparison — не отдельная реализация.
+    if filters.get("critical_path_changed_only"):
+        for p in projects:
+            b = baseline_by_project.get(p["id"])
+            p["critical_path_changed"] = False
+            if not (b and b["integrity_ok"] and b["payload"]):
+                continue
+            g = _build_schedule_graph(cur, p["id"])
+            current_nodes, _ = _cpm_nodes_from_current(g)
+            current_cpm, _, current_cycle = _cpm_compute(current_nodes, g["edges"])
+            current_critical = {(n["kind"], n["id"]) for n in current_cpm if n["is_critical"]} if not current_cycle else set()
+
+            bp = b["payload"]
+            b_nodes = {}
+            for s in bp.get("stages", []):
+                ps, pe = _to_date(s.get("plan_start")), _to_date(s.get("plan_end"))
+                if ps and pe:
+                    b_nodes[("stage", s["id"])] = {"kind": "stage", "id": s["id"], "title": s["title"], "duration": max(0, (pe - ps).days), "anchor_start": ps}
+            for t in bp.get("tasks", []):
+                due = _to_date(t.get("due_at"))
+                if due:
+                    b_nodes[("task", t["id"])] = {"kind": "task", "id": t["id"], "title": t["title"], "duration": 0, "anchor_start": due}
+            for m in bp.get("milestones", []):
+                pd = _to_date(m.get("plan_date"))
+                if pd:
+                    b_nodes[("milestone", m["id"])] = {"kind": "milestone", "id": m["id"], "title": m["title"], "duration": 0, "anchor_start": pd}
+            b_cpm, _, b_cycle = _cpm_compute(b_nodes, bp.get("dependencies", []))
+            baseline_critical = {(n["kind"], n["id"]) for n in b_cpm if n["is_critical"]} if not b_cycle else set()
+
+            p["critical_path_changed"] = current_critical != baseline_critical
+        projects = [p for p in projects if p.get("critical_path_changed")]
+
     if filters.get("overbudget_only"):
         projects = [p for p in projects if p["is_overbudget"]]
     if filters.get("critical_risk_only"):

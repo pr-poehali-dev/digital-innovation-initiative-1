@@ -193,6 +193,7 @@ function ProjectRow({
   if (viewMode !== "actual" && !dev.has_baseline) warnings.push("нет baseline");
   if (viewMode === "deviation" && dev.has_baseline && !dev.baseline_integrity_ok) warnings.push("нарушена целостность baseline");
   if (viewMode === "deviation" && deviationDays) warnings.push(`сдвиг ${deviationDays > 0 ? "+" : ""}${deviationDays} дн.`);
+  if (viewMode === "deviation" && p.critical_path_changed) warnings.push("критический путь изменился");
 
   const nextMilestone = p.milestones
     .filter((m) => m.status !== "achieved")
