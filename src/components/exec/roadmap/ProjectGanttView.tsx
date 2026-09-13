@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Icon from "@/components/ui/icon";
 import { Empty, ErrorBox, Loading, fmtDate } from "@/components/exec/ExecUI";
-import { execRoadmapApi, ProjectGanttData, GanttTask, GanttMilestone, ScheduleBaseline } from "@/lib/execRoadmapApi";
+import { execRoadmapApi, ProjectGanttData, GanttTask, GanttMilestone, GanttStage, ScheduleBaseline } from "@/lib/execRoadmapApi";
 import {
   ScaleKind, parseISODate, diffDays, buildMonthTicks, datePx, pxPerDay, todayISO,
 } from "@/lib/timeScale";
+import { StageFormDialog } from "@/components/exec/PortfolioForms";
 
 const STAGE_STATUS_CLS: Record<string, string> = {
   not_started: "bg-slate-300", in_progress: "bg-violet-500", done: "bg-emerald-500",
@@ -49,6 +50,8 @@ export default function ProjectGanttView({
   const [collapsedStages, setCollapsedStages] = useState<Set<number>>(new Set());
   const [baselineDetail, setBaselineDetail] = useState<ScheduleBaseline | null>(null);
   const [baselineLoading, setBaselineLoading] = useState(false);
+  const [stageDialogOpen, setStageDialogOpen] = useState(false);
+  const [editingStage, setEditingStage] = useState<GanttStage | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(600);
@@ -176,6 +179,12 @@ export default function ProjectGanttView({
           >
             <Icon name="CalendarClock" size={13} /> Сегодня
           </button>
+          <button
+            onClick={() => { setEditingStage(null); setStageDialogOpen(true); }}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-violet-300 text-slate-600 hover:text-violet-700 flex items-center gap-1.5"
+          >
+            <Icon name="Plus" size={13} /> Этап
+          </button>
         </div>
       </div>
 
@@ -210,6 +219,11 @@ export default function ProjectGanttView({
                       <StageRow
                         key={`stage-${row.id}`} row={row} rangeStart={rangeStart} scale={scale} totalWidth={totalWidth}
                         collapsed={collapsedStages.has(row.id)} onToggle={() => toggleStage(row.id)}
+                        onEdit={() => {
+                          const full = data?.stages.find((s) => s.id === row.id) || null;
+                          setEditingStage(full);
+                          setStageDialogOpen(true);
+                        }}
                       />
                     ) : (
                       <TaskRow
@@ -241,15 +255,23 @@ export default function ProjectGanttView({
         <span className="inline-flex items-center gap-1"><Icon name="Link2" size={11} className="text-amber-600" /> участвует в зависимости</span>
         <span className="inline-flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full ring-2 ring-red-400" /> просрочено</span>
       </div>
+
+      <StageFormDialog
+        open={stageDialogOpen}
+        onOpenChange={setStageDialogOpen}
+        stage={editingStage}
+        projectId={projectId}
+        onSaved={reload}
+      />
     </div>
   );
 }
 
 function StageRow({
-  row, rangeStart, scale, totalWidth, collapsed, onToggle,
+  row, rangeStart, scale, totalWidth, collapsed, onToggle, onEdit,
 }: {
   row: Extract<Row, { kind: "stage" }>; rangeStart: Date; scale: ScaleKind; totalWidth: number;
-  collapsed: boolean; onToggle: () => void;
+  collapsed: boolean; onToggle: () => void; onEdit: () => void;
 }) {
   const start = parseISODate(row.plan_start);
   const end = parseISODate(row.plan_end);
@@ -257,10 +279,13 @@ function StageRow({
   const width = start && end ? Math.max(6, datePx(rangeStart, end, scale) - left) : 0;
 
   return (
-    <div className="flex items-center bg-slate-50/60 border-b border-slate-100" style={{ height: ROW_HEIGHT }}>
-      <button onClick={onToggle} className="w-[280px] flex-shrink-0 px-3 flex items-center gap-1.5 text-sm font-medium text-slate-800 hover:text-violet-700 min-w-0">
+    <div className="flex items-center bg-slate-50/60 border-b border-slate-100 group" style={{ height: ROW_HEIGHT }}>
+      <button onClick={onToggle} className="w-[254px] flex-shrink-0 px-3 flex items-center gap-1.5 text-sm font-medium text-slate-800 hover:text-violet-700 min-w-0">
         <Icon name={collapsed ? "ChevronRight" : "ChevronDown"} size={13} className="text-slate-400 flex-shrink-0" />
         <span className="truncate">{row.title}</span>
+      </button>
+      <button onClick={onEdit} className="w-[26px] flex-shrink-0 text-slate-300 hover:text-violet-600 opacity-0 group-hover:opacity-100 transition-opacity" title="Редактировать этап">
+        <Icon name="Pencil" size={12} />
       </button>
       <div className="relative" style={{ width: totalWidth, height: ROW_HEIGHT }}
            title={`${row.title}\n${row.plan_start ? fmtDate(row.plan_start) : "нет даты"} — ${row.plan_end ? fmtDate(row.plan_end) : "нет даты"}`}>

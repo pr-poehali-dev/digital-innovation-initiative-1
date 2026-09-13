@@ -16,6 +16,7 @@ export interface ExecProject {
   plan_end: string | null;
   fact_start: string | null;
   fact_end: string | null;
+  forecast_end: string | null;
   task_count: number;
   overdue_task_count: number;
   updated_at: string;
@@ -33,6 +34,8 @@ export interface ExecTask {
   responsible_person_id: number | null;
   responsible_email: string | null;
   due_at: string | null;
+  forecast_date: string | null;
+  fact_date: string | null;
   priority: string;
   status: string;
   progress_pct: number;
@@ -141,6 +144,8 @@ export const execPortfolioApi = {
     req(`/?action=tasks${projectId ? `&project_id=${projectId}` : ""}`),
   saveTask: (data: Record<string, unknown>) => req("/?action=save_task", "POST", data),
   archiveTask: (id: number) => req("/?action=archive_task", "POST", { id }),
+
+  saveStage: (data: Record<string, unknown>) => req("/?action=save_stage", "POST", data),
 
   results: (projectId?: number): Promise<{ items: ExecResult[] }> =>
     req(`/?action=results${projectId ? `&project_id=${projectId}` : ""}`),

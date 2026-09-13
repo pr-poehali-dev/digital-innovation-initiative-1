@@ -29,6 +29,7 @@ export default function MilestoneForm({
     title: m?.title || "",
     milestone_type: m?.milestone_type || "",
     plan_date: m?.plan_date || "",
+    forecast_date: m?.forecast_date || "",
     fact_date: m?.fact_date || "",
     status: m?.status || "not_started",
     responsible_person_id: m?.responsible_person_id ? String(m.responsible_person_id) : "",
@@ -171,6 +172,9 @@ export default function MilestoneForm({
         )}
         <div className="grid sm:grid-cols-2 gap-4">
           <DateField label="Плановая дата" value={f.plan_date} onChange={set("plan_date")} />
+          <DateField label="Прогнозная дата" value={f.forecast_date} onChange={set("forecast_date")} />
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
           <DateField label="Фактическая дата" value={f.fact_date} onChange={set("fact_date")} />
         </div>
         {dateChanged && (

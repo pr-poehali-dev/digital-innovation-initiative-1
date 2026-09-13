@@ -28,12 +28,13 @@ const PRIORITY_OPTIONS = [
  * уровне родительской страницы — компонент только отображает и вызывает
  * onChange, состояние фильтров не хранит сам. */
 export default function RoadmapFiltersBar({
-  filters, onChange, initiatives, showMilestoneStatus = false,
+  filters, onChange, initiatives, showMilestoneStatus = false, showDeviationFilters = false,
 }: {
   filters: Filters & { milestone_status?: string };
   onChange: (next: Partial<Filters> & { milestone_status?: string }) => void;
   initiatives: { id: number; title: string }[];
   showMilestoneStatus?: boolean;
+  showDeviationFilters?: boolean;
 }) {
   const activeCount = Object.values(filters).filter((v) => v !== undefined && v !== "" && v !== false).length;
 
@@ -93,11 +94,35 @@ export default function RoadmapFiltersBar({
         </>
       )}
 
+      {showDeviationFilters && (
+        <>
+          <FilterToggle active={!!filters.shifted_only} label="Только со сдвигом" icon="TrendingUp"
+                        onClick={() => onChange({ shifted_only: !filters.shifted_only })} />
+          <div className="flex items-center gap-1">
+            <input
+              type="number" min={1} placeholder="Сдвиг >N дн."
+              value={filters.min_shift_days ?? ""}
+              onChange={(e) => onChange({ min_shift_days: e.target.value ? Number(e.target.value) : undefined })}
+              className="h-8 w-24 text-xs rounded-md border border-slate-200 px-2 text-slate-600"
+            />
+          </div>
+          <FilterToggle active={!!filters.no_baseline_only} label="Нет baseline" icon="History"
+                        onClick={() => onChange({ no_baseline_only: !filters.no_baseline_only })} />
+          <FilterToggle active={!!filters.no_forecast_only} label="Нет прогноза" icon="CalendarClock"
+                        onClick={() => onChange({ no_forecast_only: !filters.no_forecast_only })} />
+          <FilterToggle active={!!filters.no_fact_only} label="Нет факта" icon="CircleCheck"
+                        onClick={() => onChange({ no_fact_only: !filters.no_fact_only })} />
+          <FilterToggle active={!!filters.integrity_violated_only} label="Нарушена целостность" icon="ShieldAlert"
+                        onClick={() => onChange({ integrity_violated_only: !filters.integrity_violated_only })} />
+        </>
+      )}
+
       {activeCount > 0 && (
         <Button size="sm" variant="ghost" className="h-8 text-xs text-slate-400" onClick={() => onChange({
           initiative_id: undefined, project_kind: undefined, status: undefined, priority: undefined,
           overdue_only: false, critical_risk_only: false, resource_gap_only: false, overbudget_only: false,
-          cross_dependency_only: false,
+          cross_dependency_only: false, shifted_only: false, min_shift_days: undefined,
+          no_baseline_only: false, no_forecast_only: false, no_fact_only: false, integrity_violated_only: false,
         })}>
           Сбросить
         </Button>

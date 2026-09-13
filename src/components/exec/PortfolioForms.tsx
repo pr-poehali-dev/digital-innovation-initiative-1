@@ -71,11 +71,12 @@ const PRIORITIES = [
   { value: "urgent", label: "Срочный" },
 ];
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <Label className="text-xs text-muted-foreground">{label}</Label>
       {children}
+      {hint && <p className="text-[10px] text-muted-foreground/70">{hint}</p>}
     </div>
   );
 }
@@ -143,6 +144,7 @@ export function ProjectFormDialog({
       plan_end: project?.plan_end || "",
       fact_start: project?.fact_start || "",
       fact_end: project?.fact_end || "",
+      forecast_end: project?.forecast_end || "",
     });
   }, [open, project]);
 
@@ -218,6 +220,9 @@ export function ProjectFormDialog({
               <Input type="date" value={form.plan_end || ""} onChange={(e) => setForm({ ...form, plan_end: e.target.value })} />
             </Field>
           </div>
+          <Field label="Прогноз завершения" hint="Ожидаемый срок с учётом текущего темпа работы — отдельно от утверждённого плана, план не меняется">
+            <Input type="date" value={form.forecast_end || ""} onChange={(e) => setForm({ ...form, forecast_end: e.target.value })} />
+          </Field>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
@@ -259,6 +264,8 @@ export function TaskFormDialog({
       project_id: task?.project_id ? String(task.project_id) : "",
       action_id: task?.action_id ? String(task.action_id) : "",
       due_at: task?.due_at || "",
+      forecast_date: task?.forecast_date || "",
+      fact_date: task?.fact_date || "",
       priority: task?.priority || "normal",
       status: task?.status || "not_started",
       progress_pct: String(task?.progress_pct ?? 0),
@@ -322,11 +329,19 @@ export function TaskFormDialog({
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Срок">
+            <Field label="Срок (план)">
               <Input type="date" value={form.due_at || ""} onChange={(e) => setForm({ ...form, due_at: e.target.value })} />
             </Field>
             <Field label="Приоритет">
               <PickSelect value={form.priority} onChange={(v) => setForm({ ...form, priority: v })} options={PRIORITIES} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Прогноз срока" hint="Ожидаемая дата с учётом темпа работы, не меняет план">
+              <Input type="date" value={form.forecast_date || ""} onChange={(e) => setForm({ ...form, forecast_date: e.target.value })} />
+            </Field>
+            <Field label="Фактическая дата">
+              <Input type="date" value={form.fact_date || ""} onChange={(e) => setForm({ ...form, fact_date: e.target.value })} />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -351,6 +366,126 @@ export function TaskFormDialog({
               <Textarea rows={2} value={form.blocker || ""} onChange={(e) => setForm({ ...form, blocker: e.target.value })} />
             </Field>
           )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
+          <Button onClick={save} disabled={busy}>{busy ? "Сохранение..." : "Сохранить"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============ ФОРМА ЭТАПА ============
+
+const STAGE_STATUSES = [
+  { value: "not_started", label: "Не начат" },
+  { value: "in_progress", label: "В работе" },
+  { value: "done", label: "Готово" },
+  { value: "blocked", label: "Заблокирован" },
+  { value: "cancelled", label: "Отменён" },
+];
+
+interface StageLike {
+  id: number; project_id: number; title: string; sort_order: number; status: string;
+  plan_start: string | null; plan_end: string | null; forecast_end?: string | null;
+  fact_start: string | null; fact_end: string | null;
+}
+
+export function StageFormDialog({
+  open,
+  onOpenChange,
+  stage,
+  projectId,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  stage: StageLike | null;
+  projectId: number;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setError("");
+    setForm({
+      id: stage ? String(stage.id) : "",
+      project_id: String(projectId),
+      title: stage?.title || "",
+      status: stage?.status || "not_started",
+      sort_order: String(stage?.sort_order ?? 100),
+      plan_start: stage?.plan_start || "",
+      plan_end: stage?.plan_end || "",
+      forecast_end: stage?.forecast_end || "",
+      fact_start: stage?.fact_start || "",
+      fact_end: stage?.fact_end || "",
+    });
+  }, [open, stage, projectId]);
+
+  const save = async () => {
+    if (!form.title?.trim()) {
+      setError("Укажите название этапа");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await execPortfolioApi.saveStage({
+        ...form,
+        id: form.id || undefined,
+        sort_order: Number(form.sort_order) || 100,
+      });
+      onOpenChange(false);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{stage ? "Редактировать этап" : "Новый этап"}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {error && <div className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</div>}
+          <Field label="Название">
+            <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Статус">
+              <PickSelect value={form.status} onChange={(v) => setForm({ ...form, status: v })} options={STAGE_STATUSES} />
+            </Field>
+            <Field label="Порядок">
+              <Input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value })} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Начало (план)">
+              <Input type="date" value={form.plan_start || ""} onChange={(e) => setForm({ ...form, plan_start: e.target.value })} />
+            </Field>
+            <Field label="Завершение (план)">
+              <Input type="date" value={form.plan_end || ""} onChange={(e) => setForm({ ...form, plan_end: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Прогноз завершения" hint="Ожидаемый срок с учётом текущего темпа — отдельно от плана">
+            <Input type="date" value={form.forecast_end || ""} onChange={(e) => setForm({ ...form, forecast_end: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Начало (факт)">
+              <Input type="date" value={form.fact_start || ""} onChange={(e) => setForm({ ...form, fact_start: e.target.value })} />
+            </Field>
+            <Field label="Завершение (факт)">
+              <Input type="date" value={form.fact_end || ""} onChange={(e) => setForm({ ...form, fact_end: e.target.value })} />
+            </Field>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>

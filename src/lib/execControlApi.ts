@@ -10,6 +10,7 @@ export interface Milestone {
   milestone_type: string | null;
   plan_date_original: string | null;
   plan_date: string | null;
+  forecast_date: string | null;
   fact_date: string | null;
   status: string;
   is_overdue: boolean;

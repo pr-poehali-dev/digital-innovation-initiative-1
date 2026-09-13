@@ -22,6 +22,20 @@ async function post(action: string, body: unknown) {
   return data.data;
 }
 
+export interface RoadmapBaselineDeviation {
+  has_baseline: boolean;
+  baseline_version: number | null;
+  baseline_integrity_ok: boolean | null;
+  has_forecast: boolean;
+  has_fact_data: boolean;
+  baseline_start: string | null;
+  baseline_end: string | null;
+  deviation_start_days: number | null;
+  deviation_end_days: number | null;
+  shifted_tasks_count: number;
+  shifted_milestones_count: number;
+}
+
 export interface RoadmapProject {
   id: number;
   title: string;
@@ -44,6 +58,7 @@ export interface RoadmapProject {
   critical_risk_count: number;
   open_issue_count: number;
   resource_gap_count: number;
+  baseline_deviation: RoadmapBaselineDeviation;
   stages: { id: number; title: string; status: string; plan_start: string | null; plan_end: string | null }[];
   milestones: {
     id: number; title: string; project_id: number | null; initiative_id: number | null;
@@ -101,6 +116,12 @@ export interface RoadmapFilters {
   resource_gap_only?: boolean;
   overbudget_only?: boolean;
   cross_dependency_only?: boolean;
+  shifted_only?: boolean;
+  min_shift_days?: number;
+  no_baseline_only?: boolean;
+  no_forecast_only?: boolean;
+  no_fact_only?: boolean;
+  integrity_violated_only?: boolean;
 }
 
 export interface MilestoneFilters {
@@ -353,6 +374,27 @@ export interface BaselineVersionsComparison {
   };
 }
 
+export interface ScheduleChangeLogEntry {
+  id: number;
+  object_kind: ScheduleRowKind;
+  object_id: number;
+  object_title: string | null;
+  project_id: number | null;
+  layer: "plan" | "forecast" | "fact";
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  shift_days: number | null;
+  reason: string | null;
+  related_decision_id: number | null;
+  related_document_id: number | null;
+  affected_dependency_count: number;
+  criticality_changed: boolean;
+  project_end_shift_days: number | null;
+  actor: string;
+  created_at: string;
+}
+
 export const execRoadmapApi = {
   roadmap: (filters: RoadmapFilters): Promise<RoadmapData> => req(`/?action=roadmap${toQuery(filters)}`),
   milestonesTimeline: (filters: MilestoneFilters): Promise<{ items: TimelineMilestone[] }> =>
@@ -387,4 +429,6 @@ export const execRoadmapApi = {
     req(`/?action=compare_baselines&a=${a}&b=${b}`),
   scheduleComparison: (projectId: number, baselineId?: number): Promise<ScheduleComparisonData> =>
     req(`/?action=schedule_comparison&id=${projectId}${baselineId ? `&baseline_id=${baselineId}` : ""}`),
+  scheduleChangeLog: (projectId: number): Promise<{ items: ScheduleChangeLogEntry[] }> =>
+    req(`/?action=schedule_change_log&id=${projectId}`),
 };

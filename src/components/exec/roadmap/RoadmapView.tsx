@@ -18,8 +18,10 @@ const PRIORITY_LABEL: Record<string, string> = { urgent: "срочный", high:
  * внутри полосы. Рисуется через SVG/CSS без сторонних Gantt-библиотек —
  * первая фаза только просмотр (фильтры, масштаб, раскрытие, переход в
  * карточку), без перетаскивания мышью. */
+export type RoadmapViewMode = "actual" | "baseline" | "deviation";
+
 export default function RoadmapView({
-  filters, scale, onScaleChange, dateFrom, dateTo, onRangeChange,
+  filters, scale, onScaleChange, dateFrom, dateTo, onRangeChange, viewMode = "actual",
 }: {
   filters: RoadmapFilters;
   scale: ScaleKind;
@@ -27,6 +29,7 @@ export default function RoadmapView({
   dateFrom: string;
   dateTo: string;
   onRangeChange: (from: string, to: string) => void;
+  viewMode?: RoadmapViewMode;
 }) {
   const navigate = useNavigate();
   const [data, setData] = useState<RoadmapData | null>(null);
@@ -136,7 +139,7 @@ export default function RoadmapView({
                   <ProjectRow
                     key={p.id} project={p} rangeStart={rangeStart} scale={scale}
                     totalWidth={totalWidth} onOpen={() => navigate(`/cabinet/exec/portfolio/projects/${p.id}`)}
-                    collapsed={collapsed} toggle={toggle}
+                    collapsed={collapsed} toggle={toggle} viewMode={viewMode}
                   />
                 ))}
               </div>
@@ -160,10 +163,10 @@ export default function RoadmapView({
 }
 
 function ProjectRow({
-  project: p, rangeStart, scale, totalWidth, onOpen, collapsed, toggle,
+  project: p, rangeStart, scale, totalWidth, onOpen, collapsed, toggle, viewMode,
 }: {
   project: RoadmapProject; rangeStart: Date; scale: ScaleKind; totalWidth: number;
-  onOpen: () => void; collapsed: Set<string>; toggle: (k: string) => void;
+  onOpen: () => void; collapsed: Set<string>; toggle: (k: string) => void; viewMode: RoadmapViewMode;
 }) {
   const stageKey = `proj-${p.id}`;
   const hasStages = p.stages.length > 0;
@@ -174,12 +177,22 @@ function ProjectRow({
   const left = start ? Math.max(0, datePx(rangeStart, start, scale)) : 0;
   const width = start && end ? Math.max(6, datePx(rangeStart, end, scale) - left) : 0;
 
+  const dev = p.baseline_deviation;
+  const baselineStart = parseISODate(dev.baseline_start);
+  const baselineEnd = parseISODate(dev.baseline_end);
+  const bLeft = baselineStart ? Math.max(0, datePx(rangeStart, baselineStart, scale)) : 0;
+  const bWidth = baselineStart && baselineEnd ? Math.max(6, datePx(rangeStart, baselineEnd, scale) - bLeft) : 0;
+  const deviationDays = dev.deviation_end_days;
+
   const warnings: string[] = [];
   if (p.is_overdue) warnings.push("просрочен");
   if (p.critical_risk_count > 0) warnings.push(`${p.critical_risk_count} критич. риск(ов)`);
   if (p.resource_gap_count > 0) warnings.push(`дефицит ресурсов`);
   if (p.is_overbudget) warnings.push("прогноз перерасхода");
   if (p.has_cross_project_dependency) warnings.push("есть межпроектная зависимость");
+  if (viewMode !== "actual" && !dev.has_baseline) warnings.push("нет baseline");
+  if (viewMode === "deviation" && dev.has_baseline && !dev.baseline_integrity_ok) warnings.push("нарушена целостность baseline");
+  if (viewMode === "deviation" && deviationDays) warnings.push(`сдвиг ${deviationDays > 0 ? "+" : ""}${deviationDays} дн.`);
 
   const nextMilestone = p.milestones
     .filter((m) => m.status !== "achieved")
@@ -208,9 +221,16 @@ function ProjectRow({
           )}
         </div>
         <div className="relative py-2" style={{ width: totalWidth, height: 32 }} title={`${p.title}\n${p.plan_start ?? "нет даты"} — ${p.plan_end ?? "нет даты"}\nГотовность ${p.progress_pct}%\nПриоритет: ${PRIORITY_LABEL[p.priority] ?? p.priority}`}>
-            {start && end ? (
+            {viewMode !== "actual" && baselineStart && baselineEnd && (
               <div
-                className={`absolute top-1 h-4 rounded-md ${STATUS_CLS[p.status] || "bg-slate-300"} ${p.is_overdue ? "ring-2 ring-red-400" : ""} opacity-90 flex items-center overflow-hidden cursor-pointer`}
+                className="absolute top-0.5 h-2 rounded bg-slate-300 border border-slate-400"
+                style={{ left: bLeft, width: bWidth }}
+                title={`Baseline: ${dev.baseline_start} — ${dev.baseline_end}`}
+              />
+            )}
+            {(viewMode === "actual" || viewMode === "deviation") && (start && end ? (
+              <div
+                className={`absolute h-4 rounded-md ${viewMode === "deviation" ? "top-3" : "top-1"} ${STATUS_CLS[p.status] || "bg-slate-300"} ${p.is_overdue ? "ring-2 ring-red-400" : ""} opacity-90 flex items-center overflow-hidden cursor-pointer`}
                 style={{ left, width }}
                 onClick={onOpen}
               >
@@ -218,6 +238,9 @@ function ProjectRow({
               </div>
             ) : (
               <span className="absolute top-1.5 left-0 text-[10px] text-slate-400 italic">даты не заданы</span>
+            ))}
+            {viewMode === "baseline" && !(baselineStart && baselineEnd) && (
+              <span className="absolute top-1.5 left-0 text-[10px] text-slate-400 italic">нет baseline</span>
             )}
             {p.milestones.map((m) => {
               const md = parseISODate(m.plan_date);

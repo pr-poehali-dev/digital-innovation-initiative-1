@@ -13,7 +13,7 @@ import { ProjectFormDialog, TaskFormDialog, PROJECT_STATUSES, TASK_STATUSES } fr
 import { execPortfolioApi, PortfolioDashboard, ExecProject, ExecTask } from "@/lib/execPortfolioApi";
 import { execApi } from "@/lib/execCabinetApi";
 import { controlApi, Risk } from "@/lib/execControlApi";
-import RoadmapView from "@/components/exec/roadmap/RoadmapView";
+import RoadmapView, { RoadmapViewMode } from "@/components/exec/roadmap/RoadmapView";
 import MilestonesTimelineView from "@/components/exec/roadmap/MilestonesTimelineView";
 import RoadmapFiltersBar from "@/components/exec/roadmap/RoadmapFilters";
 import { ScaleKind, autoScale, diffDays, parseISODate, defaultRangeForScale } from "@/lib/timeScale";
@@ -122,6 +122,13 @@ export default function ExecPortfolioPage() {
     setSearchParams(next, { replace: true });
   };
 
+  const roadmapViewMode: RoadmapViewMode = (searchParams.get("view") as RoadmapViewMode) || "actual";
+  const setRoadmapViewMode = (v: RoadmapViewMode) => {
+    const next = new URLSearchParams(searchParams);
+    if (v === "actual") next.delete("view"); else next.set("view", v);
+    setSearchParams(next, { replace: true });
+  };
+
   const roadmapFilters: RoadmapFilters = {
     initiative_id: searchParams.get("initiative_id") ? Number(searchParams.get("initiative_id")) : undefined,
     project_kind: searchParams.get("project_kind") || undefined,
@@ -132,12 +139,20 @@ export default function ExecPortfolioPage() {
     resource_gap_only: searchParams.get("r_gap") === "1",
     overbudget_only: searchParams.get("r_budget") === "1",
     cross_dependency_only: searchParams.get("r_cross") === "1",
+    shifted_only: searchParams.get("r_shifted") === "1",
+    min_shift_days: searchParams.get("r_min_shift") ? Number(searchParams.get("r_min_shift")) : undefined,
+    no_baseline_only: searchParams.get("r_no_baseline") === "1",
+    no_forecast_only: searchParams.get("r_no_forecast") === "1",
+    no_fact_only: searchParams.get("r_no_fact") === "1",
+    integrity_violated_only: searchParams.get("r_bad_integrity") === "1",
   };
 
   const ROADMAP_FILTER_KEY_MAP: Record<string, string> = {
     initiative_id: "initiative_id", project_kind: "project_kind", status: "rstatus", priority: "priority",
     overdue_only: "r_overdue", critical_risk_only: "r_risk", resource_gap_only: "r_gap", overbudget_only: "r_budget",
-    cross_dependency_only: "r_cross",
+    cross_dependency_only: "r_cross", shifted_only: "r_shifted", min_shift_days: "r_min_shift",
+    no_baseline_only: "r_no_baseline", no_forecast_only: "r_no_forecast", no_fact_only: "r_no_fact",
+    integrity_violated_only: "r_bad_integrity",
   };
 
   const setRoadmapFilter = (patch: Record<string, unknown>) => {
@@ -278,10 +293,25 @@ export default function ExecPortfolioPage() {
         {mainTab === "roadmap" && (
           <div className="space-y-3">
             <PageGuide {...execPageGuides.roadmap} />
-            <RoadmapFiltersBar filters={roadmapFilters} onChange={setRoadmapFilter} initiatives={initiatives} />
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-0.5 w-fit">
+              {([["actual", "Актуальный план"], ["baseline", "Baseline"], ["deviation", "Отклонения"]] as [RoadmapViewMode, string][]).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => setRoadmapViewMode(v)}
+                  className={`px-2.5 py-1 text-xs rounded-md transition-colors ${roadmapViewMode === v ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:text-slate-700"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <RoadmapFiltersBar
+              filters={roadmapFilters} onChange={setRoadmapFilter} initiatives={initiatives}
+              showDeviationFilters={roadmapViewMode !== "actual"}
+            />
             <RoadmapView
               filters={roadmapFilters} scale={scale} onScaleChange={setRoadmapScale}
               dateFrom={dateFrom} dateTo={dateTo} onRangeChange={setRoadmapRange}
+              viewMode={roadmapViewMode}
             />
           </div>
         )}

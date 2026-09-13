@@ -1,7 +1,17 @@
-INSERT INTO exec_project
-    (id, title, project_kind, status, priority, progress_pct,
-     plan_start, plan_end, is_test_data, archived_at, created_by)
-OVERRIDING SYSTEM VALUE
-SELECT 15, 'Repair placeholder project', 'project', 'in_progress', 'high', 35,
-       '2026-09-01'::date, '2026-12-15'::date, true, now(), 'migration_repair'
-WHERE NOT EXISTS (SELECT 1 FROM exec_project WHERE id = 15);
+-- ИСПРАВЛЕНО ПОСТФАКТУМ (повторно): изначально этот файл создавал
+-- "запасной" exec_project с id=15 через OVERRIDING SYSTEM VALUE — то было
+-- нужно, потому что на тот момент V0442 падал бы на чистой БД без такого
+-- проекта (см. историю правки V0442__temp_gantt_test_stages.sql).
+--
+-- V0442 теперь сам сделан идемпотентным (WHERE EXISTS/WHERE NOT EXISTS) и
+-- больше не требует, чтобы exec_project id=15 существовал заранее — он
+-- просто не создаёт тестовые этапы, если такого проекта нет. Поэтому
+-- полезная нагрузка этого файла стала избыточной, а её выполнение на
+-- чистом развёртывании ТОЛЬКО добавляло риск (лишний "Repair placeholder
+-- project" в рабочей схеме, сдвиг autoincrement).
+--
+-- Файл оставлен в истории миграций (номер не переиспользуется), но его
+-- тело превращено в декларативный no-op — реального действия он больше
+-- не выполняет ни на существующей БД (там нужный проект уже есть), ни на
+-- чистом развёртывании (там он теперь не нужен вовсе).
+SELECT 1;

@@ -138,6 +138,60 @@ def diff_fields(existing: dict, new: dict) -> list:
     return [k for k, v in new.items() if str(existing.get(k)) != str(v)]
 
 
+# ---------- ЖУРНАЛ ИЗМЕНЕНИЙ РАСПИСАНИЯ ----------
+
+DATE_FIELD_LAYER = {
+    "plan_start": "plan", "plan_end": "plan", "due_at": "plan", "plan_date": "plan",
+    "forecast_end": "forecast", "forecast_date": "forecast",
+    "fact_start": "fact", "fact_end": "fact", "fact_date": "fact",
+}
+
+
+def log_schedule_change(cur, actor: str, object_kind: str, object_id: int, project_id,
+                         existing: dict, new_fields: dict, reason: str = None,
+                         related_decision_id: int = None, related_document_id: int = None):
+    """Специализированная запись в exec_schedule_change_log для каждого
+    изменённого поля даты (план/прогноз/факт) — отдельно от общего
+    exec_audit_log. Считает величину сдвига, помечает затронутые
+    зависимости и (для проекта) явно фиксирует смещение конечной даты.
+    Секреты и длинные комментарии сюда не пишутся — только сжатая причина,
+    подробности — по ссылке на решение/документ."""
+    if not existing:
+        return
+    for field, new_val in new_fields.items():
+        if field not in DATE_FIELD_LAYER:
+            continue
+        old_val = existing.get(field)
+        if str(old_val) == str(new_val):
+            continue
+        shift_days = None
+        if old_val and new_val:
+            try:
+                shift_days = (_to_date(new_val) - _to_date(old_val)).days
+            except (ValueError, TypeError):
+                shift_days = None
+
+        affected = 0
+        if object_kind in ("task", "milestone", "stage"):
+            cur.execute(f"""
+                SELECT count(*) AS c FROM {SCHEMA}.exec_schedule_dependency
+                WHERE archived_at IS NULL AND (
+                    (src_kind = %s AND src_id = %s) OR (tgt_kind = %s AND tgt_id = %s)
+                )
+            """, (object_kind, object_id, object_kind, object_id))
+            affected = rows(cur)[0]["c"]
+
+        cur.execute(f"""
+            INSERT INTO {SCHEMA}.exec_schedule_change_log
+                (object_kind, object_id, project_id, layer, field_name, old_value, new_value,
+                 shift_days, reason, related_decision_id, related_document_id,
+                 affected_dependency_count, actor)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (object_kind, object_id, project_id, DATE_FIELD_LAYER[field], field,
+              old_val or None, new_val or None, shift_days, reason,
+              related_decision_id, related_document_id, affected, actor))
+
+
 def fetch_one(cur, table, eid):
     cur.execute(f"SELECT * FROM {SCHEMA}.{table} WHERE id = %s", (eid,))
     r = rows(cur)
@@ -209,6 +263,10 @@ def save_project(cur, body: dict, actor: str):
         changed = diff_fields(existing, fields)
         new_id = cur.fetchone()[0]
         log_change(cur, actor, "project", new_id, "update", changed_fields=changed)
+        log_schedule_change(cur, actor, "project", new_id, new_id, existing, fields,
+                             reason=body.get("reschedule_reason"),
+                             related_decision_id=as_int(body.get("related_decision_id")),
+                             related_document_id=as_int(body.get("related_document_id")))
     else:
         fields.setdefault("status", "idea")
         fields.setdefault("priority", "normal")
@@ -291,6 +349,11 @@ def save_task(cur, body: dict, actor: str):
         )
         new_id = cur.fetchone()[0]
         log_change(cur, actor, "task", new_id, "update", changed_fields=diff_fields(existing, fields))
+        proj_id = fields.get("project_id", existing.get("project_id") if existing else None)
+        log_schedule_change(cur, actor, "task", new_id, proj_id, existing, fields,
+                             reason=body.get("reschedule_reason"),
+                             related_decision_id=as_int(body.get("related_decision_id")),
+                             related_document_id=as_int(body.get("related_document_id")))
     else:
         fields.setdefault("status", "not_started")
         fields.setdefault("priority", "normal")
@@ -315,6 +378,65 @@ def archive_task(cur, tid, actor):
     if r:
         log_change(cur, actor, "task", tid, "archive")
     return r[0] if r else None
+
+
+STAGE_FIELDS = ["project_id", "title", "sort_order", "status",
+    "plan_start", "plan_end", "forecast_end", "fact_start", "fact_end"]
+
+
+def save_stage(cur, body: dict, actor: str):
+    """Штатное сохранение этапа проекта — раньше этапы создавались только
+    вручную через миграции, из-за чего слой прогноза этапа фактически был
+    доступен только на чтение. save_project/save_task уже поддерживали
+    forecast_*, эта функция закрывает тот же путь для exec_project_stage."""
+    sid = as_int(body.get("id"))
+    fields = {}
+    for k in STAGE_FIELDS:
+        if k not in body:
+            continue
+        if k == "project_id":
+            fields[k] = as_int(body[k])
+        elif k == "sort_order":
+            fields[k] = as_int(body[k]) or 100
+        elif k in ("plan_start", "plan_end", "forecast_end", "fact_start", "fact_end"):
+            fields[k] = body[k] or None
+        else:
+            fields[k] = body.get(k)
+
+    existing = fetch_one(cur, "exec_project_stage", sid) if sid else None
+
+    if sid:
+        if not fields:
+            return sid, None
+        sets = ", ".join(f"{k} = %s" for k in fields)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_project_stage SET {sets}, updated_at = now() WHERE id = %s RETURNING id",
+            (*fields.values(), sid),
+        )
+        r = cur.fetchone()
+        if not r:
+            return None, "Этап не найден"
+        new_id = r[0]
+        log_change(cur, actor, "stage", new_id, "update", changed_fields=diff_fields(existing, fields))
+        proj_id = fields.get("project_id", existing.get("project_id") if existing else None)
+        log_schedule_change(cur, actor, "stage", new_id, proj_id, existing, fields,
+                             reason=body.get("reschedule_reason"),
+                             related_decision_id=as_int(body.get("related_decision_id")),
+                             related_document_id=as_int(body.get("related_document_id")))
+    else:
+        if not fields.get("project_id") or not fields.get("title"):
+            return None, "Не указан проект или название этапа"
+        fields.setdefault("status", "not_started")
+        fields.setdefault("sort_order", 100)
+        cols = ", ".join(fields.keys())
+        ph = ", ".join(["%s"] * len(fields))
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_project_stage ({cols}) VALUES ({ph}) RETURNING id",
+            tuple(fields.values()),
+        )
+        new_id = cur.fetchone()[0]
+        log_change(cur, actor, "stage", new_id, "create", after=fields)
+    return new_id, None
 
 
 # ============ РЕЗУЛЬТАТЫ И ЭФФЕКТЫ ============
@@ -775,6 +897,14 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
     for m in rows(cur):
         milestones_by_project.setdefault(m["project_id"], []).append(m)
 
+    cur.execute(f"""
+        SELECT id, project_id, due_at FROM {SCHEMA}.exec_task
+        WHERE project_id = ANY(%s) AND archived_at IS NULL
+    """, (project_ids,))
+    cur_tasks_by_project: dict = {}
+    for t in rows(cur):
+        cur_tasks_by_project.setdefault(t["project_id"], []).append(t)
+
     # Прогнозируемый перерасход: активная версия бюджета проекта, у которой
     # план по строкам меньше уже свершившегося факта.
     cur.execute(f"""
@@ -828,11 +958,58 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
         elif tgt_pid and not src_pid:
             cross_dependency_ids.add(tgt_pid)
 
+    # Baseline-сводка: для каждого проекта — действующая версия (если есть)
+    # и лёгкое сравнение дат объектов (без полного пересчёта CPM на весь
+    # портфель — это дорого; критический путь конкретного проекта считается
+    # отдельно через critical_path/schedule_comparison по требованию).
+    cur.execute(f"""
+        SELECT id, scope_id, version_number, payload_json, payload_sha256, created_at
+        FROM {SCHEMA}.exec_schedule_baseline
+        WHERE scope_kind = 'project' AND scope_id = ANY(%s) AND is_active = true
+    """, (project_ids,))
+    baseline_rows = rows(cur)
+    baseline_by_project = {}
+    for b in baseline_rows:
+        payload_str = b.pop("payload_json")
+        actual_hash = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+        b["integrity_ok"] = b["payload_sha256"] == actual_hash
+        b["payload"] = json.loads(payload_str) if b["integrity_ok"] else None
+        baseline_by_project[b["scope_id"]] = b
+
     for p in projects:
         p["stages"] = stages_by_project.get(p["id"], [])
         p["milestones"] = milestones_by_project.get(p["id"], [])
         p["is_overbudget"] = p["id"] in budget_overrun_ids
         p["has_cross_project_dependency"] = p["id"] in cross_dependency_ids
+
+        b = baseline_by_project.get(p["id"])
+        deviation = {
+            "has_baseline": b is not None,
+            "baseline_version": b["version_number"] if b else None,
+            "baseline_integrity_ok": b["integrity_ok"] if b else None,
+            "has_forecast": bool(p.get("forecast_end")),
+            "has_fact_data": bool(p.get("fact_start") or p.get("fact_end")),
+            "baseline_start": None, "baseline_end": None,
+            "deviation_start_days": None, "deviation_end_days": None,
+            "shifted_tasks_count": 0, "shifted_milestones_count": 0,
+        }
+        if b and b["integrity_ok"] and b["payload"]:
+            bp = b["payload"].get("project", {})
+            deviation["baseline_start"] = bp.get("plan_start")
+            deviation["baseline_end"] = bp.get("plan_end")
+            deviation["deviation_start_days"] = _diff_days(bp.get("plan_start"), p["fact_start"] or p["plan_start"])
+            deviation["deviation_end_days"] = _diff_days(bp.get("plan_end"), p["fact_end"] or p.get("forecast_end") or p["plan_end"])
+            b_tasks = {t["id"]: t.get("due_at") for t in b["payload"].get("tasks", [])}
+            b_milestones = {m["id"]: m.get("plan_date") for m in b["payload"].get("milestones", [])}
+            for t in cur_tasks_by_project.get(p["id"], []):
+                bd = b_tasks.get(t["id"])
+                if bd and str(bd) != str(t.get("due_at")):
+                    deviation["shifted_tasks_count"] += 1
+            for m in milestones_by_project.get(p["id"], []):
+                bd = b_milestones.get(m["id"])
+                if bd and str(bd) != str(m.get("plan_date")):
+                    deviation["shifted_milestones_count"] += 1
+        p["baseline_deviation"] = deviation
 
     if filters.get("overbudget_only"):
         projects = [p for p in projects if p["is_overbudget"]]
@@ -844,6 +1021,19 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
         projects = [p for p in projects if p["is_overdue"]]
     if filters.get("cross_dependency_only"):
         projects = [p for p in projects if p["has_cross_project_dependency"]]
+    if filters.get("shifted_only"):
+        projects = [p for p in projects if (p["baseline_deviation"]["deviation_end_days"] or 0) != 0]
+    if filters.get("min_shift_days"):
+        min_shift = filters["min_shift_days"]
+        projects = [p for p in projects if abs(p["baseline_deviation"]["deviation_end_days"] or 0) >= min_shift]
+    if filters.get("no_baseline_only"):
+        projects = [p for p in projects if not p["baseline_deviation"]["has_baseline"]]
+    if filters.get("no_forecast_only"):
+        projects = [p for p in projects if not p["baseline_deviation"]["has_forecast"]]
+    if filters.get("no_fact_only"):
+        projects = [p for p in projects if not p["baseline_deviation"]["has_fact_data"]]
+    if filters.get("integrity_violated_only"):
+        projects = [p for p in projects if p["baseline_deviation"]["has_baseline"] and not p["baseline_deviation"]["baseline_integrity_ok"]]
 
     initiatives_map = {}
     for p in projects:
@@ -1175,6 +1365,28 @@ def _diff_days(a, b):
     if da is None or db is None:
         return None
     return (db - da).days
+
+
+def schedule_change_log(cur, pid: int, limit: int = 200):
+    """Специализированная история изменений расписания проекта — читает
+    exec_schedule_change_log (не общий exec_audit_log). Каждая строка —
+    одно изменение одной даты одного объекта: старое/новое значение,
+    величина сдвига, причина, связанные решение/документ и признак того,
+    затрагивает ли изменение зависимости."""
+    cur.execute(f"""
+        SELECT l.*, 
+            CASE l.object_kind
+                WHEN 'project' THEN (SELECT title FROM {SCHEMA}.exec_project WHERE id = l.object_id)
+                WHEN 'stage' THEN (SELECT title FROM {SCHEMA}.exec_project_stage WHERE id = l.object_id)
+                WHEN 'task' THEN (SELECT title FROM {SCHEMA}.exec_task WHERE id = l.object_id)
+                WHEN 'milestone' THEN (SELECT title FROM {SCHEMA}.exec_milestone WHERE id = l.object_id)
+            END AS object_title
+        FROM {SCHEMA}.exec_schedule_change_log l
+        WHERE l.project_id = %s
+        ORDER BY l.created_at DESC
+        LIMIT %s
+    """, (pid, limit))
+    return rows(cur)
 
 
 def schedule_comparison(cur, pid: int, baseline_id: int = None):
@@ -1936,6 +2148,13 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Задача не найдена или уже архивирована"}}, 404)
             return cors({"ok": True, "data": {"id": tid}})
 
+        if action == "save_stage":
+            sid, err = save_stage(cur, body, user["email"])
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": sid}})
+
         if action == "results":
             pid = as_int(qs.get("project_id"))
             return cors({"ok": True, "data": {"items": list_results(
@@ -2060,6 +2279,12 @@ def handler(event: dict, context) -> dict:
                 "resource_gap_only": qs.get("resource_gap_only") == "1",
                 "overbudget_only": qs.get("overbudget_only") == "1",
                 "cross_dependency_only": qs.get("cross_dependency_only") == "1",
+                "shifted_only": qs.get("shifted_only") == "1",
+                "min_shift_days": as_int(qs.get("min_shift_days")),
+                "no_baseline_only": qs.get("no_baseline_only") == "1",
+                "no_forecast_only": qs.get("no_forecast_only") == "1",
+                "no_fact_only": qs.get("no_fact_only") == "1",
+                "integrity_violated_only": qs.get("integrity_violated_only") == "1",
             }
             data = roadmap_data(cur, qs.get("date_from"), qs.get("date_to"), filters)
             return cors({"ok": True, "data": data})
@@ -2143,6 +2368,13 @@ def handler(event: dict, context) -> dict:
             if err:
                 return cors({"ok": False, "error": {"message": err}}, 400)
             return cors({"ok": True, "data": result})
+
+        if action == "schedule_change_log":
+            gpid = as_int(qs.get("id"))
+            if not gpid:
+                return cors({"ok": False, "error": {"message": "Не указан проект"}}, 400)
+            items = schedule_change_log(cur, gpid)
+            return cors({"ok": True, "data": {"items": items}})
 
         return cors({"ok": False, "error": {"message": "Неизвестное действие"}}, 400)
     finally:

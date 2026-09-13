@@ -186,6 +186,34 @@ def log(cur, actor, entity, eid, action, payload=None, reason=None):
          json.dumps(payload, ensure_ascii=False, default=str) if payload else None, reason))
 
 
+def log_schedule_change(cur, actor, object_kind, object_id, project_id, layer, field_name,
+                         old_value, new_value, reason=None, related_decision_id=None):
+    """Запись в специализированный exec_schedule_change_log — отдельно от
+    общего exec_audit_log (см. backend/exec-portfolio/index.py, где
+    определена основная версия этой функции для проекта/этапа/задачи)."""
+    if str(old_value) == str(new_value):
+        return
+    def _as_date(v):
+        if v is None:
+            return None
+        if isinstance(v, datetime.date):
+            return v
+        return datetime.date.fromisoformat(str(v)[:10])
+    shift_days = None
+    if old_value and new_value:
+        try:
+            shift_days = (_as_date(new_value) - _as_date(old_value)).days
+        except (ValueError, TypeError):
+            shift_days = None
+    cur.execute(f"""
+        INSERT INTO {SCHEMA}.exec_schedule_change_log
+            (object_kind, object_id, project_id, layer, field_name, old_value, new_value,
+             shift_days, reason, related_decision_id, actor)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (object_kind, object_id, project_id, layer, field_name, old_value or None, new_value or None,
+          shift_days, reason, related_decision_id, actor))
+
+
 def milestones(cur, initiative_id=None, include_closed=True):
     conds, params = [], []
     if initiative_id:
@@ -664,12 +692,12 @@ def handler(event: dict, context) -> dict:
             data = {k: body.get(k) for k in fields if k in body}
 
             if mid:
-                cur.execute(f"SELECT plan_date, plan_date_original, reschedule_count "
+                cur.execute(f"SELECT plan_date, plan_date_original, reschedule_count, fact_date, forecast_date, project_id "
                             f"FROM {SCHEMA}.exec_milestone WHERE id = %s", (mid,))
                 prev = cur.fetchone()
                 if not prev:
                     return cors({"ok": False, "error": {"message": "Точка не найдена"}}, 404)
-                old_plan, orig, cnt = prev
+                old_plan, orig, cnt, old_fact, old_forecast, m_project_id = prev
                 new_plan = data.get("plan_date")
                 if new_plan and str(new_plan) != str(old_plan):
                     data["rescheduled_at"] = "now()"
@@ -677,6 +705,15 @@ def handler(event: dict, context) -> dict:
                     log(cur, actor, "milestone", mid, "reschedule",
                         {"from": str(old_plan), "to": str(new_plan), "original": str(orig)},
                         data.get("reschedule_reason"))
+                    log_schedule_change(cur, actor, "milestone", mid, m_project_id, "plan", "plan_date",
+                                         old_plan, new_plan, reason=data.get("reschedule_reason"),
+                                         related_decision_id=as_int(data.get("decision_id")))
+                if "forecast_date" in data and str(data.get("forecast_date")) != str(old_forecast):
+                    log_schedule_change(cur, actor, "milestone", mid, m_project_id, "forecast", "forecast_date",
+                                         old_forecast, data.get("forecast_date"))
+                if "fact_date" in data and str(data.get("fact_date")) != str(old_fact):
+                    log_schedule_change(cur, actor, "milestone", mid, m_project_id, "fact", "fact_date",
+                                         old_fact, data.get("fact_date"))
                 err = validate("milestone", data, fetch_existing(cur, "exec_milestone", mid))
                 if err:
                     return cors({"ok": False, "error": {"message": err}}, 400)

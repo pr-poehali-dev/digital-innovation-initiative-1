@@ -6,6 +6,7 @@ import {
   execRoadmapApi, ScheduleComparisonData, ScheduleComparisonRow, ScheduleBaselineSummary,
 } from "@/lib/execRoadmapApi";
 import { parseISODate, diffDays, datePx, pxPerDay, buildMonthTicks, todayISO, ScaleKind } from "@/lib/timeScale";
+import ScheduleChangeLogView from "@/components/exec/roadmap/ScheduleChangeLogView";
 
 const KIND_ICON: Record<string, string> = { project: "Folder", stage: "FolderTree", task: "ListTodo", milestone: "Diamond" };
 const KIND_LABEL: Record<string, string> = { project: "Проект", stage: "Этап", task: "Задача", milestone: "Веха" };
@@ -25,6 +26,7 @@ export default function ScheduleComparisonView({ projectId }: { projectId: numbe
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [onlyCritical, setOnlyCritical] = useState(false);
   const [busyActivate, setBusyActivate] = useState(false);
+  const [mode, setMode] = useState<"comparison" | "history">("comparison");
 
   const reload = (baselineId?: number) => {
     setLoading(true);
@@ -112,12 +114,39 @@ export default function ScheduleComparisonView({ projectId }: { projectId: numbe
     navigate(`/cabinet/exec/portfolio/projects/${projectId}?tab=${tab}`);
   };
 
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox message={error} onRetry={() => reload(selectedBaselineId)} />;
+  const ModeSwitch = (
+    <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-0.5 w-fit">
+      <button
+        onClick={() => setMode("comparison")}
+        className={`px-2.5 py-1 text-xs rounded-md transition-colors ${mode === "comparison" ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:text-slate-700"}`}
+      >
+        Сравнение
+      </button>
+      <button
+        onClick={() => setMode("history")}
+        className={`px-2.5 py-1 text-xs rounded-md transition-colors flex items-center gap-1 ${mode === "history" ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:text-slate-700"}`}
+      >
+        <Icon name="History" size={11} /> История изменений
+      </button>
+    </div>
+  );
+
+  if (mode === "history") {
+    return (
+      <div className="space-y-3">
+        {ModeSwitch}
+        <ScheduleChangeLogView projectId={projectId} />
+      </div>
+    );
+  }
+
+  if (loading) return <div className="space-y-3">{ModeSwitch}<Loading /></div>;
+  if (error) return <div className="space-y-3">{ModeSwitch}<ErrorBox message={error} onRetry={() => reload(selectedBaselineId)} /></div>;
   if (!data) return null;
 
   return (
     <div className="space-y-3">
+      {ModeSwitch}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <select
