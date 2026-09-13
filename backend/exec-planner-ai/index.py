@@ -416,16 +416,25 @@ SUMMARY_MODES = {
     "critical_path": "Объясни критический путь проекта: какие задачи/вехи на нём и почему сдвиг любой из них сдвигает срок всего проекта.",
     "risks": "Сведи риски и проблемы проекта: что активно, что критично, что требует внимания в первую очередь.",
     "resource_conflicts": "Объясни ресурсные конфликты: кто перегружен, какие роли не закрыты, что требует решения — ничего не назначай сам.",
+    "financial_summary": "Сведи финансовое состояние проекта: утверждённый бюджет, факт, открытые обязательства, ожидаемые расходы, прогноз и отклонение. Если утверждённой версии бюджета нет — прямо об этом скажи.",
     "management_note": "Сформируй ЧЕРНОВИК короткой управленческой справки по проекту (статус/риски/что нужно решить) — это черновик для правки руководителем, не финальный документ.",
     "goals_kpi": "Сведи цели и показатели (KPI) проекта кратко: план/факт, отклонение, что просрочено.",
 }
 
+# Режимы, которые передают провайдеру финансовые/кадровые/KPI данные —
+# фронтенд обязан показать предупреждение перед отправкой именно для них.
+SENSITIVE_MODES = {"financial_summary", "resource_conflicts", "goals_kpi"}
 
-def _project_ai_context(cur, project_id: int) -> tuple[str, dict]:
+
+def _project_ai_context(cur, project_id: int, include_financial: bool = False) -> tuple[str, dict]:
     """Собирает СУЩЕСТВУЮЩИЕ данные проекта одним проходом — только чтение,
     ничего не пересчитывает и не хранит отдельно. Возвращает готовый текст
     для промпта и структуру data_used (что именно попало в контекст, чтобы
-    показать пользователю источники ответа)."""
+    показать пользователю источники ответа).
+
+    Финансовые суммы (бюджет/факт/обязательства/прогноз) добавляются в
+    контекст ТОЛЬКО когда include_financial=True — остальные режимы сводки
+    не должны без необходимости передавать провайдеру денежные цифры."""
     cur.execute(f"""
         SELECT title, status, priority, progress_pct, plan_start, plan_end,
                forecast_end, fact_start, fact_end, is_test_data, archived_at
@@ -530,6 +539,56 @@ def _project_ai_context(cur, project_id: int) -> tuple[str, dict]:
         used["resource_people_count"] = len(project_people_load)
         used["open_requirements_count"] = len(open_reqs)
 
+    if include_financial:
+        # Та же логика, что project_financial_summary в exec-resources
+        # (другая cloud function, поэтому код не импортируется, а
+        # переиспользуется как та же формула): утверждённой считается
+        # только is_active=true И version_status='approved'.
+        cur.execute(f"""
+            SELECT COALESCE(SUM(l.amount_plan), 0) FROM {SCHEMA}.exec_budget_line l
+            JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
+            WHERE v.project_id = %s AND v.is_active = true AND v.version_status = 'approved' AND v.is_test_data = false
+        """, (project_id,))
+        approved_budget = float(cur.fetchone()[0] or 0)
+
+        cur.execute(f"""
+            SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_actual
+            WHERE project_id = %s AND is_test_data = false
+        """, (project_id,))
+        fact = float(cur.fetchone()[0] or 0)
+
+        cur.execute(f"""
+            SELECT COALESCE(SUM(amount), 0), COALESCE(SUM(paid_amount), 0)
+            FROM {SCHEMA}.exec_financial_commitment
+            WHERE project_id = %s AND status = 'active' AND is_test_data = false
+        """, (project_id,))
+        commitments_total, commitments_paid = cur.fetchone()
+        commitments_open = float(commitments_total or 0) - float(commitments_paid or 0)
+
+        cur.execute(f"""
+            SELECT COALESCE(SUM(amount), 0) FROM {SCHEMA}.exec_financial_expected
+            WHERE project_id = %s AND is_test_data = false
+        """, (project_id,))
+        expected = float(cur.fetchone()[0] or 0)
+
+        forecast = fact + commitments_open + expected
+        cur.execute(f"""
+            SELECT count(*) FROM {SCHEMA}.exec_budget_version
+            WHERE project_id = %s AND version_status = 'approved' AND is_test_data = false
+        """, (project_id,))
+        has_approved = cur.fetchone()[0] > 0
+
+        parts.append("\nФИНАНСЫ:")
+        if not has_approved:
+            parts.append("- Утверждённая версия бюджета отсутствует — бюджет ниже равен 0, это не официальная сумма.")
+        parts.append(f"- Утверждённый бюджет: {approved_budget:.0f}")
+        parts.append(f"- Факт: {fact:.0f}")
+        parts.append(f"- Обязательства (открыто): {commitments_open:.0f}")
+        parts.append(f"- Ожидаемые расходы: {expected:.0f}")
+        parts.append(f"- Прогноз (факт + открытые обязательства + ожидаемые): {forecast:.0f}")
+        parts.append(f"- Отклонение прогноза от бюджета: {forecast - approved_budget:.0f}")
+        used["financial_included"] = True
+
     return "\n".join(parts), used
 
 
@@ -543,7 +602,7 @@ def management_summary(cur, body: dict, actor: str):
     if mode not in SUMMARY_MODES:
         return None, "Неизвестный режим сводки"
 
-    context_text, used = _project_ai_context(cur, int(project_id))
+    context_text, used = _project_ai_context(cur, int(project_id), include_financial=(mode == "financial_summary"))
     if not context_text:
         return None, "Проект не найден"
 

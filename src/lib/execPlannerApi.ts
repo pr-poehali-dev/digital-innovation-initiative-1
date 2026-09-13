@@ -180,7 +180,11 @@ export interface AiSuggestion {
 
 export type ManagementSummaryMode =
   | "overview" | "schedule_deviation" | "overdue" | "critical_path"
-  | "risks" | "resource_conflicts" | "management_note" | "goals_kpi";
+  | "risks" | "resource_conflicts" | "financial_summary" | "management_note" | "goals_kpi";
+
+/** Режимы, которые передают провайдеру финансовые/кадровые/KPI данные —
+ * перед отправкой таких запросов интерфейс обязан показать предупреждение. */
+export const SENSITIVE_SUMMARY_MODES: ManagementSummaryMode[] = ["financial_summary", "resource_conflicts", "goals_kpi"];
 
 export interface ManagementSummary {
   answer: string;

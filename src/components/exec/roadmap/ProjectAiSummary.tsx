@@ -1,22 +1,26 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
-import { plannerApi, ManagementSummary, ManagementSummaryMode } from "@/lib/execPlannerApi";
+import { plannerApi, ManagementSummary, ManagementSummaryMode, SENSITIVE_SUMMARY_MODES } from "@/lib/execPlannerApi";
 
 const MODE_OPTIONS: { mode: ManagementSummaryMode; label: string; icon: string }[] = [
-  { mode: "overview", label: "Кратко о проекте", icon: "Eye" },
+  { mode: "overview", label: "Сводка проекта", icon: "Eye" },
   { mode: "schedule_deviation", label: "Отклонения сроков", icon: "GitCompare" },
-  { mode: "overdue", label: "Просроченные задачи и вехи", icon: "CalendarX" },
+  { mode: "overdue", label: "Просрочки", icon: "CalendarX" },
   { mode: "critical_path", label: "Критический путь", icon: "Zap" },
   { mode: "risks", label: "Риски и проблемы", icon: "ShieldAlert" },
   { mode: "resource_conflicts", label: "Ресурсные конфликты", icon: "Users" },
+  { mode: "financial_summary", label: "Финансовая сводка", icon: "Wallet" },
   { mode: "goals_kpi", label: "Цели и KPI", icon: "Target" },
   { mode: "management_note", label: "Черновик управленческой справки", icon: "FileEdit" },
 ];
 
 /** AI-помощник руководителя — только рекомендательный режим: собирает уже
- * существующие данные проекта (сроки, отклонения, риски, ресурсы) и просит
- * модель сформулировать ответ. Ничего не сохраняет, не переносит сроки,
- * не меняет бюджет/KPI/назначения — доступен только владельцу кабинета. */
+ * существующие данные проекта (сроки, отклонения, риски, ресурсы, финансы)
+ * и просит модель сформулировать ответ. Ничего не сохраняет, не переносит
+ * сроки, не меняет бюджет/KPI/назначения — доступен только владельцу
+ * кабинета. Каждый клик по кнопке — явное действие владельца; для
+ * финансовых/кадровых/KPI режимов сначала показывается предупреждение о
+ * передаче данных внешнему провайдеру. */
 export default function ProjectAiSummary({ projectId }: { projectId: number }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,12 +28,14 @@ export default function ProjectAiSummary({ projectId }: { projectId: number }) {
   const [error, setError] = useState("");
   const [disabled, setDisabled] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [pendingMode, setPendingMode] = useState<ManagementSummaryMode | null>(null);
 
-  const ask = async (mode: ManagementSummaryMode) => {
+  const run = async (mode: ManagementSummaryMode) => {
     setLoading(true);
     setError("");
     setDisabled(false);
     setResult(null);
+    setPendingMode(null);
     try {
       const r = await plannerApi.managementSummary(projectId, mode);
       setResult(r);
@@ -40,6 +46,14 @@ export default function ProjectAiSummary({ projectId }: { projectId: number }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const ask = (mode: ManagementSummaryMode) => {
+    if (SENSITIVE_SUMMARY_MODES.includes(mode)) {
+      setPendingMode(mode);
+      return;
+    }
+    run(mode);
   };
 
   const copy = () => {
@@ -81,9 +95,36 @@ export default function ProjectAiSummary({ projectId }: { projectId: number }) {
                 }`}
               >
                 <Icon name={o.icon} size={12} /> {o.label}
+                {SENSITIVE_SUMMARY_MODES.includes(o.mode) && <Icon name="ShieldAlert" size={10} className="opacity-60" />}
               </button>
             ))}
           </div>
+
+          {pendingMode && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
+              <p className="flex items-start gap-2">
+                <Icon name="TriangleAlert" size={14} className="flex-shrink-0 mt-0.5" />
+                <span>
+                  Этот запрос передаст финансовые, кадровые или KPI-данные проекта внешнему AI-провайдеру (YandexGPT).
+                  Продолжить?
+                </span>
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => run(pendingMode)}
+                  className="text-xs px-2.5 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  Подтвердить и отправить
+                </button>
+                <button
+                  onClick={() => setPendingMode(null)}
+                  className="text-xs px-2.5 py-1 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
 
           {loading && (
             <div className="flex items-center gap-2 text-xs text-violet-600 py-2">
