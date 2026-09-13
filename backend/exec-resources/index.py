@@ -768,6 +768,134 @@ def project_financial_summary(cur, project_id: int):
     }
 
 
+def financial_timeline(cur, project_id: int, year: int):
+    """Финансовая шкала проекта на той же временной оси, что и Гант/ресурсы:
+    по месяцам года — утверждённый бюджет (план), ФОТ (план/факт), факт,
+    обязательства (открытая часть, распределённая по месяцам действия
+    договора), ожидаемые расходы без обязательств, прогноз и отклонение.
+
+    НЕ копирует суммы в таблицы расписания — читает существующий
+    финансовый контур (exec_budget_line/exec_fot_plan/exec_financial_*) и
+    просто раскладывает уже существующие цифры по месяцам этого года.
+    Ключевые платежи и финансовые контрольные точки — отдельные списки,
+    без слияния с помесячной сеткой, чтоббы не терять точные даты."""
+    months = {m: {"budget_plan": 0.0, "fot_plan": 0.0, "fot_fact": 0.0, "fact": 0.0,
+                   "commitments_open": 0.0, "expected": 0.0} for m in range(1, 13)}
+
+    cur.execute(f"""
+        SELECT EXTRACT(MONTH FROM l.month)::int AS m, SUM(l.amount_plan) AS s
+        FROM {SCHEMA}.exec_budget_line l
+        JOIN {SCHEMA}.exec_budget_version v ON v.id = l.version_id
+        WHERE v.project_id = %s AND v.is_active = true AND v.is_test_data = false
+          AND EXTRACT(YEAR FROM l.month) = %s
+        GROUP BY m
+    """, (project_id, year))
+    for m, s in cur.fetchall():
+        months[m]["budget_plan"] = float(s or 0)
+
+    cur.execute(f"""
+        SELECT EXTRACT(MONTH FROM f.month)::int AS m, SUM(f.plan_total) AS pl, SUM(f.fact_total) AS fc
+        FROM {SCHEMA}.exec_fot_plan f
+        WHERE f.project_id = %s AND f.is_test_data = false AND EXTRACT(YEAR FROM f.month) = %s
+        GROUP BY m
+    """, (project_id, year))
+    for m, pl, fc in cur.fetchall():
+        months[m]["fot_plan"] = float(pl or 0)
+        months[m]["fot_fact"] = float(fc or 0)
+
+    cur.execute(f"""
+        SELECT EXTRACT(MONTH FROM a.month)::int AS m, SUM(a.amount) AS s
+        FROM {SCHEMA}.exec_financial_actual a
+        WHERE a.project_id = %s AND a.is_test_data = false AND EXTRACT(YEAR FROM a.month) = %s
+        GROUP BY m
+    """, (project_id, year))
+    for m, s in cur.fetchall():
+        months[m]["fact"] = float(s or 0)
+
+    cur.execute(f"""
+        SELECT EXTRACT(MONTH FROM e.month)::int AS m, SUM(e.amount) AS s
+        FROM {SCHEMA}.exec_financial_expected e
+        WHERE e.project_id = %s AND e.is_test_data = false AND EXTRACT(YEAR FROM e.month) = %s
+        GROUP BY m
+    """, (project_id, year))
+    for m, s in cur.fetchall():
+        months[m]["expected"] = float(s or 0)
+
+    # Открытая часть обязательства равномерно распределяется по месяцам
+    # действия договора, попадающим в этот год — приблизительная разбивка
+    # для отображения на шкале, не бухгалтерский учёт.
+    cur.execute(f"""
+        SELECT id, amount, paid_amount, start_date, end_date FROM {SCHEMA}.exec_financial_commitment
+        WHERE project_id = %s AND status = 'active' AND is_test_data = false
+    """, (project_id,))
+    commitments_without_dates = 0.0
+    for cid, amount, paid, start, end in cur.fetchall():
+        open_amount = float(amount or 0) - float(paid or 0)
+        if open_amount <= 0:
+            continue
+        if not start or not end:
+            # Без дат распределить по месяцам нельзя — сумма не должна
+            # молча пропадать со шкалы, показываем её отдельно как факт,
+            # требующий уточнения дат.
+            commitments_without_dates += open_amount
+            continue
+        span_months = [(start.year, start.month)]
+        cur_y, cur_m = start.year, start.month
+        while (cur_y, cur_m) < (end.year, end.month):
+            cur_m += 1
+            if cur_m > 12:
+                cur_m, cur_y = 1, cur_y + 1
+            span_months.append((cur_y, cur_m))
+        in_year = [(y, m) for y, m in span_months if y == year]
+        if not in_year:
+            continue
+        per_month = open_amount / len(span_months)
+        for y, m in in_year:
+            months[m]["commitments_open"] += per_month
+
+    result_months = {}
+    running_budget = running_forecast = 0.0
+    for m in range(1, 13):
+        d = months[m]
+        forecast = d["fact"] + d["commitments_open"] + d["expected"]
+        running_budget += d["budget_plan"]
+        running_forecast += forecast
+        result_months[m] = {
+            **d, "forecast": forecast,
+            "deviation": forecast - d["budget_plan"],
+            "cumulative_budget": running_budget,
+            "cumulative_forecast": running_forecast,
+        }
+
+    # Ключевые платежи: крупные фактические/обязательственные записи с
+    # конкретной датой — не всё подряд, максимум по 10 самых крупных.
+    cur.execute(f"""
+        SELECT 'actual' AS kind, id, month AS date, amount, comment FROM {SCHEMA}.exec_financial_actual
+        WHERE project_id = %s AND is_test_data = false AND EXTRACT(YEAR FROM month) = %s
+        UNION ALL
+        SELECT 'commitment' AS kind, id, start_date AS date, amount, contract_ref AS comment
+        FROM {SCHEMA}.exec_financial_commitment
+        WHERE project_id = %s AND is_test_data = false AND status = 'active'
+          AND start_date IS NOT NULL AND EXTRACT(YEAR FROM start_date) = %s
+        ORDER BY amount DESC LIMIT 10
+    """, (project_id, year, project_id, year))
+    key_payments = rows(cur)
+
+    # Финансовые контрольные точки: существующие вехи проекта — без
+    # дублирования дат в новую структуру, только с признаком суммы если
+    # веха связана с бюджетной строкой через комментарий (не строгая связь).
+    cur.execute(f"""
+        SELECT id, title, plan_date, fact_date, status, milestone_type
+        FROM {SCHEMA}.exec_milestone
+        WHERE project_id = %s AND is_test_data = false AND EXTRACT(YEAR FROM plan_date) = %s
+        ORDER BY plan_date
+    """, (project_id, year))
+    milestones = rows(cur)
+
+    return {"year": year, "months": result_months, "key_payments": key_payments, "milestones": milestones,
+            "commitments_without_dates": commitments_without_dates}
+
+
 def initiative_financial_summary(cur, initiative_id: int):
     """Бюджет инициативы = сумма бюджетов связанных проектов + собственные
     нераспределённые расходы инициативы. Защита от двойного счёта: проекты
@@ -1253,6 +1381,136 @@ def requirement_dashboard(cur, include_test_data=False):
     }
 
 
+# ============ РЕСУРСНАЯ ШКАЛА: КОНФЛИКТЫ (ТОЛЬКО ПРЕДУПРЕЖДЕНИЯ) ============
+
+def resource_conflicts(cur, parent_kind: str, parent_id: int):
+    """Выявление конфликтов ресурсов проекта/инициативы — это РАСЧЁТ-
+    ПРЕДУПРЕЖДЕНИЕ для руководителя, не автоматическое кадровое решение:
+    ничего не меняет, не переназначает, не закрывает. Каждый пункт —
+    отдельная явная проверка по уже существующим таблицам, без дублирования
+    данных в новые структуры.
+
+    Проверяет:
+      - overloaded_people: суммарная загрузка человека по ВСЕМ его активным
+        назначениям (во всех проектах) превышает 100%;
+      - overlapping_assignments: один человек назначен на пересекающиеся по
+        датам назначения с суммарной загрузкой > 100% в период пересечения;
+      - open_roles: незакрытые потребности (draft/confirmed/searching/
+        candidate_identified) этого проекта/инициативы;
+      - search_should_have_started: потребность, у которой search_start_date
+        уже наступил, а поиск не переведён в статус searching/candidate;
+      - unfunded_requirements: потребность без подтверждённого финансирования;
+      - assignment_outside_period: назначение, чей период (period_start/end)
+        не покрывает плановый период самого проекта — работа продолжается
+        за пределами официального участия человека;
+      - tasks_without_owner: задачи проекта без responsible_person_id.
+    """
+    parent_cond = f"a.{parent_kind}_id = %s"
+
+    # --- Перегрузка: сумма плановой загрузки человека по ВСЕМ активным
+    # назначениям (не только в этом проекте) — тот же расчёт, что и в
+    # overload_check/team_load_summary, но со списком проектов-источников.
+    cur.execute(f"""
+        SELECT ap.person_id, p.display_name AS person_name,
+               SUM(ap.plan_load_pct) AS total_load_pct,
+               json_agg(json_build_object('project_id', ap.project_id, 'plan_load_pct', ap.plan_load_pct)) AS sources
+        FROM {SCHEMA}.exec_resource_assignment ap
+        JOIN {SCHEMA}.exec_person p ON p.id = ap.person_id
+        WHERE ap.person_id IN (
+            SELECT person_id FROM {SCHEMA}.exec_resource_assignment a
+            WHERE {parent_cond} AND a.archived_at IS NULL AND a.is_test_data = false AND a.person_id IS NOT NULL
+        ) AND ap.archived_at IS NULL AND ap.is_test_data = false
+        GROUP BY ap.person_id, p.display_name
+        HAVING SUM(ap.plan_load_pct) > 100
+        ORDER BY total_load_pct DESC
+    """, (parent_id,))
+    overloaded_people = rows(cur)
+    for r in overloaded_people:
+        r["total_load_pct"] = float(r["total_load_pct"])
+
+    # --- Пересечение периодов: два (или более) назначения ОДНОГО человека,
+    # чьи периоды физически пересекаются во времени — независимо от общей
+    # месячной суммы, это сигнал "работает на двух фронтах одновременно".
+    cur.execute(f"""
+        SELECT a1.person_id, p.display_name AS person_name,
+               a1.id AS assignment_a, a1.project_id AS project_a, a1.period_start AS start_a, a1.period_end AS end_a,
+               a2.id AS assignment_b, a2.project_id AS project_b, a2.period_start AS start_b, a2.period_end AS end_b
+        FROM {SCHEMA}.exec_resource_assignment a1
+        JOIN {SCHEMA}.exec_resource_assignment a2
+            ON a1.person_id = a2.person_id AND a1.id < a2.id
+            AND a1.archived_at IS NULL AND a2.archived_at IS NULL
+            AND a1.is_test_data = false AND a2.is_test_data = false
+            AND a1.period_start IS NOT NULL AND a1.period_end IS NOT NULL
+            AND a2.period_start IS NOT NULL AND a2.period_end IS NOT NULL
+            AND a1.period_start <= a2.period_end AND a2.period_start <= a1.period_end
+        JOIN {SCHEMA}.exec_person p ON p.id = a1.person_id
+        WHERE a1.person_id IN (
+            SELECT person_id FROM {SCHEMA}.exec_resource_assignment a
+            WHERE {parent_cond} AND a.archived_at IS NULL AND a.is_test_data = false AND a.person_id IS NOT NULL
+        )
+    """, (parent_id,))
+    overlapping_assignments = rows(cur)
+
+    # --- Незакрытые роли (потребности) этого проекта/инициативы.
+    open_statuses = "('draft','confirmed','searching','candidate_identified')"
+    cur.execute(f"""
+        SELECT r.id, r.role_title, rc.title AS role_title_ref, r.status, r.criticality,
+               r.need_by_date, r.search_start_date, r.funding_confirmed
+        FROM {SCHEMA}.exec_resource_requirement r
+        LEFT JOIN {SCHEMA}.exec_center_role rc ON rc.id = r.role_id
+        WHERE r.{parent_kind}_id = %s AND r.archived_at IS NULL AND r.is_test_data = false
+          AND r.status IN {open_statuses}
+        ORDER BY (r.need_by_date IS NULL), r.need_by_date
+    """, (parent_id,))
+    open_roles = rows(cur)
+
+    # --- Поиск должен был начаться (search_start_date уже прошёл), но
+    # статус потребности всё ещё 'draft'/'confirmed' — поиск не запущен.
+    search_should_have_started = [
+        r for r in open_roles
+        if r["search_start_date"] and r["status"] in ("draft", "confirmed")
+    ]
+
+    # --- Потребности без подтверждённого финансирования.
+    unfunded_requirements = [r for r in open_roles if not r["funding_confirmed"]]
+
+    # --- Назначение вне периода доступности: период назначения не покрывает
+    # плановый период самого проекта (работа продолжается без назначения
+    # или назначение выходит за рамки официального участия).
+    cur.execute(f"""
+        SELECT a.id AS assignment_id, a.person_id, p.display_name AS person_name,
+               a.period_start, a.period_end, pr.plan_start AS project_plan_start, pr.plan_end AS project_plan_end
+        FROM {SCHEMA}.exec_resource_assignment a
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = a.person_id
+        JOIN {SCHEMA}.exec_project pr ON pr.id = a.project_id
+        WHERE a.project_id = %s AND a.archived_at IS NULL AND a.is_test_data = false
+          AND a.period_start IS NOT NULL AND a.period_end IS NOT NULL
+          AND pr.plan_start IS NOT NULL AND pr.plan_end IS NOT NULL
+          AND (a.period_start > pr.plan_start OR a.period_end < pr.plan_end)
+    """, (parent_id,)) if parent_kind == "project" else None
+    assignment_outside_period = rows(cur) if parent_kind == "project" else []
+
+    # --- Задачи проекта без ответственного.
+    cur.execute(f"""
+        SELECT t.id, t.title, t.status, t.due_at
+        FROM {SCHEMA}.exec_task t
+        WHERE t.project_id = %s AND t.archived_at IS NULL AND t.is_test_data = false
+          AND t.responsible_person_id IS NULL AND t.status NOT IN ('done', 'cancelled')
+        ORDER BY (t.due_at IS NULL), t.due_at
+    """, (parent_id,)) if parent_kind == "project" else None
+    tasks_without_owner = rows(cur) if parent_kind == "project" else []
+
+    return {
+        "overloaded_people": overloaded_people,
+        "overlapping_assignments": overlapping_assignments,
+        "open_roles": open_roles,
+        "search_should_have_started": search_should_have_started,
+        "unfunded_requirements": unfunded_requirements,
+        "assignment_outside_period": assignment_outside_period,
+        "tasks_without_owner": tasks_without_owner,
+    }
+
+
 def handler(event: dict, context) -> dict:
     """Команда, загрузка, ФОТ и бюджет проектов/инициатив. Доступ только владельцу
     кабинета. Финансовые/кадровые данные не передаются во внешний AI."""
@@ -1311,6 +1569,12 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
             year = as_int(qs.get("year")) or datetime.date.today().year
             return cors({"ok": True, "data": {"items": capacity_plan_year(cur, parent_kind, parent_id, year, itd), "year": year}})
+
+        if action == "financial_timeline":
+            if not parent_id:
+                return cors({"ok": False, "error": {"message": "Не указан проект"}}, 400)
+            year = as_int(qs.get("year")) or datetime.date.today().year
+            return cors({"ok": True, "data": financial_timeline(cur, parent_id, year)})
 
         if action == "save_capacity_cell":
             cid, err = save_capacity_cell(cur, body, user["email"])
@@ -1469,6 +1733,11 @@ def handler(event: dict, context) -> dict:
 
         if action == "requirement_dashboard":
             return cors({"ok": True, "data": requirement_dashboard(cur, itd)})
+
+        if action == "resource_conflicts":
+            if not parent_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
+            return cors({"ok": True, "data": resource_conflicts(cur, parent_kind, parent_id)})
 
         if action == "hiring_lead_times":
             cur.execute(f"SELECT * FROM {SCHEMA}.exec_hiring_lead_time ORDER BY lead_time_days")

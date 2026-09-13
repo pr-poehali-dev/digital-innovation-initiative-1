@@ -207,6 +207,73 @@ export interface RequirementDashboard {
   tasks_without_resource: Array<{ id: number; title: string; project_id: number | null; due_at: string | null }>;
 }
 
+/** Расчёт-предупреждение по ресурсам проекта/инициативы — ничего не
+ * меняет и не переназначает, только показывает потенциальные конфликты
+ * для решения руководителем. */
+export interface ResourceConflicts {
+  overloaded_people: Array<{
+    person_id: number; person_name: string; total_load_pct: number;
+    sources: Array<{ project_id: number | null; plan_load_pct: number }>;
+  }>;
+  overlapping_assignments: Array<{
+    person_id: number; person_name: string;
+    assignment_a: number; project_a: number | null; start_a: string; end_a: string;
+    assignment_b: number; project_b: number | null; start_b: string; end_b: string;
+  }>;
+  open_roles: Array<{
+    id: number; role_title: string | null; role_title_ref: string | null; status: string;
+    criticality: string; need_by_date: string | null; search_start_date: string | null; funding_confirmed: boolean;
+  }>;
+  search_should_have_started: ResourceConflicts["open_roles"];
+  unfunded_requirements: ResourceConflicts["open_roles"];
+  assignment_outside_period: Array<{
+    assignment_id: number; person_id: number | null; person_name: string | null;
+    period_start: string; period_end: string; project_plan_start: string; project_plan_end: string;
+  }>;
+  tasks_without_owner: Array<{ id: number; title: string; status: string; due_at: string | null }>;
+}
+
+export interface FinancialTimelineMonth {
+  budget_plan: number;
+  fot_plan: number;
+  fot_fact: number;
+  fact: number;
+  commitments_open: number;
+  expected: number;
+  forecast: number;
+  deviation: number;
+  cumulative_budget: number;
+  cumulative_forecast: number;
+}
+
+export interface FinancialKeyPayment {
+  kind: "actual" | "commitment";
+  id: number;
+  date: string | null;
+  amount: number;
+  comment: string | null;
+}
+
+export interface FinancialMilestone {
+  id: number;
+  title: string;
+  plan_date: string;
+  fact_date: string | null;
+  status: string;
+  milestone_type: string | null;
+}
+
+/** Финансовая шкала проекта на той же временной оси, что Гант/ресурсы —
+ * читает существующий финансовый контур помесячно, ничего не копирует в
+ * таблицы расписания. */
+export interface FinancialTimeline {
+  year: number;
+  months: Record<string, FinancialTimelineMonth>;
+  key_payments: FinancialKeyPayment[];
+  milestones: FinancialMilestone[];
+  commitments_without_dates: number;
+}
+
 async function req(path: string, method: "GET" | "POST" = "GET", body?: unknown) {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -282,4 +349,8 @@ export const execResourcesApi = {
   requirementDashboard: (): Promise<RequirementDashboard> => req("/?action=requirement_dashboard"),
   hiringLeadTimes: (): Promise<{ items: Array<{ closing_method: string; lead_time_days: number }> }> =>
     req("/?action=hiring_lead_times"),
+  resourceConflicts: (kind: "project" | "initiative", id: number): Promise<ResourceConflicts> =>
+    req(`/?action=resource_conflicts&kind=${kind}&id=${id}`),
+  financialTimeline: (projectId: number, year: number): Promise<FinancialTimeline> =>
+    req(`/?action=financial_timeline&kind=project&id=${projectId}&year=${year}`),
 };

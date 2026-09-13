@@ -1,7 +1,7 @@
 // Утилита масштабирования временной шкалы для дорожной карты и шкалы вех.
 // Чистые функции без React — переиспользуются в RoadmapView и MilestonesTimelineView.
 
-export type ScaleKind = "month" | "quarter" | "year";
+export type ScaleKind = "week" | "month" | "quarter" | "year";
 
 export interface ScaleTick {
   date: Date;
@@ -33,7 +33,7 @@ export function autoScale(days: number): ScaleKind {
 }
 
 export function pxPerDay(scale: ScaleKind): number {
-  return { month: 9, quarter: 4, year: 1.3 }[scale];
+  return { week: 24, month: 9, quarter: 4, year: 1.3 }[scale];
 }
 
 /** Ширина одной "ячейки" заголовка (месяц) в пикселях для данного масштаба. */
