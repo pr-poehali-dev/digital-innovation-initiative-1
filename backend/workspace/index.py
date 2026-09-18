@@ -11,6 +11,8 @@ Actions:
   GET  artifact         — конкретный артефакт
   GET  ai_runs          — история AI-сессий
   POST copilot          — AI-ассистент с workspace-контекстом
+  GET  passport         — паспорт лабораторного кейса (wb_case_analysis)
+  PUT  passport         — обновить паспорт лабораторного кейса
 """
 import json
 import os
@@ -384,6 +386,56 @@ def handler(event: dict, context) -> dict:
                               updated_by = EXCLUDED.updated_by,
                               updated_at = NOW()""",
                         (project_id, goals, constraints, key_facts, stakeholders, user_id),
+                    )
+                bump_content_version(conn, project_id)
+                conn.commit()
+                return cors({"ok": True})
+
+        # ── Паспорт лабораторного кейса ─────────────────────────────────
+        if action == "passport":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id:
+                return cors({"ok": False, "error": {"message": "Нужен project_id"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT current_state, problem_statement, stakeholders, systems_involved,
+                                   documents_involved, constraints_text, metrics_current, previous_attempts,
+                                   regulatory_context, data_availability, initiator, customer, owner_name,
+                                   basis, why_now, decision_due_at, expected_result, success_criteria, updated_at
+                            FROM {SCHEMA}.wb_case_analysis WHERE project_id = %s""",
+                        (project_id,),
+                    )
+                    row = cur.fetchone()
+                if not row:
+                    return cors({"ok": True, "passport": None})
+                keys = ["current_state", "problem_statement", "stakeholders", "systems_involved",
+                        "documents_involved", "constraints_text", "metrics_current", "previous_attempts",
+                        "regulatory_context", "data_availability", "initiator", "customer", "owner_name",
+                        "basis", "why_now", "decision_due_at", "expected_result", "success_criteria"]
+                passport = {k: row[i] for i, k in enumerate(keys)}
+                passport["decision_due_at"] = str(passport["decision_due_at"]) if passport["decision_due_at"] else None
+                passport["updated_at"] = str(row[18])
+                return cors({"ok": True, "passport": passport})
+
+            if method == "PUT":
+                fields = ["current_state", "problem_statement", "stakeholders", "systems_involved",
+                          "documents_involved", "constraints_text", "metrics_current", "previous_attempts",
+                          "regulatory_context", "data_availability", "initiator", "customer", "owner_name",
+                          "basis", "why_now", "decision_due_at", "expected_result", "success_criteria"]
+                values = [(body.get(f) or None) if body.get(f) != "" else None for f in fields]
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""INSERT INTO {SCHEMA}.wb_case_analysis
+                            (project_id, case_id, {', '.join(fields)})
+                            VALUES (%s, %s, {', '.join(['%s'] * len(fields))})
+                            ON CONFLICT (project_id) DO UPDATE SET
+                              {', '.join(f'{f} = EXCLUDED.{f}' for f in fields)},
+                              updated_at = NOW()""",
+                        (project_id, project_id, *values),
                     )
                 bump_content_version(conn, project_id)
                 conn.commit()
@@ -825,7 +877,7 @@ def handler(event: dict, context) -> dict:
                             FROM {SCHEMA}.wb_pain_points p
                             LEFT JOIN {SCHEMA}.wb_processes proc ON proc.id = p.linked_process_id
                             LEFT JOIN {SCHEMA}.wb_solutions sol ON sol.id = p.linked_solution_id
-                            WHERE p.case_id = %s AND p.is_archived = FALSE
+                            WHERE p.project_id = %s AND p.is_archived = FALSE
                             ORDER BY CASE p.impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                                      p.created_at DESC""",
                         (project_id,),
@@ -850,10 +902,10 @@ def handler(event: dict, context) -> dict:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.wb_pain_points
-                            (case_id, pain_type, description, impact_level, frequency, root_cause,
+                            (case_id, project_id, pain_type, description, impact_level, frequency, root_cause,
                              linked_process_id, linked_solution_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                        (project_id, body.get("pain_type", "manual_work"), desc,
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (project_id, project_id, body.get("pain_type", "manual_work"), desc,
                          body.get("impact_level", "medium"),
                          body.get("frequency", ""), body.get("root_cause", ""),
                          linked_process_id, linked_solution_id),
@@ -1204,7 +1256,7 @@ def handler(event: dict, context) -> dict:
                     # Без гипотезы — валидируем каждую переданную связь отдельно
                     if pain_point_id:
                         with conn.cursor() as cur:
-                            cur.execute(f"SELECT case_id FROM {SCHEMA}.wb_pain_points WHERE id = %s", (pain_point_id,))
+                            cur.execute(f"SELECT project_id FROM {SCHEMA}.wb_pain_points WHERE id = %s", (pain_point_id,))
                             row = cur.fetchone()
                         if not row or row[0] != project_id:
                             return cors({"ok": False, "error": {"message": "Проблема не принадлежит этому проекту"}}, 400)
@@ -1400,7 +1452,7 @@ def handler(event: dict, context) -> dict:
                             WHERE p.is_archived = FALSE GROUP BY p.id""", (project_id,))
                         pd["processes"] = [{"title": r[0], "steps": r[1], "manual": r[2], "ai_steps": r[3]} for r in cur.fetchall()]
                     with conn2.cursor() as cur:
-                        cur.execute(f"SELECT pain_type, description, impact_level FROM {SCHEMA}.wb_pain_points WHERE case_id = %s AND is_archived = FALSE ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END", (project_id,))
+                        cur.execute(f"SELECT pain_type, description, impact_level FROM {SCHEMA}.wb_pain_points WHERE project_id = %s AND is_archived = FALSE ORDER BY CASE impact_level WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END", (project_id,))
                         pd["pains"] = [{"type": r[0], "desc": r[1], "impact": r[2]} for r in cur.fetchall()]
                     with conn2.cursor() as cur:
                         cur.execute(f"SELECT title, statement, status FROM {SCHEMA}.workspace_hypotheses WHERE project_id = %s ORDER BY created_at", (project_id,))

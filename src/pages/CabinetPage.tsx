@@ -25,11 +25,13 @@ interface Project {
   updated_at: string;
   owner_name: string;
   my_role: string;
+  project_kind?: string;
 }
 
 export default function CabinetPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [labOnly, setLabOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState("");
@@ -279,13 +281,35 @@ export default function CabinetPage() {
           </div>
         )}
 
+        {!loading && projects.some((p) => p.project_kind === "lab_development") && (
+          <div className="flex items-center gap-2 mb-3 sm:mb-4">
+            <button
+              onClick={() => setLabOnly(false)}
+              className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+                !labOnly ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
+              }`}
+            >
+              Все кейсы
+            </button>
+            <button
+              onClick={() => setLabOnly(true)}
+              className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
+                labOnly ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
+              }`}
+            >
+              <Icon name="FlaskConical" size={12} />
+              Лаборатория решений
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             {[1, 2, 3].map((i) => (
               <div key={i} className="border rounded-2xl p-4 animate-pulse bg-muted/30 h-28" />
             ))}
           </div>
-        ) : projects.length === 0 ? (
+        ) : projects.filter((p) => !labOnly || p.project_kind === "lab_development").length === 0 ? (
           <div className="text-center py-12 sm:py-16 text-muted-foreground">
             <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-3">
               <Icon name="Briefcase" size={24} />
@@ -303,7 +327,7 @@ export default function CabinetPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            {projects.map((p) => (
+            {projects.filter((p) => !labOnly || p.project_kind === "lab_development").map((p) => (
               <div
                 key={p.id}
                 className="relative border border-slate-200 rounded-2xl p-4 sm:p-5 bg-card hover:border-slate-400 hover:shadow-sm active:bg-slate-50 transition-all group"
@@ -365,6 +389,12 @@ export default function CabinetPage() {
 
                 {/* Основное тело карточки */}
                 <Link to={`/cabinet/project/${p.id}`} className="block">
+                  {p.project_kind === "lab_development" && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full mb-1.5">
+                      <Icon name="FlaskConical" size={10} />
+                      Лаборатория решений
+                    </span>
+                  )}
                   {/* Название */}
                   <h3 className="font-semibold text-slate-900 leading-snug mb-1 line-clamp-2">{p.title}</h3>
                   {/* Описание */}

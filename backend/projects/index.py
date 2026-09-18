@@ -10,6 +10,9 @@
   - project.invite    — пригласить в проект (требует project_id, email)
   - project.set_workspace_mode — переключить режим проекта (требует project_id, workspace_mode:
     null|"polygon" — polygon включает вкладки "Функции подразделения"/"Функции и процессы")
+  - project.set_project_kind — переключить тип проекта (требует project_id, project_kind:
+    standard|lab_development|implementation|process_description). lab_development включает
+    вкладку "Паспорт" (Лаборатория решений).
 
 Формат ответа:
   Success: {"ok": true, "data": {...}}
@@ -36,6 +39,7 @@ ALLOWED_ACTIONS = {
     "project.restore",
     "project.invite",
     "project.set_workspace_mode",
+    "project.set_project_kind",
 }
 
 
@@ -188,7 +192,7 @@ def handle_list(conn, user, request_id, origin=None):
             u.name as owner_name,
             (SELECT COUNT(*) FROM {schema}.documents WHERE project_id = p.id AND archived_at IS NULL) as doc_count,
             (SELECT COUNT(*) FROM {schema}.tasks WHERE project_id = p.id AND archived_at IS NULL) as task_count,
-            pm.role
+            pm.role, p.project_kind
         FROM {schema}.projects p
         JOIN {schema}.project_members pm ON pm.project_id = p.id AND pm.user_id = %s
         JOIN {schema}.users u ON u.id = p.owner_id
@@ -201,6 +205,7 @@ def handle_list(conn, user, request_id, origin=None):
             "id": r[0], "title": r[1], "description": r[2],
             "owner_id": r[3], "created_at": str(r[4]), "updated_at": str(r[5]),
             "owner_name": r[6], "doc_count": r[7], "task_count": r[8], "my_role": r[9],
+            "project_kind": r[10],
         }
         for r in cur.fetchall()
     ]
@@ -223,7 +228,7 @@ def handle_get(conn, user, body, request_id, origin=None):
         return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
 
     cur.execute(
-        f"SELECT id, title, description, owner_id, created_at, updated_at, archived_at, workspace_mode FROM {schema}.projects WHERE id = %s",
+        f"SELECT id, title, description, owner_id, created_at, updated_at, archived_at, workspace_mode, project_kind, source_lab_project_id FROM {schema}.projects WHERE id = %s",
         (project_id,),
     )
     p = cur.fetchone()
@@ -247,7 +252,7 @@ def handle_get(conn, user, body, request_id, origin=None):
     return ok_response({
         "id": p[0], "title": p[1], "description": p[2],
         "owner_id": p[3], "created_at": str(p[4]), "updated_at": str(p[5]),
-        "workspace_mode": p[7],
+        "workspace_mode": p[7], "project_kind": p[8], "source_lab_project_id": p[9],
         "members": members, "activity": activity, "my_role": role,
     }, request_id, origin=origin)
 
@@ -330,6 +335,47 @@ def handle_set_workspace_mode(conn, user, body, request_id, origin=None):
     conn.commit()
     notify_indexer("upsert", "project", project_id)
     return ok_response({"ok": True, "workspace_mode": workspace_mode}, request_id, origin=origin)
+
+
+ALLOWED_PROJECT_KINDS = {"standard", "lab_development", "implementation", "process_description"}
+
+
+def handle_set_project_kind(conn, user, body, request_id, origin=None):
+    """Переключает тип проекта. lab_development помечает проект как лабораторный кейс
+    (Лаборатория решений) — открывает вкладку "Паспорт" и связанные лабораторные объекты.
+    implementation — проект реализации утверждённого решения, может ссылаться на исходный
+    лабораторный кейс через source_lab_project_id."""
+    schema = get_schema()
+    project_id = body.get("project_id")
+    if not project_id:
+        return err_response("validation_error", "Поле project_id обязательно", 400, request_id, origin=origin)
+    project_id = int(project_id)
+    project_kind = body.get("project_kind")
+    if project_kind not in ALLOWED_PROJECT_KINDS:
+        return err_response("validation_error", f"project_kind должен быть одним из: {', '.join(sorted(ALLOWED_PROJECT_KINDS))}", 400, request_id, origin=origin)
+    source_lab_project_id = body.get("source_lab_project_id")
+
+    cur = conn.cursor()
+    role = check_access(cur, schema, project_id, user["id"])
+    if not role:
+        return err_response("access_denied", "Нет доступа к проекту", 403, request_id, origin=origin)
+    if role not in ("owner", "admin"):
+        return err_response("access_denied", "Только владелец может менять тип проекта", 403, request_id, origin=origin)
+
+    if source_lab_project_id is not None:
+        cur.execute(
+            f"UPDATE {schema}.projects SET project_kind = %s, source_lab_project_id = %s, updated_at = NOW() WHERE id = %s",
+            (project_kind, int(source_lab_project_id), project_id),
+        )
+    else:
+        cur.execute(
+            f"UPDATE {schema}.projects SET project_kind = %s, updated_at = NOW() WHERE id = %s",
+            (project_kind, project_id),
+        )
+    log_activity(cur, schema, project_id, user["id"], "changed_project_kind", "project", project_id, project_kind)
+    conn.commit()
+    notify_indexer("upsert", "project", project_id)
+    return ok_response({"ok": True, "project_kind": project_kind}, request_id, origin=origin)
 
 
 def handle_archive(conn, user, body, request_id, origin=None):
@@ -515,6 +561,8 @@ def handler(event: dict, context) -> dict:
             return handle_update(conn, user, body, request_id, origin=origin)
         if action == "project.set_workspace_mode":
             return handle_set_workspace_mode(conn, user, body, request_id, origin=origin)
+        if action == "project.set_project_kind":
+            return handle_set_project_kind(conn, user, body, request_id, origin=origin)
         if action == "project.archive":
             return handle_archive(conn, user, body, request_id, origin=origin)
         if action == "project.restore":
