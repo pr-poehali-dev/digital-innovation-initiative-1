@@ -22,6 +22,7 @@ type Passport = {
   expected_result: string | null;
   success_criteria: string | null;
   updated_at?: string;
+  status?: "draft" | "confirmed";
 };
 
 const EMPTY: Passport = {
@@ -29,24 +30,41 @@ const EMPTY: Passport = {
   documents_involved: "", constraints_text: "", metrics_current: "", previous_attempts: "",
   regulatory_context: "", data_availability: "", initiator: "", customer: "", owner_name: "",
   basis: "", why_now: "", decision_due_at: "", expected_result: "", success_criteria: "",
+  status: "draft",
 };
+
+const NEEDS_REVIEW_MARK = "Требует уточнения";
 
 interface Props {
   projectId: number;
 }
 
+function needsReview(value: string): boolean {
+  return value.trim().toLowerCase().startsWith(NEEDS_REVIEW_MARK.toLowerCase());
+}
+
 function Field({ label, value, onChange, textarea = true, type = "text" }: {
   label: string; value: string; onChange: (v: string) => void; textarea?: boolean; type?: string;
 }) {
+  const flagged = textarea && needsReview(value);
   return (
     <div className="space-y-1">
-      <label className="text-xs font-medium text-slate-600">{label}</label>
+      <label className="text-xs font-medium text-slate-600 flex items-center gap-1.5">
+        {label}
+        {flagged && (
+          <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+            <Icon name="AlertTriangle" size={9} /> {NEEDS_REVIEW_MARK}
+          </span>
+        )}
+      </label>
       {textarea ? (
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
           rows={2}
-          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-300 resize-y"
+          className={`w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 resize-y ${
+            flagged ? "border-amber-300 bg-amber-50/40 focus:ring-amber-300" : "border-slate-200 focus:ring-slate-300"
+          }`}
         />
       ) : (
         <input
@@ -76,6 +94,7 @@ export default function PassportTab({ projectId }: Props) {
   const [data, setData] = useState<Passport>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
@@ -99,16 +118,22 @@ export default function PassportTab({ projectId }: Props) {
     setDirty(true);
   };
 
-  const handleSave = async () => {
-    setSaving(true);
+  const reviewFieldsCount = (Object.entries(data) as [string, unknown][])
+    .filter(([, v]) => typeof v === "string" && needsReview(v)).length;
+
+  const handleSave = async (nextStatus?: "draft" | "confirmed") => {
+    const isConfirm = nextStatus === "confirmed";
+    if (isConfirm) setConfirming(true); else setSaving(true);
     try {
-      await workspaceApi.updatePassport(projectId, data as Record<string, string | null>);
+      await workspaceApi.updatePassport(projectId, data as Record<string, string | null>, nextStatus || data.status || "draft");
+      setData((d) => ({ ...d, status: nextStatus || d.status }));
       setDirty(false);
       setSavedAt(new Date().toISOString());
     } catch (e) {
       alert(e instanceof Error ? e.message : "Не удалось сохранить паспорт");
     } finally {
       setSaving(false);
+      setConfirming(false);
     }
   };
 
@@ -118,18 +143,39 @@ export default function PassportTab({ projectId }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs sm:text-sm text-slate-500 leading-snug">
-          Постановка задачи, текущее состояние, ожидаемый результат и рабочая конструкция кейса
-        </p>
-        <button
-          onClick={handleSave}
-          disabled={saving || !dirty}
-          className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none flex-shrink-0"
-        >
-          <Icon name={saving ? "Loader2" : "Save"} size={13} className={saving ? "animate-spin" : ""} />
-          {saving ? "Сохранение…" : "Сохранить"}
-        </button>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          {data.status === "confirmed" ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full">
+              <Icon name="CheckCircle2" size={12} /> Подтверждён владельцем
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-full">
+              <Icon name="FileEdit" size={12} /> Черновик — требует подтверждения владельцем
+            </span>
+          )}
+          {reviewFieldsCount > 0 && (
+            <span className="text-[11px] text-slate-500">{reviewFieldsCount} полей требуют уточнения</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleSave()}
+            disabled={saving || confirming || !dirty}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none flex-shrink-0"
+          >
+            <Icon name={saving ? "Loader2" : "Save"} size={13} className={saving ? "animate-spin" : ""} />
+            {saving ? "Сохранение…" : "Сохранить черновик"}
+          </button>
+          <button
+            onClick={() => handleSave("confirmed")}
+            disabled={saving || confirming}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 disabled:opacity-40 disabled:pointer-events-none flex-shrink-0"
+          >
+            <Icon name={confirming ? "Loader2" : "CheckCircle2"} size={13} className={confirming ? "animate-spin" : ""} />
+            {confirming ? "Подтверждение…" : "Подтвердить как владелец"}
+          </button>
+        </div>
       </div>
 
       {savedAt && !dirty && (

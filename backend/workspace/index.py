@@ -13,6 +13,8 @@ Actions:
   POST copilot          — AI-ассистент с workspace-контекстом
   GET  passport         — паспорт лабораторного кейса (wb_case_analysis)
   PUT  passport         — обновить паспорт лабораторного кейса
+  GET  workplan         — рабочий план лаборатории (авто-создаётся при первом обращении)
+  PUT  workplan         — обновить статус/ответственного задачи плана
 """
 import json
 import os
@@ -405,7 +407,8 @@ def handler(event: dict, context) -> dict:
                         f"""SELECT current_state, problem_statement, stakeholders, systems_involved,
                                    documents_involved, constraints_text, metrics_current, previous_attempts,
                                    regulatory_context, data_availability, initiator, customer, owner_name,
-                                   basis, why_now, decision_due_at, expected_result, success_criteria, updated_at
+                                   basis, why_now, decision_due_at, expected_result, success_criteria, updated_at,
+                                   status
                             FROM {SCHEMA}.wb_case_analysis WHERE project_id = %s""",
                         (project_id,),
                     )
@@ -419,6 +422,7 @@ def handler(event: dict, context) -> dict:
                 passport = {k: row[i] for i, k in enumerate(keys)}
                 passport["decision_due_at"] = str(passport["decision_due_at"]) if passport["decision_due_at"] else None
                 passport["updated_at"] = str(row[18])
+                passport["status"] = row[19]
                 return cors({"ok": True, "passport": passport})
 
             if method == "PUT":
@@ -427,17 +431,105 @@ def handler(event: dict, context) -> dict:
                           "regulatory_context", "data_availability", "initiator", "customer", "owner_name",
                           "basis", "why_now", "decision_due_at", "expected_result", "success_criteria"]
                 values = [(body.get(f) or None) if body.get(f) != "" else None for f in fields]
+                status = body.get("status") if body.get("status") in ("draft", "confirmed") else "draft"
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""INSERT INTO {SCHEMA}.wb_case_analysis
-                            (project_id, case_id, {', '.join(fields)})
-                            VALUES (%s, %s, {', '.join(['%s'] * len(fields))})
+                            (project_id, case_id, {', '.join(fields)}, status)
+                            VALUES (%s, %s, {', '.join(['%s'] * len(fields))}, %s)
                             ON CONFLICT (project_id) DO UPDATE SET
                               {', '.join(f'{f} = EXCLUDED.{f}' for f in fields)},
+                              status = EXCLUDED.status,
                               updated_at = NOW()""",
-                        (project_id, project_id, *values),
+                        (project_id, project_id, *values, status),
                     )
                 bump_content_version(conn, project_id)
+                conn.commit()
+                return cors({"ok": True, "status": status})
+
+        # ── Рабочий план лаборатории (подготовка и проверка решения) ────
+        # ВАЖНО: это план РАЗРАБОТКИ решения, а не план его внедрения —
+        # задачи вроде "внедрить X в масштабе Банка" сюда не входят.
+        if action == "workplan":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id:
+                return cors({"ok": False, "error": {"message": "Нужен project_id"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            if method == "GET":
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"""SELECT id, order_no, code, title, expected_result, responsible_name,
+                                   status, week_reference
+                            FROM {SCHEMA}.wb_case_workplan_task
+                            WHERE project_id = %s ORDER BY order_no""",
+                        (project_id,),
+                    )
+                    rows = cur.fetchall()
+
+                if not rows:
+                    default_tasks = [
+                        ("D1", "Уточнить постановку задачи", "Согласованный паспорт кейса", "неделя 1"),
+                        ("D2", "Собрать исходные материалы", "Загруженные документы и данные", "неделя 1-2"),
+                        ("D3", "Провести диагностику текущего состояния", "Карта AS-IS и разрывов", "неделя 2-4"),
+                        ("D4", "Сформировать гипотезы", "Реестр гипотез с методом проверки", "неделя 4-5"),
+                        ("D5", "Провести проверку гипотез", "Выводы и доказательства по каждой гипотезе", "неделя 5-8"),
+                        ("D6", "Разработать варианты решения", "Сравнение вариантов по критериям", "неделя 8-10"),
+                        ("D7", "Сформировать концепцию", "Согласованные разделы концепции", "неделя 10-14"),
+                        ("D8", "Подготовить образ будущего", "Описание целевого состояния", "неделя 14"),
+                        ("D9", "Разработать календарно-сетевой план реализации", "План с зависимостями и вехами", "неделя 15-16"),
+                        ("D10", "Подготовить комплект документов", "Word, презентация, план-график", "неделя 16-17"),
+                        ("D11", "Представить решение заказчику", "Решение о передаче в реализацию", "неделя 17"),
+                    ]
+                    with conn.cursor() as cur:
+                        for i, (code, title, expected, week) in enumerate(default_tasks, 1):
+                            cur.execute(
+                                f"""INSERT INTO {SCHEMA}.wb_case_workplan_task
+                                    (project_id, order_no, code, title, expected_result, week_reference)
+                                    VALUES (%s, %s, %s, %s, %s, %s)""",
+                                (project_id, i, code, title, expected, week),
+                            )
+                    conn.commit()
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"""SELECT id, order_no, code, title, expected_result, responsible_name,
+                                       status, week_reference
+                                FROM {SCHEMA}.wb_case_workplan_task
+                                WHERE project_id = %s ORDER BY order_no""",
+                            (project_id,),
+                        )
+                        rows = cur.fetchall()
+
+                return cors({"ok": True, "tasks": [
+                    {"id": r[0], "order_no": r[1], "code": r[2], "title": r[3],
+                     "expected_result": r[4], "responsible_name": r[5],
+                     "status": r[6], "week_reference": r[7]}
+                    for r in rows
+                ]})
+
+            if method == "PUT":
+                task_id = int(body.get("id") or 0)
+                if not task_id:
+                    return cors({"ok": False, "error": {"message": "Нужен id"}}, 400)
+                status = body.get("status")
+                if status not in (None, "not_started", "in_progress", "done"):
+                    return cors({"ok": False, "error": {"message": "Недопустимый статус"}}, 400)
+                fields = []
+                vals = []
+                if status is not None:
+                    fields.append("status = %s"); vals.append(status)
+                if "responsible_name" in body:
+                    fields.append("responsible_name = %s"); vals.append(body.get("responsible_name") or None)
+                if not fields:
+                    return cors({"ok": False, "error": {"message": "Нечего обновлять"}}, 400)
+                fields.append("updated_at = NOW()")
+                vals.append(task_id)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.wb_case_workplan_task SET {', '.join(fields)} WHERE id = %s AND project_id = %s",
+                        (*vals, project_id),
+                    )
                 conn.commit()
                 return cors({"ok": True})
 

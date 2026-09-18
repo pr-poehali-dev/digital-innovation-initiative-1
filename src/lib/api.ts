@@ -814,8 +814,12 @@ export const workspaceApi = {
     request(URLS.workspace, "/?action=context", "PUT", { project_id: projectId, ...data }),
   getPassport: (projectId: number) =>
     request(URLS.workspace, `/?action=passport&project_id=${projectId}`, "GET"),
-  updatePassport: (projectId: number, data: Record<string, string | null>) =>
-    request(URLS.workspace, "/?action=passport", "PUT", { project_id: projectId, ...data }),
+  updatePassport: (projectId: number, data: Record<string, string | null>, status?: "draft" | "confirmed") =>
+    request(URLS.workspace, "/?action=passport", "PUT", { project_id: projectId, ...data, status }),
+  getWorkplan: (projectId: number) =>
+    request(URLS.workspace, `/?action=workplan&project_id=${projectId}`, "GET"),
+  updateWorkplanTask: (projectId: number, id: number, data: { status?: string; responsible_name?: string }) =>
+    request(URLS.workspace, "/?action=workplan", "PUT", { project_id: projectId, id, ...data }),
   getHypotheses: (projectId: number) =>
     request(URLS.workspace, `/?action=hypotheses&project_id=${projectId}`, "GET"),
   createHypothesis: (data: { project_id: number; title: string; statement?: string; assumptions?: string; success_criteria?: string; priority?: string; process_id?: number | null; pain_point_id?: number | null; solution_id?: number | null }) =>

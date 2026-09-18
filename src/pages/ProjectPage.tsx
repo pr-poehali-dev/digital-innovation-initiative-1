@@ -5,6 +5,7 @@ import SolutionsTab from "@/components/workspace/SolutionsTab";
 import ProcessesTab from "@/components/workspace/ProcessesTab";
 import PainsTab from "@/components/workspace/PainsTab";
 import PassportTab from "@/components/workspace/PassportTab";
+import WorkplanTab from "@/components/workspace/WorkplanTab";
 import DeptFunctionsTab from "@/components/dept/DeptFunctionsTab";
 import DeptAutomationTab from "@/components/dept/DeptAutomationTab";
 import DeptTreeTab from "@/components/dept/DeptTreeTab";
@@ -215,8 +216,8 @@ function filterPainsForPreset<T extends { id: number; linked_solution_id: number
   return list;
 }
 
-type TabKey = "overview" | "passport" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation" | "dept-tree" | "dept-overlaps" | "dept-decisions" | "dept-roadmap";
-const VALID_TABS: TabKey[] = ["overview", "passport", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation", "dept-tree", "dept-overlaps", "dept-decisions", "dept-roadmap"];
+type TabKey = "overview" | "passport" | "workplan" | "copilot" | "hypotheses" | "artifacts" | "tasks" | "docs" | "team" | "process" | "pains" | "benchmarks" | "ai" | "initiatives" | "solutions" | "dept-functions" | "dept-automation" | "dept-tree" | "dept-overlaps" | "dept-decisions" | "dept-roadmap";
+const VALID_TABS: TabKey[] = ["overview", "passport", "workplan", "copilot", "hypotheses", "artifacts", "tasks", "docs", "team", "process", "pains", "benchmarks", "ai", "initiatives", "solutions", "dept-functions", "dept-automation", "dept-tree", "dept-overlaps", "dept-decisions", "dept-roadmap"];
 const VALID_PRESETS: OverviewPreset[] = ["stalled", "launch_ready", "without_initiative", "without_hypothesis", "without_solution", "without_validation"];
 
 export default function ProjectPage() {
@@ -1247,7 +1248,10 @@ export default function ProjectPage() {
                 { key: "docs",        label: `📄 Файлы (${docs.length})` },
               ] : [
                 { key: "overview",    label: "🏠 Обзор" },
-                ...(project?.project_kind === "lab_development" ? [{ key: "passport", label: "🧭 Паспорт" }] : []),
+                ...(project?.project_kind === "lab_development" ? [
+                  { key: "passport", label: "🧭 Паспорт" },
+                  { key: "workplan", label: "🗓️ Рабочий план" },
+                ] : []),
                 { key: "copilot",     label: "🤖 AI Copilot" },
                 { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
                 { key: "pains",       label: `🔥 Боли${painPoints.length ? ` (${painPoints.length})` : ""}` },
@@ -1843,6 +1847,11 @@ export default function ProjectPage() {
         {/* ── Паспорт лабораторного кейса ── */}
         {tab === "passport" && project?.project_kind === "lab_development" && (
           <PassportTab projectId={projectId} />
+        )}
+
+        {/* ── Рабочий план лаборатории ── */}
+        {tab === "workplan" && project?.project_kind === "lab_development" && (
+          <WorkplanTab projectId={projectId} />
         )}
 
         {/* ── AI Copilot ── */}
