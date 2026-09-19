@@ -17,8 +17,8 @@ const STATUS_META: Record<string, { label: string; icon: string; cls: string }> 
  * (достигнута/просрочена/отклонение в днях). Клик открывает карточку
  * проекта на вкладке контрольных точек. */
 export default function MilestonesTimelineView({
-  filters, scale, dateFrom, dateTo,
-}: { filters: MilestoneFilters; scale: ScaleKind; dateFrom: string; dateTo: string }) {
+  filters, scale, dateFrom, dateTo, embedded = false,
+}: { filters: MilestoneFilters; scale: ScaleKind; dateFrom: string; dateTo: string; embedded?: boolean }) {
   const navigate = useNavigate();
   const [items, setItems] = useState<TimelineMilestone[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +44,7 @@ export default function MilestonesTimelineView({
   if (!items.length) return <Empty text="Вех в выбранном диапазоне не найдено" icon="Diamond" />;
 
   const openProject = (m: TimelineMilestone) => {
-    if (m.project_id) navigate(`/cabinet/exec/portfolio/projects/${m.project_id}?tab=milestones`);
+    if (!embedded && m.project_id) navigate(`/cabinet/exec/portfolio/projects/${m.project_id}?tab=milestones`);
   };
 
   return (
@@ -68,17 +68,19 @@ export default function MilestonesTimelineView({
               if (!d) return null;
               const left = datePx(rangeStart, d, scale);
               const meta = STATUS_META[m.status] || STATUS_META.not_started;
-              const dotCls = m.is_overdue ? "text-red-500" : meta.cls;
+              const conditional = !!m.is_conditional_scenario;
+              const dotCls = conditional ? "text-amber-500" : m.is_overdue ? "text-red-500" : meta.cls;
+              const title = `${m.title}\n${m.project_title || ""}\n${conditional ? "условный сценарий — требует решения руководителя" : STATUS_META[m.status]?.label || m.status}`;
               return (
                 <button
                   key={m.id}
                   onClick={() => openProject(m)}
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 group"
+                  className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 group ${embedded ? "cursor-default" : ""}`}
                   style={{ left }}
-                  title={`${m.title}\n${m.project_title || ""}\n${STATUS_META[m.status]?.label || m.status}`}
+                  title={title}
                 >
-                  <Icon name="Diamond" size={14} className={dotCls} />
-                  {m.is_overdue && <Icon name="TriangleAlert" size={9} className="text-red-500 absolute -top-1 -right-1" />}
+                  <Icon name={conditional ? "HelpCircle" : "Diamond"} size={14} className={dotCls} />
+                  {!conditional && m.is_overdue && <Icon name="TriangleAlert" size={9} className="text-red-500 absolute -top-1 -right-1" />}
                 </button>
               );
             })}
@@ -89,14 +91,27 @@ export default function MilestonesTimelineView({
       <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
         {items.map((m) => {
           const meta = STATUS_META[m.status] || STATUS_META.not_started;
+          const conditional = !!m.is_conditional_scenario;
           return (
-            <div key={m.id} className="p-3 flex items-start gap-3 hover:bg-slate-50 cursor-pointer" onClick={() => openProject(m)}>
-              <Icon name={meta.icon} size={16} className={`flex-shrink-0 mt-0.5 ${m.is_overdue ? "text-red-500" : meta.cls}`} />
+            <div
+              key={m.id}
+              className={`p-3 flex items-start gap-3 hover:bg-slate-50 ${embedded ? "" : "cursor-pointer"} ${conditional ? "bg-amber-50/40" : ""}`}
+              onClick={() => openProject(m)}
+            >
+              <Icon
+                name={conditional ? "HelpCircle" : meta.icon}
+                size={16}
+                className={`flex-shrink-0 mt-0.5 ${conditional ? "text-amber-500" : m.is_overdue ? "text-red-500" : meta.cls}`}
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm text-slate-900">{m.title}</p>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{meta.label}</span>
-                  {m.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">Просрочена</span>}
+                  <p className={`text-sm ${conditional ? "text-amber-700 italic" : "text-slate-900"}`}>{m.title}</p>
+                  {conditional ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300">требует решения</span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{meta.label}</span>
+                  )}
+                  {!conditional && m.is_overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">Просрочена</span>}
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
                   {m.project_title || m.initiative_title || "без проекта"}

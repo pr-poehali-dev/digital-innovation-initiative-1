@@ -78,7 +78,7 @@ function layoutGraph(nodes: DependencyGraphNode[], edges: DependencyGraphEdge[])
  * выпуск — только просмотр: масштабирование, перемещение холста, фокус на
  * узле с подсветкой предшественников/последователей, переход в карточку.
  * Редактирование графа мышью не реализовано. */
-export default function DependencyGraphView({ projectId }: { projectId: number }) {
+export default function DependencyGraphView({ projectId, embedded = false }: { projectId: number; embedded?: boolean }) {
   const navigate = useNavigate();
   const [data, setData] = useState<DependencyGraphData | null>(null);
   const [cpm, setCpm] = useState<CriticalPathData | null>(null);
@@ -317,10 +317,12 @@ export default function DependencyGraphView({ projectId }: { projectId: number }
                     <title>
                       {`${KIND_LABEL[n.kind]}: ${n.title}\n${n.responsible_name ? "Ответственный: " + n.responsible_name + "\n" : ""}Входящих связей: ${n.in_count}, исходящих: ${n.out_count}${n.plan_end ? "\nСрок: " + fmtDate(n.plan_end) : ""}`}
                     </title>
-                    <g transform={`translate(${NODE_W - 18}, ${NODE_H - 16})`} onClick={(ev) => { ev.stopPropagation(); openNode(n); }}>
-                      <circle r={9} fill="#f1f5f9" />
-                      <text x={0} y={3} textAnchor="middle" fontSize={9} fill="#64748b">→</text>
-                    </g>
+                    {!embedded && (
+                      <g transform={`translate(${NODE_W - 18}, ${NODE_H - 16})`} onClick={(ev) => { ev.stopPropagation(); openNode(n); }}>
+                        <circle r={9} fill="#f1f5f9" />
+                        <text x={0} y={3} textAnchor="middle" fontSize={9} fill="#64748b">→</text>
+                      </g>
+                    )}
                   </g>
                 );
               })}

@@ -148,9 +148,19 @@ export default function ExecProjectDetailPage() {
   return (
     <Layout>
       <div className={`mx-auto px-4 py-6 space-y-4 ${tab === "gantt" || tab === "dependencies" || tab === "schedule" || tab === "resources" || tab === "financeTimeline" ? "max-w-[1400px]" : "max-w-4xl"}`}>
-        <button onClick={() => navigate("/cabinet/exec/portfolio")} className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground">
-          <Icon name="ArrowLeft" size={14} /> К портфелю
-        </button>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
+          <button onClick={() => navigate("/cabinet/exec/portfolio")} className="flex items-center gap-1 hover:text-foreground">
+            <Icon name="ArrowLeft" size={14} /> К портфелю
+          </button>
+          {data.initiative_id && (
+            <>
+              <Icon name="ChevronRight" size={12} />
+              <button onClick={() => navigate(`/cabinet/exec/initiatives/${data.initiative_id}?tab=plan`)} className="hover:text-foreground">
+                {data.initiative_title || "К инициативе"}
+              </button>
+            </>
+          )}
+        </div>
 
         <div className="flex items-start justify-between gap-3">
           <div>

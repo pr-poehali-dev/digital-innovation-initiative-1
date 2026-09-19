@@ -34,7 +34,7 @@ const OVERSCAN_PX = 400;
  * реализовано намеренно — изменение дат остаётся через существующие
  * формы редактирования проекта/задачи/вехи. */
 export default function ProjectGanttView({
-  projectId, scale, onScaleChange, dateFrom, dateTo, onRangeChange,
+  projectId, scale, onScaleChange, dateFrom, dateTo, onRangeChange, embedded = false,
 }: {
   projectId: number;
   scale: ScaleKind;
@@ -42,6 +42,10 @@ export default function ProjectGanttView({
   dateFrom: string;
   dateTo: string;
   onRangeChange: (from: string, to: string) => void;
+  /** В упрощённом просмотре (карточка инициативы) клики по задачам/вехам
+   * не уводят на полную карточку проекта — это самостоятельное read-only
+   * представление плана, а не вход в проектный интерфейс. */
+  embedded?: boolean;
 }) {
   const navigate = useNavigate();
   const [data, setData] = useState<ProjectGanttData | null>(null);
@@ -228,14 +232,14 @@ export default function ProjectGanttView({
                     ) : (
                       <TaskRow
                         key={`task-${row.id}`} task={row} rangeStart={rangeStart} scale={scale} totalWidth={totalWidth}
-                        isCritical={criticalTaskIds.has(row.id)}
+                        isCritical={criticalTaskIds.has(row.id)} embedded={embedded}
                       />
                     )
                   )}
                 </div>
                 {/* Вехи — поверх всех строк, привязаны к общей временной оси */}
                 {data.milestones.map((m) => (
-                  <MilestoneMarker key={`m-${m.id}`} milestone={m} rangeStart={rangeStart} scale={scale} navigate={navigate} projectId={projectId} />
+                  <MilestoneMarker key={`m-${m.id}`} milestone={m} rangeStart={rangeStart} scale={scale} navigate={navigate} projectId={projectId} embedded={embedded} />
                 ))}
               </div>
             </div>
@@ -298,8 +302,8 @@ function StageRow({
 }
 
 function TaskRow({
-  task, rangeStart, scale, totalWidth, isCritical,
-}: { task: GanttTask; rangeStart: Date; scale: ScaleKind; totalWidth: number; isCritical: boolean }) {
+  task, rangeStart, scale, totalWidth, isCritical, embedded,
+}: { task: GanttTask; rangeStart: Date; scale: ScaleKind; totalWidth: number; isCritical: boolean; embedded?: boolean }) {
   const navigate = useNavigate();
   const due = parseISODate(task.due_at);
   const barWidth = 90; // условная ширина плашки задачи от предполагаемой стартовой точки до срока
@@ -308,9 +312,13 @@ function TaskRow({
   return (
     <div className="flex items-center border-b border-slate-50 hover:bg-slate-50/50" style={{ height: ROW_HEIGHT }}>
       <div className="w-[280px] flex-shrink-0 px-3 pl-8 min-w-0">
-        <button onClick={() => navigate(`/cabinet/exec/portfolio/projects/${task.project_id}?tab=tasks`)} className="text-xs text-slate-700 hover:text-violet-700 truncate block text-left w-full" title={task.title}>
-          {task.title}
-        </button>
+        {embedded ? (
+          <span className="text-xs text-slate-700 truncate block" title={task.title}>{task.title}</span>
+        ) : (
+          <button onClick={() => navigate(`/cabinet/exec/portfolio/projects/${task.project_id}?tab=tasks`)} className="text-xs text-slate-700 hover:text-violet-700 truncate block text-left w-full" title={task.title}>
+            {task.title}
+          </button>
+        )}
         {task.responsible_name && <p className="text-[10px] text-slate-400 truncate">{task.responsible_name}</p>}
       </div>
       <div className="relative" style={{ width: totalWidth, height: ROW_HEIGHT }}
@@ -332,21 +340,37 @@ function TaskRow({
 }
 
 function MilestoneMarker({
-  milestone: m, rangeStart, scale, navigate, projectId,
-}: { milestone: GanttMilestone; rangeStart: Date; scale: ScaleKind; navigate: ReturnType<typeof useNavigate>; projectId: number }) {
+  milestone: m, rangeStart, scale, navigate, projectId, embedded,
+}: { milestone: GanttMilestone; rangeStart: Date; scale: ScaleKind; navigate: ReturnType<typeof useNavigate>; projectId: number; embedded?: boolean }) {
   const d = parseISODate(m.plan_date);
   if (!d) return null;
   const left = datePx(rangeStart, d, scale);
   const achieved = m.status === "achieved";
   const overdue = !achieved && m.plan_date < todayISO();
+  const conditional = !!m.is_conditional_scenario;
+  const title = `${m.title}\n${conditional ? "условный сценарий — требует решения руководителя" : achieved ? "достигнута" : overdue ? "просрочена" : "план " + fmtDate(m.plan_date)}`;
+  const icon = (
+    <Icon
+      name={conditional ? "HelpCircle" : "Diamond"}
+      size={11}
+      className={conditional ? "text-amber-500" : achieved ? "text-emerald-600" : overdue ? "text-red-500" : "text-violet-500"}
+    />
+  );
+  if (embedded) {
+    return (
+      <span className="absolute z-10" style={{ left: left + 280 - 4, top: 4 }} title={title}>
+        {icon}
+      </span>
+    );
+  }
   return (
     <button
       onClick={() => navigate(`/cabinet/exec/portfolio/projects/${projectId}?tab=milestones`)}
       className="absolute z-10"
       style={{ left: left + 280 - 4, top: 4 }}
-      title={`${m.title}\n${achieved ? "достигнута" : overdue ? "просрочена" : "план " + fmtDate(m.plan_date)}`}
+      title={title}
     >
-      <Icon name="Diamond" size={11} className={achieved ? "text-emerald-600" : overdue ? "text-red-500" : "text-violet-500"} />
+      {icon}
     </button>
   );
 }

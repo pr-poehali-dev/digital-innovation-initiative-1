@@ -102,6 +102,8 @@ export interface TimelineMilestone {
   is_overdue: boolean;
   deviation_days: number | null;
   dependent_task_count: number;
+  is_conditional_scenario?: boolean;
+  decision_request_id?: number | null;
 }
 
 export interface RoadmapFilters {
@@ -230,6 +232,8 @@ export interface GanttMilestone {
   parent_milestone_id?: number | null;
   outline_code?: string | null;
   sort_order?: number;
+  is_conditional_scenario?: boolean;
+  decision_request_id?: number | null;
 }
 
 export interface ProjectGanttData {

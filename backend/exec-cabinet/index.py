@@ -1021,12 +1021,14 @@ def handler(event: dict, context) -> dict:
             """, (iid,))
             assignments = rows(cur)
 
-            # Ближайшая непройденная контрольная точка
+            # Ближайшая непройденная контрольная точка (условные сценарии,
+            # ожидающие решения руководителя, не считаются частью действующего плана).
             cur.execute(f"""
                 SELECT m.id, m.title, m.plan_date, m.status,
                        (m.plan_date - CURRENT_DATE) AS days_left
                 FROM {SCHEMA}.exec_milestone m
                 WHERE m.initiative_id = %s AND m.status NOT IN ('achieved','cancelled')
+                  AND COALESCE(m.is_conditional_scenario, false) = false
                 ORDER BY m.plan_date NULLS LAST LIMIT 1
             """, (iid,))
             next_milestone = rows(cur)

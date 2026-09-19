@@ -724,6 +724,7 @@ def dashboard(cur):
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = m.initiative_id
         LEFT JOIN {SCHEMA}.exec_initiative ip ON ip.id = p.initiative_id
         WHERE COALESCE(m.is_test_data, false) = false AND m.status NOT IN ('achieved','cancelled')
+          AND COALESCE(m.is_conditional_scenario, false) = false
           AND m.plan_date IS NOT NULL AND m.plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
           AND (m.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
           AND (m.initiative_id IS NULL OR COALESCE(i.is_test_data, false) = false)
@@ -1044,7 +1045,7 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
                 continue
             g = _build_schedule_graph(cur, p["id"])
             current_nodes, _ = _cpm_nodes_from_current(g)
-            current_cpm, _, current_cycle = _cpm_compute(current_nodes, g["edges"])
+            current_cpm, _, current_cycle, _ = _cpm_compute(current_nodes, g["edges"])
             current_critical = {(n["kind"], n["id"]) for n in current_cpm if n["is_critical"]} if not current_cycle else set()
 
             bp = b["payload"]
@@ -1061,7 +1062,7 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
                 pd = _to_date(m.get("plan_date"))
                 if pd:
                     b_nodes[("milestone", m["id"])] = {"kind": "milestone", "id": m["id"], "title": m["title"], "duration": 0, "anchor_start": pd}
-            b_cpm, _, b_cycle = _cpm_compute(b_nodes, bp.get("dependencies", []))
+            b_cpm, _, b_cycle, _ = _cpm_compute(b_nodes, bp.get("dependencies", []))
             baseline_critical = {(n["kind"], n["id"]) for n in b_cpm if n["is_critical"]} if not b_cycle else set()
 
             p["critical_path_changed"] = current_critical != baseline_critical
@@ -1130,6 +1131,7 @@ def milestones_timeline(cur, date_from, date_to, filters: dict):
                m.initiative_id, ei.title AS initiative_title,
                m.responsible_person_id, per.display_name AS responsible_name,
                m.confirmed_by_person_id, m.confirmed_at,
+               m.is_conditional_scenario, m.decision_request_id,
                (m.status <> 'achieved' AND m.plan_date < CURRENT_DATE) AS is_overdue,
                CASE WHEN m.plan_date_original IS NOT NULL
                     THEN (m.plan_date - m.plan_date_original) ELSE NULL END AS deviation_days,
@@ -1556,7 +1558,7 @@ def schedule_comparison(cur, pid: int, baseline_id: int = None):
 
     # --- Критический путь: текущий vs baseline ---
     current_nodes, _ = _cpm_nodes_from_current(g)
-    current_cpm_nodes, _, current_cycle = _cpm_compute(current_nodes, g["edges"])
+    current_cpm_nodes, _, current_cycle, _ = _cpm_compute(current_nodes, g["edges"])
     current_critical = {(n["kind"], n["id"]) for n in current_cpm_nodes if n["is_critical"]} if not current_cycle else set()
 
     baseline_critical = set()
@@ -1581,7 +1583,7 @@ def schedule_comparison(cur, pid: int, baseline_id: int = None):
                 b_nodes[("milestone", m["id"])] = {"kind": "milestone", "id": m["id"], "title": m["title"],
                     "duration": 0, "anchor_start": pd}
         b_edges = bp.get("dependencies", [])
-        b_cpm_nodes, baseline_duration, b_cycle = _cpm_compute(b_nodes, b_edges)
+        b_cpm_nodes, baseline_duration, b_cycle, _ = _cpm_compute(b_nodes, b_edges)
         if not b_cycle:
             baseline_critical = {(n["kind"], n["id"]) for n in b_cpm_nodes if n["is_critical"]}
 
@@ -1720,6 +1722,7 @@ def _build_schedule_graph(cur, pid: int):
     cur.execute(f"""
         SELECT m.id, m.title, m.status, m.plan_date, m.forecast_date, m.fact_date,
                m.responsible_person_id, per.display_name AS responsible_name,
+               m.is_conditional_scenario,
                (m.status <> 'achieved' AND m.plan_date < CURRENT_DATE) AS is_overdue
         FROM {SCHEMA}.exec_milestone m
         LEFT JOIN {SCHEMA}.exec_person per ON per.id = m.responsible_person_id
@@ -1859,11 +1862,25 @@ def _cpm_compute(nodes: dict, edges: list):
     зафиксированных в снимке baseline (чтобы сравнить критические пути).
     nodes: (kind,id) -> {duration, anchor_start, title, status, ...}
     edges: список зависимостей с полями dependency_type/src_*/tgt_*/lag_days.
-    Возвращает (result_nodes, project_duration, cycle_chain_or_None)."""
+    Возвращает (result_nodes, project_duration, cycle_chain_or_None, isolated_keys).
+
+    ВАЖНО: объекты, не связанные НИ ОДНОЙ зависимостью с остальным графом
+    (нет ни входящей, ни исходящей связи), исключаются из расчёта целиком —
+    иначе они математически получают нулевой резерв (LS=LF=0 по умолчанию,
+    ES=EF=0 при нулевой длительности) и ложно помечаются критичными, хотя
+    по смыслу метода критический путь для них попросту не определён."""
     local_edges = [e for e in edges
                    if (e["src_kind"], e["src_id"]) in nodes and (e["tgt_kind"], e["tgt_id"]) in nodes]
-    if len(nodes) < 2 or not local_edges:
-        return [], None, None
+    connected_keys = set()
+    for e in local_edges:
+        connected_keys.add((e["src_kind"], e["src_id"]))
+        connected_keys.add((e["tgt_kind"], e["tgt_id"]))
+    isolated_keys = set(nodes) - connected_keys
+
+    if len(connected_keys) < 2 or not local_edges:
+        return [], None, None, isolated_keys
+
+    nodes = {k: v for k, v in nodes.items() if k in connected_keys}
 
     adjacency: dict = {k: [] for k in nodes}
     indegree = {k: 0 for k in nodes}
@@ -1886,7 +1903,7 @@ def _cpm_compute(nodes: dict, edges: list):
     if len(order) != len(nodes):
         remaining = set(nodes) - set(order)
         chain = _find_cycle_chain(remaining, adjacency)
-        return [], None, [{"kind": k[0], "id": k[1], "title": nodes[k]["title"]} for k in chain]
+        return [], None, [{"kind": k[0], "id": k[1], "title": nodes[k]["title"]} for k in chain], isolated_keys
 
     day0 = min(n["anchor_start"] for n in nodes.values())
     ES = {k: 0 for k in nodes}
@@ -1965,7 +1982,7 @@ def _cpm_compute(nodes: dict, edges: list):
             "total_float_days": total_float, "free_float_days": free_float[k],
             "is_critical": is_critical, "criticality_reason": reason, "next_critical": next_critical,
         })
-    return result_nodes, project_duration, None
+    return result_nodes, project_duration, None, isolated_keys
 
 
 def _cpm_nodes_from_current(g: dict):
@@ -1991,7 +2008,10 @@ def _cpm_nodes_from_current(g: dict):
         else:
             incomplete.append({"kind": "task", "id": t["id"], "title": t["title"], "reason": "нет срока выполнения (due_at) — задача без даты не может участвовать в расчёте"})
     for m in g["milestones"]:
-        if m["plan_date"]:
+        if m.get("is_conditional_scenario"):
+            incomplete.append({"kind": "milestone", "id": m["id"], "title": m["title"],
+                                "reason": "условный сценарий (требует решения руководителя) — не включается в расчёт критического пути до подтверждения"})
+        elif m["plan_date"]:
             nodes[("milestone", m["id"])] = {
                 "kind": "milestone", "id": m["id"], "title": m["title"], "duration": 0,
                 "anchor_start": m["plan_date"], "status": m["status"], "responsible_name": m.get("responsible_name"),
@@ -2034,12 +2054,31 @@ def critical_path(cur, pid: int):
             "cycle": None, "nodes": [], "project_duration_days": None,
         }, None
 
-    result_nodes, project_duration, cycle_chain = _cpm_compute(nodes, g["edges"])
+    result_nodes, project_duration, cycle_chain, isolated_keys = _cpm_compute(nodes, g["edges"])
+
+    isolated_incomplete = [
+        {"kind": k[0], "id": k[1], "title": nodes[k]["title"],
+         "reason": "не связан ни одной зависимостью с остальным планом — критический путь для одиночного объекта не определён"}
+        for k in isolated_keys
+    ]
+    incomplete = incomplete + isolated_incomplete
+    if isolated_incomplete:
+        warnings.append(f"{len(isolated_incomplete)} объект(ов) не связаны зависимостями с остальным планом и исключены из расчёта критического пути.")
+
     if cycle_chain:
         return {
             "project": {"id": p["id"], "title": p["title"]},
             "computable": False, "warnings": warnings, "incomplete_objects": incomplete,
             "cycle": {"chain": cycle_chain}, "nodes": [], "project_duration_days": None,
+        }, None
+
+    if not result_nodes:
+        return {
+            "project": {"id": p["id"], "title": p["title"]},
+            "computable": False,
+            "warnings": warnings + ["Недостаточно связанных зависимостями объектов с датами для расчёта критического пути."],
+            "incomplete_objects": incomplete,
+            "cycle": None, "nodes": [], "project_duration_days": None,
         }, None
 
     return {
