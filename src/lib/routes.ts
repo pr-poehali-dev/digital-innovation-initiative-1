@@ -91,6 +91,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "chief.control", label: "Контроль", icon: "Flag", href: "/cabinet/exec/control", active: true },
       { id: "chief.stakeholders", label: "Стейкхолдеры", icon: "Users", href: "/cabinet/exec/stakeholders", active: true },
       { id: "chief.decisions", label: "Решения", icon: "GitPullRequest", href: "/cabinet/exec/decisions", active: true },
+      { id: "chief.decisionRequests", label: "Реестр вопросов", icon: "ListChecks", href: "/cabinet/exec/decision-requests", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.authority", label: "Полномочия", icon: "Shield", href: "/cabinet/exec/authority", active: true },
       { id: "chief.diagnostics", label: "Диагностика", icon: "Stethoscope", href: "/cabinet/exec/diagnostics", active: true },
       { id: "chief.processMap", label: "Черновая карта ДФМ", icon: "FileSearch", href: ROUTES.processMap, active: true, badge: { text: "Черновик", tone: "neutral" } },

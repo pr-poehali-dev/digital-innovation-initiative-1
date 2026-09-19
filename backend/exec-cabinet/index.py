@@ -973,6 +973,98 @@ def handler(event: dict, context) -> dict:
             """)
             return cors({"ok": True, "data": {"items": rows(cur)}})
 
+        if action == "decision_requests_registry":
+            # Единый реестр вопросов по ВСЕМ инициативам портфеля — для
+            # предварительной проверки руководителем перед рассылкой.
+            # Ничего не направляется автоматически: все вопросы создаются
+            # и остаются в статусе dispatch_status='draft_not_sent', пока
+            # пользователь явно не преобразует конкретный вопрос в поручение.
+            conds = ["COALESCE(i.is_test_data, false) = false"]
+            params: list = []
+            if qs.get("question_type"):
+                conds.append("idr.question_type = %s")
+                params.append(qs["question_type"])
+            if qs.get("status"):
+                conds.append("idr.status = %s")
+                params.append(qs["status"])
+            if qs.get("initiative_id"):
+                conds.append("idr.initiative_id = %s")
+                params.append(int(qs["initiative_id"]))
+            where = "WHERE " + " AND ".join(conds)
+            cur.execute(f"""
+                SELECT idr.id, idr.initiative_id, i.external_code AS initiative_code, i.title AS initiative_title,
+                       cust.id AS customer_org_unit_id, cust.name AS customer_org_unit_name,
+                       idr.question, idr.question_type, idr.options, idr.recommended_option,
+                       idr.priority, idr.due_at, idr.status, idr.dispatch_status,
+                       idr.addressee_person_id, ap.display_name AS addressee_name, ap.position_title AS addressee_position,
+                       idr.converted_to_action_id,
+                       idr.consequence_if_not_decided, idr.source_note, idr.verification_status,
+                       idr.created_at, idr.updated_at
+                FROM {SCHEMA}.exec_initiative_decision_request idr
+                JOIN {SCHEMA}.exec_initiative i ON i.id = idr.initiative_id
+                LEFT JOIN {SCHEMA}.org_units cust ON cust.id = i.customer_org_unit_id
+                LEFT JOIN {SCHEMA}.exec_person ap ON ap.id = idr.addressee_person_id
+                {where}
+                ORDER BY i.external_code, idr.question_type, idr.id
+            """, params)
+            items = rows(cur)
+            return cors({"ok": True, "data": {
+                "items": items,
+                "summary": {
+                    "total": len(items),
+                    "decision": sum(1 for x in items if x["question_type"] == "decision"),
+                    "data_clarification": sum(1 for x in items if x["question_type"] == "data_clarification"),
+                    "draft_not_sent": sum(1 for x in items if x["dispatch_status"] == "draft_not_sent"),
+                    "converted": sum(1 for x in items if x["dispatch_status"] == "converted"),
+                },
+            }})
+
+        if action == "convert_decision_request_to_action":
+            # Преобразование вопроса в поручение — ТОЛЬКО по явному
+            # подтверждению пользователем адресата, срока и ожидаемого
+            # результата. Ничего не подставляется автоматически из
+            # догадок: если addressee_person_id не передан, поручение
+            # создаётся без ответственного (останется видно как пробел).
+            rid = as_int(body.get("decision_request_id"))
+            if not rid:
+                return cors({"ok": False, "error": {"message": "Не указан вопрос для преобразования"}}, 400)
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_initiative_decision_request WHERE id = %s", (rid,))
+            dr = rows(cur)
+            if not dr:
+                return cors({"ok": False, "error": {"message": "Вопрос не найден"}}, 404)
+            dr = dr[0]
+            if dr.get("converted_to_action_id"):
+                return cors({"ok": False, "error": {"message": "Вопрос уже преобразован в поручение"}}, 400)
+
+            responsible_person_id = as_int(body.get("responsible_person_id"))
+            due_at = body.get("due_at")
+            expected_result = body.get("expected_result") or ""
+            if not expected_result.strip():
+                return cors({"ok": False, "error": {"message": "Укажите ожидаемый результат поручения"}}, 400)
+
+            cur.execute(f"""
+                INSERT INTO {SCHEMA}.exec_action
+                    (title, description, initiative_id, responsible_person_id, due_at,
+                     expected_result, status, priority, created_by)
+                VALUES (%s,%s,%s,%s,%s,%s,'new',%s,%s) RETURNING id
+            """, (dr["question"][:500], dr["question"], dr["initiative_id"], responsible_person_id, due_at,
+                  expected_result, dr.get("priority"), actor))
+            new_action_id = cur.fetchone()[0]
+
+            cur.execute(f"""
+                UPDATE {SCHEMA}.exec_initiative_decision_request
+                SET converted_to_action_id = %s, dispatch_status = 'converted', updated_at = now()
+                WHERE id = %s
+            """, (new_action_id, rid))
+
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+                f"VALUES (%s,%s,%s,%s,%s)",
+                ("decision_request", rid, "convert_to_action", actor,
+                 json.dumps({"action_id": new_action_id, "responsible_person_id": responsible_person_id, "due_at": due_at}, ensure_ascii=False, default=str)))
+            conn.commit()
+            return cors({"ok": True, "data": {"action_id": new_action_id}})
+
         if action == "initiative":
             iid = int(qs.get("id", 0))
             cur.execute(f"""
@@ -1471,7 +1563,7 @@ def handler(event: dict, context) -> dict:
             fields = ["initiative_id", "question", "options", "recommended_option", "due_at",
                       "consequence_if_not_decided", "prepared_by_person_id", "status",
                       "decided_option", "decided_at", "decided_by_person_id", "source_note",
-                      "question_type"]
+                      "question_type", "priority", "addressee_person_id", "dispatch_status"]
             data = {k: body.get(k) for k in fields if k in body}
             if rid:
                 sets = ", ".join(f"{k} = %s" for k in data)

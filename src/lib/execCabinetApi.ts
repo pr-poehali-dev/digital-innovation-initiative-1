@@ -135,6 +135,39 @@ export interface DecisionRequest {
    * data_clarification — уточнение исходных данных у владельца инициативы,
    * не является решением по существу инициативы. */
   question_type?: "decision" | "data_clarification";
+  priority?: "low" | "medium" | "high" | null;
+  /** draft_not_sent — черновик, никому не направлен (по умолчанию для
+   * всех вопросов); converted — преобразован в поручение; sent — направлен
+   * адресату вне поручения (зарезервировано). */
+  dispatch_status?: "draft_not_sent" | "converted" | "sent";
+  addressee_person_id?: number | null;
+  converted_to_action_id?: number | null;
+}
+
+export interface DecisionRequestRegistryItem {
+  id: number;
+  initiative_id: number;
+  initiative_code: string | null;
+  initiative_title: string;
+  customer_org_unit_id: number | null;
+  customer_org_unit_name: string | null;
+  question: string;
+  question_type: "decision" | "data_clarification";
+  options: string | null;
+  recommended_option: string | null;
+  priority: "low" | "medium" | "high" | null;
+  due_at: string | null;
+  status: "open" | "decided" | "withdrawn";
+  dispatch_status: "draft_not_sent" | "converted" | "sent";
+  addressee_person_id: number | null;
+  addressee_name: string | null;
+  addressee_position: string | null;
+  converted_to_action_id: number | null;
+  consequence_if_not_decided: string | null;
+  source_note: string | null;
+  verification_status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PlanProjectRef {
@@ -444,6 +477,26 @@ export const execApi = {
 
   saveDecisionRequest: (payload: Record<string, unknown>): Promise<{ id: number }> =>
     req("/?action=save_decision_request", { method: "POST", body: JSON.stringify(payload) }),
+
+  decisionRequestsRegistry: (filters?: { question_type?: string; status?: string; initiative_id?: number }): Promise<{
+    items: DecisionRequestRegistryItem[];
+    summary: { total: number; decision: number; data_clarification: number; draft_not_sent: number; converted: number };
+  }> => {
+    const params = new URLSearchParams();
+    if (filters?.question_type) params.set("question_type", filters.question_type);
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.initiative_id) params.set("initiative_id", String(filters.initiative_id));
+    const qs = params.toString();
+    return req(`/?action=decision_requests_registry${qs ? `&${qs}` : ""}`);
+  },
+
+  convertDecisionRequestToAction: (payload: {
+    decision_request_id: number;
+    responsible_person_id?: number;
+    due_at?: string;
+    expected_result: string;
+  }): Promise<{ action_id: number }> =>
+    req("/?action=convert_decision_request_to_action", { method: "POST", body: JSON.stringify(payload) }),
 
   auditLog: (entity = "", limit = 200): Promise<AuditData> =>
     req(`/?action=audit_log&limit=${limit}${entity ? `&entity=${entity}` : ""}`),

@@ -39,6 +39,7 @@ import ExecInitiativesPage from "./pages/cabinet/exec/ExecInitiativesPage";
 import ExecInitiativeDetailPage from "./pages/cabinet/exec/ExecInitiativeDetailPage";
 import ExecStakeholdersPage from "./pages/cabinet/exec/ExecStakeholdersPage";
 import ExecDecisionsPage from "./pages/cabinet/exec/ExecDecisionsPage";
+import ExecDecisionRequestsRegistryPage from "./pages/cabinet/exec/ExecDecisionRequestsRegistryPage";
 import ExecAuthorityPage from "./pages/cabinet/exec/ExecAuthorityPage";
 import ExecDiagnosticsPage from "./pages/cabinet/exec/ExecDiagnosticsPage";
 import ExecPersonsPage from "./pages/cabinet/exec/ExecPersonsPage";
@@ -213,6 +214,7 @@ const App = () => (
               <Route path="/cabinet/exec/control" element={<ExecRoute><ExecControlPage /></ExecRoute>} />
               <Route path="/cabinet/exec/stakeholders" element={<ExecRoute><ExecStakeholdersPage /></ExecRoute>} />
               <Route path="/cabinet/exec/decisions" element={<ExecRoute><ExecDecisionsPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/decision-requests" element={<ExecRoute><ExecDecisionRequestsRegistryPage /></ExecRoute>} />
               <Route path="/cabinet/exec/authority" element={<ExecRoute><ExecAuthorityPage /></ExecRoute>} />
               <Route path="/cabinet/exec/diagnostics" element={<ExecRoute><ExecDiagnosticsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/persons" element={<ExecRoute><ExecPersonsPage /></ExecRoute>} />
