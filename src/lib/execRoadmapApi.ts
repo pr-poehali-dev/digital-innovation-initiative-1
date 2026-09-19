@@ -200,13 +200,18 @@ export interface GanttTask {
   milestone_id: number | null;
   responsible_person_id: number | null;
   responsible_name: string | null;
+  responsible_role?: string | null;
   due_at: string | null;
+  plan_start?: string | null;
   forecast_date: string | null;
   fact_date: string | null;
   priority: string;
   status: string;
   progress_pct: number;
   is_overdue: boolean;
+  parent_task_id?: number | null;
+  outline_code?: string | null;
+  sort_order?: number;
 }
 
 export interface GanttMilestone {
@@ -220,7 +225,11 @@ export interface GanttMilestone {
   status: string;
   responsible_person_id: number | null;
   responsible_name: string | null;
+  responsible_role?: string | null;
   achievement_criteria: string | null;
+  parent_milestone_id?: number | null;
+  outline_code?: string | null;
+  sort_order?: number;
 }
 
 export interface ProjectGanttData {

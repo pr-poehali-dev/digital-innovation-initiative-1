@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import {
@@ -11,12 +11,15 @@ import {
   InitiativeFunctionRef,
   InitiativeLabor,
   InitiativeMilestoneRef,
+  PlanProjectRef,
   execApi,
   Initiative,
   RefsData,
   RoleAssignment,
   Stakeholder,
 } from "@/lib/execCabinetApi";
+import { execPortfolioApi, HistoryEntry } from "@/lib/execPortfolioApi";
+import { controlApi, Risk } from "@/lib/execControlApi";
 import DecisionRequestForm from "@/components/exec/DecisionRequestForm";
 import { Badge, Card, Empty, ErrorBox, Loading, VerificationTag, fmtDate } from "@/components/exec/ExecUI";
 import { VerificationSelect } from "@/components/exec/ExecForm";
@@ -27,17 +30,20 @@ import DecisionForm from "@/components/exec/DecisionForm";
 import QuickIssueForm from "@/components/exec/QuickIssueForm";
 import QuickRiskForm from "@/components/exec/QuickRiskForm";
 import { TeamTab, BudgetTab, CapacityTab, FotTab, PlanFactTab } from "@/components/exec/ProjectResourcesTab";
+import InitiativePlanTab from "@/components/exec/InitiativePlanTab";
+import { RISK_CATEGORY_LABEL, RISK_LEVEL_LABEL, RISK_STATUS_LABEL } from "@/lib/execControlApi";
 
-type Tab = "overview" | "stakeholders" | "decisions" | "roles" | "effect" | "budget" | "resources";
+type Tab = "overview" | "plan" | "risks" | "budget" | "team" | "decisions" | "documents" | "history";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: "overview", label: "Основное", icon: "FileText" },
-  { id: "stakeholders", label: "Стейкхолдеры", icon: "Users" },
+  { id: "overview", label: "Обзор", icon: "FileText" },
+  { id: "plan", label: "План и Гант", icon: "GanttChartSquare" },
+  { id: "risks", label: "Риски", icon: "ShieldAlert" },
+  { id: "budget", label: "Бюджет и ресурсы", icon: "Wallet" },
+  { id: "team", label: "Команда", icon: "Users" },
   { id: "decisions", label: "Решения", icon: "GitPullRequest" },
-  { id: "roles", label: "Роли", icon: "Shield" },
-  { id: "effect", label: "Эффект", icon: "TrendingUp" },
-  { id: "budget", label: "Бюджетная заявка", icon: "Wallet" },
-  { id: "resources", label: "Ресурсы и финансы", icon: "PiggyBank" },
+  { id: "documents", label: "Документы", icon: "FileStack" },
+  { id: "history", label: "История", icon: "History" },
 ];
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
@@ -77,6 +83,7 @@ function MiniMetric({
 
 export default function ExecInitiativeDetailPage() {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [initiative, setInitiative] = useState<Initiative | null>(null);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
@@ -85,7 +92,17 @@ export default function ExecInitiativeDetailPage() {
   const [refs, setRefs] = useState<RefsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<Tab>("overview");
+  const urlTab = searchParams.get("tab") as Tab | null;
+  const [tab, setTabState] = useState<Tab>(urlTab && TABS.some((t) => t.id === urlTab) ? urlTab : "overview");
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", t);
+    setSearchParams(next, { replace: true });
+  };
+  const [planProject, setPlanProject] = useState<PlanProjectRef | null>(null);
+  const [risks, setRisks] = useState<Risk[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [editInit, setEditInit] = useState(false);
   const [shForm, setShForm] = useState<{ open: boolean; item: Stakeholder | null }>({
     open: false,
@@ -118,8 +135,12 @@ export default function ExecInitiativeDetailPage() {
   const load = () => {
     setLoading(true);
     setError("");
-    Promise.all([execApi.initiative(Number(id)), execApi.refs()])
-      .then(([r, rf]) => {
+    Promise.all([
+      execApi.initiative(Number(id)),
+      execApi.refs(),
+      controlApi.all(Number(id)).then((d) => d.risks).catch(() => []),
+    ])
+      .then(([r, rf, rk]) => {
         setInitiative(r.initiative);
         setStakeholders(r.stakeholders);
         setDecisions(r.decisions);
@@ -133,12 +154,20 @@ export default function ExecInitiativeDetailPage() {
         setFunctions(r.functions);
         setActionStats(r.action_stats);
         setDecisionRequests(r.decision_requests || []);
+        setPlanProject(r.plan_project);
+        setRisks(rk);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, [id]);
+
+  useEffect(() => {
+    if (tab === "history" && id) {
+      execPortfolioApi.history("initiative", Number(id)).then((d) => setHistory(d.items)).catch(() => {});
+    }
+  }, [tab, id]);
 
   const changeStatus = async (
     entity: "initiative" | "stakeholder" | "decision",
@@ -346,11 +375,16 @@ export default function ExecInitiativeDetailPage() {
             >
               <Icon name={t.icon} size={14} />
               {t.label}
-              {t.id === "stakeholders" && stakeholders.length > 0 && (
+              {t.id === "team" && stakeholders.length > 0 && (
                 <span className="text-xs text-slate-400">{stakeholders.length}</span>
               )}
               {t.id === "decisions" && decisions.length > 0 && (
                 <span className="text-xs text-slate-400">{decisions.length}</span>
+              )}
+              {t.id === "risks" && risks.length > 0 && (
+                <span className={`text-xs ${riskStats.high_risks > 0 ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                  {risks.length}
+                </span>
               )}
             </button>
           ))}
@@ -381,6 +415,60 @@ export default function ExecInitiativeDetailPage() {
                 Все точки, проблемы и риски
               </Link>
             </div>
+
+            <Card
+              title="План исполнения"
+              icon="GanttChartSquare"
+              className="lg:col-span-2"
+              action={
+                <button
+                  onClick={() => setTab("plan")}
+                  className="px-2.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                >
+                  <Icon name="ExternalLink" size={13} />
+                  Открыть план и Гант
+                </button>
+              }
+            >
+              {!planProject ? (
+                <Empty text="План исполнения ещё не заведён — вехи есть, но работы с продолжительностью и зависимостями пока не структурированы" icon="GanttChartSquare" />
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <MiniMetric label="Готовность" value={`${planProject.progress_pct}%`} />
+                  <MiniMetric
+                    label="Ближайшая веха"
+                    value={nextMilestone ? fmtDate(nextMilestone.plan_date) : "—"}
+                    tone={nextMilestone?.days_left != null && nextMilestone.days_left < 0 ? "danger" : "default"}
+                    hint={nextMilestone?.title}
+                  />
+                  <MiniMetric
+                    label="Просрочки"
+                    value={planProject.overdue_task_count + planProject.overdue_milestone_count}
+                    tone={planProject.overdue_task_count + planProject.overdue_milestone_count > 0 ? "danger" : "default"}
+                    hint={
+                      planProject.overdue_task_count + planProject.overdue_milestone_count > 0
+                        ? `задач: ${planProject.overdue_task_count}, вех: ${planProject.overdue_milestone_count}`
+                        : undefined
+                    }
+                  />
+                  <MiniMetric
+                    label="Прогнозное завершение"
+                    value={planProject.forecast_end ? fmtDate(planProject.forecast_end) : fmtDate(planProject.plan_end)}
+                    tone={
+                      planProject.forecast_end && planProject.plan_end && planProject.forecast_end > planProject.plan_end
+                        ? "warning"
+                        : "default"
+                    }
+                    hint={
+                      planProject.forecast_end && planProject.plan_end && planProject.forecast_end > planProject.plan_end
+                        ? `план был: ${fmtDate(planProject.plan_end)}`
+                        : undefined
+                    }
+                  />
+                </div>
+              )}
+            </Card>
+
             <Card
               title="Требует решения руководителя"
               icon="Gavel"
@@ -469,14 +557,103 @@ export default function ExecInitiativeDetailPage() {
                 />
               </div>
             </Card>
+
+            <Card title="Ожидаемый эффект" icon="TrendingUp" className="lg:col-span-2">
+              <div className="space-y-4">
+                <Field label="Описание эффекта" value={i.effect_description} />
+                <Field label="Владелец эффекта" value={i.effect_owner_name} />
+                <Field label="Показатель" value={i.effect_metric} />
+                <div className="grid grid-cols-3 gap-3 pt-2">
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Базовое</p>
+                    <p className="text-sm text-slate-800 mt-1">{i.effect_baseline || "—"}</p>
+                  </div>
+                  <div className="rounded-lg border border-violet-600/30 bg-violet-50 p-3">
+                    <p className="text-xs text-slate-500">Целевое</p>
+                    <p className="text-sm text-violet-700 mt-1">{i.effect_target || "—"}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-xs text-slate-500">Фактическое</p>
+                    <p className="text-sm text-slate-800 mt-1">{i.effect_actual || "—"}</p>
+                  </div>
+                </div>
+              </div>
+            </Card>
           </div>
         )}
 
-        {tab === "stakeholders" && (
+        {tab === "plan" && (
+          <InitiativePlanTab initiativeId={i.id} planProject={planProject} onProjectCreated={load} />
+        )}
+
+        {tab === "risks" && (
+          <Card title="Риски инициативы" subtitle={`${risks.length} записей`} icon="ShieldAlert">
+            {risks.length === 0 ? (
+              <Empty text="Рисков не зафиксировано" icon="ShieldAlert" />
+            ) : (
+              <div className="space-y-2">
+                {risks.map((r) => {
+                  const lvl = RISK_LEVEL_LABEL[r.risk_level] || RISK_LEVEL_LABEL.low;
+                  return (
+                    <div key={r.id} className={`rounded-lg border p-3.5 ${r.status === "active" ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50 opacity-70"}`}>
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <span className={`text-[11px] px-1.5 py-0.5 rounded-md border font-medium ${lvl.cls}`}>
+                              {lvl.title} · {r.risk_score}
+                            </span>
+                            <span className="text-xs text-slate-500">{RISK_STATUS_LABEL[r.status]}</span>
+                            {r.category && (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                                {RISK_CATEGORY_LABEL[r.category] || r.category}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-900">{r.description}</p>
+                          {r.related_milestone_title && (
+                            <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                              <Icon name="Flag" size={10} />
+                              {r.related_milestone_title}
+                            </p>
+                          )}
+                        </div>
+                        <Link
+                          to={`/cabinet/exec/control?tab=risks&initiative=${i.id}`}
+                          className="text-xs text-violet-600 hover:text-violet-700 flex items-center gap-1 flex-shrink-0"
+                        >
+                          Открыть <Icon name="ExternalLink" size={11} />
+                        </Link>
+                      </div>
+                      {(r.owner_name || r.owner_role) && (
+                        <p className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100">
+                          Владелец: {r.owner_name || r.owner_role}
+                        </p>
+                      )}
+                      {r.preventive_measures && (
+                        <p className="text-xs text-slate-500 mt-1.5">
+                          <span className="text-slate-400">Меры:</span> {r.preventive_measures}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {tab === "team" && (
+          <div className="space-y-5">
+          <Card title="Команда инициативы" icon="Users">
+            <TeamTab kind="initiative" parentId={i.id} />
+          </Card>
+          <Card title="Загрузка" icon="CalendarRange">
+            <CapacityTab kind="initiative" parentId={i.id} />
+          </Card>
           <Card
             title="Стейкхолдеры инициативы"
             subtitle={`${stakeholders.length} участников`}
-            icon="Users"
+            icon="UserCog"
             action={
               <button
                 onClick={() => setShForm({ open: true, item: null })}
@@ -565,6 +742,43 @@ export default function ExecInitiativeDetailPage() {
               </div>
             )}
           </Card>
+
+          <Card title="Назначения ролей" subtitle={`${assignments.length} назначений`} icon="Shield">
+            {assignments.length === 0 ? (
+              <Empty text="Роли не назначены" />
+            ) : (
+              <div className="overflow-x-auto -mx-4 px-4">
+                <table className="w-full text-sm min-w-[600px]">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                      <th className="pb-2 font-medium">Роль</th>
+                      <th className="pb-2 font-medium">Лицо</th>
+                      <th className="pb-2 font-medium">Период</th>
+                      <th className="pb-2 font-medium">Статус</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {assignments.map((a) => (
+                      <tr key={a.id}>
+                        <td className="py-2.5 text-slate-800">{a.role_title}</td>
+                        <td className="py-2.5 text-slate-700">
+                          {a.display_name || <span className="text-red-600">не назначено</span>}
+                        </td>
+                        <td className="py-2.5 text-slate-500 text-xs">
+                          {fmtDate(a.date_from)}
+                          {a.date_to && ` — ${fmtDate(a.date_to)}`}
+                        </td>
+                        <td className="py-2.5">
+                          <VerificationTag status={a.verification_status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+          </div>
         )}
 
         {tab === "decisions" && (
@@ -641,68 +855,6 @@ export default function ExecInitiativeDetailPage() {
           </Card>
         )}
 
-        {tab === "roles" && (
-          <Card title="Назначения ролей" subtitle={`${assignments.length} назначений`} icon="Shield">
-            {assignments.length === 0 ? (
-              <Empty text="Роли не назначены" />
-            ) : (
-              <div className="overflow-x-auto -mx-4 px-4">
-                <table className="w-full text-sm min-w-[600px]">
-                  <thead>
-                    <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                      <th className="pb-2 font-medium">Роль</th>
-                      <th className="pb-2 font-medium">Лицо</th>
-                      <th className="pb-2 font-medium">Период</th>
-                      <th className="pb-2 font-medium">Статус</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {assignments.map((a) => (
-                      <tr key={a.id}>
-                        <td className="py-2.5 text-slate-800">{a.role_title}</td>
-                        <td className="py-2.5 text-slate-700">
-                          {a.display_name || <span className="text-red-600">не назначено</span>}
-                        </td>
-                        <td className="py-2.5 text-slate-500 text-xs">
-                          {fmtDate(a.date_from)}
-                          {a.date_to && ` — ${fmtDate(a.date_to)}`}
-                        </td>
-                        <td className="py-2.5">
-                          <VerificationTag status={a.verification_status} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        )}
-
-        {tab === "effect" && (
-          <Card title="Ожидаемый эффект" icon="TrendingUp">
-            <div className="space-y-4">
-              <Field label="Описание эффекта" value={i.effect_description} />
-              <Field label="Владелец эффекта" value={i.effect_owner_name} />
-              <Field label="Показатель" value={i.effect_metric} />
-              <div className="grid grid-cols-3 gap-3 pt-2">
-                <div className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-xs text-slate-500">Базовое</p>
-                  <p className="text-sm text-slate-800 mt-1">{i.effect_baseline || "—"}</p>
-                </div>
-                <div className="rounded-lg border border-violet-600/30 bg-violet-50 p-3">
-                  <p className="text-xs text-slate-500">Целевое</p>
-                  <p className="text-sm text-violet-700 mt-1">{i.effect_target || "—"}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-xs text-slate-500">Фактическое</p>
-                  <p className="text-sm text-slate-800 mt-1">{i.effect_actual || "—"}</p>
-                </div>
-              </div>
-            </div>
-          </Card>
-        )}
-
         {tab === "budget" && (
           <div className="grid lg:grid-cols-2 gap-5">
             <Card title="Бюджетная заявка" icon="Wallet">
@@ -744,27 +896,39 @@ export default function ExecInitiativeDetailPage() {
                 <Field label="Источник финансирования (общий)" value={i.budget_source} />
               </div>
             </Card>
-          </div>
-        )}
-
-        {tab === "resources" && (
-          <div className="space-y-6">
-            <Card title="Команда инициативы" icon="Users">
-              <TeamTab kind="initiative" parentId={i.id} />
-            </Card>
-            <Card title="Загрузка" icon="CalendarRange">
-              <CapacityTab kind="initiative" parentId={i.id} />
-            </Card>
             <Card title="Бюджет по годам" icon="Wallet">
               <BudgetTab kind="initiative" parentId={i.id} />
             </Card>
             <Card title="ФОТ" icon="Banknote">
               <FotTab kind="initiative" parentId={i.id} />
             </Card>
-            <Card title="План-факт" icon="TrendingUp">
+            <Card title="План-факт" icon="TrendingUp" className="lg:col-span-2">
               <PlanFactTab kind="initiative" parentId={i.id} />
             </Card>
           </div>
+        )}
+
+        {tab === "documents" && (
+          <Card title="Документы инициативы" icon="FileStack">
+            <Empty text="Раздел документов пока не заполнен" icon="FileStack" />
+          </Card>
+        )}
+
+        {tab === "history" && (
+          <Card title="История изменений" icon="History">
+            {history.length === 0 ? (
+              <Empty text="История пуста" icon="History" />
+            ) : (
+              <div className="space-y-1.5">
+                {history.map((h) => (
+                  <div key={h.id} className="text-xs border-b border-slate-100 py-1.5">
+                    <span className="font-medium">{h.action}</span>
+                    <span className="text-muted-foreground ml-1.5">{h.actor} · {fmtDate(h.created_at)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
         )}
 
         {editInit && refs && (

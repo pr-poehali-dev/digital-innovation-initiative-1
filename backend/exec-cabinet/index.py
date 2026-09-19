@@ -905,8 +905,16 @@ def handler(event: dict, context) -> dict:
 
         if action == "initiatives":
             portfolio_id = qs.get("portfolio_id")
-            where = "WHERE i.portfolio_id = %s" if portfolio_id else ""
-            params = (int(portfolio_id),) if portfolio_id else ()
+            include_test_data = qs.get("include_test_data") == "1"
+            conds = []
+            params = []
+            if portfolio_id:
+                conds.append("i.portfolio_id = %s")
+                params.append(int(portfolio_id))
+            if not include_test_data:
+                conds.append("COALESCE(i.is_test_data, false) = false")
+            where = ("WHERE " + " AND ".join(conds)) if conds else ""
+            params = tuple(params)
             cur.execute(f"""
                 SELECT i.*, ow.display_name AS owner_name, mg.display_name AS manager_name,
                        cu.display_name AS curator_name, ef.display_name AS effect_owner_name,
@@ -1089,13 +1097,31 @@ def handler(event: dict, context) -> dict:
             """, (iid,))
             decision_requests = rows(cur)
 
+            # План исполнения: рабочий проект-контейнер инициативы (если заведён) —
+            # для краткой сводки в «Обзоре» и перехода на вкладку «План и Гант».
+            cur.execute(f"""
+                SELECT p.id, p.title, p.progress_pct, p.plan_start, p.plan_end, p.forecast_end,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_task t
+                        WHERE t.project_id = p.id AND t.archived_at IS NULL
+                          AND t.status NOT IN ('done', 'cancelled')
+                          AND t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE) AS overdue_task_count,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_milestone m
+                        WHERE m.project_id = p.id AND m.status NOT IN ('achieved', 'cancelled')
+                          AND m.plan_date IS NOT NULL AND m.plan_date < CURRENT_DATE) AS overdue_milestone_count
+                FROM {SCHEMA}.exec_project p
+                WHERE p.initiative_id = %s AND p.archived_at IS NULL
+                ORDER BY p.id LIMIT 1
+            """, (iid,))
+            plan_project_rows = rows(cur)
+            plan_project = plan_project_rows[0] if plan_project_rows else None
+
             return cors({"ok": True, "data": {
                 "initiative": item[0], "stakeholders": stakeholders,
                 "decisions": decisions, "assignments": assignments,
                 "next_milestone": next_milestone,
                 "issue_stats": issue_stats, "risk_stats": risk_stats,
                 "labor": labor, "functions": functions, "action_stats": action_stats,
-                "decision_requests": decision_requests,
+                "decision_requests": decision_requests, "plan_project": plan_project,
                 "dictionaries": load_dictionaries(cur),
             }})
 

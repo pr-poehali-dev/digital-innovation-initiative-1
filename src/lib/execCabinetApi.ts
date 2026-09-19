@@ -133,6 +133,17 @@ export interface DecisionRequest {
   verification_status: string;
 }
 
+export interface PlanProjectRef {
+  id: number;
+  title: string;
+  progress_pct: number;
+  plan_start: string | null;
+  plan_end: string | null;
+  forecast_end: string | null;
+  overdue_task_count: number;
+  overdue_milestone_count: number;
+}
+
 export interface InitiativeMilestoneRef {
   id: number;
   title: string;
@@ -360,6 +371,7 @@ export const execApi = {
     functions: InitiativeFunctionRef[];
     action_stats: { open_actions: number; overdue_actions: number };
     decision_requests: DecisionRequest[];
+    plan_project: PlanProjectRef | null;
     dictionaries: Dictionaries;
   }> => req(`/?action=initiative&id=${id}`),
 
