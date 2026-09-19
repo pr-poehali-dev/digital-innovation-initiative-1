@@ -5,7 +5,7 @@ import SolutionsTab from "@/components/workspace/SolutionsTab";
 import ProcessesTab from "@/components/workspace/ProcessesTab";
 import PainsTab from "@/components/workspace/PainsTab";
 import PassportTab from "@/components/workspace/PassportTab";
-import WorkplanTab from "@/components/workspace/WorkplanTab";
+import StagesGatesTab from "@/components/workspace/StagesGatesTab";
 import DeptFunctionsTab from "@/components/dept/DeptFunctionsTab";
 import DeptAutomationTab from "@/components/dept/DeptAutomationTab";
 import DeptTreeTab from "@/components/dept/DeptTreeTab";
@@ -1250,7 +1250,7 @@ export default function ProjectPage() {
                 { key: "overview",    label: "🏠 Обзор" },
                 ...(project?.project_kind === "lab_development" ? [
                   { key: "passport", label: "🧭 Паспорт" },
-                  { key: "workplan", label: "🗓️ Рабочий план" },
+                  { key: "workplan", label: "🗓️ Стадии и шлюзы" },
                 ] : []),
                 { key: "copilot",     label: "🤖 AI Copilot" },
                 { key: "process",     label: `⚙️ Процессы${processes.length ? ` (${processes.length})` : ""}` },
@@ -1849,9 +1849,9 @@ export default function ProjectPage() {
           <PassportTab projectId={projectId} />
         )}
 
-        {/* ── Рабочий план лаборатории ── */}
+        {/* ── Стадии и шлюзы лабораторного кейса ── */}
         {tab === "workplan" && project?.project_kind === "lab_development" && (
-          <WorkplanTab projectId={projectId} />
+          <StagesGatesTab projectId={projectId} />
         )}
 
         {/* ── AI Copilot ── */}

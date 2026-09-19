@@ -15,6 +15,8 @@ Actions:
   PUT  passport         — обновить паспорт лабораторного кейса
   GET  workplan         — рабочий план лаборатории (авто-создаётся при первом обращении)
   PUT  workplan         — обновить статус/ответственного задачи плана
+  GET  stages           — стадии и критерии шлюзов кейса (авто-создаются из шаблона project_kind)
+  POST stage_transition — подтвердить переход к следующей стадии (с опциональным waiver критериев)
 """
 import json
 import os
@@ -95,6 +97,136 @@ def bump_content_version(conn, project_id: int):
             f"UPDATE {SCHEMA}.projects SET content_version = content_version + 1, ai_status = 'idle' WHERE id = %s",
             (project_id,),
         )
+
+
+def get_user_name(conn, user_id: int) -> str:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT name FROM {SCHEMA}.users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+    return row[0] if row else "Неизвестный пользователь"
+
+
+def init_stages_from_template(conn, project_id: int, project_kind: str):
+    """Создаёт стадии и критерии проекта из шаблона project_kind (общий механизм,
+    не привязан к конкретному кейсу). Первая стадия — 'active', остальные — 'locked'."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""SELECT id, order_no, code, title FROM {SCHEMA}.wb_stage_template
+                WHERE project_kind = %s ORDER BY order_no""",
+            (project_kind,),
+        )
+        templates = cur.fetchall()
+        for t_id, order_no, code, title in templates:
+            status = "active" if order_no == 1 else "locked"
+            cur.execute(
+                f"""INSERT INTO {SCHEMA}.wb_case_stage (project_id, order_no, code, title, status)
+                    VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (project_id, order_no, code, title, status),
+            )
+            stage_id = cur.fetchone()[0]
+            cur.execute(
+                f"""SELECT order_no, code, title, criterion_type FROM {SCHEMA}.wb_stage_template_criterion
+                    WHERE stage_template_id = %s ORDER BY order_no""",
+                (t_id,),
+            )
+            for c_order, c_code, c_title, c_type in cur.fetchall():
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.wb_case_stage_criterion
+                        (stage_id, order_no, code, title, criterion_type)
+                        VALUES (%s, %s, %s, %s, %s)""",
+                    (stage_id, c_order, c_code, c_title, c_type),
+                )
+
+
+def evaluate_all_criteria(conn, project_id: int):
+    """Автоматически пересчитывает результат критериев с типом отличным от 'manual'
+    и 'waived' (те трогать нельзя — это зафиксированное решение владельца)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""SELECT c.id, c.criterion_type, c.result, s.code
+                FROM {SCHEMA}.wb_case_stage_criterion c
+                JOIN {SCHEMA}.wb_case_stage s ON s.id = c.stage_id
+                WHERE s.project_id = %s""",
+            (project_id,),
+        )
+        criteria = cur.fetchall()
+
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT status FROM {SCHEMA}.wb_case_analysis WHERE project_id = %s", (project_id,))
+        pr = cur.fetchone()
+    passport_confirmed = bool(pr and pr[0] == "confirmed")
+
+    for c_id, c_type, c_result, stage_code in criteria:
+        if c_result == "waived":
+            continue
+        new_result = None
+        if c_type == "stage_tasks_done":
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT COUNT(*) FILTER (WHERE status != 'done'), COUNT(*)
+                        FROM {SCHEMA}.wb_case_workplan_task
+                        WHERE project_id = %s AND stage_code = %s""",
+                    (project_id, stage_code),
+                )
+                unfinished, total = cur.fetchone()
+            new_result = "passed" if total > 0 and unfinished == 0 else "failed"
+        elif c_type == "passport_confirmed":
+            new_result = "passed" if passport_confirmed else "failed"
+        elif c_type == "manual":
+            continue
+        if new_result and new_result != c_result:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.wb_case_stage_criterion
+                        SET result = %s, checked_at = NOW(), updated_at = NOW() WHERE id = %s""",
+                    (new_result, c_id),
+                )
+
+
+def fetch_stages_payload(conn, project_id: int):
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""SELECT id, order_no, code, title, status, gate_confirmed_at, gate_confirmed_by_name
+                FROM {SCHEMA}.wb_case_stage WHERE project_id = %s ORDER BY order_no""",
+            (project_id,),
+        )
+        stage_rows = cur.fetchall()
+
+    result = []
+    for s_id, order_no, code, title, status, gate_at, gate_by in stage_rows:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT id, order_no, code, title, criterion_type, result,
+                           waived_reason, waived_by_name, waived_at
+                    FROM {SCHEMA}.wb_case_stage_criterion WHERE stage_id = %s ORDER BY order_no""",
+                (s_id,),
+            )
+            crit_rows = cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""SELECT id, code, title, status, expected_result, responsible_name
+                    FROM {SCHEMA}.wb_case_workplan_task
+                    WHERE project_id = %s AND stage_code = %s ORDER BY order_no""",
+                (project_id, code),
+            )
+            task_rows = cur.fetchall()
+        result.append({
+            "id": s_id, "order_no": order_no, "code": code, "title": title, "status": status,
+            "gate_confirmed_at": str(gate_at) if gate_at else None,
+            "gate_confirmed_by_name": gate_by,
+            "criteria": [
+                {"id": r[0], "order_no": r[1], "code": r[2], "title": r[3], "criterion_type": r[4],
+                 "result": r[5], "waived_reason": r[6], "waived_by_name": r[7],
+                 "waived_at": str(r[8]) if r[8] else None}
+                for r in crit_rows
+            ],
+            "tasks": [
+                {"id": r[0], "code": r[1], "title": r[2], "status": r[3],
+                 "expected_result": r[4], "responsible_name": r[5]}
+                for r in task_rows
+            ],
+        })
+    return result
 
 
 def check_project_access(conn, project_id: int, user_id: int) -> bool:
@@ -469,26 +601,34 @@ def handler(event: dict, context) -> dict:
                     rows = cur.fetchall()
 
                 if not rows:
+                    # Ровно план ПОДГОТОВКИ решения (16 задач, привязаны к 8 стадиям через
+                    # stage_code). Содержательные потоки будущей реализации сюда не входят —
+                    # они хранятся отдельно как черновик-артефакт (lab_implementation_plan_draft).
                     default_tasks = [
-                        ("D1", "Уточнить постановку задачи", "Согласованный паспорт кейса", "неделя 1"),
-                        ("D2", "Собрать исходные материалы", "Загруженные документы и данные", "неделя 1-2"),
-                        ("D3", "Провести диагностику текущего состояния", "Карта AS-IS и разрывов", "неделя 2-4"),
-                        ("D4", "Сформировать гипотезы", "Реестр гипотез с методом проверки", "неделя 4-5"),
-                        ("D5", "Провести проверку гипотез", "Выводы и доказательства по каждой гипотезе", "неделя 5-8"),
-                        ("D6", "Разработать варианты решения", "Сравнение вариантов по критериям", "неделя 8-10"),
-                        ("D7", "Сформировать концепцию", "Согласованные разделы концепции", "неделя 10-14"),
-                        ("D8", "Подготовить образ будущего", "Описание целевого состояния", "неделя 14"),
-                        ("D9", "Разработать календарно-сетевой план реализации", "План с зависимостями и вехами", "неделя 15-16"),
-                        ("D10", "Подготовить комплект документов", "Word, презентация, план-график", "неделя 16-17"),
-                        ("D11", "Представить решение заказчику", "Решение о передаче в реализацию", "неделя 17"),
+                        ("D1", "Уточнить постановку и границы кейса", "Подтверждённый паспорт", "S1"),
+                        ("D2", "Собрать и систематизировать исходные материалы", "Реестр материалов", "S2"),
+                        ("D3", "Описать текущее состояние и проблемы", "Диагностика AS-IS", "S2"),
+                        ("D4", "Выделить причины и ограничения", "Структурированная карта причин", "S2"),
+                        ("D5", "Сформировать гипотезы", "Реестр гипотез", "S3"),
+                        ("D6", "Разработать планы проверки гипотез", "Проверки, критерии и ответственные", "S3"),
+                        ("D7", "Провести проверки и собрать доказательства", "Выводы по гипотезам", "S4"),
+                        ("D8", "Сформировать варианты концепции", "Набор вариантов", "S5"),
+                        ("D9", "Сравнить варианты и обосновать выбор", "Матрица сравнения", "S5"),
+                        ("D10", "Разработать образ будущего и архитектуру «6И»", "Целевая модель", "S5"),
+                        ("D11", "Сформировать концепцию по разделам", "Проект концепции", "S5"),
+                        ("D12", "Подготовить предварительный план реализации", "Черновик будущего проекта", "S6"),
+                        ("D13", "Подготовить визуальные схемы и Гант", "Комплект визуализаций", "S6"),
+                        ("D14", "Сформировать Word и PowerPoint", "Управленческий комплект", "S7"),
+                        ("D15", "Подготовить вопрос и проект решения", "Материалы для принятия решения", "S7"),
+                        ("D16", "Зафиксировать решение и дальнейший маршрут", "Закрытие кейса или передача в реализацию", "S8"),
                     ]
                     with conn.cursor() as cur:
-                        for i, (code, title, expected, week) in enumerate(default_tasks, 1):
+                        for i, (code, title, expected, stage_code) in enumerate(default_tasks, 1):
                             cur.execute(
                                 f"""INSERT INTO {SCHEMA}.wb_case_workplan_task
-                                    (project_id, order_no, code, title, expected_result, week_reference)
+                                    (project_id, order_no, code, title, expected_result, stage_code)
                                     VALUES (%s, %s, %s, %s, %s, %s)""",
-                                (project_id, i, code, title, expected, week),
+                                (project_id, i, code, title, expected, stage_code),
                             )
                     conn.commit()
                     with conn.cursor() as cur:
@@ -532,6 +672,140 @@ def handler(event: dict, context) -> dict:
                     )
                 conn.commit()
                 return cors({"ok": True})
+
+        # ── Стадии и шлюзы (общий механизм для всех lab_development кейсов) ──
+        if action == "stages":
+            project_id = int(qs.get("project_id") or body.get("project_id") or 0)
+            if not project_id:
+                return cors({"ok": False, "error": {"message": "Нужен project_id"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT project_kind FROM {SCHEMA}.projects WHERE id = %s", (project_id,))
+                kind_row = cur.fetchone()
+            project_kind = kind_row[0] if kind_row else "standard"
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT id FROM {SCHEMA}.wb_case_stage WHERE project_id = %s LIMIT 1",
+                    (project_id,),
+                )
+                exists = cur.fetchone()
+
+            if not exists:
+                init_stages_from_template(conn, project_id, project_kind)
+                conn.commit()
+
+            evaluate_all_criteria(conn, project_id)
+            conn.commit()
+
+            stages = fetch_stages_payload(conn, project_id)
+            return cors({"ok": True, "stages": stages})
+
+        if action == "stage_transition" and method == "POST":
+            project_id = int(body.get("project_id") or 0)
+            to_stage_id = int(body.get("to_stage_id") or 0)
+            comment = (body.get("comment") or "").strip() or None
+            waivers = body.get("waivers") or []  # [{criterion_id, reason}]
+            if not project_id or not to_stage_id:
+                return cors({"ok": False, "error": {"message": "Нужны project_id и to_stage_id"}}, 400)
+            if not check_project_access(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, order_no, status FROM {SCHEMA}.wb_case_stage
+                        WHERE id = %s AND project_id = %s""",
+                    (to_stage_id, project_id),
+                )
+                to_stage = cur.fetchone()
+            if not to_stage:
+                return cors({"ok": False, "error": {"message": "Стадия не найдена"}}, 404)
+            if to_stage[2] != "locked":
+                return cors({"ok": False, "error": {"message": "Переход возможен только на следующую заблокированную стадию"}}, 400)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, order_no, status FROM {SCHEMA}.wb_case_stage
+                        WHERE project_id = %s AND order_no = %s - 1""",
+                    (project_id, to_stage[1]),
+                )
+                from_stage = cur.fetchone()
+            if not from_stage:
+                return cors({"ok": False, "error": {"message": "Нет предыдущей стадии для перехода"}}, 400)
+            if from_stage[2] != "active":
+                return cors({"ok": False, "error": {"message": "Предыдущая стадия должна быть активной"}}, 400)
+
+            evaluate_all_criteria(conn, project_id)
+
+            # Критерии шлюза принадлежат стадии, которую ПОКИДАЮТ (from_stage) —
+            # именно она должна быть завершена, чтобы открылась следующая.
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, code, title, result FROM {SCHEMA}.wb_case_stage_criterion
+                        WHERE stage_id = %s""",
+                    (from_stage[0],),
+                )
+                criteria = cur.fetchall()
+
+            waiver_map = {int(w.get("criterion_id")): (w.get("reason") or "").strip() for w in waivers if w.get("criterion_id")}
+            unresolved = []
+            waived_list = []
+            for c_id, c_code, c_title, c_result in criteria:
+                if c_result == "passed":
+                    continue
+                if c_id in waiver_map:
+                    reason = waiver_map[c_id]
+                    if not reason:
+                        return cors({"ok": False, "error": {"message": f"Нужно обоснование для исключения критерия «{c_title}»"}}, 400)
+                    waived_list.append({"criterion_id": c_id, "code": c_code, "title": c_title, "reason": reason})
+                else:
+                    unresolved.append({"criterion_id": c_id, "code": c_code, "title": c_title})
+
+            if unresolved:
+                return cors({"ok": False, "error": {
+                    "message": "Не все критерии шлюза выполнены. Отметьте исключение с обоснованием или выполните критерии.",
+                    "unresolved_criteria": unresolved,
+                }}, 409)
+
+            actor_name = get_user_name(conn, user_id)
+            transition_type = "waived" if waived_list else "confirmed"
+
+            with conn.cursor() as cur:
+                for w in waived_list:
+                    cur.execute(
+                        f"""UPDATE {SCHEMA}.wb_case_stage_criterion
+                            SET result = 'waived', waived_reason = %s, waived_by_name = %s,
+                                waived_at = NOW(), updated_at = NOW()
+                            WHERE id = %s""",
+                        (w["reason"], actor_name, w["criterion_id"]),
+                    )
+                if from_stage:
+                    cur.execute(
+                        f"UPDATE {SCHEMA}.wb_case_stage SET status = 'completed', updated_at = NOW() WHERE id = %s",
+                        (from_stage[0],),
+                    )
+                cur.execute(
+                    f"""UPDATE {SCHEMA}.wb_case_stage
+                        SET status = 'active', gate_confirmed_at = NOW(),
+                            gate_confirmed_by_user_id = %s, gate_confirmed_by_name = %s, updated_at = NOW()
+                        WHERE id = %s""",
+                    (user_id, actor_name, to_stage_id),
+                )
+                cur.execute(
+                    f"""INSERT INTO {SCHEMA}.wb_case_stage_transition_log
+                        (project_id, from_stage_id, to_stage_id, transition_type, comment,
+                         waived_criteria_json, actor_user_id, actor_name)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (project_id, from_stage[0] if from_stage else None, to_stage_id,
+                     transition_type, comment, json.dumps(waived_list), user_id, actor_name),
+                )
+            bump_content_version(conn, project_id)
+            conn.commit()
+
+            stages = fetch_stages_payload(conn, project_id)
+            return cors({"ok": True, "stages": stages})
 
         # ── Гипотезы ──────────────────────────────────────────────────
         if action == "hypotheses":

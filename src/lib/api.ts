@@ -820,6 +820,10 @@ export const workspaceApi = {
     request(URLS.workspace, `/?action=workplan&project_id=${projectId}`, "GET"),
   updateWorkplanTask: (projectId: number, id: number, data: { status?: string; responsible_name?: string }) =>
     request(URLS.workspace, "/?action=workplan", "PUT", { project_id: projectId, id, ...data }),
+  getStages: (projectId: number) =>
+    request(URLS.workspace, `/?action=stages&project_id=${projectId}`, "GET"),
+  confirmStageTransition: (projectId: number, toStageId: number, opts?: { comment?: string; waivers?: { criterion_id: number; reason: string }[] }) =>
+    request(URLS.workspace, "/?action=stage_transition", "POST", { project_id: projectId, to_stage_id: toStageId, ...opts }),
   getHypotheses: (projectId: number) =>
     request(URLS.workspace, `/?action=hypotheses&project_id=${projectId}`, "GET"),
   createHypothesis: (data: { project_id: number; title: string; statement?: string; assumptions?: string; success_criteria?: string; priority?: string; process_id?: number | null; pain_point_id?: number | null; solution_id?: number | null }) =>
