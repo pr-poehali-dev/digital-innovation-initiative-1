@@ -1,19 +1,26 @@
 import { useEffect, useState } from "react";
 import Icon from "@/components/ui/icon";
-import { execApi, DecisionRequestRegistryItem } from "@/lib/execCabinetApi";
+import { execApi, DecisionRequestRegistryItem, takeCabinetWarning } from "@/lib/execCabinetApi";
 
-interface PersonOption { id: number; display_name: string; position_title: string; org_name: string }
+interface PersonOption { id: number; display_name: string; position_title: string; org_name: string; org_unit_id: number | null }
 
 /**
  * Преобразование вопроса реестра в поручение (exec_action) — только по
  * явному подтверждению пользователем. Адресат, срок и ожидаемый результат
  * не подставляются автоматически: если адресат не выбран, поручение
  * создаётся без ответственного (пробел остаётся видимым, а не скрывается).
+ *
+ * Список адресатов НЕ показывает весь справочник персон вперемешку:
+ * сначала — только сотрудники подразделения-заказчика инициативы.
+ * Выбор человека из другого подразделения требует отдельного явного
+ * подтверждения чекбоксом («это сотрудник другого подразделения»).
  */
 export default function ConvertToActionForm({
   item, onClose, onDone,
-}: { item: DecisionRequestRegistryItem; onClose: () => void; onDone: () => void }) {
-  const [persons, setPersons] = useState<PersonOption[]>([]);
+}: { item: DecisionRequestRegistryItem; onClose: () => void; onDone: (warning?: string) => void }) {
+  const [orgPersons, setOrgPersons] = useState<PersonOption[]>([]);
+  const [allPersons, setAllPersons] = useState<PersonOption[]>([]);
+  const [confirmOtherOrgUnit, setConfirmOtherOrgUnit] = useState(false);
   const [responsiblePersonId, setResponsiblePersonId] = useState<string>(
     item.addressee_person_id ? String(item.addressee_person_id) : "",
   );
@@ -23,8 +30,18 @@ export default function ConvertToActionForm({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    execApi.persons().then((r) => setPersons(r.items)).catch(() => {});
-  }, []);
+    if (item.customer_org_unit_id) {
+      execApi.persons(item.customer_org_unit_id).then((r) => setOrgPersons(r.items)).catch(() => {});
+    }
+  }, [item.customer_org_unit_id]);
+
+  useEffect(() => {
+    if (confirmOtherOrgUnit && allPersons.length === 0) {
+      execApi.persons().then((r) => setAllPersons(r.items)).catch(() => {});
+    }
+  }, [confirmOtherOrgUnit, allPersons.length]);
+
+  const persons = confirmOtherOrgUnit ? allPersons : orgPersons;
 
   const save = async () => {
     if (!expectedResult.trim()) {
@@ -40,7 +57,8 @@ export default function ConvertToActionForm({
         due_at: dueAt || undefined,
         expected_result: expectedResult.trim(),
       });
-      onDone();
+      const warning = takeCabinetWarning();
+      onDone(warning || undefined);
     } catch (e) {
       setError((e as Error).message);
       setSaving(false);
@@ -71,7 +89,9 @@ export default function ConvertToActionForm({
           </div>
 
           <label className="block">
-            <span className="text-xs text-slate-500 mb-1.5 block">Ответственный (адресат)</span>
+            <span className="text-xs text-slate-500 mb-1.5 block">
+              Ответственный (адресат) — {confirmOtherOrgUnit ? "весь справочник" : "сотрудники подразделения-заказчика"}
+            </span>
             <select
               value={responsiblePersonId}
               onChange={(e) => setResponsiblePersonId(e.target.value)}
@@ -84,6 +104,22 @@ export default function ConvertToActionForm({
                 </option>
               ))}
             </select>
+            {!confirmOtherOrgUnit && orgPersons.length === 0 && (
+              <span className="text-[11px] text-amber-600 mt-1 block">
+                В подразделении «{item.customer_org_unit_name}» пока нет сотрудников, связанных в справочнике —
+                поэтому список пуст. Свяжите сотрудников с подразделением либо явно подтвердите назначение
+                сотрудника другого подразделения.
+              </span>
+            )}
+            <label className="flex items-center gap-2 mt-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={confirmOtherOrgUnit}
+                onChange={(e) => { setConfirmOtherOrgUnit(e.target.checked); setResponsiblePersonId(""); }}
+                className="rounded border-slate-300"
+              />
+              <span className="text-xs text-slate-600">Это сотрудник другого подразделения (подтверждаю явно)</span>
+            </label>
             <span className="text-[11px] text-slate-400 mt-1 block">
               Только подтверждённые сотрудники из справочника — фиктивные персоны не создаются.
             </span>

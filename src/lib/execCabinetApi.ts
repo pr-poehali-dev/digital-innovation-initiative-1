@@ -372,6 +372,16 @@ export interface FocusData {
   dictionaries: Dictionaries;
 }
 
+let lastWarning: string | null = null;
+
+/** Забирает предупреждение последнего запроса (например, "поручение создано
+ * без ответственного — недостаточно прав назначить исполнителя") и сбрасывает его. */
+export function takeCabinetWarning(): string | null {
+  const w = lastWarning;
+  lastWarning = null;
+  return w;
+}
+
 async function req(path: string, options: RequestInit = {}) {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -385,6 +395,7 @@ async function req(path: string, options: RequestInit = {}) {
   if (!res.ok || !data.ok) {
     throw new Error(data?.error?.message || "Ошибка загрузки данных");
   }
+  lastWarning = data.warning || null;
   return data.data;
 }
 
@@ -443,8 +454,8 @@ export const execApi = {
 
   diagnostics: (): Promise<{ issues: Issue[] }> => req("/?action=diagnostics"),
 
-  persons: (): Promise<{ items: { id: number; display_name: string; position_title: string; org_name: string }[] }> =>
-    req("/?action=persons"),
+  persons: (orgUnitId?: number): Promise<{ items: { id: number; display_name: string; position_title: string; org_name: string; org_unit_id: number | null }[] }> =>
+    req(`/?action=persons${orgUnitId ? `&org_unit_id=${orgUnitId}` : ""}`),
 
   refs: (): Promise<RefsData> => req("/?action=refs"),
 

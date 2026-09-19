@@ -1025,10 +1025,24 @@ def handler(event: dict, context) -> dict:
             # результата. Ничего не подставляется автоматически из
             # догадок: если addressee_person_id не передан, поручение
             # создаётся без ответственного (останется видно как пробел).
+            #
+            # Право доступа: наблюдатель (viewer) не может создавать
+            # поручения вообще. Назначить ответственного (responsible_person_id)
+            # может только пользователь с can_confirm=true или ролью
+            # head/curator — иначе поручение создаётся БЕЗ ответственного
+            # с предупреждением, аналогично существующей практике
+            # exec-control для незавершённых подтверждений.
+            if user["role"] == "viewer":
+                return cors({"ok": False, "error": {
+                    "message": "Роль «наблюдатель» не может создавать поручения"}}, 403)
+
             rid = as_int(body.get("decision_request_id"))
             if not rid:
                 return cors({"ok": False, "error": {"message": "Не указан вопрос для преобразования"}}, 400)
-            cur.execute(f"SELECT * FROM {SCHEMA}.exec_initiative_decision_request WHERE id = %s", (rid,))
+            # Блокировка от двойного преобразования: SELECT ... FOR UPDATE
+            # фиксирует строку до commit, чтобы параллельный повторный вызов
+            # не создал второе поручение на тот же вопрос.
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_initiative_decision_request WHERE id = %s FOR UPDATE", (rid,))
             dr = rows(cur)
             if not dr:
                 return cors({"ok": False, "error": {"message": "Вопрос не найден"}}, 404)
@@ -1037,6 +1051,13 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Вопрос уже преобразован в поручение"}}, 400)
 
             responsible_person_id = as_int(body.get("responsible_person_id"))
+            can_assign = bool(user.get("can_confirm")) or user["role"] in ("head", "curator")
+            assign_warning = None
+            if responsible_person_id and not can_assign:
+                assign_warning = ("У вас нет права назначать ответственного. Поручение создано "
+                                   "без ответственного — назначение подтвердит уполномоченное лицо.")
+                responsible_person_id = None
+
             due_at = body.get("due_at")
             expected_result = body.get("expected_result") or ""
             if not expected_result.strip():
@@ -1063,7 +1084,7 @@ def handler(event: dict, context) -> dict:
                 ("decision_request", rid, "convert_to_action", actor,
                  json.dumps({"action_id": new_action_id, "responsible_person_id": responsible_person_id, "due_at": due_at}, ensure_ascii=False, default=str)))
             conn.commit()
-            return cors({"ok": True, "data": {"action_id": new_action_id}})
+            return cors({"ok": True, "data": {"action_id": new_action_id}, "warning": assign_warning})
 
         if action == "initiative":
             iid = int(qs.get("id", 0))
@@ -1463,11 +1484,22 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": {"id": new_id}})
 
         if action == "persons":
+            # org_unit_id — фильтр по подразделению для подбора адресата
+            # (например, при преобразовании вопроса в поручение). Без
+            # него возвращается весь активный справочник — используется
+            # для общих списков персон, а не для назначения ответственных
+            # по конкретному подразделению.
+            org_unit_id = qs.get("org_unit_id")
+            conds = ["p.record_state = 'active'"]
+            params: list = []
+            if org_unit_id:
+                conds.append("p.org_unit_id = %s")
+                params.append(int(org_unit_id))
             cur.execute(f"""
                 SELECT p.*, (SELECT COUNT(*) FROM {SCHEMA}.exec_stakeholder s WHERE s.person_id = p.id) AS stakeholder_count,
                        (SELECT COUNT(*) FROM {SCHEMA}.exec_role_assignment ra WHERE ra.person_id = p.id) AS role_count
-                FROM {SCHEMA}.exec_person p WHERE p.record_state = 'active' ORDER BY p.display_name
-            """)
+                FROM {SCHEMA}.exec_person p WHERE {" AND ".join(conds)} ORDER BY p.display_name
+            """, params)
             return cors({"ok": True, "data": {"items": rows(cur)}})
 
         if action == "save_initiative":

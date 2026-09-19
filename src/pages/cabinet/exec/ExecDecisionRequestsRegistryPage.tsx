@@ -32,6 +32,7 @@ export default function ExecDecisionRequestsRegistryPage() {
   const [error, setError] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [convertItem, setConvertItem] = useState<DecisionRequestRegistryItem | null>(null);
+  const [notice, setNotice] = useState<string>("");
 
   const load = () => {
     setLoading(true);
@@ -71,6 +72,16 @@ export default function ExecDecisionRequestsRegistryPage() {
         </div>
 
         {error && <ErrorBox message={error} onRetry={load} />}
+
+        {notice && (
+          <div className="flex items-start gap-2 p-3 rounded-lg border border-amber-300 bg-amber-50">
+            <Icon name="Info" size={15} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-800 flex-1">{notice}</p>
+            <button onClick={() => setNotice("")} className="text-amber-500 hover:text-amber-700">
+              <Icon name="X" size={14} />
+            </button>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Metric label="Всего вопросов" value={items.length} icon="ListChecks" />
@@ -141,7 +152,7 @@ export default function ExecDecisionRequestsRegistryPage() {
                             {it.addressee_position && <span className="block text-slate-400">{it.addressee_position}</span>}
                           </>
                         ) : (
-                          <span className="text-slate-400 italic">не подтверждён</span>
+                          <span className="text-slate-400 italic">Не назначен</span>
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-xs">
@@ -152,7 +163,7 @@ export default function ExecDecisionRequestsRegistryPage() {
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-xs text-slate-500">
-                        {it.due_at ? fmtDate(it.due_at) : <span className="text-slate-400">не установлен</span>}
+                        {it.due_at ? fmtDate(it.due_at) : <span className="text-slate-400">Не установлен</span>}
                       </td>
                       <td className="py-2.5 px-3">
                         {it.dispatch_status === "converted" ? (
@@ -188,7 +199,7 @@ export default function ExecDecisionRequestsRegistryPage() {
         <ConvertToActionForm
           item={convertItem}
           onClose={() => setConvertItem(null)}
-          onDone={() => { setConvertItem(null); load(); }}
+          onDone={(warning) => { setConvertItem(null); setNotice(warning || "Поручение создано."); load(); }}
         />
       )}
     </Layout>
