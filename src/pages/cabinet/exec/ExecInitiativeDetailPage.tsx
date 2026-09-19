@@ -174,13 +174,28 @@ export default function ExecInitiativeDetailPage() {
   return (
     <Layout>
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-5">
-        <Link
-          to="/cabinet/exec/initiatives"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
-        >
-          <Icon name="ArrowLeft" size={14} />
-          Портфель инициатив
-        </Link>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <nav className="flex items-center gap-1.5 text-sm text-slate-400 flex-wrap">
+            <Link to="/cabinet/exec" className="hover:text-slate-700 transition-colors">
+              Кабинет руководителя
+            </Link>
+            <Icon name="ChevronRight" size={13} />
+            <Link to="/cabinet/exec/portfolio?tab=initiatives" className="hover:text-slate-700 transition-colors">
+              Портфель и контроль
+            </Link>
+            <Icon name="ChevronRight" size={13} />
+            <span className="text-slate-700 font-medium truncate max-w-[280px]">
+              {i.external_code ? `${i.external_code} ` : ""}{i.title}
+            </span>
+          </nav>
+          <Link
+            to="/cabinet/exec/portfolio?tab=initiatives"
+            className="inline-flex items-center gap-1.5 text-sm text-violet-600 hover:text-violet-700 transition-colors flex-shrink-0"
+          >
+            <Icon name="ArrowLeft" size={14} />
+            Вернуться к портфелю
+          </Link>
+        </div>
 
         <header className="rounded-xl border border-slate-200 bg-white p-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">

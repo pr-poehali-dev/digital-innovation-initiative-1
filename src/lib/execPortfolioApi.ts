@@ -109,14 +109,20 @@ export interface ProjectDetail extends ExecProject {
   links: ExecLink[];
 }
 
+interface WithInitiative {
+  initiative_id: number | null;
+  initiative_title: string | null;
+  initiative_code: string | null;
+}
+
 export interface PortfolioDashboard {
-  overdue_actions: Array<{ id: number; title: string; status: string; priority: string; due_at: string; is_on_control: boolean }>;
-  upcoming_actions: Array<{ id: number; title: string; status: string; priority: string; due_at: string }>;
-  overdue_tasks: Array<{ id: number; title: string; status: string; priority: string; project_id: number | null; due_at: string }>;
-  upcoming_milestones: Array<{ id: number; title: string; plan_date: string; status: string; initiative_id: number | null; project_id: number | null }>;
+  overdue_actions: Array<{ id: number; title: string; status: string; priority: string; due_at: string; is_on_control: boolean } & WithInitiative>;
+  upcoming_actions: Array<{ id: number; title: string; status: string; priority: string; due_at: string } & WithInitiative>;
+  overdue_tasks: Array<{ id: number; title: string; status: string; priority: string; project_id: number | null; due_at: string } & WithInitiative>;
+  upcoming_milestones: Array<{ id: number; title: string; plan_date: string; status: string; initiative_id: number | null; project_id: number | null } & WithInitiative>;
   projects_by_status: Array<{ status: string; cnt: number }>;
-  pending_decisions: Array<{ id: number; question: string; status: string; due_at: string | null }>;
-  top_risks: Array<{ id: number; description: string; probability: number; impact: number; risk_score: number; status: string }>;
+  pending_decisions: Array<{ id: number; question: string; status: string; due_at: string | null } & WithInitiative>;
+  top_risks: Array<{ id: number; description: string; probability: number; impact: number; risk_score: number; status: string } & WithInitiative>;
   recent_results: Array<{ id: number; title: string; achieved_at: string | null; result_kind: string }>;
 }
 

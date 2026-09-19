@@ -678,30 +678,36 @@ def object_history(cur, kind: str, oid: int):
 
 def dashboard(cur):
     cur.execute(f"""
-        SELECT id, title, status, priority, due_at, is_on_control
-        FROM {SCHEMA}.exec_action
-        WHERE COALESCE(is_test_data, false) = false
-          AND status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
-          AND due_at IS NOT NULL AND due_at < CURRENT_DATE
-        ORDER BY due_at
+        SELECT a.id, a.title, a.status, a.priority, a.due_at, a.is_on_control,
+               a.initiative_id, i.title AS initiative_title, i.external_code AS initiative_code
+        FROM {SCHEMA}.exec_action a
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
+        WHERE COALESCE(a.is_test_data, false) = false
+          AND a.status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
+          AND a.due_at IS NOT NULL AND a.due_at < CURRENT_DATE
+        ORDER BY a.due_at
     """)
     overdue_actions = rows(cur)
 
     cur.execute(f"""
-        SELECT id, title, status, priority, due_at
-        FROM {SCHEMA}.exec_action
-        WHERE COALESCE(is_test_data, false) = false
-          AND status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
-          AND due_at IS NOT NULL AND due_at BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
-        ORDER BY due_at
+        SELECT a.id, a.title, a.status, a.priority, a.due_at,
+               a.initiative_id, i.title AS initiative_title, i.external_code AS initiative_code
+        FROM {SCHEMA}.exec_action a
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
+        WHERE COALESCE(a.is_test_data, false) = false
+          AND a.status NOT IN ('done_by_executor','accepted_by_head','cancelled','done')
+          AND a.due_at IS NOT NULL AND a.due_at BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY a.due_at
     """)
     upcoming_actions = rows(cur)
 
     cur.execute(f"""
         SELECT t.id, t.title, t.status, t.priority, t.project_id, t.due_at,
-            (t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE) AS is_overdue
+            (t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE) AS is_overdue,
+            p.initiative_id, ii.title AS initiative_title, ii.external_code AS initiative_code
         FROM {SCHEMA}.exec_task t
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = t.project_id
+        LEFT JOIN {SCHEMA}.exec_initiative ii ON ii.id = p.initiative_id
         WHERE t.archived_at IS NULL AND t.is_test_data = false AND t.status NOT IN ('done','cancelled')
           AND t.due_at IS NOT NULL AND t.due_at < CURRENT_DATE
           AND (t.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
@@ -710,10 +716,13 @@ def dashboard(cur):
     overdue_tasks = rows(cur)
 
     cur.execute(f"""
-        SELECT m.id, m.title, m.plan_date, m.status, m.initiative_id, m.project_id
+        SELECT m.id, m.title, m.plan_date, m.status, m.initiative_id, m.project_id,
+               COALESCE(i.title, ip.title) AS initiative_title,
+               COALESCE(i.external_code, ip.external_code) AS initiative_code
         FROM {SCHEMA}.exec_milestone m
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = m.project_id
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = m.initiative_id
+        LEFT JOIN {SCHEMA}.exec_initiative ip ON ip.id = p.initiative_id
         WHERE COALESCE(m.is_test_data, false) = false AND m.status NOT IN ('achieved','cancelled')
           AND m.plan_date IS NOT NULL AND m.plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
           AND (m.project_id IS NULL OR (p.archived_at IS NULL AND p.is_test_data = false))
@@ -729,15 +738,20 @@ def dashboard(cur):
     projects_by_status = rows(cur)
 
     cur.execute(f"""
-        SELECT id, question, status, due_at FROM {SCHEMA}.exec_decision_instance
-        WHERE status IN ('raised','in_progress') ORDER BY due_at NULLS LAST LIMIT 20
+        SELECT d.id, d.question, d.status, d.due_at,
+               d.initiative_id, i.title AS initiative_title, i.external_code AS initiative_code
+        FROM {SCHEMA}.exec_decision_instance d
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = d.initiative_id
+        WHERE d.status IN ('raised','in_progress') ORDER BY d.due_at NULLS LAST LIMIT 20
     """)
     pending_decisions = rows(cur)
 
     cur.execute(f"""
-        SELECT id, description, probability, impact, probability * impact AS risk_score, status
-        FROM {SCHEMA}.exec_risk
-        WHERE status = 'active' ORDER BY probability * impact DESC LIMIT 10
+        SELECT r.id, r.description, r.probability, r.impact, r.probability * r.impact AS risk_score, r.status,
+               r.initiative_id, i.title AS initiative_title, i.external_code AS initiative_code
+        FROM {SCHEMA}.exec_risk r
+        LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
+        WHERE r.status = 'active' ORDER BY r.probability * r.impact DESC LIMIT 10
     """)
     top_risks = rows(cur)
 

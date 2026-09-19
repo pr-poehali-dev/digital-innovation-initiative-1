@@ -11,7 +11,8 @@ import PageGuide from "@/components/exec/PageGuide";
 import { execPageGuides } from "@/config/execPageGuides";
 import { ProjectFormDialog, TaskFormDialog, PROJECT_STATUSES, TASK_STATUSES } from "@/components/exec/PortfolioForms";
 import { execPortfolioApi, PortfolioDashboard, ExecProject, ExecTask } from "@/lib/execPortfolioApi";
-import { execApi } from "@/lib/execCabinetApi";
+import { execApi, Dictionaries, Initiative, BUDGET_STATUS_LABEL } from "@/lib/execCabinetApi";
+import { Badge, VerificationTag } from "@/components/exec/ExecUI";
 import { controlApi, Risk } from "@/lib/execControlApi";
 import RoadmapView, { RoadmapViewMode } from "@/components/exec/roadmap/RoadmapView";
 import MilestonesTimelineView from "@/components/exec/roadmap/MilestonesTimelineView";
@@ -29,12 +30,12 @@ const PRIORITY_CLS: Record<string, string> = {
 const PROJECT_STATUS_LABEL: Record<string, string> = Object.fromEntries(PROJECT_STATUSES.map((s) => [s.value, s.label]));
 const TASK_STATUS_LABEL: Record<string, string> = Object.fromEntries(TASK_STATUSES.map((s) => [s.value, s.label]));
 
-type MainTab = "dashboard" | "projects" | "tasks" | "risks" | "roadmap" | "milestones";
-type ViewMode = "projects" | "roadmap" | "milestones";
+type MainTab = "initiatives" | "dashboard" | "projects" | "tasks" | "risks" | "roadmap" | "milestones";
+type ViewMode = "initiatives" | "projects" | "roadmap" | "milestones";
 type SubTab = "dashboard" | "projects" | "tasks" | "risks";
 
-const VIEW_MODE_ICON: Record<ViewMode, string> = { projects: "List", roadmap: "CalendarRange", milestones: "Diamond" };
-const VIEW_MODE_LABEL: Record<ViewMode, string> = { projects: "Список", roadmap: "Дорожная карта", milestones: "Вехи" };
+const VIEW_MODE_ICON: Record<ViewMode, string> = { initiatives: "Rocket", projects: "List", roadmap: "CalendarRange", milestones: "Diamond" };
+const VIEW_MODE_LABEL: Record<ViewMode, string> = { initiatives: "Инициативы", projects: "Проекты", roadmap: "Дорожная карта", milestones: "Вехи" };
 
 function subTabLabel(t: SubTab, projectsCount: number, tasksCount: number, risksCount: number): string {
   const labels: Record<SubTab, string> = {
@@ -47,12 +48,14 @@ function subTabLabel(t: SubTab, projectsCount: number, tasksCount: number, risks
 export default function ExecPortfolioPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [mainTab, setMainTab] = useState<MainTab>((searchParams.get("tab") as MainTab) || "dashboard");
+  const [mainTab, setMainTab] = useState<MainTab>((searchParams.get("tab") as MainTab) || "initiatives");
   const [risks, setRisks] = useState<Risk[]>([]);
   const [data, setData] = useState<PortfolioDashboard | null>(null);
   const [projects, setProjects] = useState<ExecProject[]>([]);
   const [tasks, setTasks] = useState<ExecTask[]>([]);
   const [initiatives, setInitiatives] = useState<Array<{ id: number; title: string }>>([]);
+  const [initiativeItems, setInitiativeItems] = useState<Initiative[]>([]);
+  const [initDicts, setInitDicts] = useState<Dictionaries>({});
   const [actions, setActions] = useState<Array<{ id: number; title: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -81,7 +84,11 @@ export default function ExecPortfolioPage() {
       execPortfolioApi.dashboard().then(setData),
       execPortfolioApi.projects().then((d) => setProjects(d.items)),
       execPortfolioApi.tasks().then((d) => setTasks(d.items)),
-      execApi.initiatives().then((d) => setInitiatives(d.items.map((i) => ({ id: i.id, title: i.title })))),
+      execApi.initiatives().then((d) => {
+        setInitiatives(d.items.map((i) => ({ id: i.id, title: i.title })));
+        setInitiativeItems(d.items);
+        setInitDicts(d.dictionaries);
+      }),
       controlApi.actions().then((d) => setActions(d.items.map((a) => ({ id: a.id, title: a.title || a.description })))),
       controlApi.all().then((d) => setRisks(d.risks)),
     ])
@@ -201,7 +208,7 @@ export default function ExecPortfolioPage() {
 
   if (loading) return <Layout><Loading /></Layout>;
 
-  const isWideTab = mainTab === "roadmap" || mainTab === "milestones";
+  const isWideTab = mainTab === "roadmap" || mainTab === "milestones" || mainTab === "initiatives";
 
   return (
     <Layout>
@@ -209,11 +216,11 @@ export default function ExecPortfolioPage() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
-              <Icon name="GanttChartSquare" size={22} className="text-violet-600" />
-              Проекты и дорожная карта
+              <Icon name="Rocket" size={22} className="text-violet-600" />
+              Портфель и контроль
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Поручения, проекты, портфель, риски — списком, на дорожной карте или шкале вех.
+              Инициативы, проекты, вехи, риски и дорожная карта — всё в одном месте.
             </p>
           </div>
           <div className="flex gap-2 flex-shrink-0">
@@ -244,7 +251,7 @@ export default function ExecPortfolioPage() {
           </div>
         </div>
 
-        {mainTab !== "roadmap" && mainTab !== "milestones" && <PageGuide {...execPageGuides.portfolio} />}
+        {!["roadmap", "milestones", "initiatives"].includes(mainTab) && <PageGuide {...execPageGuides.portfolio} />}
 
         {error && <ErrorBox message={error} onRetry={() => { loadDashboard(); loadProjects(); loadTasks(); }} />}
         {snapMsg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-3 py-2">{snapMsg}</div>}
@@ -256,24 +263,29 @@ export default function ExecPortfolioPage() {
           </div>
         )}
 
-        {/* Главный переключатель представления портфеля — три равнозначных
-            режима просмотра одних и тех же проектов/вех. */}
+        {/* Главный переключатель представления портфеля. «Инициативы» —
+            основной, самый понятный вход: карточки инициатив Блока ВК. */}
         <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 w-fit">
-          {(["projects", "roadmap", "milestones"] as ViewMode[]).map((t) => (
+          {(["initiatives", "projects", "roadmap", "milestones"] as ViewMode[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5 ${
-                mainTab === t ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                mainTab === t || (t === "projects" && ["dashboard", "tasks", "risks"].includes(mainTab))
+                  ? "bg-white text-violet-700 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
               }`}
             >
               <Icon name={VIEW_MODE_ICON[t]} size={14} />
               {VIEW_MODE_LABEL[t]}
+              {t === "initiatives" && initiativeItems.length > 0 && (
+                <span className="text-[10px] text-slate-400">({initiativeItems.length})</span>
+              )}
             </button>
           ))}
         </div>
 
-        {mainTab !== "roadmap" && mainTab !== "milestones" && (
+        {["dashboard", "projects", "tasks", "risks"].includes(mainTab) && (
           <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
             {(["dashboard", "projects", "tasks", "risks"] as SubTab[]).map((t) => (
               <button
@@ -287,6 +299,10 @@ export default function ExecPortfolioPage() {
               </button>
             ))}
           </div>
+        )}
+
+        {mainTab === "initiatives" && (
+          <InitiativesTab items={initiativeItems} dicts={initDicts} navigate={navigate} />
         )}
 
         {mainTab === "dashboard" && data && <DashboardTab data={data} />}
@@ -388,10 +404,24 @@ export default function ExecPortfolioPage() {
           filteredRisks.length === 0 ? <Empty text="Рисков пока нет" icon="ShieldAlert" /> :
           <div className="space-y-1.5">
             {filteredRisks.map((r) => (
-              <div key={r.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs">
+              <div
+                key={r.id}
+                onClick={() => r.initiative_id && navigate(`/cabinet/exec/initiatives/${r.initiative_id}`)}
+                className={`rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs ${
+                  r.initiative_id ? "cursor-pointer hover:border-amber-400 transition-colors" : ""
+                }`}
+              >
                 <div className="font-medium">{r.description}</div>
-                <div className="text-muted-foreground mt-0.5">
-                  Оценка {r.probability * r.impact} (вероятность {r.probability} × влияние {r.impact}) · {r.initiative_title || "без инициативы"}
+                <div className="text-muted-foreground mt-0.5 flex items-center justify-between gap-2">
+                  <span>Оценка {r.probability * r.impact} (вероятность {r.probability} × влияние {r.impact})</span>
+                  {r.initiative_title ? (
+                    <span className="text-violet-600 flex items-center gap-1 flex-shrink-0">
+                      <Icon name="Rocket" size={10} />
+                      Инициатива: {r.initiative_title}
+                    </span>
+                  ) : (
+                    <span className="flex-shrink-0">без инициативы</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -405,9 +435,91 @@ export default function ExecPortfolioPage() {
   );
 }
 
+function InitiativesTab({
+  items, dicts, navigate,
+}: { items: Initiative[]; dicts: Dictionaries; navigate: (path: string) => void }) {
+  if (items.length === 0) {
+    return <Empty text="Инициатив пока нет" icon="Rocket" />;
+  }
+  return (
+    <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+      {items.map((i) => (
+        <div
+          key={i.id}
+          onClick={() => navigate(`/cabinet/exec/initiatives/${i.id}`)}
+          className="rounded-xl border border-slate-200 bg-white p-4 hover:border-violet-300 transition-colors flex flex-col cursor-pointer"
+        >
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <span className="text-[11px] font-mono text-slate-400">
+              {i.external_code || i.code || `#${i.id}`}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <VerificationTag status={i.verification_status} />
+              <Badge dicts={dicts} type="priority" code={i.priority} />
+            </div>
+          </div>
+          <h3 className="text-sm font-medium text-slate-900 leading-snug flex-1">{i.title}</h3>
+          {i.customer_org_unit_name && (
+            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+              <Icon name="Building2" size={10} />
+              {i.customer_org_unit_name}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            <Badge dicts={dicts} type="initiative_status" code={i.status} />
+            <Badge dicts={dicts} type="initiative_stage" code={i.stage} />
+          </div>
+          <div className="mt-3 pt-3 border-t border-slate-200 space-y-1">
+            <p className="text-xs text-slate-500 flex items-center gap-1.5">
+              <Icon name="User" size={11} />
+              {i.owner_name || <span className="text-red-600">владелец не назначен</span>}
+            </p>
+            {i.next_milestone_title && (
+              <p className="text-xs text-slate-500 flex items-center gap-1.5 truncate">
+                <Icon name="Flag" size={11} className="flex-shrink-0" />
+                <span className="truncate">
+                  {fmtDate(i.next_milestone_date || null)} · {i.next_milestone_title}
+                </span>
+              </p>
+            )}
+            {i.top_risk_title && (
+              <p
+                className={`text-xs flex items-center gap-1.5 truncate ${
+                  (i.top_risk_score || 0) >= 15 ? "text-red-600" : "text-amber-600"
+                }`}
+              >
+                <Icon name="ShieldAlert" size={11} className="flex-shrink-0" />
+                <span className="truncate">{i.top_risk_title}</span>
+              </p>
+            )}
+            {(i.open_decision_requests ?? 0) > 0 && (
+              <p className="text-xs text-amber-600 flex items-center gap-1.5">
+                <Icon name="Gavel" size={11} />
+                {i.open_decision_requests} требует вашего решения
+              </p>
+            )}
+            {i.budget_year && (
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md border mt-1 ${
+                  BUDGET_STATUS_LABEL[i.budget_status]?.cls || BUDGET_STATUS_LABEL.not_started.cls
+                }`}
+              >
+                <Icon name="Wallet" size={10} />
+                {i.budget_year}: {BUDGET_STATUS_LABEL[i.budget_status]?.title}
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DashboardTab({ data }: { data: PortfolioDashboard }) {
+  const navigate = useNavigate();
   const requiresDecision = data.pending_decisions.length;
   const totalOverdue = data.overdue_actions.length + data.overdue_tasks.length;
+  const goInit = (id: number | null) => id && navigate(`/cabinet/exec/initiatives/${id}`);
 
   return (
     <div className="space-y-5">
@@ -421,7 +533,13 @@ function DashboardTab({ data }: { data: PortfolioDashboard }) {
       {requiresDecision > 0 && (
         <Section title="Требует вашего решения" icon="HelpCircle" tone="warning">
           {data.pending_decisions.map((d) => (
-            <Row key={d.id} title={d.question} sub={d.due_at ? `Срок: ${fmtDate(d.due_at)}` : "Срок не установлен"} />
+            <Row
+              key={d.id}
+              title={d.question}
+              sub={d.due_at ? `Срок: ${fmtDate(d.due_at)}` : "Срок не установлен"}
+              initiative={d.initiative_title}
+              onClick={() => goInit(d.initiative_id)}
+            />
           ))}
         </Section>
       )}
@@ -429,7 +547,15 @@ function DashboardTab({ data }: { data: PortfolioDashboard }) {
       {data.overdue_actions.length > 0 && (
         <Section title="Просроченные поручения" icon="AlertTriangle" tone="danger">
           {data.overdue_actions.map((a) => (
-            <Row key={a.id} title={a.title} sub={`Срок был: ${fmtDate(a.due_at)}`} badge={a.priority} extra={a.is_on_control ? "На личном контроле" : undefined} />
+            <Row
+              key={a.id}
+              title={a.title}
+              sub={`Срок был: ${fmtDate(a.due_at)}`}
+              badge={a.priority}
+              extra={a.is_on_control ? "На личном контроле" : undefined}
+              initiative={a.initiative_title}
+              onClick={() => goInit(a.initiative_id)}
+            />
           ))}
         </Section>
       )}
@@ -437,7 +563,14 @@ function DashboardTab({ data }: { data: PortfolioDashboard }) {
       {data.overdue_tasks.length > 0 && (
         <Section title="Просроченные задачи" icon="ListTodo" tone="danger">
           {data.overdue_tasks.map((t) => (
-            <Row key={t.id} title={t.title} sub={`Срок был: ${fmtDate(t.due_at)}`} badge={t.priority} />
+            <Row
+              key={t.id}
+              title={t.title}
+              sub={`Срок был: ${fmtDate(t.due_at)}`}
+              badge={t.priority}
+              initiative={t.initiative_title}
+              onClick={() => goInit(t.initiative_id)}
+            />
           ))}
         </Section>
       )}
@@ -445,7 +578,14 @@ function DashboardTab({ data }: { data: PortfolioDashboard }) {
       {data.upcoming_actions.length > 0 && (
         <Section title="Поручения на ближайшие 30 дней" icon="Calendar">
           {data.upcoming_actions.map((a) => (
-            <Row key={a.id} title={a.title} sub={fmtDate(a.due_at)} badge={a.priority} />
+            <Row
+              key={a.id}
+              title={a.title}
+              sub={fmtDate(a.due_at)}
+              badge={a.priority}
+              initiative={a.initiative_title}
+              onClick={() => goInit(a.initiative_id)}
+            />
           ))}
         </Section>
       )}
@@ -453,7 +593,13 @@ function DashboardTab({ data }: { data: PortfolioDashboard }) {
       {data.upcoming_milestones.length > 0 && (
         <Section title="Контрольные точки (30 дней)" icon="Flag">
           {data.upcoming_milestones.map((m) => (
-            <Row key={m.id} title={m.title} sub={fmtDate(m.plan_date)} />
+            <Row
+              key={m.id}
+              title={m.title}
+              sub={fmtDate(m.plan_date)}
+              initiative={m.initiative_title}
+              onClick={() => goInit(m.initiative_id)}
+            />
           ))}
         </Section>
       )}
@@ -461,7 +607,13 @@ function DashboardTab({ data }: { data: PortfolioDashboard }) {
       {data.top_risks.length > 0 && (
         <Section title="Ключевые риски" icon="ShieldAlert" tone="danger">
           {data.top_risks.map((r) => (
-            <Row key={r.id} title={r.description} sub={`Оценка риска: ${r.risk_score} (вероятность ${r.probability} × влияние ${r.impact})`} />
+            <Row
+              key={r.id}
+              title={r.description}
+              sub={`Оценка риска: ${r.risk_score} (вероятность ${r.probability} × влияние ${r.impact})`}
+              initiative={r.initiative_title}
+              onClick={() => goInit(r.initiative_id)}
+            />
           ))}
         </Section>
       )}
@@ -508,15 +660,32 @@ function Section({
   );
 }
 
-function Row({ title, sub, badge, extra }: { title: string; sub?: string; badge?: string; extra?: string }) {
+function Row({
+  title, sub, badge, extra, initiative, onClick,
+}: { title: string; sub?: string; badge?: string; extra?: string; initiative?: string | null; onClick?: () => void }) {
+  const clickable = !!onClick && !!initiative;
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 flex items-center justify-between gap-2">
+    <div
+      onClick={clickable ? onClick : undefined}
+      className={`rounded-lg border border-slate-200 bg-white px-3 py-2 flex items-center justify-between gap-2 ${
+        clickable ? "cursor-pointer hover:border-violet-300 hover:bg-violet-50/40 transition-colors" : ""
+      }`}
+    >
       <div className="min-w-0">
         <div className="text-sm truncate">{title}</div>
+        {initiative && (
+          <div className="text-[11px] text-violet-600 mt-0.5 flex items-center gap-1 truncate">
+            <Icon name="Rocket" size={10} className="flex-shrink-0" />
+            <span className="truncate">Инициатива: {initiative}</span>
+          </div>
+        )}
         {sub && <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>}
         {extra && <div className="text-[11px] text-red-600 mt-0.5 font-medium">{extra}</div>}
       </div>
-      {badge && <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${PRIORITY_CLS[badge] || PRIORITY_CLS.normal}`}>{badge}</span>}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {badge && <span className={`text-[10px] px-1.5 py-0.5 rounded ${PRIORITY_CLS[badge] || PRIORITY_CLS.normal}`}>{badge}</span>}
+        {clickable && <Icon name="ChevronRight" size={14} className="text-slate-300" />}
+      </div>
     </div>
   );
 }
