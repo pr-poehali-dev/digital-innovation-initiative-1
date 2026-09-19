@@ -231,6 +231,7 @@ def milestones(cur, initiative_id=None, include_closed=True):
                p.display_name AS responsible_name,
                c.display_name AS confirmed_by_name,
                dep.title AS depends_on_title,
+               par.title AS parent_milestone_title, par.outline_code AS parent_outline_code,
                d.question AS decision_question,
                (m.plan_date - CURRENT_DATE) AS days_left
         FROM {SCHEMA}.exec_milestone m
@@ -238,9 +239,10 @@ def milestones(cur, initiative_id=None, include_closed=True):
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = m.responsible_person_id
         LEFT JOIN {SCHEMA}.exec_person c ON c.id = m.confirmed_by_person_id
         LEFT JOIN {SCHEMA}.exec_milestone dep ON dep.id = m.depends_on_milestone_id
+        LEFT JOIN {SCHEMA}.exec_milestone par ON par.id = m.parent_milestone_id
         LEFT JOIN {SCHEMA}.exec_decision_instance d ON d.id = m.decision_id
         {where}
-        ORDER BY m.plan_date NULLS LAST, m.id
+        ORDER BY i.id, COALESCE(m.parent_milestone_id, m.id), m.sort_order, m.plan_date NULLS LAST, m.id
     """, params)
     return rows(cur)
 
@@ -286,6 +288,7 @@ def risks(cur, initiative_id=None, include_closed=True):
                i.title AS initiative_title, i.code AS initiative_code,
                ow.display_name AS owner_name, asr.display_name AS assessed_by_name,
                mi.title AS materialized_issue_title,
+               rm.title AS related_milestone_title,
                (r.next_review_at < CURRENT_DATE AND r.status = 'active') AS review_overdue,
                (r.is_blocking AND COALESCE(r.block_status,'active') = 'active') AS block_active,
                (SELECT COUNT(*) FROM {SCHEMA}.exec_action a WHERE a.risk_id = r.id) AS actions_count
@@ -294,6 +297,7 @@ def risks(cur, initiative_id=None, include_closed=True):
         LEFT JOIN {SCHEMA}.exec_person ow ON ow.id = r.owner_person_id
         LEFT JOIN {SCHEMA}.exec_person asr ON asr.id = r.assessed_by_person_id
         LEFT JOIN {SCHEMA}.exec_issue mi ON mi.id = r.materialized_issue_id
+        LEFT JOIN {SCHEMA}.exec_milestone rm ON rm.id = r.related_milestone_id
         {where}
         ORDER BY r.risk_score DESC, r.id
     """, params)
@@ -698,7 +702,9 @@ def handler(event: dict, context) -> dict:
             fields = ["initiative_id", "project_id", "title", "milestone_type", "plan_date", "fact_date",
                       "forecast_date", "status", "responsible_person_id", "depends_on_milestone_id", "decision_id",
                       "achievement_criteria", "achievement_evidence", "confirmed_by_person_id",
-                      "reschedule_reason", "reschedule_approved_by", "comment"]
+                      "reschedule_reason", "reschedule_approved_by", "comment",
+                      "parent_milestone_id", "outline_code", "sort_order", "responsible_role",
+                      "cancel_reason", "source_ref", "data_as_of"]
             data = {k: body.get(k) for k in fields if k in body}
 
             if mid:
@@ -802,7 +808,9 @@ def handler(event: dict, context) -> dict:
                       "next_review_at", "status", "materialized_issue_id",
                       "is_blocking", "block_what", "block_since", "block_who_can_lift",
                       "block_requirements", "block_escalation_level", "block_deadline",
-                      "block_status", "block_lifted_at", "block_lifted_by", "block_lift_result"]
+                      "block_status", "block_lifted_at", "block_lifted_by", "block_lift_result",
+                      "category", "related_milestone_id", "mitigation_due_at", "mitigation_status",
+                      "residual_level", "owner_role", "source_ref", "data_as_of"]
             data = {k: body.get(k) for k in fields if k in body}
             if data.get("is_blocking"):
                 data.setdefault("block_status", "active")
@@ -833,7 +841,8 @@ def handler(event: dict, context) -> dict:
                       "author_person_id", "initiative_id", "center_function_id", "meeting_id",
                       "priority", "expected_result", "is_on_control",
                       "start_date", "due_at", "fact_date", "status", "completion_criteria",
-                      "result", "result_confirmed_by_person_id", "delay_reason", "decision_id"]
+                      "result", "result_confirmed_by_person_id", "delay_reason", "decision_id",
+                      "responsible_role"]
             data = {k: body.get(k) for k in fields if k in body}
             # description в БД обязателен (историческое поле) — если задан только
             # короткий title, дублируем его в description, чтобы не менять схему

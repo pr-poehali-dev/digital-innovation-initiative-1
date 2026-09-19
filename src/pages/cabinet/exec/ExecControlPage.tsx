@@ -15,6 +15,7 @@ import {
   MILESTONE_STATUS_LABEL,
   MILESTONE_TYPES,
   Milestone,
+  RISK_CATEGORY_LABEL,
   RISK_LEVEL_LABEL,
   RISK_STATUS_LABEL,
   Risk,
@@ -22,7 +23,7 @@ import {
   takeWarning,
 } from "@/lib/execControlApi";
 import { ACCESS_ROLE_LABEL, CabinetAccess } from "@/lib/execAccess";
-import { Card, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import { Card, ErrorBox, Loading, Metric, VerificationTag, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
 import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
 import { execPageGuides } from "@/config/execPageGuides";
@@ -341,23 +342,33 @@ export default function ExecControlPage() {
                 {fMilestones.map((m) => (
                   <div
                     key={m.id}
+                    style={m.parent_milestone_id ? { marginLeft: 24 } : undefined}
                     className={`rounded-lg border p-4 ${
+                      m.parent_milestone_id ? "border-l-4 border-l-slate-300" : ""
+                    } ${
                       m.is_overdue
                         ? "border-red-500/30 bg-red-500/5"
                         : m.status === "achieved"
                           ? "border-green-500/25 bg-green-500/5"
-                          : "border-slate-200 bg-white"
+                          : m.status === "cancelled"
+                            ? "border-slate-200 bg-slate-50 opacity-70"
+                            : "border-slate-200 bg-white"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
+                          {m.outline_code && (
+                            <span className="text-[11px] font-mono text-slate-400">{m.outline_code}</span>
+                          )}
                           <Tag
                             label={MILESTONE_STATUS_LABEL[m.status] || m.status}
                             cls={
                               m.status === "achieved"
                                 ? "bg-green-500/15 text-green-700 border-green-500/30"
-                                : "bg-slate-100 text-slate-500 border-slate-300"
+                                : m.status === "cancelled"
+                                  ? "bg-slate-200 text-slate-500 border-slate-300"
+                                  : "bg-slate-100 text-slate-500 border-slate-300"
                             }
                           />
                           {m.is_overdue && (
@@ -374,6 +385,7 @@ export default function ExecControlPage() {
                               {MILESTONE_TYPES.find((t) => t.code === m.milestone_type)?.title}
                             </span>
                           )}
+                          <VerificationTag status={m.verification_status} />
                         </div>
                         <p className="text-sm text-slate-900 leading-snug">{m.title}</p>
                         <p className="text-xs text-slate-400 mt-1 truncate">{m.initiative_title}</p>
@@ -405,10 +417,18 @@ export default function ExecControlPage() {
                       </div>
                       <div>
                         <p className="text-slate-500">Ответственный</p>
-                        <p className="text-slate-700">{m.responsible_name || "—"}</p>
+                        <p className="text-slate-700">
+                          {m.responsible_name || m.responsible_role || "—"}
+                        </p>
                       </div>
                     </div>
 
+                    {m.parent_milestone_title && (
+                      <p className="text-xs text-slate-500 mt-2">
+                        <Icon name="CornerDownRight" size={11} className="inline mr-1" />
+                        Часть вехи {m.parent_outline_code ? `${m.parent_outline_code} ` : ""}«{m.parent_milestone_title}»
+                      </p>
+                    )}
                     {m.depends_on_title && (
                       <p className="text-xs text-slate-500 mt-2">
                         <Icon name="Link" size={11} className="inline mr-1" />
@@ -419,6 +439,9 @@ export default function ExecControlPage() {
                       <p className="text-xs text-slate-500 mt-1.5">
                         <span className="text-slate-400">Критерий:</span> {m.achievement_criteria}
                       </p>
+                    )}
+                    {m.status === "cancelled" && m.cancel_reason && (
+                      <p className="text-xs text-red-600 mt-1.5">Причина отмены: {m.cancel_reason}</p>
                     )}
                   </div>
                 ))}
@@ -760,6 +783,11 @@ export default function ExecControlPage() {
                                 <span className="text-xs text-slate-500">
                                   {RISK_STATUS_LABEL[r.status]}
                                 </span>
+                                {r.category && (
+                                  <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                                    {RISK_CATEGORY_LABEL[r.category] || r.category}
+                                  </span>
+                                )}
                                 {r.review_overdue && (
                                   <Tag
                                     label="Пересмотр просрочен"
@@ -769,6 +797,12 @@ export default function ExecControlPage() {
                               </div>
                               <p className="text-sm text-slate-900 leading-snug">{r.description}</p>
                               <p className="text-xs text-slate-400 mt-1 truncate">{r.initiative_title}</p>
+                              {r.related_milestone_title && (
+                                <p className="text-xs text-slate-400 mt-0.5 truncate flex items-center gap-1">
+                                  <Icon name="Flag" size={10} />
+                                  {r.related_milestone_title}
+                                </p>
+                              )}
                             </div>
                             <span onClick={(e) => e.stopPropagation()}>
                               <ReminderQuickButton entityType="risk" entityId={r.id} title={r.description} variant="icon" />
@@ -794,7 +828,7 @@ export default function ExecControlPage() {
                               </div>
                               <div>
                                 <p className="text-xs text-slate-500">Владелец риска</p>
-                                <p className="text-slate-700">{r.owner_name || "—"}</p>
+                                <p className="text-slate-700">{r.owner_name || r.owner_role || "—"}</p>
                               </div>
                               <div>
                                 <p className="text-xs text-slate-500">Предупреждающие меры</p>
@@ -1043,6 +1077,7 @@ export default function ExecControlPage() {
             initiativeId={initFilter ? Number(initFilter) : undefined}
             initiatives={initiatives}
             issues={issues}
+            milestones={milestones}
             persons={persons}
             onClose={() => setRiskForm({ open: false, item: null })}
             onSaved={() => {

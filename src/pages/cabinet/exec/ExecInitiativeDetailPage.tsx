@@ -6,6 +6,7 @@ import {
   BUDGET_KIND_LABEL,
   BUDGET_STATUS_LABEL,
   Decision,
+  DecisionRequest,
   Dictionaries,
   InitiativeFunctionRef,
   InitiativeLabor,
@@ -16,6 +17,7 @@ import {
   RoleAssignment,
   Stakeholder,
 } from "@/lib/execCabinetApi";
+import DecisionRequestForm from "@/components/exec/DecisionRequestForm";
 import { Badge, Card, Empty, ErrorBox, Loading, VerificationTag, fmtDate } from "@/components/exec/ExecUI";
 import { VerificationSelect } from "@/components/exec/ExecForm";
 import ReminderQuickButton from "@/components/exec/ReminderQuickButton";
@@ -107,6 +109,11 @@ export default function ExecInitiativeDetailPage() {
   });
   const [functions, setFunctions] = useState<InitiativeFunctionRef[]>([]);
   const [actionStats, setActionStats] = useState({ open_actions: 0, overdue_actions: 0 });
+  const [decisionRequests, setDecisionRequests] = useState<DecisionRequest[]>([]);
+  const [drForm, setDrForm] = useState<{ open: boolean; item: DecisionRequest | null }>({
+    open: false,
+    item: null,
+  });
 
   const load = () => {
     setLoading(true);
@@ -125,6 +132,7 @@ export default function ExecInitiativeDetailPage() {
         setLabor(r.labor);
         setFunctions(r.functions);
         setActionStats(r.action_stats);
+        setDecisionRequests(r.decision_requests || []);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -214,6 +222,8 @@ export default function ExecInitiativeDetailPage() {
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-5 pt-5 border-t border-slate-200">
+            <Field label="Портфель" value={i.portfolio_title} />
+            <Field label="Функциональный заказчик" value={i.customer_org_unit_name} />
             <Field
               label="Владелец"
               value={i.owner_name || <span className="text-red-600">не назначен</span>}
@@ -224,7 +234,33 @@ export default function ExecInitiativeDetailPage() {
               label="Срок"
               value={`${fmtDate(i.plan_start)} — ${fmtDate(i.plan_end)}`}
             />
+            {i.executor_org_unit_name && (
+              <Field label="Подразделение-исполнитель" value={i.executor_org_unit_name} />
+            )}
+            {i.external_code && <Field label="Внешний код" value={i.external_code} />}
           </div>
+          {i.status === "cancelled" && (
+            <div className="mt-4 pt-4 border-t border-slate-200 rounded-lg bg-red-50 border border-red-200 p-3">
+              <p className="text-sm font-medium text-red-700 flex items-center gap-1.5">
+                <Icon name="Ban" size={14} />
+                Инициатива прекращена {i.cancelled_at ? fmtDate(i.cancelled_at) : ""}
+                {i.cancelled_by_name ? ` · ${i.cancelled_by_name}` : ""}
+              </p>
+              {i.cancel_reason && <p className="text-xs text-red-600 mt-1">Причина: {i.cancel_reason}</p>}
+              {i.cancel_basis && <p className="text-xs text-red-600 mt-0.5">Основание: {i.cancel_basis}</p>}
+            </div>
+          )}
+          {i.source_note && (
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <p className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                <Icon name="FileText" size={12} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  {i.source_note}
+                  {i.data_as_of && <> Данные актуальны на {fmtDate(i.data_as_of)}.</>}
+                </span>
+              </p>
+            </div>
+          )}
         </header>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -330,6 +366,61 @@ export default function ExecInitiativeDetailPage() {
                 Все точки, проблемы и риски
               </Link>
             </div>
+            <Card
+              title="Требует решения руководителя"
+              icon="Gavel"
+              subtitle={decisionRequests.filter((d) => d.status === "open").length > 0
+                ? `${decisionRequests.filter((d) => d.status === "open").length} открытых`
+                : undefined}
+              action={
+                <button
+                  onClick={() => setDrForm({ open: true, item: null })}
+                  className="px-2.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+                >
+                  <Icon name="Plus" size={13} />
+                  Вопрос
+                </button>
+              }
+            >
+              {decisionRequests.length === 0 ? (
+                <Empty text="Открытых вопросов на решение нет" />
+              ) : (
+                <div className="space-y-3">
+                  {decisionRequests.map((d) => (
+                    <div
+                      key={d.id}
+                      onClick={() => setDrForm({ open: true, item: d })}
+                      className={`rounded-lg border p-3 cursor-pointer transition-colors ${
+                        d.status === "open"
+                          ? "border-amber-200 bg-amber-50 hover:bg-amber-100"
+                          : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-sm text-slate-800 font-medium">{d.question}</p>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                            d.status === "open"
+                              ? "bg-amber-500/20 text-amber-800"
+                              : "bg-slate-200 text-slate-500"
+                          }`}
+                        >
+                          {d.status === "open" ? "открыт" : d.status === "decided" ? "решён" : "отозван"}
+                        </span>
+                      </div>
+                      {d.recommended_option && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Рекомендация: {d.recommended_option}
+                        </p>
+                      )}
+                      {d.due_at && (
+                        <p className="text-[11px] text-slate-400 mt-1">Срок решения: {fmtDate(d.due_at)}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
             <Card title="Проблема и цель" icon="Target">
               <div className="space-y-4">
                 <Field label="Проблема или потребность" value={i.problem} />
@@ -666,6 +757,8 @@ export default function ExecInitiativeDetailPage() {
             initiative={i}
             dicts={dicts}
             persons={refs.persons}
+            orgUnits={refs.org_units}
+            portfolios={refs.portfolios}
             onClose={() => setEditInit(false)}
             onSaved={() => {
               setEditInit(false);
@@ -721,6 +814,18 @@ export default function ExecInitiativeDetailPage() {
             initiatives={refs?.initiatives || []}
             onClose={() => setQuickRisk(false)}
             onDone={() => setQuickRisk(false)}
+          />
+        )}
+
+        {drForm.open && (
+          <DecisionRequestForm
+            initiativeId={i.id}
+            item={drForm.item}
+            onClose={() => setDrForm({ open: false, item: null })}
+            onDone={() => {
+              setDrForm({ open: false, item: null });
+              load();
+            }}
           />
         )}
       </div>

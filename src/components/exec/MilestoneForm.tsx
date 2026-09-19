@@ -33,7 +33,10 @@ export default function MilestoneForm({
     fact_date: m?.fact_date || "",
     status: m?.status || "not_started",
     responsible_person_id: m?.responsible_person_id ? String(m.responsible_person_id) : "",
+    responsible_role: m?.responsible_role || "",
     depends_on_milestone_id: m?.depends_on_milestone_id ? String(m.depends_on_milestone_id) : "",
+    parent_milestone_id: m?.parent_milestone_id ? String(m.parent_milestone_id) : "",
+    outline_code: m?.outline_code || "",
     decision_id: m?.decision_id ? String(m.decision_id) : "",
     achievement_criteria: m?.achievement_criteria || "",
     achievement_evidence: m?.achievement_evidence || "",
@@ -41,6 +44,7 @@ export default function MilestoneForm({
     reschedule_reason: "",
     reschedule_approved_by: "",
     comment: m?.comment || "",
+    cancel_reason: m?.cancel_reason || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -80,6 +84,7 @@ export default function MilestoneForm({
         depends_on_milestone_id: f.depends_on_milestone_id
           ? Number(f.depends_on_milestone_id)
           : null,
+        parent_milestone_id: f.parent_milestone_id ? Number(f.parent_milestone_id) : null,
         decision_id: f.decision_id ? Number(f.decision_id) : null,
         confirmed_by_person_id: f.confirmed_by_person_id
           ? Number(f.confirmed_by_person_id)
@@ -125,13 +130,16 @@ export default function MilestoneForm({
             options={MILESTONE_TYPES.map((t) => ({ value: t.code, label: t.title }))}
           />
         </div>
-        <TextField
-          label="Наименование контрольной точки"
-          value={f.title}
-          onChange={set("title")}
-          placeholder="Например: Согласована концепция решения"
-          required
-        />
+        <div className="grid sm:grid-cols-[80px_1fr] gap-4">
+          <TextField label="№ в плане" value={f.outline_code} onChange={set("outline_code")} placeholder="1.1" />
+          <TextField
+            label="Наименование контрольной точки"
+            value={f.title}
+            onChange={set("title")}
+            placeholder="Например: Согласована концепция решения"
+            required
+          />
+        </div>
         <div className="grid sm:grid-cols-2 gap-4">
           <SelectField
             label="Статус"
@@ -152,6 +160,21 @@ export default function MilestoneForm({
             options={personOptions}
           />
         </div>
+        <TextField
+          label="Ответственная роль (если человек не назначен)"
+          value={f.responsible_role}
+          onChange={set("responsible_role")}
+          placeholder="Например: РП, ОМ, ТРП"
+          hint="Заполняйте, только если конкретного человека пока нет"
+        />
+        {f.status === "cancelled" && (
+          <TextArea
+            label="Причина отмены"
+            value={f.cancel_reason}
+            onChange={set("cancel_reason")}
+            rows={2}
+          />
+        )}
       </Section>
 
       <Section title="Сроки">
@@ -225,19 +248,26 @@ export default function MilestoneForm({
       <Section title="Связи">
         <div className="grid sm:grid-cols-2 gap-4">
           <SelectField
+            label="Часть вехи (декомпозиция)"
+            value={f.parent_milestone_id}
+            onChange={set("parent_milestone_id")}
+            options={depOptions}
+            hint="Например точка 1.1 — часть точки 1. Это НЕ календарная зависимость"
+          />
+          <SelectField
             label="Зависит от точки"
             value={f.depends_on_milestone_id}
             onChange={set("depends_on_milestone_id")}
             options={depOptions}
             hint="Не может достигаться раньше предшествующей"
           />
-          <SelectField
-            label="Связанное решение"
-            value={f.decision_id}
-            onChange={set("decision_id")}
-            options={decisions.map((d) => ({ value: String(d.id), label: d.question }))}
-          />
         </div>
+        <SelectField
+          label="Связанное решение"
+          value={f.decision_id}
+          onChange={set("decision_id")}
+          options={decisions.map((d) => ({ value: String(d.id), label: d.question }))}
+        />
         <TextArea label="Комментарий" value={f.comment} onChange={set("comment")} rows={2} />
       </Section>
     </Modal>

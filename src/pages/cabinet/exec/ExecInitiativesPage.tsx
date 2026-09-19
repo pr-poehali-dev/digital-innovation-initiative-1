@@ -5,12 +5,14 @@ import Icon from "@/components/ui/icon";
 import {
   BUDGET_STATUS_LABEL,
   Dictionaries,
+  OrgUnit,
+  Portfolio,
   PortfolioSummary,
   execApi,
   Initiative,
   PersonRef,
 } from "@/lib/execCabinetApi";
-import { Badge, Card, Empty, ErrorBox, Loading, Metric, fmtDate } from "@/components/exec/ExecUI";
+import { Badge, Card, Empty, ErrorBox, Loading, Metric, VerificationTag, fmtDate } from "@/components/exec/ExecUI";
 import PageGuide from "@/components/exec/PageGuide";
 import { execPageGuides } from "@/config/execPageGuides";
 import InitiativeForm from "@/components/exec/InitiativeForm";
@@ -28,6 +30,9 @@ export default function ExecInitiativesPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [priority, setPriority] = useState("");
+  const [portfolioFilter, setPortfolioFilter] = useState("");
+  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Initiative | null>(null);
   const [view, setView] = useState<"cards" | "map">("cards");
@@ -38,11 +43,13 @@ export default function ExecInitiativesPage() {
   const load = () => {
     setLoading(true);
     setError("");
-    Promise.all([execApi.initiatives(), execApi.refs(), execApi.portfolioSummary()])
-      .then(([r, refs, ps]) => {
+    Promise.all([execApi.initiatives(), execApi.refs(), execApi.portfolioSummary(), execApi.portfolios()])
+      .then(([r, refs, ps, pf]) => {
         setItems(r.items);
         setDicts(r.dictionaries);
         setPersons(refs.persons);
+        setOrgUnits(refs.org_units);
+        setPortfolios(pf.items);
         setSummary(ps);
       })
       .catch((e) => setError(e.message))
@@ -58,12 +65,13 @@ export default function ExecInitiativesPage() {
           return false;
         if (status && i.status !== status) return false;
         if (priority && i.priority !== priority) return false;
+        if (portfolioFilter && String(i.portfolio_id || "") !== portfolioFilter) return false;
         if (onlyNoOwner && i.owner_person_id) return false;
         if (onlyBudgetNotReady && (!i.budget_year || i.budget_status === "approved" || i.budget_status === "not_required"))
           return false;
         return true;
       }),
-    [items, q, status, priority, onlyNoOwner, onlyBudgetNotReady],
+    [items, q, status, priority, portfolioFilter, onlyNoOwner, onlyBudgetNotReady],
   );
 
   const openNew = () => {
@@ -215,6 +223,20 @@ export default function ExecInitiativesPage() {
               </option>
             ))}
           </select>
+          {portfolios.length > 0 && (
+            <select
+              value={portfolioFilter}
+              onChange={(e) => setPortfolioFilter(e.target.value)}
+              className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 text-sm outline-none focus:border-slate-200"
+            >
+              <option value="">Все портфели</option>
+              {portfolios.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          )}
 
           <div className="flex items-center gap-1 p-1 rounded-lg bg-white border border-slate-200">
             {[
@@ -260,8 +282,11 @@ export default function ExecInitiativesPage() {
                 className="rounded-xl border border-slate-200 bg-white p-4 hover:border-slate-300 transition-colors flex flex-col"
               >
                 <div className="flex items-start justify-between gap-2 mb-2">
-                  <span className="text-[11px] font-mono text-slate-400">{i.code || `#${i.id}`}</span>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    {i.external_code || i.code || `#${i.id}`}
+                  </span>
                   <div className="flex items-center gap-1.5">
+                    <VerificationTag status={i.verification_status} />
                     <Badge dicts={dicts} type="priority" code={i.priority} />
                     <button
                       onClick={(e) => openEdit(e, i)}
@@ -273,6 +298,12 @@ export default function ExecInitiativesPage() {
                   </div>
                 </div>
                 <h3 className="text-sm font-medium text-slate-900 leading-snug flex-1">{i.title}</h3>
+                {i.customer_org_unit_name && (
+                  <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                    <Icon name="Building2" size={10} />
+                    {i.customer_org_unit_name}
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   <Badge dicts={dicts} type="initiative_status" code={i.status} />
                   <Badge dicts={dicts} type="initiative_stage" code={i.stage} />
@@ -286,6 +317,24 @@ export default function ExecInitiativesPage() {
                     <Icon name="Calendar" size={11} />
                     {fmtDate(i.plan_end)}
                   </p>
+                  {i.next_milestone_title && (
+                    <p className="text-xs text-slate-500 flex items-center gap-1.5 truncate">
+                      <Icon name="Flag" size={11} className="flex-shrink-0" />
+                      <span className="truncate">
+                        {fmtDate(i.next_milestone_date || null)} · {i.next_milestone_title}
+                      </span>
+                    </p>
+                  )}
+                  {i.top_risk_title && (
+                    <p
+                      className={`text-xs flex items-center gap-1.5 truncate ${
+                        (i.top_risk_score || 0) >= 15 ? "text-red-600" : "text-amber-600"
+                      }`}
+                    >
+                      <Icon name="ShieldAlert" size={11} className="flex-shrink-0" />
+                      <span className="truncate">{i.top_risk_title}</span>
+                    </p>
+                  )}
                   <div className="flex items-center gap-3 text-xs text-slate-500 pt-1">
                     <span className="flex items-center gap-1">
                       <Icon name="Users" size={11} />
@@ -295,6 +344,12 @@ export default function ExecInitiativesPage() {
                       <Icon name="GitPullRequest" size={11} />
                       {i.open_decisions ?? 0} открытых
                     </span>
+                    {(i.open_decision_requests ?? 0) > 0 && (
+                      <span className="flex items-center gap-1 text-amber-600">
+                        <Icon name="Gavel" size={11} />
+                        {i.open_decision_requests} на решение
+                      </span>
+                    )}
                   </div>
                   {i.budget_year && (
                     <span
@@ -317,6 +372,8 @@ export default function ExecInitiativesPage() {
             initiative={editing}
             dicts={dicts}
             persons={persons}
+            orgUnits={orgUnits}
+            portfolios={portfolios}
             onClose={() => setFormOpen(false)}
             onSaved={() => {
               setFormOpen(false);

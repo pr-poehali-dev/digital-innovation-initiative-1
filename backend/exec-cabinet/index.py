@@ -904,31 +904,81 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": data})
 
         if action == "initiatives":
+            portfolio_id = qs.get("portfolio_id")
+            where = "WHERE i.portfolio_id = %s" if portfolio_id else ""
+            params = (int(portfolio_id),) if portfolio_id else ()
             cur.execute(f"""
                 SELECT i.*, ow.display_name AS owner_name, mg.display_name AS manager_name,
                        cu.display_name AS curator_name, ef.display_name AS effect_owner_name,
+                       cust.name AS customer_org_unit_name, exec_.name AS executor_org_unit_name,
+                       pf.title AS portfolio_title,
                        (SELECT COUNT(*) FROM {SCHEMA}.exec_stakeholder s WHERE s.initiative_id = i.id) AS stakeholders_count,
                        (SELECT COUNT(*) FROM {SCHEMA}.exec_decision_instance d
-                        WHERE d.initiative_id = i.id AND d.status NOT IN ('decided','rejected','deferred')) AS open_decisions
+                        WHERE d.initiative_id = i.id AND d.status NOT IN ('decided','rejected','deferred')) AS open_decisions,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_initiative_decision_request idr
+                        WHERE idr.initiative_id = i.id AND idr.status = 'open') AS open_decision_requests,
+                       (SELECT m.title FROM {SCHEMA}.exec_milestone m
+                        WHERE m.initiative_id = i.id AND m.status NOT IN ('achieved','cancelled')
+                        ORDER BY m.plan_date NULLS LAST LIMIT 1) AS next_milestone_title,
+                       (SELECT m.plan_date FROM {SCHEMA}.exec_milestone m
+                        WHERE m.initiative_id = i.id AND m.status NOT IN ('achieved','cancelled')
+                        ORDER BY m.plan_date NULLS LAST LIMIT 1) AS next_milestone_date,
+                       (SELECT r.description FROM {SCHEMA}.exec_risk r
+                        WHERE r.initiative_id = i.id AND r.status = 'active'
+                        ORDER BY r.risk_score DESC LIMIT 1) AS top_risk_title,
+                       (SELECT r.risk_score FROM {SCHEMA}.exec_risk r
+                        WHERE r.initiative_id = i.id AND r.status = 'active'
+                        ORDER BY r.risk_score DESC LIMIT 1) AS top_risk_score
                 FROM {SCHEMA}.exec_initiative i
                 LEFT JOIN {SCHEMA}.exec_person ow ON ow.id = i.owner_person_id
                 LEFT JOIN {SCHEMA}.exec_person mg ON mg.id = i.manager_person_id
                 LEFT JOIN {SCHEMA}.exec_person cu ON cu.id = i.curator_person_id
                 LEFT JOIN {SCHEMA}.exec_person ef ON ef.id = i.effect_owner_person_id
+                LEFT JOIN {SCHEMA}.org_units cust ON cust.id = i.customer_org_unit_id
+                LEFT JOIN {SCHEMA}.org_units exec_ ON exec_.id = i.executor_org_unit_id
+                LEFT JOIN {SCHEMA}.exec_portfolio pf ON pf.id = i.portfolio_id
+                {where}
                 ORDER BY i.updated_at DESC
-            """)
+            """, params)
             return cors({"ok": True, "data": {"items": rows(cur), "dictionaries": load_dictionaries(cur)}})
+
+        if action == "portfolios":
+            cur.execute(f"""
+                SELECT p.*, ou.name AS owner_org_unit_name,
+                       (SELECT COUNT(*) FROM {SCHEMA}.exec_initiative i WHERE i.portfolio_id = p.id) AS initiatives_count
+                FROM {SCHEMA}.exec_portfolio p
+                LEFT JOIN {SCHEMA}.org_units ou ON ou.id = p.owner_org_unit_id
+                ORDER BY p.title
+            """)
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        if action == "org_units":
+            portfolio_id = qs.get("portfolio_id")
+            cur.execute(f"""
+                SELECT id, code, name, type, parent_id, level
+                FROM {SCHEMA}.org_units
+                WHERE COALESCE(is_archived, false) = false
+                ORDER BY level, sort_order, name
+            """)
+            return cors({"ok": True, "data": {"items": rows(cur)}})
 
         if action == "initiative":
             iid = int(qs.get("id", 0))
             cur.execute(f"""
                 SELECT i.*, ow.display_name AS owner_name, mg.display_name AS manager_name,
-                       cu.display_name AS curator_name, ef.display_name AS effect_owner_name
+                       cu.display_name AS curator_name, ef.display_name AS effect_owner_name,
+                       cust.name AS customer_org_unit_name, exec_.name AS executor_org_unit_name,
+                       cancb.display_name AS cancelled_by_name,
+                       pf.title AS portfolio_title
                 FROM {SCHEMA}.exec_initiative i
                 LEFT JOIN {SCHEMA}.exec_person ow ON ow.id = i.owner_person_id
                 LEFT JOIN {SCHEMA}.exec_person mg ON mg.id = i.manager_person_id
                 LEFT JOIN {SCHEMA}.exec_person cu ON cu.id = i.curator_person_id
                 LEFT JOIN {SCHEMA}.exec_person ef ON ef.id = i.effect_owner_person_id
+                LEFT JOIN {SCHEMA}.exec_person cancb ON cancb.id = i.cancelled_by_person_id
+                LEFT JOIN {SCHEMA}.org_units cust ON cust.id = i.customer_org_unit_id
+                LEFT JOIN {SCHEMA}.org_units exec_ ON exec_.id = i.executor_org_unit_id
+                LEFT JOIN {SCHEMA}.exec_portfolio pf ON pf.id = i.portfolio_id
                 WHERE i.id = %s
             """, (iid,))
             item = rows(cur)
@@ -1028,12 +1078,24 @@ def handler(event: dict, context) -> dict:
             """, (iid, iid, iid))
             action_stats = rows(cur)[0]
 
+            # Вопросы, требующие управленческого решения по инициативе
+            cur.execute(f"""
+                SELECT idr.*, pp.display_name AS prepared_by_name, dp.display_name AS decided_by_name
+                FROM {SCHEMA}.exec_initiative_decision_request idr
+                LEFT JOIN {SCHEMA}.exec_person pp ON pp.id = idr.prepared_by_person_id
+                LEFT JOIN {SCHEMA}.exec_person dp ON dp.id = idr.decided_by_person_id
+                WHERE idr.initiative_id = %s
+                ORDER BY idr.status = 'open' DESC, idr.due_at NULLS LAST, idr.id DESC
+            """, (iid,))
+            decision_requests = rows(cur)
+
             return cors({"ok": True, "data": {
                 "initiative": item[0], "stakeholders": stakeholders,
                 "decisions": decisions, "assignments": assignments,
                 "next_milestone": next_milestone,
                 "issue_stats": issue_stats, "risk_stats": risk_stats,
                 "labor": labor, "functions": functions, "action_stats": action_stats,
+                "decision_requests": decision_requests,
                 "dictionaries": load_dictionaries(cur),
             }})
 
@@ -1246,9 +1308,18 @@ def handler(event: dict, context) -> dict:
             bodies = rows(cur)
             cur.execute(f"SELECT id, code, title FROM {SCHEMA}.exec_initiative ORDER BY title")
             initiatives = rows(cur)
+            cur.execute(f"""
+                SELECT id, code, name, type, parent_id, level
+                FROM {SCHEMA}.org_units WHERE COALESCE(is_archived, false) = false
+                ORDER BY level, sort_order, name
+            """)
+            org_units = rows(cur)
+            cur.execute(f"SELECT id, code, title FROM {SCHEMA}.exec_portfolio WHERE status = 'active' ORDER BY title")
+            portfolios = rows(cur)
             return cors({"ok": True, "data": {
                 "persons": persons, "decision_types": decision_types,
                 "bodies": bodies, "initiatives": initiatives,
+                "org_units": org_units, "portfolios": portfolios,
                 "dictionaries": load_dictionaries(cur),
             }})
 
@@ -1283,8 +1354,14 @@ def handler(event: dict, context) -> dict:
                       "plan_start", "plan_end",
                       "budget_year", "budget_kind", "budget_source_prev", "budget_source_new",
                       "budget_amount", "budget_status", "budget_owner_person_id",
-                      "budget_materials_note", "budget_due_date", "budget_finance_comment"]
+                      "budget_materials_note", "budget_due_date", "budget_finance_comment",
+                      "portfolio_id", "customer_org_unit_id", "executor_org_unit_id", "external_code",
+                      "cancel_reason", "cancel_basis", "cancelled_at", "cancelled_by_person_id",
+                      "source_note", "source_ref", "data_as_of"]
             data = {k: body.get(k) for k in fields if k in body}
+            # Прекращение инициативы обязательно с основанием — не только смена статуса.
+            if data.get("status") == "cancelled" and not (data.get("cancel_reason") or "").strip():
+                return cors({"ok": False, "error": {"message": "Для статуса «Прекращена» нужно указать причину прекращения"}}, 400)
             if iid:
                 sets = ", ".join(f"{k} = %s" for k in data)
                 cur.execute(
@@ -1352,6 +1429,33 @@ def handler(event: dict, context) -> dict:
                 f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
                 f"VALUES (%s,%s,%s,%s,%s)",
                 ("decision", new_id, "update" if did else "create", actor, json.dumps(data, ensure_ascii=False, default=str)))
+            conn.commit()
+            return cors({"ok": True, "data": {"id": new_id}})
+
+        if action == "save_decision_request":
+            rid = body.get("id")
+            fields = ["initiative_id", "question", "options", "recommended_option", "due_at",
+                      "consequence_if_not_decided", "prepared_by_person_id", "status",
+                      "decided_option", "decided_at", "decided_by_person_id", "source_note"]
+            data = {k: body.get(k) for k in fields if k in body}
+            if rid:
+                sets = ", ".join(f"{k} = %s" for k in data)
+                cur.execute(
+                    f"UPDATE {SCHEMA}.exec_initiative_decision_request SET {sets}, updated_at = now() "
+                    f"WHERE id = %s RETURNING id", list(data.values()) + [rid])
+            else:
+                data["created_by"] = actor
+                cols = ", ".join(data.keys())
+                ph = ", ".join(["%s"] * len(data))
+                cur.execute(
+                    f"INSERT INTO {SCHEMA}.exec_initiative_decision_request ({cols}) VALUES ({ph}) RETURNING id",
+                    list(data.values()))
+            new_id = cur.fetchone()[0]
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_audit_log (entity_type, entity_id, action, actor, after_json) "
+                f"VALUES (%s,%s,%s,%s,%s)",
+                ("decision_request", new_id, "update" if rid else "create", actor,
+                 json.dumps(data, ensure_ascii=False, default=str)))
             conn.commit()
             return cors({"ok": True, "data": {"id": new_id}})
 

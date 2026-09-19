@@ -1,8 +1,8 @@
 import { useState } from "react";
 import Icon from "@/components/ui/icon";
 import { PersonRef } from "@/lib/execCabinetApi";
-import { Issue, RISK_LEVEL_LABEL, Risk, controlApi } from "@/lib/execControlApi";
-import { DateField, Modal, Section, SelectField, TextArea } from "./ExecForm";
+import { Issue, Milestone, RISK_CATEGORY_LABEL, RISK_LEVEL_LABEL, Risk, controlApi } from "@/lib/execControlApi";
+import { DateField, Modal, Section, SelectField, TextArea, TextField } from "./ExecForm";
 
 function level(score: number): string {
   if (score >= 16) return "critical";
@@ -24,6 +24,7 @@ export default function RiskForm({
   initiativeId,
   initiatives,
   issues,
+  milestones = [],
   persons,
   onClose,
   onSaved,
@@ -32,6 +33,7 @@ export default function RiskForm({
   initiativeId?: number;
   initiatives: { id: number; title: string }[];
   issues: Issue[];
+  milestones?: Milestone[];
   persons: PersonRef[];
   onClose: () => void;
   onSaved: () => void;
@@ -55,6 +57,9 @@ export default function RiskForm({
     next_review_at: r?.next_review_at || "",
     status: r?.status || "active",
     materialized_issue_id: r?.materialized_issue_id ? String(r.materialized_issue_id) : "",
+    category: r?.category || "",
+    related_milestone_id: r?.related_milestone_id ? String(r.related_milestone_id) : "",
+    owner_role: r?.owner_role || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -90,6 +95,8 @@ export default function RiskForm({
         owner_person_id: f.owner_person_id ? Number(f.owner_person_id) : null,
         assessed_by_person_id: f.assessed_by_person_id ? Number(f.assessed_by_person_id) : null,
         materialized_issue_id: f.materialized_issue_id ? Number(f.materialized_issue_id) : null,
+        related_milestone_id: f.related_milestone_id ? Number(f.related_milestone_id) : null,
+        category: f.category || null,
         detected_at: f.detected_at || null,
         last_assessed_at: f.last_assessed_at || null,
         next_review_at: f.next_review_at || null,
@@ -147,6 +154,22 @@ export default function RiskForm({
           rows={2}
           hint="По какому признаку поймём, что риск реализуется"
         />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <SelectField
+            label="Категория риска"
+            value={f.category}
+            onChange={set("category")}
+            options={Object.entries(RISK_CATEGORY_LABEL).map(([value, label]) => ({ value, label }))}
+          />
+          <SelectField
+            label="Связанная контрольная точка"
+            value={f.related_milestone_id}
+            onChange={set("related_milestone_id")}
+            options={milestones
+              .filter((m) => String(m.initiative_id) === f.initiative_id)
+              .map((m) => ({ value: String(m.id), label: m.title }))}
+          />
+        </div>
       </Section>
 
       <Section title="Оценка">
@@ -200,6 +223,13 @@ export default function RiskForm({
           value={f.owner_person_id}
           onChange={set("owner_person_id")}
           options={personOptions}
+        />
+        <TextField
+          label="Ответственная роль (если человек не назначен)"
+          value={f.owner_role}
+          onChange={set("owner_role")}
+          placeholder="Например: ОМ, РП"
+          hint="Заполняйте, только если конкретного владельца пока нет"
         />
         <TextArea
           label="Предупреждающие меры"

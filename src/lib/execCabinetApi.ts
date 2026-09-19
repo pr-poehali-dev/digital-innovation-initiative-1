@@ -70,6 +70,67 @@ export interface Initiative {
   budget_materials_note: string | null;
   budget_due_date: string | null;
   budget_finance_comment: string | null;
+  // Портфель и организационная принадлежность
+  portfolio_id: number | null;
+  portfolio_title?: string | null;
+  customer_org_unit_id: number | null;
+  customer_org_unit_name?: string | null;
+  executor_org_unit_id: number | null;
+  executor_org_unit_name?: string | null;
+  external_code: string | null;
+  cancel_reason: string | null;
+  cancel_basis: string | null;
+  cancelled_at: string | null;
+  cancelled_by_person_id: number | null;
+  cancelled_by_name?: string | null;
+  source_note: string | null;
+  source_ref: string | null;
+  data_as_of: string | null;
+  // Сводка для карточек списка (приходит только из action=initiatives)
+  open_decision_requests?: number;
+  next_milestone_title?: string | null;
+  next_milestone_date?: string | null;
+  top_risk_title?: string | null;
+  top_risk_score?: number | null;
+}
+
+export interface Portfolio {
+  id: number;
+  code: string | null;
+  title: string;
+  description: string | null;
+  owner_org_unit_id: number | null;
+  owner_org_unit_name?: string | null;
+  status: string;
+  initiatives_count?: number;
+}
+
+export interface OrgUnit {
+  id: number;
+  code: string;
+  name: string;
+  type: string;
+  parent_id: number | null;
+  level: number;
+}
+
+export interface DecisionRequest {
+  id: number;
+  initiative_id: number;
+  question: string;
+  options: string | null;
+  recommended_option: string | null;
+  due_at: string | null;
+  consequence_if_not_decided: string | null;
+  prepared_by_person_id: number | null;
+  prepared_by_name?: string | null;
+  status: "open" | "decided" | "withdrawn";
+  decided_option: string | null;
+  decided_at: string | null;
+  decided_by_person_id: number | null;
+  decided_by_name?: string | null;
+  source_note: string | null;
+  verification_status: string;
 }
 
 export interface InitiativeMilestoneRef {
@@ -220,6 +281,8 @@ export interface RefsData {
   decision_types: { code: string; title: string; category: string; stage: string }[];
   bodies: { id: number; title: string }[];
   initiatives: { id: number; code: string | null; title: string }[];
+  org_units: OrgUnit[];
+  portfolios: { id: number; code: string | null; title: string }[];
   dictionaries: Dictionaries;
 }
 
@@ -296,8 +359,13 @@ export const execApi = {
     labor: InitiativeLabor;
     functions: InitiativeFunctionRef[];
     action_stats: { open_actions: number; overdue_actions: number };
+    decision_requests: DecisionRequest[];
     dictionaries: Dictionaries;
   }> => req(`/?action=initiative&id=${id}`),
+
+  portfolios: (): Promise<{ items: Portfolio[] }> => req("/?action=portfolios"),
+
+  orgUnits: (): Promise<{ items: OrgUnit[] }> => req("/?action=org_units"),
 
   stakeholders: (): Promise<{ items: Stakeholder[]; dictionaries: Dictionaries }> =>
     req("/?action=stakeholders"),
@@ -357,6 +425,9 @@ export const execApi = {
 
   saveDecision: (payload: Record<string, unknown>): Promise<{ id: number }> =>
     req("/?action=save_decision", { method: "POST", body: JSON.stringify(payload) }),
+
+  saveDecisionRequest: (payload: Record<string, unknown>): Promise<{ id: number }> =>
+    req("/?action=save_decision_request", { method: "POST", body: JSON.stringify(payload) }),
 
   auditLog: (entity = "", limit = 200): Promise<AuditData> =>
     req(`/?action=audit_log&limit=${limit}${entity ? `&entity=${entity}` : ""}`),

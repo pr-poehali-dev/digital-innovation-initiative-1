@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dictionaries, execApi, Initiative, PersonRef } from "@/lib/execCabinetApi";
+import { Dictionaries, execApi, Initiative, OrgUnit, PersonRef } from "@/lib/execCabinetApi";
 import {
   DateField,
   DictSelect,
@@ -50,6 +50,13 @@ function init(i?: Initiative | null): Form {
     budget_materials_note: i?.budget_materials_note || "",
     budget_due_date: i?.budget_due_date || "",
     budget_finance_comment: i?.budget_finance_comment || "",
+    portfolio_id: i?.portfolio_id ? String(i.portfolio_id) : "",
+    customer_org_unit_id: i?.customer_org_unit_id ? String(i.customer_org_unit_id) : "",
+    executor_org_unit_id: i?.executor_org_unit_id ? String(i.executor_org_unit_id) : "",
+    external_code: i?.external_code || "",
+    cancel_reason: i?.cancel_reason || "",
+    cancel_basis: i?.cancel_basis || "",
+    cancelled_at: i?.cancelled_at || "",
   };
 }
 
@@ -57,12 +64,16 @@ export default function InitiativeForm({
   initiative,
   dicts,
   persons,
+  orgUnits = [],
+  portfolios = [],
   onClose,
   onSaved,
 }: {
   initiative?: Initiative | null;
   dicts: Dictionaries;
   persons: PersonRef[];
+  orgUnits?: OrgUnit[];
+  portfolios?: { id: number; code: string | null; title: string }[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -76,10 +87,19 @@ export default function InitiativeForm({
     value: String(p.id),
     label: p.position_title ? `${p.display_name} — ${p.position_title}` : p.display_name,
   }));
+  const orgUnitOptions = orgUnits.map((u) => ({
+    value: String(u.id),
+    label: u.level > 0 ? `${"— ".repeat(u.level)}${u.name}` : u.name,
+  }));
+  const portfolioOptions = portfolios.map((p) => ({ value: String(p.id), label: p.title }));
 
   const save = async () => {
     if (!f.title.trim()) {
       setError("Укажите наименование инициативы");
+      return;
+    }
+    if (f.status === "cancelled" && !f.cancel_reason.trim()) {
+      setError("Для статуса «Прекращена» укажите причину прекращения");
       return;
     }
     setSaving(true);
@@ -92,10 +112,13 @@ export default function InitiativeForm({
       "curator_person_id",
       "effect_owner_person_id",
       "budget_owner_person_id",
+      "portfolio_id",
+      "customer_org_unit_id",
+      "executor_org_unit_id",
     ].forEach((k) => {
       payload[k] = f[k] ? Number(f[k]) : null;
     });
-    ["plan_start", "plan_end", "budget_due_date"].forEach((k) => {
+    ["plan_start", "plan_end", "budget_due_date", "cancelled_at"].forEach((k) => {
       payload[k] = f[k] || null;
     });
     payload.budget_year = f.budget_year ? Number(f.budget_year) : null;
@@ -171,6 +194,55 @@ export default function InitiativeForm({
           />
           <DateField label="Плановое начало" value={f.plan_start} onChange={set("plan_start")} />
           <DateField label="Плановое окончание" value={f.plan_end} onChange={set("plan_end")} />
+        </div>
+      </Section>
+
+      {f.status === "cancelled" && (
+        <Section title="Прекращение инициативы">
+          <TextArea
+            label="Причина прекращения"
+            value={f.cancel_reason}
+            onChange={set("cancel_reason")}
+            rows={2}
+            hint="Обязательно для статуса «Прекращена»"
+          />
+          <TextArea
+            label="Основание (решение, документ)"
+            value={f.cancel_basis}
+            onChange={set("cancel_basis")}
+            rows={2}
+          />
+          <DateField label="Дата прекращения" value={f.cancelled_at} onChange={set("cancelled_at")} />
+        </Section>
+      )}
+
+      <Section title="Портфель и заказчик">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <SelectField
+            label="Портфель"
+            value={f.portfolio_id}
+            onChange={set("portfolio_id")}
+            options={portfolioOptions}
+          />
+          <TextField
+            label="Внешний код"
+            value={f.external_code}
+            onChange={set("external_code")}
+            placeholder="Например: 100401"
+          />
+          <SelectField
+            label="Функциональный заказчик"
+            value={f.customer_org_unit_id}
+            onChange={set("customer_org_unit_id")}
+            options={orgUnitOptions}
+            hint="Конкретное подразделение, а не Блок целиком"
+          />
+          <SelectField
+            label="Подразделение-исполнитель"
+            value={f.executor_org_unit_id}
+            onChange={set("executor_org_unit_id")}
+            options={orgUnitOptions}
+          />
         </div>
       </Section>
 

@@ -30,6 +30,17 @@ export interface Milestone {
   reschedule_count: number;
   comment: string | null;
   verification_status: string;
+  // Иерархия/декомпозиция (1 -> 1.1, 1.2) — отдельно от календарной
+  // зависимости depends_on_milestone_id.
+  parent_milestone_id: number | null;
+  parent_milestone_title: string | null;
+  parent_outline_code: string | null;
+  outline_code: string | null;
+  sort_order: number;
+  responsible_role: string | null;
+  cancel_reason: string | null;
+  source_ref: string | null;
+  data_as_of: string | null;
 }
 
 export interface Issue {
@@ -116,6 +127,15 @@ export interface Risk {
   block_active: boolean;
   actions_count: number;
   verification_status: string;
+  category: string | null;
+  related_milestone_id: number | null;
+  related_milestone_title: string | null;
+  mitigation_due_at: string | null;
+  mitigation_status: string;
+  residual_level: string | null;
+  owner_role: string | null;
+  source_ref: string | null;
+  data_as_of: string | null;
 }
 
 export interface ControlAction {
@@ -128,6 +148,7 @@ export interface ControlAction {
   description: string;
   responsible_person_id: number | null;
   responsible_name: string | null;
+  responsible_role: string | null;
   author_person_id: number | null;
   author_name: string | null;
   initiative_id: number | null;
@@ -471,6 +492,15 @@ export const RISK_STATUS_LABEL: Record<string, string> = {
   materialized: "Реализовался",
   closed: "Закрыт",
   irrelevant: "Неактуален",
+};
+
+export const RISK_CATEGORY_LABEL: Record<string, string> = {
+  schedule: "Сроки",
+  budget: "Бюджет",
+  resources: "Ресурсы",
+  integration: "Интеграция",
+  regulatory: "Регуляторный",
+  other: "Другое",
 };
 
 export const ACTION_STATUS_LABEL: Record<string, string> = {
