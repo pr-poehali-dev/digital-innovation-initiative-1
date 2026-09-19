@@ -1464,7 +1464,8 @@ def handler(event: dict, context) -> dict:
             rid = body.get("id")
             fields = ["initiative_id", "question", "options", "recommended_option", "due_at",
                       "consequence_if_not_decided", "prepared_by_person_id", "status",
-                      "decided_option", "decided_at", "decided_by_person_id", "source_note"]
+                      "decided_option", "decided_at", "decided_by_person_id", "source_note",
+                      "question_type"]
             data = {k: body.get(k) for k in fields if k in body}
             if rid:
                 sets = ", ".join(f"{k} = %s" for k in data)

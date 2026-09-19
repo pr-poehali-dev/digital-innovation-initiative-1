@@ -159,7 +159,12 @@ function CpmStatusBanner({ cpm }: { cpm: CriticalPathData | null }) {
       <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-[11px] text-slate-600 flex items-start gap-1.5">
         <Icon name="Info" size={13} className="flex-shrink-0 mt-0.5" />
         <div>
-          <span className="font-medium">Критический путь не рассчитан</span> — недостаточно задач и зависимостей.
+          <span className="font-medium">Критический путь не рассчитан</span> — недостаточно задач и подтверждённых зависимостей.
+          {cpm.warnings.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {cpm.warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          )}
           {cpm.incomplete_objects.length > 0 && (
             <ul className="mt-1 space-y-0.5">
               {cpm.incomplete_objects.map((o) => (
@@ -325,6 +330,10 @@ function PlanTable({ projectId }: { projectId: number }) {
                     ) : isCritical ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700 border border-red-500/30">
                         да
+                      </span>
+                    ) : !cpm?.computable ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400">
+                        не рассчитано
                       </span>
                     ) : null}
                   </td>

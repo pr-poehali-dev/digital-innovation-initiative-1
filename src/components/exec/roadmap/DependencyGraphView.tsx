@@ -250,7 +250,8 @@ export default function DependencyGraphView({ projectId, embedded = false }: { p
                 const s = nodeByKey.get(`${e.src_kind}:${e.src_id}`);
                 const t = nodeByKey.get(`${e.tgt_kind}:${e.tgt_id}`);
                 if (!s || !t) return null;
-                const isCritical = showCritical && criticalSet.has(`${e.src_kind}:${e.src_id}`) && criticalSet.has(`${e.tgt_kind}:${e.tgt_id}`);
+                const isDraft = e.verification_status === "draft";
+                const isCritical = !isDraft && showCritical && criticalSet.has(`${e.src_kind}:${e.src_id}`) && criticalSet.has(`${e.tgt_kind}:${e.tgt_id}`);
                 const dimmed = focusKey && !(predecessors.has(`${e.src_kind}:${e.src_id}`) || successors.has(`${e.tgt_kind}:${e.tgt_id}`) || `${e.src_kind}:${e.src_id}` === focusKey || `${e.tgt_kind}:${e.tgt_id}` === focusKey);
                 const x1 = s.x + NODE_W, y1 = s.y + NODE_H / 2, x2 = t.x, y2 = t.y + NODE_H / 2;
                 const midX = (x1 + x2) / 2;
@@ -259,13 +260,15 @@ export default function DependencyGraphView({ projectId, embedded = false }: { p
                     <path
                       d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
                       fill="none"
-                      stroke={e.violated ? "#ef4444" : isCritical ? "#dc2626" : "#cbd5e1"}
+                      stroke={isDraft ? "#f59e0b" : e.violated ? "#ef4444" : isCritical ? "#dc2626" : "#cbd5e1"}
                       strokeWidth={isCritical ? 2.5 : 1.5}
-                      strokeDasharray={e.is_cross_project ? "5,4" : undefined}
+                      strokeDasharray={isDraft ? "3,3" : e.is_cross_project ? "5,4" : undefined}
                       markerEnd="url(#arrow)"
-                    />
-                    <text x={midX} y={(y1 + y2) / 2 - 4} fontSize={9} fill={e.violated ? "#dc2626" : "#94a3b8"} textAnchor="middle">
-                      {e.dependency_type}{e.lag_days !== 0 ? ` ${e.lag_days > 0 ? "+" : ""}${e.lag_days}д` : ""}
+                    >
+                      {isDraft && <title>Черновик — требует подтверждения владельцем инициативы, исключена из расчёта критического пути</title>}
+                    </path>
+                    <text x={midX} y={(y1 + y2) / 2 - 4} fontSize={9} fill={isDraft ? "#b45309" : e.violated ? "#dc2626" : "#94a3b8"} textAnchor="middle">
+                      {e.dependency_type}{e.lag_days !== 0 ? ` ${e.lag_days > 0 ? "+" : ""}${e.lag_days}д` : ""}{isDraft ? " · черновик" : ""}
                     </text>
                   </g>
                 );
@@ -334,6 +337,7 @@ export default function DependencyGraphView({ projectId, embedded = false }: { p
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400">
         <span className="inline-flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-red-600" /> критический путь</span>
         <span className="inline-flex items-center gap-1"><span className="inline-block w-4 h-0.5 bg-red-400" style={{ borderTop: "1px dashed" }} /> нарушенная зависимость</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block w-4 h-0.5 border-t border-dashed border-amber-500" /> черновик — требует подтверждения</span>
         <span className="inline-flex items-center gap-1"><span className="inline-block w-4 h-0.5 border-t border-dashed border-slate-400" /> межпроектная связь</span>
         <span>Клик по узлу — фокус на предшественниках/последователях. Стрелка в узле — переход в карточку.</span>
       </div>

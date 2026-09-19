@@ -131,6 +131,10 @@ export interface DecisionRequest {
   decided_by_name?: string | null;
   source_note: string | null;
   verification_status: string;
+  /** decision — управленческое решение (стратегический выбор);
+   * data_clarification — уточнение исходных данных у владельца инициативы,
+   * не является решением по существу инициативы. */
+  question_type?: "decision" | "data_clarification";
 }
 
 export interface PlanProjectRef {

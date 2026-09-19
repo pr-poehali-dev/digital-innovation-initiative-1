@@ -161,6 +161,10 @@ export interface ScheduleDependency {
   lag_kind: "calendar" | "working";
   note: string | null;
   created_at: string;
+  /** draft — перенесена из источника с нестыковкой (например, дата
+   * предшественника позже последователя), требует подтверждения владельцем
+   * и не участвует в расчёте критического пути. confirmed — обычная связь. */
+  verification_status?: "draft" | "confirmed";
 }
 
 export interface ScheduleBaselineSummary {
@@ -277,6 +281,7 @@ export interface DependencyGraphEdge {
   lag_kind: "calendar" | "working";
   is_cross_project: boolean;
   violated: boolean;
+  verification_status?: "draft" | "confirmed";
 }
 
 export interface DependencyGraphData {

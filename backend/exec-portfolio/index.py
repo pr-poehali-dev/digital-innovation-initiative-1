@@ -1829,6 +1829,7 @@ def dependency_graph(cur, pid: int):
             "src_kind": e["src_kind"], "src_id": e["src_id"],
             "tgt_kind": e["tgt_kind"], "tgt_id": e["tgt_id"],
             "lag_days": e["lag_days"], "lag_kind": e["lag_kind"],
+            "verification_status": e.get("verification_status", "confirmed"),
             "is_cross_project": not (g["is_local"](e["src_kind"], e["src_id"]) and g["is_local"](e["tgt_kind"], e["tgt_id"])),
         })
 
@@ -1868,7 +1869,14 @@ def _cpm_compute(nodes: dict, edges: list):
     (нет ни входящей, ни исходящей связи), исключаются из расчёта целиком —
     иначе они математически получают нулевой резерв (LS=LF=0 по умолчанию,
     ES=EF=0 при нулевой длительности) и ложно помечаются критичными, хотя
-    по смыслу метода критический путь для них попросту не определён."""
+    по смыслу метода критический путь для них попросту не определён.
+
+    Черновые зависимости (verification_status='draft' — перенесённые из
+    источника с нестыковкой, ещё не подтверждённые владельцем) фильтруются
+    здесь же, централизованно, чтобы ни один из вызовов _cpm_compute
+    (текущий план, сравнение с baseline, фильтр «критический путь изменился»)
+    не мог случайно опереться на неподтверждённую связь."""
+    edges = [e for e in edges if e.get("verification_status", "confirmed") != "draft"]
     local_edges = [e for e in edges
                    if (e["src_kind"], e["src_id"]) in nodes and (e["tgt_kind"], e["tgt_id"]) in nodes]
     connected_keys = set()
@@ -2039,22 +2047,31 @@ def critical_path(cur, pid: int):
     warnings = []
     nodes, incomplete = _cpm_nodes_from_current(g)
 
-    working_lag_seen = any(e["lag_kind"] == "working" for e in g["edges"])
+    # Черновые зависимости (перенесённые из источника с нестыковкой дат,
+    # ещё не подтверждённые владельцем) не должны молча участвовать в
+    # расчёте критического пути — иначе противоречивые связи дают
+    # формально «рассчитанный» результат, которому нельзя доверять.
+    draft_edges = [e for e in g["edges"] if e.get("verification_status") == "draft"]
+    confirmed_edges = [e for e in g["edges"] if e.get("verification_status") != "draft"]
+    if draft_edges:
+        warnings.append(f"{len(draft_edges)} зависимост(ей) помечены как черновик (требуют подтверждения владельцем инициативы) и исключены из расчёта критического пути.")
+
+    working_lag_seen = any(e["lag_kind"] == "working" for e in confirmed_edges)
     if working_lag_seen:
         warnings.append("Часть зависимостей задана в рабочих днях, но рабочий календарь (выходные, праздники) в системе пока не реализован — такой лаг применён как календарные дни, чтобы не смешивать режимы незаметно.")
     if incomplete:
         warnings.append(f"{len(incomplete)} объект(ов) исключены из расчёта из-за отсутствующих дат — см. incomplete_objects.")
 
-    if len(nodes) < 2 or not [e for e in g["edges"] if (e["src_kind"], e["src_id"]) in nodes and (e["tgt_kind"], e["tgt_id"]) in nodes]:
+    if len(nodes) < 2 or not [e for e in confirmed_edges if (e["src_kind"], e["src_id"]) in nodes and (e["tgt_kind"], e["tgt_id"]) in nodes]:
         return {
             "project": {"id": p["id"], "title": p["title"]},
             "computable": False,
-            "warnings": warnings + ["Недостаточно данных для расчёта критического пути: нужно минимум два объекта с датами, связанных зависимостью."],
+            "warnings": warnings + ["Недостаточно данных для расчёта критического пути: нужно минимум два объекта с датами, связанных подтверждённой зависимостью."],
             "incomplete_objects": incomplete,
             "cycle": None, "nodes": [], "project_duration_days": None,
         }, None
 
-    result_nodes, project_duration, cycle_chain, isolated_keys = _cpm_compute(nodes, g["edges"])
+    result_nodes, project_duration, cycle_chain, isolated_keys = _cpm_compute(nodes, confirmed_edges)
 
     isolated_incomplete = [
         {"kind": k[0], "id": k[1], "title": nodes[k]["title"],

@@ -55,6 +55,45 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function DecisionRequestCard({ d, onClick }: { d: DecisionRequest; onClick: () => void }) {
+  const isClarification = d.question_type === "data_clarification";
+  return (
+    <div
+      onClick={onClick}
+      className={`rounded-lg border p-3 cursor-pointer transition-colors ${
+        d.status === "open"
+          ? isClarification
+            ? "border-blue-200 bg-blue-50 hover:bg-blue-100"
+            : "border-amber-200 bg-amber-50 hover:bg-amber-100"
+          : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-slate-800 font-medium">{d.question}</p>
+        <span
+          className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+            d.status === "open"
+              ? isClarification
+                ? "bg-blue-500/20 text-blue-800"
+                : "bg-amber-500/20 text-amber-800"
+              : "bg-slate-200 text-slate-500"
+          }`}
+        >
+          {d.status === "open" ? "открыт" : d.status === "decided" ? "решён" : "отозван"}
+        </span>
+      </div>
+      {d.recommended_option && (
+        <p className="text-xs text-slate-500 mt-1">
+          Рекомендация: {d.recommended_option}
+        </p>
+      )}
+      {d.due_at && (
+        <p className="text-[11px] text-slate-400 mt-1">Срок решения: {fmtDate(d.due_at)}</p>
+      )}
+    </div>
+  );
+}
+
 function MiniMetric({
   label,
   value,
@@ -472,8 +511,8 @@ export default function ExecInitiativeDetailPage() {
             <Card
               title="Требует решения руководителя"
               icon="Gavel"
-              subtitle={decisionRequests.filter((d) => d.status === "open").length > 0
-                ? `${decisionRequests.filter((d) => d.status === "open").length} открытых`
+              subtitle={decisionRequests.filter((d) => d.status === "open" && d.question_type !== "data_clarification").length > 0
+                ? `${decisionRequests.filter((d) => d.status === "open" && d.question_type !== "data_clarification").length} открытых`
                 : undefined}
               action={
                 <button
@@ -485,45 +524,33 @@ export default function ExecInitiativeDetailPage() {
                 </button>
               }
             >
-              {decisionRequests.length === 0 ? (
+              {decisionRequests.filter((d) => d.question_type !== "data_clarification").length === 0 ? (
                 <Empty text="Открытых вопросов на решение нет" />
               ) : (
                 <div className="space-y-3">
-                  {decisionRequests.map((d) => (
-                    <div
-                      key={d.id}
-                      onClick={() => setDrForm({ open: true, item: d })}
-                      className={`rounded-lg border p-3 cursor-pointer transition-colors ${
-                        d.status === "open"
-                          ? "border-amber-200 bg-amber-50 hover:bg-amber-100"
-                          : "border-slate-200 bg-slate-50 hover:bg-slate-100"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <p className="text-sm text-slate-800 font-medium">{d.question}</p>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-                            d.status === "open"
-                              ? "bg-amber-500/20 text-amber-800"
-                              : "bg-slate-200 text-slate-500"
-                          }`}
-                        >
-                          {d.status === "open" ? "открыт" : d.status === "decided" ? "решён" : "отозван"}
-                        </span>
-                      </div>
-                      {d.recommended_option && (
-                        <p className="text-xs text-slate-500 mt-1">
-                          Рекомендация: {d.recommended_option}
-                        </p>
-                      )}
-                      {d.due_at && (
-                        <p className="text-[11px] text-slate-400 mt-1">Срок решения: {fmtDate(d.due_at)}</p>
-                      )}
-                    </div>
+                  {decisionRequests.filter((d) => d.question_type !== "data_clarification").map((d) => (
+                    <DecisionRequestCard key={d.id} d={d} onClick={() => setDrForm({ open: true, item: d })} />
                   ))}
                 </div>
               )}
             </Card>
+
+            {decisionRequests.some((d) => d.question_type === "data_clarification") && (
+              <Card
+                title="Требует уточнения данных"
+                icon="HelpCircle"
+                subtitle={`${decisionRequests.filter((d) => d.question_type === "data_clarification" && d.status === "open").length} открытых`}
+              >
+                <p className="text-xs text-slate-400 mb-3">
+                  Технические вопросы к исходным данным (даты, зависимости) — не управленческое решение по существу инициативы.
+                </p>
+                <div className="space-y-3">
+                  {decisionRequests.filter((d) => d.question_type === "data_clarification").map((d) => (
+                    <DecisionRequestCard key={d.id} d={d} onClick={() => setDrForm({ open: true, item: d })} />
+                  ))}
+                </div>
+              </Card>
+            )}
             <Card title="Проблема и цель" icon="Target">
               <div className="space-y-4">
                 <Field label="Проблема или потребность" value={i.problem} />

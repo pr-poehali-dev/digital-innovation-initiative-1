@@ -19,6 +19,7 @@ export default function DecisionRequestForm({ initiativeId, item, onClose, onDon
   const [recommended, setRecommended] = useState(item?.recommended_option || "");
   const [dueAt, setDueAt] = useState(item?.due_at ? item.due_at.slice(0, 10) : "");
   const [consequence, setConsequence] = useState(item?.consequence_if_not_decided || "");
+  const [questionType, setQuestionType] = useState<"decision" | "data_clarification">(item?.question_type || "decision");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -41,6 +42,7 @@ export default function DecisionRequestForm({ initiativeId, item, onClose, onDon
         due_at: dueAt || null,
         consequence_if_not_decided: consequence.trim() || null,
         status: "open",
+        question_type: questionType,
       });
       onDone();
     } catch (e) {
@@ -78,6 +80,32 @@ export default function DecisionRequestForm({ initiativeId, item, onClose, onDon
         </header>
 
         <div className="p-5 space-y-4">
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+            <button
+              type="button"
+              onClick={() => setQuestionType("decision")}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                questionType === "decision" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Управленческое решение
+            </button>
+            <button
+              type="button"
+              onClick={() => setQuestionType("data_clarification")}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                questionType === "data_clarification" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Уточнение данных
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400 -mt-2">
+            {questionType === "decision"
+              ? "Стратегический выбор по инициативе (например, продолжать/прекратить)."
+              : "Техническая правка исходных данных (противоречивые даты, зависимости) — не решение по существу инициативы."}
+          </p>
+
           <label className="block">
             <span className="text-xs text-slate-500 mb-1.5 block">
               Вопрос <span className="text-violet-600">*</span>
