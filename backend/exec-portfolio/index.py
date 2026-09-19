@@ -748,11 +748,13 @@ def dashboard(cur):
     pending_decisions = rows(cur)
 
     cur.execute(f"""
-        SELECT r.id, r.description, r.probability, r.impact, r.probability * r.impact AS risk_score, r.status,
+        SELECT r.id, r.description, r.probability, r.impact, r.probability * r.impact AS risk_score,
+               r.qualitative_level, r.severity_rank, r.status,
                r.initiative_id, i.title AS initiative_title, i.external_code AS initiative_code
         FROM {SCHEMA}.exec_risk r
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
-        WHERE r.status = 'active' ORDER BY r.probability * r.impact DESC LIMIT 10
+        WHERE r.status = 'active'
+        ORDER BY COALESCE(r.probability * r.impact, r.severity_rank * 5) DESC LIMIT 10
     """)
     top_risks = rows(cur)
 

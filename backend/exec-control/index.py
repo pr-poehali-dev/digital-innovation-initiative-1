@@ -79,11 +79,23 @@ def as_int(v):
         return None
 
 
+# risk_score (probability*impact) может быть NULL — источник дал только
+# качественную оценку (severity_rank), без числовой вероятности/влияния.
+# В этом случае откатываемся на severity_rank, а не молча считаем риск
+# "низким": иначе критичный по презентации риск без чисел исчезал бы
+# из сводок "высокие риски".
 RISK_LEVEL_SQL = """
-    CASE WHEN r.risk_score >= 16 THEN 'critical'
-         WHEN r.risk_score >= 10 THEN 'high'
-         WHEN r.risk_score >= 5 THEN 'medium'
-         ELSE 'low' END
+    CASE
+        WHEN r.risk_score >= 16 THEN 'critical'
+        WHEN r.risk_score >= 10 THEN 'high'
+        WHEN r.risk_score >= 5 THEN 'medium'
+        WHEN r.risk_score IS NOT NULL THEN 'low'
+        WHEN r.severity_rank >= 4 THEN 'critical'
+        WHEN r.severity_rank = 3 THEN 'high'
+        WHEN r.severity_rank = 2 THEN 'medium'
+        WHEN r.severity_rank = 1 THEN 'low'
+        ELSE 'unassessed'
+    END
 """
 
 OVERDUE_MS = "(m.plan_date < CURRENT_DATE AND m.status NOT IN ('achieved','cancelled'))"
@@ -488,12 +500,13 @@ def control_focus(cur):
 
     cur.execute(f"""
         SELECT r.id, LEFT(r.description, 300) AS description, r.risk_score,
+               r.qualitative_level, r.severity_rank,
                {RISK_LEVEL_SQL} AS risk_level, r.next_review_at, r.status,
                i.id AS initiative_id, i.title AS initiative_title
         FROM {SCHEMA}.exec_risk r
         JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
-        WHERE r.risk_score >= 10 AND r.status IN ('active','accepted')
-        ORDER BY r.risk_score DESC
+        WHERE (r.risk_score >= 10 OR r.severity_rank >= 3) AND r.status IN ('active','accepted')
+        ORDER BY COALESCE(r.risk_score, r.severity_rank * 5) DESC
     """)
     out["high_risks"] = rows(cur)
 
@@ -567,7 +580,7 @@ def control_focus(cur):
            WHERE plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
              AND status NOT IN ('achieved','cancelled')) AS upcoming_milestones,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_risk
-           WHERE risk_score >= 10 AND status IN ('active','accepted')) AS high_risks,
+           WHERE (risk_score >= 10 OR severity_rank >= 3) AND status IN ('active','accepted')) AS high_risks,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_escalation
            WHERE status IN ('sent','in_review')) AS open_escalations
     """)

@@ -515,9 +515,12 @@ def my_day_v2(cur, actor, tz):
     decisions_awaiting_control = rows(cur)
 
     cur.execute(f"""
-        SELECT id, description AS title, probability * impact AS risk_score, initiative_id
-        FROM {SCHEMA}.exec_risk WHERE status = 'active' AND probability * impact >= 15
-        ORDER BY probability * impact DESC LIMIT 10
+        SELECT id, description AS title, probability * impact AS risk_score,
+               qualitative_level, severity_rank, initiative_id
+        FROM {SCHEMA}.exec_risk
+        WHERE status = 'active'
+          AND (probability * impact >= 15 OR severity_rank >= 4)
+        ORDER BY COALESCE(probability * impact, severity_rank * 5) DESC LIMIT 10
     """)
     critical_risks = rows(cur)
 
@@ -933,10 +936,10 @@ def handler(event: dict, context) -> dict:
                         ORDER BY m.plan_date NULLS LAST LIMIT 1) AS next_milestone_date,
                        (SELECT r.description FROM {SCHEMA}.exec_risk r
                         WHERE r.initiative_id = i.id AND r.status = 'active'
-                        ORDER BY r.risk_score DESC LIMIT 1) AS top_risk_title,
+                        ORDER BY COALESCE(r.risk_score, r.severity_rank * 5) DESC NULLS LAST LIMIT 1) AS top_risk_title,
                        (SELECT r.risk_score FROM {SCHEMA}.exec_risk r
                         WHERE r.initiative_id = i.id AND r.status = 'active'
-                        ORDER BY r.risk_score DESC LIMIT 1) AS top_risk_score
+                        ORDER BY COALESCE(r.risk_score, r.severity_rank * 5) DESC NULLS LAST LIMIT 1) AS top_risk_score
                 FROM {SCHEMA}.exec_initiative i
                 LEFT JOIN {SCHEMA}.exec_person ow ON ow.id = i.owner_person_id
                 LEFT JOIN {SCHEMA}.exec_person mg ON mg.id = i.manager_person_id
@@ -1043,7 +1046,10 @@ def handler(event: dict, context) -> dict:
             issue_stats = rows(cur)[0]
             cur.execute(f"""
                 SELECT COUNT(*) FILTER (WHERE status = 'active') AS open_risks,
-                       COUNT(*) FILTER (WHERE risk_score >= 10 AND status = 'active') AS high_risks
+                       COUNT(*) FILTER (
+                           WHERE status = 'active'
+                             AND (risk_score >= 10 OR severity_rank >= 3)
+                       ) AS high_risks
                 FROM {SCHEMA}.exec_risk WHERE initiative_id = %s
             """, (iid,))
             risk_stats = rows(cur)[0]
