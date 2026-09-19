@@ -106,6 +106,21 @@ def get_user_name(conn, user_id: int) -> str:
     return row[0] if row else "Неизвестный пользователь"
 
 
+def is_project_owner(conn, project_id: int, user_id: int) -> bool:
+    """Подтверждение перехода (обычного или с исключением) — право владельца
+    кейса, а не любого участника. Владелец = projects.owner_id ИЛИ
+    project_members.role='owner'."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""SELECT 1 FROM {SCHEMA}.projects p
+                LEFT JOIN {SCHEMA}.project_members m
+                    ON m.project_id = p.id AND m.user_id = %s AND m.role = 'owner'
+                WHERE p.id = %s AND (p.owner_id = %s OR m.user_id IS NOT NULL)""",
+            (user_id, project_id, user_id),
+        )
+        return cur.fetchone() is not None
+
+
 def init_stages_from_template(conn, project_id: int, project_kind: str):
     """Создаёт стадии и критерии проекта из шаблона project_kind (общий механизм,
     не привязан к конкретному кейсу). Первая стадия — 'active', остальные — 'locked'."""
@@ -204,7 +219,7 @@ def fetch_stages_payload(conn, project_id: int):
             crit_rows = cur.fetchall()
         with conn.cursor() as cur:
             cur.execute(
-                f"""SELECT id, code, title, status, expected_result, responsible_name
+                f"""SELECT id, code, title, status, expected_result, responsible_name, week_reference
                     FROM {SCHEMA}.wb_case_workplan_task
                     WHERE project_id = %s AND stage_code = %s ORDER BY order_no""",
                 (project_id, code),
@@ -222,7 +237,7 @@ def fetch_stages_payload(conn, project_id: int):
             ],
             "tasks": [
                 {"id": r[0], "code": r[1], "title": r[2], "status": r[3],
-                 "expected_result": r[4], "responsible_name": r[5]}
+                 "expected_result": r[4], "responsible_name": r[5], "week_reference": r[6]}
                 for r in task_rows
             ],
         })
@@ -712,30 +727,36 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Нужны project_id и to_stage_id"}}, 400)
             if not check_project_access(conn, project_id, user_id):
                 return cors({"ok": False, "error": {"message": "Нет доступа"}}, 403)
+            # Подтверждение перехода (обычного и особенно с исключением) — право
+            # владельца кейса, а не любого участника с доступом на чтение/правку.
+            if not is_project_owner(conn, project_id, user_id):
+                return cors({"ok": False, "error": {"message": "Подтверждать переход между стадиями может только владелец кейса"}}, 403)
 
+            # SELECT ... FOR UPDATE — блокируем строки стадий на время транзакции,
+            # чтобы двойное быстрое нажатие не создало два перехода/две записи журнала.
             with conn.cursor() as cur:
                 cur.execute(
                     f"""SELECT id, order_no, status FROM {SCHEMA}.wb_case_stage
-                        WHERE id = %s AND project_id = %s""",
+                        WHERE id = %s AND project_id = %s FOR UPDATE""",
                     (to_stage_id, project_id),
                 )
                 to_stage = cur.fetchone()
             if not to_stage:
                 return cors({"ok": False, "error": {"message": "Стадия не найдена"}}, 404)
             if to_stage[2] != "locked":
-                return cors({"ok": False, "error": {"message": "Переход возможен только на следующую заблокированную стадию"}}, 400)
+                return cors({"ok": False, "error": {"message": "Переход уже выполнен или стадия недоступна"}}, 409)
 
             with conn.cursor() as cur:
                 cur.execute(
                     f"""SELECT id, order_no, status FROM {SCHEMA}.wb_case_stage
-                        WHERE project_id = %s AND order_no = %s - 1""",
+                        WHERE project_id = %s AND order_no = %s - 1 FOR UPDATE""",
                     (project_id, to_stage[1]),
                 )
                 from_stage = cur.fetchone()
             if not from_stage:
                 return cors({"ok": False, "error": {"message": "Нет предыдущей стадии для перехода"}}, 400)
             if from_stage[2] != "active":
-                return cors({"ok": False, "error": {"message": "Предыдущая стадия должна быть активной"}}, 400)
+                return cors({"ok": False, "error": {"message": "Переход уже выполнен или предыдущая стадия неактивна"}}, 409)
 
             evaluate_all_criteria(conn, project_id)
 
@@ -771,6 +792,11 @@ def handler(event: dict, context) -> dict:
 
             actor_name = get_user_name(conn, user_id)
             transition_type = "waived" if waived_list else "confirmed"
+            # В текущей итерации согласующим исключения выступает владелец кейса
+            # (та же роль, что и подтверждает переход). Поля approver_* хранятся
+            # отдельно от actor_*, чтобы в будущем развести роли без миграции.
+            approver_user_id = user_id if waived_list else None
+            approver_name = actor_name if waived_list else None
 
             with conn.cursor() as cur:
                 for w in waived_list:
@@ -779,7 +805,7 @@ def handler(event: dict, context) -> dict:
                             SET result = 'waived', waived_reason = %s, waived_by_name = %s,
                                 waived_at = NOW(), updated_at = NOW()
                             WHERE id = %s""",
-                        (w["reason"], actor_name, w["criterion_id"]),
+                        (w["reason"], approver_name, w["criterion_id"]),
                     )
                 if from_stage:
                     cur.execute(
@@ -796,10 +822,12 @@ def handler(event: dict, context) -> dict:
                 cur.execute(
                     f"""INSERT INTO {SCHEMA}.wb_case_stage_transition_log
                         (project_id, from_stage_id, to_stage_id, transition_type, comment,
-                         waived_criteria_json, actor_user_id, actor_name)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                         waived_criteria_json, actor_user_id, actor_name,
+                         approver_user_id, approver_name)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (project_id, from_stage[0] if from_stage else None, to_stage_id,
-                     transition_type, comment, json.dumps(waived_list), user_id, actor_name),
+                     transition_type, comment, json.dumps(waived_list), user_id, actor_name,
+                     approver_user_id, approver_name),
                 )
             bump_content_version(conn, project_id)
             conn.commit()

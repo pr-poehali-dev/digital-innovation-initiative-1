@@ -21,6 +21,7 @@ type StageTask = {
   status: "not_started" | "in_progress" | "done";
   expected_result: string | null;
   responsible_name: string | null;
+  week_reference: string | null;
 };
 
 type Stage = {
@@ -198,9 +199,17 @@ export default function StagesGatesTab({ projectId }: Props) {
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[10px] font-mono text-slate-400">{t.code}</span>
                     <p className="text-sm font-medium text-slate-800">{t.title}</p>
+                    {t.week_reference && (
+                      <span className="text-[10px] text-slate-400 ml-auto flex items-center gap-1">
+                        <Icon name="Calendar" size={10} /> {t.week_reference}
+                      </span>
+                    )}
                   </div>
                   {t.expected_result && (
                     <p className="text-xs text-slate-500 mt-0.5">→ {t.expected_result}</p>
+                  )}
+                  {t.responsible_name && (
+                    <p className="text-[11px] text-slate-400 mt-0.5">Ответственный: {t.responsible_name}</p>
                   )}
                 </div>
               </div>
