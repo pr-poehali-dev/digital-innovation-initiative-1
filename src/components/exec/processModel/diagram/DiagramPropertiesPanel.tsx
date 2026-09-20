@@ -8,6 +8,7 @@ import {
   PersonRef,
   InfoSystem,
   NODE_TYPE_ICON,
+  QUALITATIVE_LEVEL_STYLE,
   processModelApi,
 } from "@/lib/execProcessModelApi";
 
@@ -141,6 +142,19 @@ export default function DiagramPropertiesPanel({
 
             <CheckField label="Критичная операция" checked={isCritical}
               onChange={(v) => { setIsCritical(v); save({ is_critical: v }); }} />
+
+            {node.ref_risk_id && (
+              <div className={`rounded-lg border p-2.5 ${node.ref_risk_level ? QUALITATIVE_LEVEL_STYLE[node.ref_risk_level].cls : "border-slate-200 bg-slate-50"}`}>
+                <p className="text-[11px] font-medium uppercase tracking-wide mb-1 flex items-center gap-1">
+                  <Icon name="ShieldAlert" size={12} /> Риск операции
+                </p>
+                <p className="text-xs">{node.ref_risk_title}</p>
+                {!node.ref_risk_controls_count && (
+                  <p className="text-[11px] mt-1 flex items-center gap-1"><Icon name="AlertTriangle" size={10} /> без контроля</p>
+                )}
+                <p className="text-[10px] text-slate-400 mt-1">Открыть карточку и добавить контроль — на вкладке «Риски и показатели» процесса.</p>
+              </div>
+            )}
           </>
         )}
 

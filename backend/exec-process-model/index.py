@@ -61,6 +61,37 @@ PARTICIPATION_KINDS = {
 }
 CONFIRMATION_STATUSES = {"user_draft": "Черновик", "confirmed": "Подтверждено"}
 
+# ── Итерация 3: риски/контроли/показатели/проблемы/улучшения ────────────────
+QUALITATIVE_LEVELS = {"low": "Низкий", "medium": "Средний", "high": "Высокий", "critical": "Критичный"}
+SEVERITY_RANK_BY_LEVEL = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+CONTROL_TYPES = {"preventive": "Предупреждающий", "detective": "Выявляющий"}
+CONTROL_METHODS = {"manual": "Ручной", "automated": "Автоматизированный", "mixed": "Смешанный"}
+CONTROL_PERIODICITIES = {
+    "continuous": "Непрерывно", "daily": "Ежедневно", "weekly": "Еженедельно",
+    "monthly": "Ежемесячно", "quarterly": "Ежеквартально", "yearly": "Ежегодно",
+    "event_based": "По событию",
+}
+METRIC_KINDS = {"result": "Результат", "quality": "Качество", "deadline": "Срок", "cost": "Стоимость", "risk": "Риск"}
+METRIC_PERIODICITIES = {
+    "daily": "Ежедневно", "weekly": "Еженедельно", "monthly": "Ежемесячно",
+    "quarterly": "Ежеквартально", "yearly": "Ежегодно", "event_based": "По событию",
+}
+PROBLEM_TYPES = {
+    "delay": "Задержка", "extra_approval": "Лишнее согласование", "duplication": "Дублирование",
+    "manual_operation": "Ручная операция", "responsibility_gap": "Разрыв ответственности",
+    "no_control": "Отсутствие контроля", "data_gap": "Недостаток данных",
+    "system_limitation": "Ограничение информационной системы",
+    "normative_conflict": "Нормативное противоречие", "other": "Другое",
+}
+ISSUE_STATUSES = {"open": "Открыта", "addressed": "В работе (адресована)", "closed": "Закрыта"}
+EFFECT_TYPES = {
+    "time_reduction": "Сокращение срока", "risk_reduction": "Снижение риска",
+    "quality_improvement": "Повышение качества", "cost_reduction": "Снижение стоимости",
+    "manual_op_elimination": "Устранение ручной операции", "control_strengthening": "Усиление контроля",
+    "automation": "Автоматизация", "duplication_elimination": "Устранение дублирования",
+}
+IMPROVEMENT_STATUSES = {"user_draft": "Черновик", "confirmed": "Подтверждено"}
+
 
 def cors(body: dict, code: int = 200) -> dict:
     return {
@@ -160,6 +191,22 @@ def log_change(cur, actor, entity, eid, action, before=None, after=None, reason=
     )
 
 
+def check_optimistic_lock(before: dict, body: dict) -> str | None:
+    """Простая защита от незаметной перезаписи чужих изменений (раздел 11 ТЗ):
+    если клиент прислал expected_updated_at (значение updated_at, которое он
+    видел при открытии формы) и оно отличается от текущего — отклоняем
+    сохранение, чтобы не потерять параллельно внесённые изменения другого
+    пользователя. Поле необязательно — старые вызовы без него продолжают
+    работать как раньше (для обратной совместимости)."""
+    expected = body.get("expected_updated_at")
+    if not expected:
+        return None
+    current = before.get("updated_at")
+    if current is not None and str(current) != str(expected):
+        return "Запись изменена другим пользователем после открытия формы — обновите страницу и повторите изменения"
+    return None
+
+
 def normalize_text(s: str) -> str:
     s = (s or "").lower().strip()
     s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
@@ -218,7 +265,7 @@ def get_overview(cur, scope_id: int):
     cur.execute(f"""
         SELECT d.variant, COUNT(*) FROM {SCHEMA}.exec_process_diagram d
         JOIN {SCHEMA}.exec_process_node n ON n.id = d.process_node_id
-        WHERE n.scope_id = %s GROUP BY d.variant
+        WHERE n.scope_id = %s AND d.is_test_data = false GROUP BY d.variant
     """, (scope_id,))
     diagrams_by_variant = {r[0]: r[1] for r in cur.fetchall()}
 
@@ -589,7 +636,7 @@ def get_process_detail(cur, node_id: int):
     """, (node_id,))
     documents = rows(cur)
 
-    cur.execute(f"SELECT id, variant, title, model_status, version, updated_at FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s ORDER BY variant, id", (node_id,))
+    cur.execute(f"SELECT id, variant, title, model_status, version, updated_at, base_diagram_id FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s AND is_test_data = false ORDER BY variant, id", (node_id,))
     diagrams = rows(cur)
 
     cur.execute(f"""
@@ -659,6 +706,501 @@ def passport_completeness(cur, node_id: int):
     blocking = {"goal", "boundaries", "trigger", "inputs", "outputs", "owner"}
     can_confirm = all(i["ok"] for i in (ready + needs_attention) if i["code"] in blocking)
     return {"ready": ready, "needs_attention": needs_attention, "can_confirm": can_confirm}
+
+
+# ── Итерация 3: риски процесса ───────────────────────────────────────────────
+# Вероятность/влияние НЕ придумываются — только качественный уровень.
+# severity_rank выводится детерминированно из qualitative_level (только для
+# сортировки в UI), не хранит и не имитирует числовую оценку риска.
+
+RISK_FIELDS = [
+    "process_node_id", "diagram_node_id", "title", "event_description", "cause", "consequence",
+    "qualitative_level", "owner_person_id", "owner_role", "source_note", "comment",
+    "linked_initiative_risk_id", "verification_status",
+]
+RISK_INT_FIELDS = {"process_node_id", "diagram_node_id", "owner_person_id", "linked_initiative_risk_id"}
+
+
+def list_process_risks(cur, process_node_id: int):
+    cur.execute(f"""
+        SELECT r.*, p.display_name AS owner_name, n.label AS diagram_node_label,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_process_control c WHERE c.risk_id = r.id) AS controls_count
+        FROM {SCHEMA}.exec_process_risk r
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = r.owner_person_id
+        LEFT JOIN {SCHEMA}.exec_process_diagram_node n ON n.id = r.diagram_node_id
+        WHERE r.process_node_id = %s AND r.is_test_data = false
+        ORDER BY r.severity_rank DESC NULLS LAST, r.id
+    """, (process_node_id,))
+    return rows(cur)
+
+
+def save_process_risk(cur, body: dict, actor: str):
+    rid = as_int(body.get("id"))
+    vals = {}
+    for f in RISK_FIELDS:
+        if f not in body:
+            continue
+        vals[f] = as_int(body[f]) if f in RISK_INT_FIELDS else nz(body.get(f))
+
+    if "qualitative_level" in vals:
+        lvl = vals["qualitative_level"]
+        if lvl is not None and lvl not in QUALITATIVE_LEVELS:
+            return None, "Некорректный качественный уровень риска"
+        vals["severity_rank"] = SEVERITY_RANK_BY_LEVEL.get(lvl) if lvl else None
+
+    def sync_diagram_node_ref(risk_id: int, old_node_id, new_node_id):
+        """Значок риска на схеме — ref_risk_id узла держим в согласии с diagram_node_id риска."""
+        if old_node_id and old_node_id != new_node_id:
+            cur.execute(
+                f"UPDATE {SCHEMA}.exec_process_diagram_node SET ref_risk_id = NULL WHERE id = %s AND ref_risk_id = %s",
+                (old_node_id, risk_id),
+            )
+        if new_node_id:
+            cur.execute(
+                f"UPDATE {SCHEMA}.exec_process_diagram_node SET ref_risk_id = %s WHERE id = %s",
+                (risk_id, new_node_id),
+            )
+
+    if rid:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_risk WHERE id = %s", (rid,))
+        before = rows(cur)
+        if not before:
+            return None, "Риск не найден"
+        lock_err = check_optimistic_lock(before[0], body)
+        if lock_err:
+            return None, lock_err
+        if not vals:
+            return rid, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_risk SET {sets}, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [rid],
+        )
+        if "diagram_node_id" in vals:
+            sync_diagram_node_ref(rid, before[0].get("diagram_node_id"), vals["diagram_node_id"])
+        log_change(cur, actor, "process_risk", rid, "update", before=before[0], after=vals)
+        return rid, None
+
+    node_id = vals.get("process_node_id")
+    if not node_id:
+        return None, "Не указан процесс"
+    if not nz(vals.get("title")):
+        return None, "Укажите название риска"
+    vals["created_by"] = actor
+    cols = ", ".join(vals.keys())
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_risk ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+    new_id = cur.fetchone()[0]
+    if vals.get("diagram_node_id"):
+        sync_diagram_node_ref(new_id, None, vals["diagram_node_id"])
+    log_change(cur, actor, "process_risk", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_process_risk(cur, body: dict, actor: str):
+    rid = as_int(body.get("id"))
+    if not rid:
+        return None, "Не указан риск"
+    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_control WHERE risk_id = %s", (rid,))
+    if cur.fetchone()[0] > 0:
+        return None, "У риска есть привязанные контроли — сначала удалите или перепривяжите их"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_risk WHERE id = %s", (rid,))
+    before = rows(cur)
+    if not before:
+        return None, "Риск не найден"
+    cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_node SET ref_risk_id = NULL WHERE ref_risk_id = %s", (rid,))
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_risk WHERE id = %s", (rid,))
+    log_change(cur, actor, "process_risk", rid, "delete", before=before[0])
+    return rid, None
+
+
+def confirm_process_risk(cur, body: dict, actor: str, confirm: bool):
+    rid = as_int(body.get("id"))
+    if not rid:
+        return None, "Не указан риск"
+    status = "confirmed" if confirm else "user_draft"
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_risk SET verification_status = %s, updated_at = now() WHERE id = %s",
+        (status, rid),
+    )
+    log_change(cur, actor, "process_risk", rid, "confirm" if confirm else "unconfirm")
+    return rid, None
+
+
+# ── Контрольные процедуры ────────────────────────────────────────────────────
+
+CONTROL_FIELDS = [
+    "risk_id", "title", "goal_note", "control_type", "method", "diagram_node_id",
+    "responsible_role", "responsible_person_id", "responsible_org_unit_id", "periodicity",
+    "evidence_note", "normative_document_note", "info_system_id", "comment", "verification_status",
+]
+CONTROL_INT_FIELDS = {"risk_id", "diagram_node_id", "responsible_person_id", "responsible_org_unit_id", "info_system_id"}
+
+
+def list_process_controls(cur, risk_id: int):
+    cur.execute(f"""
+        SELECT c.*, p.display_name AS responsible_name, u.name AS responsible_org_unit_name,
+               s.name AS info_system_name, n.label AS diagram_node_label
+        FROM {SCHEMA}.exec_process_control c
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = c.responsible_person_id
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = c.responsible_org_unit_id
+        LEFT JOIN {SCHEMA}.exec_info_system s ON s.id = c.info_system_id
+        LEFT JOIN {SCHEMA}.exec_process_diagram_node n ON n.id = c.diagram_node_id
+        WHERE c.risk_id = %s AND c.is_test_data = false ORDER BY c.id
+    """, (risk_id,))
+    return rows(cur)
+
+
+def save_process_control(cur, body: dict, actor: str):
+    cid = as_int(body.get("id"))
+    vals = {}
+    for f in CONTROL_FIELDS:
+        if f not in body:
+            continue
+        vals[f] = as_int(body[f]) if f in CONTROL_INT_FIELDS else nz(body.get(f))
+
+    if vals.get("control_type") is not None and vals["control_type"] not in CONTROL_TYPES:
+        return None, "Некорректный тип контроля"
+    if vals.get("method") is not None and vals["method"] not in CONTROL_METHODS:
+        return None, "Некорректный способ выполнения контроля"
+    if vals.get("periodicity") is not None and vals["periodicity"] not in CONTROL_PERIODICITIES:
+        return None, "Некорректная периодичность"
+
+    if cid:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE id = %s", (cid,))
+        before = rows(cur)
+        if not before:
+            return None, "Контроль не найден"
+        lock_err = check_optimistic_lock(before[0], body)
+        if lock_err:
+            return None, lock_err
+        if not vals:
+            return cid, None
+        if "evidence_note" in vals and vals["evidence_note"] and vals["evidence_note"] != before[0].get("evidence_note"):
+            vals["last_evidence_confirmed_by"] = actor
+            vals["last_evidence_confirmed_at"] = "now()"
+        sets = []
+        params = []
+        for k, v in vals.items():
+            if v == "now()":
+                sets.append(f"{k} = now()")
+            else:
+                sets.append(f"{k} = %s")
+                params.append(v)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_control SET {', '.join(sets)}, updated_at = now() WHERE id = %s",
+            params + [cid],
+        )
+        log_change(cur, actor, "process_control", cid, "update", before=before[0], after=vals)
+        return cid, None
+
+    risk_id = vals.get("risk_id")
+    if not risk_id:
+        return None, "Не указан риск, к которому относится контроль"
+    if not nz(vals.get("title")):
+        return None, "Укажите название контроля (или отметьте «Контроль не определён — требует уточнения»)"
+    vals["created_by"] = actor
+    cols = ", ".join(vals.keys())
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_control ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_control", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_process_control(cur, body: dict, actor: str):
+    cid = as_int(body.get("id"))
+    if not cid:
+        return None, "Не указан контроль"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE id = %s", (cid,))
+    before = rows(cur)
+    if not before:
+        return None, "Контроль не найден"
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_control WHERE id = %s", (cid,))
+    log_change(cur, actor, "process_control", cid, "delete", before=before[0])
+    return cid, None
+
+
+def confirm_process_control(cur, body: dict, actor: str, confirm: bool):
+    cid = as_int(body.get("id"))
+    if not cid:
+        return None, "Не указан контроль"
+    status = "confirmed" if confirm else "user_draft"
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_control SET verification_status = %s, updated_at = now() WHERE id = %s",
+        (status, cid),
+    )
+    log_change(cur, actor, "process_control", cid, "confirm" if confirm else "unconfirm")
+    return cid, None
+
+
+# ── Показатели процесса ──────────────────────────────────────────────────────
+
+METRIC_FIELDS = [
+    "process_node_id", "diagram_node_id", "title", "metric_kind", "measures_note", "formula",
+    "unit", "data_source", "periodicity", "plan_value", "fact_value", "threshold_note",
+    "owner_person_id", "goal_link_note", "verification_status",
+]
+METRIC_INT_FIELDS = {"process_node_id", "diagram_node_id", "owner_person_id"}
+
+
+def list_process_metrics(cur, process_node_id: int):
+    cur.execute(f"""
+        SELECT m.*, p.display_name AS owner_name, n.label AS diagram_node_label
+        FROM {SCHEMA}.exec_process_metric m
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = m.owner_person_id
+        LEFT JOIN {SCHEMA}.exec_process_diagram_node n ON n.id = m.diagram_node_id
+        WHERE m.process_node_id = %s AND m.is_test_data = false ORDER BY m.metric_kind, m.id
+    """, (process_node_id,))
+    return rows(cur)
+
+
+def save_process_metric(cur, body: dict, actor: str):
+    mid = as_int(body.get("id"))
+    vals = {}
+    for f in METRIC_FIELDS:
+        if f not in body:
+            continue
+        vals[f] = as_int(body[f]) if f in METRIC_INT_FIELDS else nz(body.get(f))
+
+    if vals.get("metric_kind") is not None and vals["metric_kind"] not in METRIC_KINDS:
+        return None, "Некорректный тип показателя"
+    if vals.get("periodicity") is not None and vals["periodicity"] not in METRIC_PERIODICITIES:
+        return None, "Некорректная периодичность"
+
+    if mid:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_metric WHERE id = %s", (mid,))
+        before = rows(cur)
+        if not before:
+            return None, "Показатель не найден"
+        lock_err = check_optimistic_lock(before[0], body)
+        if lock_err:
+            return None, lock_err
+        if not vals:
+            return mid, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_metric SET {sets}, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [mid],
+        )
+        log_change(cur, actor, "process_metric", mid, "update", before=before[0], after=vals)
+        return mid, None
+
+    node_id = vals.get("process_node_id")
+    if not node_id:
+        return None, "Не указан процесс"
+    if not nz(vals.get("title")):
+        return None, "Укажите название показателя"
+    vals["created_by"] = actor
+    cols = ", ".join(vals.keys())
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_metric ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_metric", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_process_metric(cur, body: dict, actor: str):
+    mid = as_int(body.get("id"))
+    if not mid:
+        return None, "Не указан показатель"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_metric WHERE id = %s", (mid,))
+    before = rows(cur)
+    if not before:
+        return None, "Показатель не найден"
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_metric WHERE id = %s", (mid,))
+    log_change(cur, actor, "process_metric", mid, "delete", before=before[0])
+    return mid, None
+
+
+def metric_checks(cur, process_node_id: int):
+    """Детерминированные предупреждения по показателям — без ИИ."""
+    metrics = list_process_metrics(cur, process_node_id)
+    warnings = []
+    for m in metrics:
+        label = m["title"] or "без названия"
+        if not nz(m.get("goal_link_note")):
+            warnings.append({"code": "metric_no_goal_link", "message": f'Показатель «{label}» не связан с целью процесса', "metric_id": m["id"]})
+        if not nz(m.get("unit")):
+            warnings.append({"code": "metric_no_unit", "message": f'Показатель «{label}» без единицы измерения', "metric_id": m["id"]})
+        if not nz(m.get("data_source")):
+            warnings.append({"code": "metric_no_source", "message": f'Показатель «{label}» без источника данных', "metric_id": m["id"]})
+        if not nz(m.get("periodicity")):
+            warnings.append({"code": "metric_no_periodicity", "message": f'Показатель «{label}» без периодичности', "metric_id": m["id"]})
+        if not nz(m.get("threshold_note")):
+            warnings.append({"code": "metric_no_threshold", "message": f'Показатель «{label}» без допустимого порога', "metric_id": m["id"]})
+        plan_v, fact_v = nz(m.get("plan_value")), nz(m.get("fact_value"))
+        if plan_v and fact_v:
+            try:
+                float(plan_v.replace(",", "."))
+                float(fact_v.replace(",", "."))
+            except ValueError:
+                warnings.append({"code": "metric_plan_fact_incomparable", "message": f'Показатель «{label}»: план и факт несопоставимы (не числа)', "metric_id": m["id"]})
+    if not any(m.get("metric_kind") == "result" for m in metrics):
+        warnings.append({"code": "process_no_result_metric", "message": "У процесса нет ни одного показателя результата", "metric_id": None})
+    return warnings
+
+
+# ── Проблемы AS-IS ───────────────────────────────────────────────────────────
+
+ISSUE_FIELDS = [
+    "process_node_id", "diagram_node_id", "title", "description", "problem_type", "cause",
+    "impact_note", "source_note", "severity_rank", "improvement_direction", "status", "verification_status",
+]
+ISSUE_INT_FIELDS = {"process_node_id", "diagram_node_id", "severity_rank"}
+
+
+def list_process_issues(cur, process_node_id: int):
+    cur.execute(f"""
+        SELECT i.*, n.label AS diagram_node_label
+        FROM {SCHEMA}.exec_process_issue i
+        LEFT JOIN {SCHEMA}.exec_process_diagram_node n ON n.id = i.diagram_node_id
+        WHERE i.process_node_id = %s AND i.is_test_data = false ORDER BY i.severity_rank DESC NULLS LAST, i.id
+    """, (process_node_id,))
+    return rows(cur)
+
+
+def save_process_issue(cur, body: dict, actor: str):
+    iid = as_int(body.get("id"))
+    vals = {}
+    for f in ISSUE_FIELDS:
+        if f not in body:
+            continue
+        vals[f] = as_int(body[f]) if f in ISSUE_INT_FIELDS else nz(body.get(f))
+
+    if vals.get("problem_type") is not None and vals["problem_type"] not in PROBLEM_TYPES:
+        return None, "Некорректный тип проблемы"
+    if vals.get("status") is not None and vals["status"] not in ISSUE_STATUSES:
+        return None, "Некорректный статус проблемы"
+
+    if iid:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_issue WHERE id = %s", (iid,))
+        before = rows(cur)
+        if not before:
+            return None, "Проблема не найдена"
+        lock_err = check_optimistic_lock(before[0], body)
+        if lock_err:
+            return None, lock_err
+        if not vals:
+            return iid, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_issue SET {sets}, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [iid],
+        )
+        log_change(cur, actor, "process_issue", iid, "update", before=before[0], after=vals)
+        return iid, None
+
+    node_id = vals.get("process_node_id")
+    if not node_id:
+        return None, "Не указан процесс"
+    if not nz(vals.get("title")):
+        return None, "Укажите название проблемы"
+    vals["created_by"] = actor
+    cols = ", ".join(vals.keys())
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_issue ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_issue", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_process_issue(cur, body: dict, actor: str):
+    iid = as_int(body.get("id"))
+    if not iid:
+        return None, "Не указана проблема"
+    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_improvement WHERE as_is_issue_id = %s", (iid,))
+    if cur.fetchone()[0] > 0:
+        return None, "На проблему ссылается изменение TO-BE — сначала отвяжите или удалите его"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_issue WHERE id = %s", (iid,))
+    before = rows(cur)
+    if not before:
+        return None, "Проблема не найдена"
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_issue WHERE id = %s", (iid,))
+    log_change(cur, actor, "process_issue", iid, "delete", before=before[0])
+    return iid, None
+
+
+def link_issue_initiative(cur, body: dict, actor: str, link: bool):
+    issue_id = as_int(body.get("issue_id"))
+    initiative_id = as_int(body.get("initiative_id"))
+    if not issue_id or not initiative_id:
+        return None, "Не указаны параметры связи"
+    if link:
+        cur.execute(f"SELECT id FROM {SCHEMA}.exec_initiative WHERE id = %s", (initiative_id,))
+        if not cur.fetchone():
+            return None, "Инициатива не найдена"
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_issue_initiative_link (issue_id, initiative_id, expected_effect_note, created_by) "
+            f"VALUES (%s,%s,%s,%s) ON CONFLICT (issue_id, initiative_id) DO NOTHING",
+            (issue_id, initiative_id, nz(body.get("expected_effect_note")), actor),
+        )
+    else:
+        cur.execute(
+            f"DELETE FROM {SCHEMA}.exec_process_issue_initiative_link WHERE issue_id = %s AND initiative_id = %s",
+            (issue_id, initiative_id),
+        )
+    log_change(cur, actor, "process_issue", issue_id, "link_initiative" if link else "unlink_initiative",
+               after={"initiative_id": initiative_id})
+    return issue_id, None
+
+
+def risk_control_checks(cur, process_node_id: int):
+    """Детерминированные предупреждения по рискам/контролям процесса — раздел 2 ТЗ."""
+    warnings = []
+    risks = list_process_risks(cur, process_node_id)
+    for r in risks:
+        label = r["title"] or "без названия"
+        if not r.get("controls_count"):
+            warnings.append({"code": "risk_no_control", "message": f'Риск «{label}» без контроля', "risk_id": r["id"]})
+            if r.get("qualitative_level") == "critical":
+                warnings.append({"code": "critical_risk_no_confirmed_control", "message": f'Критичный риск «{label}» без подтверждённого контроля', "risk_id": r["id"]})
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE risk_id = %s AND is_test_data = false", (r["id"],))
+        controls = rows(cur)
+        if controls and r.get("qualitative_level") == "critical":
+            if not any(c.get("verification_status") == "confirmed" for c in controls):
+                warnings.append({"code": "critical_risk_no_confirmed_control", "message": f'Критичный риск «{label}» без подтверждённого контроля', "risk_id": r["id"]})
+        for c in controls:
+            clabel = c["title"] or "без названия"
+            if not c.get("responsible_person_id") and not c.get("responsible_role"):
+                warnings.append({"code": "control_no_executor", "message": f'Контроль «{clabel}» без исполнителя', "control_id": c["id"]})
+            if not c.get("periodicity"):
+                warnings.append({"code": "control_no_periodicity", "message": f'Контроль «{clabel}» без периодичности', "control_id": c["id"]})
+            if not c.get("evidence_note"):
+                warnings.append({"code": "control_no_evidence", "message": f'Контроль «{clabel}» без доказательства выполнения', "control_id": c["id"]})
+        # дубли контролей по нормализованному названию внутри одного риска
+        seen: dict[str, int] = {}
+        for c in controls:
+            key = normalize_text(c.get("title") or "")
+            if not key:
+                continue
+            if key in seen:
+                warnings.append({"code": "duplicate_control", "message": f'Возможный дубль контроля у риска «{label}»: «{c["title"]}»', "control_id": c["id"]})
+            else:
+                seen[key] = c["id"]
+
+    cur.execute(f"""
+        SELECT n.id, n.label FROM {SCHEMA}.exec_process_diagram_node n
+        JOIN {SCHEMA}.exec_process_diagram d ON d.id = n.diagram_id
+        WHERE d.process_node_id = %s AND d.variant = 'as_is' AND n.is_critical = true
+          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_process_risk r WHERE r.diagram_node_id = n.id)
+    """, (process_node_id,))
+    for op_id, op_label in cur.fetchall():
+        warnings.append({"code": "critical_operation_no_risk", "message": f'Критичная операция «{op_label or "без названия"}» без риска', "diagram_node_id": op_id})
+
+    cur.execute(f"""
+        SELECT n.id, n.label FROM {SCHEMA}.exec_process_diagram_node n
+        JOIN {SCHEMA}.exec_process_diagram d ON d.id = n.diagram_id
+        WHERE d.process_node_id = %s AND d.variant = 'as_is' AND n.is_critical = true
+          AND EXISTS (
+            SELECT 1 FROM {SCHEMA}.exec_process_risk r WHERE r.diagram_node_id = n.id
+              AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_process_control c WHERE c.risk_id = r.id)
+          )
+    """, (process_node_id,))
+    for op_id, op_label in cur.fetchall():
+        warnings.append({"code": "critical_operation_no_control", "message": f'Критичная операция «{op_label or "без названия"}» без контроля', "diagram_node_id": op_id})
+
+    return warnings
 
 
 # ── Участники, системы, документы, связи с функциями ────────────────────────
@@ -829,7 +1371,7 @@ LANE_TYPES = {"org_unit": "Подразделение", "role": "Роль", "pla
 
 def get_or_create_diagram(cur, process_node_id: int, variant: str, actor: str):
     cur.execute(
-        f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s AND variant = %s",
+        f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s AND variant = %s AND is_test_data = false",
         (process_node_id, variant),
     )
     existing = rows(cur)
@@ -871,7 +1413,8 @@ def get_diagram_full(cur, diagram_id: int):
     cur.execute(f"""
         SELECT n.*, p.display_name AS ref_person_name, u.name AS ref_org_unit_name,
                s.name AS ref_system_name, doc.title AS ref_document_title,
-               r.title AS ref_risk_title
+               r.title AS ref_risk_title, r.qualitative_level AS ref_risk_level,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_process_control c WHERE c.risk_id = r.id) AS ref_risk_controls_count
         FROM {SCHEMA}.exec_process_diagram_node n
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = n.ref_person_id
         LEFT JOIN {SCHEMA}.org_units u ON u.id = n.ref_org_unit_id
@@ -1289,6 +1832,292 @@ def export_diagram_data(cur, diagram_id: int):
     return full
 
 
+# ── Итерация 3: создание TO-BE из AS-IS, сравнение, улучшения ───────────────
+
+def create_to_be_from_as_is(cur, body: dict, actor: str):
+    """«Создать TO-BE на основе AS-IS»: копирует дорожки/узлы/связи в новую
+    диаграмму-черновик, хранит ссылку на исходную (base_diagram_id) и
+    происхождение каждого элемента (origin_*_id) для устойчивого diff.
+    AS-IS не изменяется. Действие журналируется."""
+    as_is_id = as_int(body.get("as_is_diagram_id"))
+    if not as_is_id:
+        return None, "Не указана исходная схема AS-IS"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (as_is_id,))
+    as_is_rows = rows(cur)
+    if not as_is_rows:
+        return None, "Схема AS-IS не найдена"
+    as_is = as_is_rows[0]
+    if as_is["variant"] != "as_is":
+        return None, "Исходной схемой для копирования должна быть AS-IS"
+
+    process_node_id = as_is["process_node_id"]
+    cur.execute(f"SELECT name FROM {SCHEMA}.exec_process_node WHERE id = %s", (process_node_id,))
+    node_row = cur.fetchone()
+    title = f"TO-BE: {node_row[0] if node_row else ''}"
+
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_diagram "
+        f"(process_node_id, variant, base_diagram_id, title, model_status, updated_by) "
+        f"VALUES (%s,'to_be',%s,%s,'draft',%s) RETURNING id",
+        (process_node_id, as_is_id, title, actor),
+    )
+    to_be_id = cur.fetchone()[0]
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_lane WHERE diagram_id = %s ORDER BY id", (as_is_id,))
+    lane_id_map: dict[int, int] = {}
+    for lane in rows(cur):
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_diagram_lane "
+            f"(diagram_id, title, org_unit_id, role_title, lane_type, placeholder_label, needs_clarification, sort_order, origin_lane_id) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (to_be_id, lane["title"], lane["org_unit_id"], lane["role_title"], lane["lane_type"],
+             lane["placeholder_label"], lane["needs_clarification"], lane["sort_order"], lane["id"]),
+        )
+        lane_id_map[lane["id"]] = cur.fetchone()[0]
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_node WHERE diagram_id = %s ORDER BY id", (as_is_id,))
+    node_id_map: dict[int, int] = {}
+    node_copy_cols = [
+        "node_type", "label", "pos_x", "pos_y", "width", "height", "description", "input_note",
+        "output_note", "duration_note", "is_critical", "gateway_outcomes", "ref_role_title",
+        "ref_person_id", "ref_org_unit_id", "ref_document_id", "ref_system_id",
+        "system_note", "document_note", "note",
+    ]
+    for n in rows(cur):
+        new_lane_id = lane_id_map.get(n["lane_id"]) if n["lane_id"] else None
+        vals = {c: n[c] for c in node_copy_cols}
+        vals["diagram_id"] = to_be_id
+        vals["lane_id"] = new_lane_id
+        vals["origin_node_id"] = n["id"]
+        vals["confirmation_status"] = "user_draft"
+        cols = ", ".join(vals.keys())
+        ph = ", ".join(["%s"] * len(vals))
+        cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_node ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+        node_id_map[n["id"]] = cur.fetchone()[0]
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE diagram_id = %s ORDER BY id", (as_is_id,))
+    for e in rows(cur):
+        new_source = node_id_map.get(e["source_node_id"])
+        new_target = node_id_map.get(e["target_node_id"])
+        if not new_source or not new_target:
+            continue
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_diagram_edge "
+            f"(diagram_id, source_node_id, target_node_id, label, edge_type, origin_edge_id) "
+            f"VALUES (%s,%s,%s,%s,%s,%s)",
+            (to_be_id, new_source, new_target, e["label"], e["edge_type"], e["id"]),
+        )
+
+    log_change(cur, actor, "process_diagram", to_be_id, "create_from_as_is",
+               after={"base_diagram_id": as_is_id, "process_node_id": process_node_id})
+    return to_be_id, None
+
+
+def compare_diagrams(cur, as_is_id: int, to_be_id: int):
+    """Сравнение AS-IS/TO-BE по устойчивому происхождению элементов (origin_*_id),
+    не только по совпадению названий. Возвращает добавленные/удалённые/изменённые
+    узлы, связи, дорожки — детерминированно, без ИИ."""
+    as_is_full = get_diagram_full(cur, as_is_id)
+    to_be_full = get_diagram_full(cur, to_be_id)
+    if not as_is_full or not to_be_full:
+        return None
+
+    as_is_nodes = {n["id"]: n for n in as_is_full["nodes"]}
+    to_be_by_origin = {n["origin_node_id"]: n for n in to_be_full["nodes"] if n.get("origin_node_id")}
+    to_be_new = [n for n in to_be_full["nodes"] if not n.get("origin_node_id")]
+
+    # lane_id ссылается на diagram-специфичную запись дорожки — сравнивать напрямую
+    # по числовому id нельзя (у AS-IS и TO-BE это разные записи), переводим через
+    # происхождение (origin_lane_id) в общее пространство "исходных" id AS-IS.
+    to_be_lane_to_origin = {l["id"]: l.get("origin_lane_id") for l in to_be_full["lanes"]}
+
+    def lane_key(node: dict, is_to_be: bool):
+        lid = node.get("lane_id")
+        if lid is None:
+            return None
+        return to_be_lane_to_origin.get(lid) if is_to_be else lid
+
+    node_diff = {"added": [], "removed": [], "changed": [], "unchanged": []}
+    tracked_fields = ["label", "ref_person_id", "ref_role_title", "ref_org_unit_id",
+                       "description", "is_critical", "node_type"]
+    for n in to_be_new:
+        node_diff["added"].append({"id": n["id"], "label": n["label"], "node_type": n["node_type"]})
+    for origin_id, as_is_node in as_is_nodes.items():
+        tb = to_be_by_origin.get(origin_id)
+        if not tb:
+            node_diff["removed"].append({"id": origin_id, "label": as_is_node["label"], "node_type": as_is_node["node_type"]})
+            continue
+        changed_fields = [f for f in tracked_fields if (as_is_node.get(f) or None) != (tb.get(f) or None)]
+        if lane_key(as_is_node, False) != lane_key(tb, True):
+            changed_fields.append("lane_id")
+        entry = {"as_is_id": origin_id, "to_be_id": tb["id"], "label": tb["label"], "node_type": tb["node_type"], "changed_fields": changed_fields}
+        if changed_fields:
+            node_diff["changed"].append(entry)
+        else:
+            node_diff["unchanged"].append(entry)
+
+    as_is_edges = {e["id"]: e for e in as_is_full["edges"]}
+    to_be_edges_by_origin = {e["origin_edge_id"]: e for e in to_be_full["edges"] if e.get("origin_edge_id")}
+    to_be_new_edges = [e for e in to_be_full["edges"] if not e.get("origin_edge_id")]
+    edge_diff = {"added": [], "removed": [], "changed": [], "unchanged": []}
+    for e in to_be_new_edges:
+        edge_diff["added"].append({"id": e["id"], "label": e["label"]})
+    for origin_id, as_is_edge in as_is_edges.items():
+        tb = to_be_edges_by_origin.get(origin_id)
+        if not tb:
+            edge_diff["removed"].append({"id": origin_id, "label": as_is_edge["label"]})
+            continue
+        origin_src_new = to_be_by_origin.get(as_is_edge["source_node_id"], {}).get("id")
+        origin_tgt_new = to_be_by_origin.get(as_is_edge["target_node_id"], {}).get("id")
+        changed = (tb["source_node_id"] != origin_src_new) or (tb["target_node_id"] != origin_tgt_new) or (tb["label"] != as_is_edge["label"]) or (tb["edge_type"] != as_is_edge["edge_type"])
+        entry = {"as_is_id": origin_id, "to_be_id": tb["id"], "label": tb["label"]}
+        (edge_diff["changed"] if changed else edge_diff["unchanged"]).append(entry)
+
+    as_is_lanes = {l["id"]: l for l in as_is_full["lanes"]}
+    to_be_lanes_by_origin = {l["origin_lane_id"]: l for l in to_be_full["lanes"] if l.get("origin_lane_id")}
+    to_be_new_lanes = [l for l in to_be_full["lanes"] if not l.get("origin_lane_id")]
+    lane_diff = {"added": [], "removed": [], "changed": [], "unchanged": []}
+    for l in to_be_new_lanes:
+        lane_diff["added"].append({"id": l["id"], "title": l["title"]})
+    for origin_id, as_is_lane in as_is_lanes.items():
+        tb = to_be_lanes_by_origin.get(origin_id)
+        if not tb:
+            lane_diff["removed"].append({"id": origin_id, "title": as_is_lane["title"]})
+            continue
+        changed = (tb["title"] != as_is_lane["title"]) or (tb["org_unit_id"] != as_is_lane["org_unit_id"]) or (tb["role_title"] != as_is_lane["role_title"])
+        entry = {"as_is_id": origin_id, "to_be_id": tb["id"], "title": tb["title"]}
+        (lane_diff["changed"] if changed else lane_diff["unchanged"]).append(entry)
+
+    # Риски/контроли/показатели — сравнение по наличию на процессе (риски/показатели
+    # привязаны к process_node_id, который у AS-IS и TO-BE один и тот же — поэтому
+    # сравниваем именно привязку к конкретным diagram_node_id каждой из схем).
+    as_is_risk_node_ids = {n["id"] for n in as_is_full["nodes"] if n.get("ref_risk_id")}
+    to_be_risk_node_ids = {n["origin_node_id"] for n in to_be_full["nodes"] if n.get("ref_risk_id") and n.get("origin_node_id")}
+    risk_diff = {
+        "removed_on_operations": list(as_is_risk_node_ids - to_be_risk_node_ids),
+        "still_present_on_operations": list(as_is_risk_node_ids & to_be_risk_node_ids),
+    }
+
+    return {
+        "as_is_diagram_id": as_is_id,
+        "to_be_diagram_id": to_be_id,
+        "nodes": node_diff,
+        "edges": edge_diff,
+        "lanes": lane_diff,
+        "risks": risk_diff,
+        "summary": {
+            "added": len(node_diff["added"]) + len(edge_diff["added"]) + len(lane_diff["added"]),
+            "removed": len(node_diff["removed"]) + len(edge_diff["removed"]) + len(lane_diff["removed"]),
+            "changed": len(node_diff["changed"]) + len(edge_diff["changed"]) + len(lane_diff["changed"]),
+        },
+    }
+
+
+# ── Улучшения TO-BE и ожидаемый эффект ──────────────────────────────────────
+
+IMPROVEMENT_FIELDS = [
+    "to_be_diagram_id", "to_be_node_id", "as_is_issue_id", "description", "expected_effect_note",
+    "effect_type", "result_metric_id", "owner_person_id", "status", "initiative_id",
+]
+IMPROVEMENT_INT_FIELDS = {"to_be_diagram_id", "to_be_node_id", "as_is_issue_id", "result_metric_id", "owner_person_id", "initiative_id"}
+
+
+def list_improvements(cur, to_be_diagram_id: int):
+    cur.execute(f"""
+        SELECT im.*, iss.title AS issue_title, p.display_name AS owner_name,
+               ini.title AS initiative_title, ini.external_code AS initiative_code,
+               n.label AS to_be_node_label
+        FROM {SCHEMA}.exec_process_improvement im
+        LEFT JOIN {SCHEMA}.exec_process_issue iss ON iss.id = im.as_is_issue_id
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = im.owner_person_id
+        LEFT JOIN {SCHEMA}.exec_initiative ini ON ini.id = im.initiative_id
+        LEFT JOIN {SCHEMA}.exec_process_diagram_node n ON n.id = im.to_be_node_id
+        WHERE im.to_be_diagram_id = %s AND im.is_test_data = false ORDER BY im.id
+    """, (to_be_diagram_id,))
+    return rows(cur)
+
+
+def save_improvement(cur, body: dict, actor: str):
+    iid = as_int(body.get("id"))
+    vals = {}
+    for f in IMPROVEMENT_FIELDS:
+        if f not in body:
+            continue
+        vals[f] = as_int(body[f]) if f in IMPROVEMENT_INT_FIELDS else nz(body.get(f))
+
+    if vals.get("effect_type") is not None and vals["effect_type"] not in EFFECT_TYPES:
+        return None, "Некорректный тип эффекта"
+    if vals.get("initiative_id"):
+        cur.execute(f"SELECT id FROM {SCHEMA}.exec_initiative WHERE id = %s", (vals["initiative_id"],))
+        if not cur.fetchone():
+            return None, "Указанная инициатива не найдена"
+
+    if iid:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_improvement WHERE id = %s", (iid,))
+        before = rows(cur)
+        if not before:
+            return None, "Изменение не найдено"
+        lock_err = check_optimistic_lock(before[0], body)
+        if lock_err:
+            return None, lock_err
+        if not vals:
+            return iid, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_improvement SET {sets}, updated_by = %s, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [actor, iid],
+        )
+        log_change(cur, actor, "process_improvement", iid, "update", before=before[0], after=vals)
+        return iid, None
+
+    diagram_id = vals.get("to_be_diagram_id")
+    if not diagram_id:
+        return None, "Не указана схема TO-BE"
+    if not nz(vals.get("description")):
+        return None, "Опишите изменение"
+    vals["created_by"] = actor
+    vals["updated_by"] = actor
+    cols = ", ".join(vals.keys())
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_improvement ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_improvement", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_improvement(cur, body: dict, actor: str):
+    iid = as_int(body.get("id"))
+    if not iid:
+        return None, "Не указано изменение"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_improvement WHERE id = %s", (iid,))
+    before = rows(cur)
+    if not before:
+        return None, "Изменение не найдено"
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_improvement WHERE id = %s", (iid,))
+    log_change(cur, actor, "process_improvement", iid, "delete", before=before[0])
+    return iid, None
+
+
+def suggest_initiative_links(cur, to_be_diagram_id: int):
+    """Предлагает возможную связь с существующими инициативами портфеля на основе
+    уже существующих связей проблем AS-IS этого процесса с инициативами
+    (exec_process_issue_initiative_link) — ничего не создаёт и не подставляет
+    автоматически, только предлагает вариант для подтверждения пользователем."""
+    cur.execute(f"SELECT process_node_id, base_diagram_id FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (to_be_diagram_id,))
+    r = cur.fetchone()
+    if not r:
+        return []
+    process_node_id = r[0]
+    cur.execute(f"""
+        SELECT DISTINCT ini.id, ini.title, ini.external_code
+        FROM {SCHEMA}.exec_process_issue_initiative_link l
+        JOIN {SCHEMA}.exec_process_issue iss ON iss.id = l.issue_id
+        JOIN {SCHEMA}.exec_initiative ini ON ini.id = l.initiative_id
+        WHERE iss.process_node_id = %s
+    """, (process_node_id,))
+    return rows(cur)
+
+
 # ── HTTP handler ─────────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
@@ -1326,6 +2155,15 @@ def handler(event: dict, context) -> dict:
                 "confirmation_statuses": CONFIRMATION_STATUSES,
                 "node_types": NODE_TYPES,
                 "lane_types": LANE_TYPES,
+                "qualitative_levels": QUALITATIVE_LEVELS,
+                "control_types": CONTROL_TYPES,
+                "control_methods": CONTROL_METHODS,
+                "control_periodicities": CONTROL_PERIODICITIES,
+                "metric_kinds": METRIC_KINDS,
+                "metric_periodicities": METRIC_PERIODICITIES,
+                "problem_types": PROBLEM_TYPES,
+                "issue_statuses": ISSUE_STATUSES,
+                "effect_types": EFFECT_TYPES,
                 "user_role": user.get("role"),
                 "can_confirm": can_confirm,
                 "can_edit": can_edit,
@@ -1515,6 +2353,16 @@ def handler(event: dict, context) -> dict:
             """)
             return cors({"ok": True, "data": {"items": rows(cur)}})
 
+        if action == "initiatives_lite":
+            # Лёгкий список для выбора инициативы при связывании (проблема AS-IS,
+            # улучшение TO-BE) — читает существующий портфель, не создаёт новый.
+            cur.execute(f"""
+                SELECT id, title, external_code, status FROM {SCHEMA}.exec_initiative
+                WHERE COALESCE(is_test_data, false) = false
+                ORDER BY title
+            """)
+            return cors({"ok": True, "data": {"items": rows(cur)}})
+
         # ── Схемы процессов ──────────────────────────────────────────────────
 
         if action == "diagram_get_or_create":
@@ -1634,6 +2482,200 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": err}}, 400)
             conn.commit()
             return cors({"ok": True, "data": {"id": eid}})
+
+        # ── Итерация 3: риски процесса ──────────────────────────────────────
+
+        if action == "process_risks":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": list_process_risks(cur, node_id)}})
+
+        if action == "risk_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            rid, err = save_process_risk(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "risk_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            rid, err = delete_process_risk(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action in ("risk_confirm", "risk_unconfirm"):
+            if not can_confirm:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав для подтверждения"}}, 403)
+            rid, err = confirm_process_risk(cur, body, actor, action == "risk_confirm")
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        # ── Контрольные процедуры ────────────────────────────────────────────
+
+        if action == "process_controls":
+            risk_id = as_int(qs.get("risk_id"))
+            if not risk_id:
+                return cors({"ok": False, "error": {"message": "Не указан риск"}}, 400)
+            return cors({"ok": True, "data": {"items": list_process_controls(cur, risk_id)}})
+
+        if action == "control_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            cid, err = save_process_control(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": cid}})
+
+        if action == "control_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            cid, err = delete_process_control(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": cid}})
+
+        if action in ("control_confirm", "control_unconfirm"):
+            if not can_confirm:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав для подтверждения"}}, 403)
+            cid, err = confirm_process_control(cur, body, actor, action == "control_confirm")
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": cid}})
+
+        if action == "risk_control_checks":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": risk_control_checks(cur, node_id)}})
+
+        # ── Показатели процесса ──────────────────────────────────────────────
+
+        if action == "process_metrics":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": list_process_metrics(cur, node_id)}})
+
+        if action == "metric_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            mid, err = save_process_metric(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": mid}})
+
+        if action == "metric_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            mid, err = delete_process_metric(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": mid}})
+
+        if action == "metric_checks":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": metric_checks(cur, node_id)}})
+
+        # ── Проблемы AS-IS ────────────────────────────────────────────────────
+
+        if action == "process_issues":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": list_process_issues(cur, node_id)}})
+
+        if action == "issue_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            iid, err = save_process_issue(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action == "issue_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            iid, err = delete_process_issue(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action in ("issue_initiative_link", "issue_initiative_unlink"):
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            iid, err = link_issue_initiative(cur, body, actor, action == "issue_initiative_link")
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        # ── TO-BE: создание из AS-IS, сравнение, улучшения ───────────────────
+
+        if action == "diagram_create_to_be":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            did, err = create_to_be_from_as_is(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": did}})
+
+        if action == "diagram_compare":
+            as_is_id = as_int(qs.get("as_is_id"))
+            to_be_id = as_int(qs.get("to_be_id"))
+            if not as_is_id or not to_be_id:
+                return cors({"ok": False, "error": {"message": "Не указаны обе схемы для сравнения"}}, 400)
+            result = compare_diagrams(cur, as_is_id, to_be_id)
+            if result is None:
+                return cors({"ok": False, "error": {"message": "Схема не найдена"}}, 404)
+            return cors({"ok": True, "data": result})
+
+        if action == "improvements":
+            diagram_id = as_int(qs.get("to_be_diagram_id"))
+            if not diagram_id:
+                return cors({"ok": False, "error": {"message": "Не указана схема TO-BE"}}, 400)
+            return cors({"ok": True, "data": {"items": list_improvements(cur, diagram_id)}})
+
+        if action == "improvement_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            iid, err = save_improvement(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action == "improvement_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            iid, err = delete_improvement(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": iid}})
+
+        if action == "improvement_suggest_initiatives":
+            diagram_id = as_int(qs.get("to_be_diagram_id"))
+            if not diagram_id:
+                return cors({"ok": False, "error": {"message": "Не указана схема TO-BE"}}, 400)
+            return cors({"ok": True, "data": {"items": suggest_initiative_links(cur, diagram_id)}})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
 

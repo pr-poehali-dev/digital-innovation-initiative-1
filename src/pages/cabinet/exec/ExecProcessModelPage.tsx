@@ -210,6 +210,33 @@ function WizardScreen({
             </button>
           </div>
         )}
+        {(stage.code === "risks" || stage.code === "metrics" || stage.code === "issues") && (
+          <div className="mt-4 text-sm text-slate-600 leading-relaxed">
+            <p>Риски, показатели и проблемы ведутся внутри карточки конкретного процесса — откройте архитектуру, выберите процесс и перейдите на вкладку «Риски и показатели».</p>
+            <button onClick={() => nav("/cabinet/exec/process-model?tab=architecture")}
+              className="mt-3 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs hover:bg-violet-700 flex items-center gap-1.5">
+              Открыть архитектуру процессов <Icon name="ArrowRight" size={12} />
+            </button>
+          </div>
+        )}
+        {stage.code === "to_be" && (
+          <div className="mt-4 text-sm text-slate-600 leading-relaxed">
+            <p>TO-BE создаётся копированием AS-IS внутри карточки процесса — откройте процесс, вкладку «Схемы» и нажмите «Создать TO-BE на основе AS-IS».</p>
+            <button onClick={() => nav("/cabinet/exec/process-model?tab=architecture")}
+              className="mt-3 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs hover:bg-violet-700 flex items-center gap-1.5">
+              Открыть архитектуру процессов <Icon name="ArrowRight" size={12} />
+            </button>
+          </div>
+        )}
+        {stage.code === "initiatives" && (
+          <div className="mt-4 text-sm text-slate-600 leading-relaxed">
+            <p>Связь изменения TO-BE с инициативой устанавливается внутри блока «Улучшения и эффект» на вкладке «Схемы» процесса — используется существующий портфель, новый реестр не создаётся.</p>
+            <button onClick={() => nav("/cabinet/exec/process-model?tab=architecture")}
+              className="mt-3 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs hover:bg-violet-700 flex items-center gap-1.5">
+              Открыть архитектуру процессов <Icon name="ArrowRight" size={12} />
+            </button>
+          </div>
+        )}
         {!stage.available && stage.code !== "boundaries" && stage.code !== "documents" && (
           <div className="mt-8 flex flex-col items-center text-center py-10">
             <Icon name="Construction" size={28} className="text-slate-300 mb-3" />

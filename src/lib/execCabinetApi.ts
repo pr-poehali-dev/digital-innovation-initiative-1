@@ -420,6 +420,10 @@ export const execApi = {
     action_stats: { open_actions: number; overdue_actions: number };
     decision_requests: DecisionRequest[];
     plan_project: PlanProjectRef | null;
+    process_links?: {
+      issues: { process_node_id: number; process_name: string; issue_id: number; issue_title: string; expected_effect_note: string | null }[];
+      improvements: { improvement_id: number; description: string; expected_effect_note: string | null; effect_type: string | null; process_node_id: number; process_name: string }[];
+    };
     dictionaries: Dictionaries;
   }> => req(`/?action=initiative&id=${id}`),
 

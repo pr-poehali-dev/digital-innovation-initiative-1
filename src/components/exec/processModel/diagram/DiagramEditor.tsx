@@ -59,6 +59,8 @@ export default function DiagramEditor({
   const [scale, setScale] = useState(1);
   const [saving, setSaving] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
+  const [showRisks, setShowRisks] = useState(true);
+  const [issueNodeIds, setIssueNodeIds] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +78,9 @@ export default function DiagramEditor({
         setOrgUnits(u.items);
         setPeople(p.items);
         setSystems(s.items);
+        processModelApi.processIssues(f.process_node_id).then((r) => {
+          setIssueNodeIds(new Set(r.items.map((i) => i.diagram_node_id).filter((id): id is number => !!id)));
+        });
       })
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
@@ -233,6 +238,10 @@ export default function DiagramEditor({
               <Icon name="AlignHorizontalDistributeCenter" size={12} /> Выровнять
             </button>
           )}
+          <button onClick={() => setShowRisks((v) => !v)}
+            className={`text-xs px-2 py-1 rounded-md border flex items-center gap-1 ${showRisks ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+            <Icon name="ShieldAlert" size={12} /> Риски и контроли
+          </button>
           <button onClick={() => setShowAssistant((v) => !v)} className={`text-xs px-2 py-1 rounded-md border flex items-center gap-1 ${showAssistant ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
             <Icon name="Compass" size={12} /> Помощник
           </button>
@@ -268,6 +277,8 @@ export default function DiagramEditor({
               selectedNodeId={selectedNodeId}
               readOnly={readOnly}
               scale={scale}
+              showRisks={showRisks}
+              issueNodeIds={issueNodeIds}
               onSelectNode={setSelectedNodeId}
               onMoveNode={handleMoveNode}
               onDropNewNode={handleDropNewNode}

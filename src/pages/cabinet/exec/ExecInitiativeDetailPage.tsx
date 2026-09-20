@@ -170,6 +170,10 @@ export default function ExecInitiativeDetailPage() {
     open: false,
     item: null,
   });
+  const [processLinks, setProcessLinks] = useState<{
+    issues: { process_node_id: number; process_name: string; issue_id: number; issue_title: string; expected_effect_note: string | null }[];
+    improvements: { improvement_id: number; description: string; expected_effect_note: string | null; effect_type: string | null; process_node_id: number; process_name: string }[];
+  }>({ issues: [], improvements: [] });
 
   const load = () => {
     setLoading(true);
@@ -195,6 +199,7 @@ export default function ExecInitiativeDetailPage() {
         setDecisionRequests(r.decision_requests || []);
         setPlanProject(r.plan_project);
         setRisks(rk);
+        setProcessLinks(r.process_links || { issues: [], improvements: [] });
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -606,6 +611,30 @@ export default function ExecInitiativeDetailPage() {
                 </div>
               </div>
             </Card>
+
+            {(processLinks.issues.length > 0 || processLinks.improvements.length > 0) && (
+              <Card title="Связь с процессной моделью" icon="Network" className="lg:col-span-2"
+                subtitle="Обратная ссылка из контура «Процессное управление» — устанавливается там, здесь только отображается">
+                <div className="space-y-3">
+                  {processLinks.issues.map((l) => (
+                    <div key={`issue-${l.issue_id}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-[11px] text-amber-600 uppercase tracking-wide mb-1">Устраняемая проблема процесса</p>
+                      <p className="text-sm text-slate-900">{l.issue_title}</p>
+                      <p className="text-xs text-slate-500 mt-1">процесс: {l.process_name}</p>
+                      {l.expected_effect_note && <p className="text-xs text-slate-500 mt-1">{l.expected_effect_note}</p>}
+                    </div>
+                  ))}
+                  {processLinks.improvements.map((l) => (
+                    <div key={`imp-${l.improvement_id}`} className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+                      <p className="text-[11px] text-violet-600 uppercase tracking-wide mb-1">Изменение TO-BE</p>
+                      <p className="text-sm text-slate-900">{l.description}</p>
+                      <p className="text-xs text-slate-500 mt-1">процесс: {l.process_name}</p>
+                      {l.expected_effect_note && <p className="text-xs text-slate-500 mt-1">ожидаемый эффект: {l.expected_effect_note}</p>}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
           </div>
         )}
 

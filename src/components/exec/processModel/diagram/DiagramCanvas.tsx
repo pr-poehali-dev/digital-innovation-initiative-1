@@ -20,6 +20,8 @@ export default function DiagramCanvas({
   selectedNodeId,
   readOnly,
   scale,
+  showRisks,
+  issueNodeIds,
   onSelectNode,
   onMoveNode,
   onDropNewNode,
@@ -35,6 +37,8 @@ export default function DiagramCanvas({
   selectedNodeId: number | null;
   readOnly: boolean;
   scale: number;
+  showRisks?: boolean;
+  issueNodeIds?: Set<number>;
   onSelectNode: (id: number | null) => void;
   onMoveNode: (id: number, x: number, y: number) => void;
   onDropNewNode: (nodeType: string, x: number, y: number, laneId: number | null) => void;
@@ -206,6 +210,8 @@ export default function DiagramCanvas({
             node={{ ...node, pos_x: nodePos(node).x, pos_y: nodeAbsY(node) }}
             selected={selectedNodeId === node.id}
             readOnly={readOnly}
+            showRisks={showRisks}
+            hasIssue={issueNodeIds?.has(node.id)}
             onMouseDownNode={handleNodeMouseDown(node)}
             onStartConnect={handleStartConnect(node)}
             onFinishConnect={handleFinishConnect(node)}

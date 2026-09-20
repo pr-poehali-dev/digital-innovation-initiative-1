@@ -11,9 +11,12 @@ import {
   STATUS_STYLE,
   PersonRef,
   OrgUnitRef,
+  InfoSystem,
+  Refs,
 } from "@/lib/execProcessModelApi";
 import PassportForm from "./PassportForm";
 import DiagramsTab from "./DiagramsTab";
+import RisksMetricsTab from "./RisksMetricsTab";
 
 const LEVEL_LABEL: Record<ProcessLevel, string> = {
   direction: "Направление",
@@ -267,12 +270,31 @@ function ProcessDetailPanel({
   const [detail, setDetail] = useState<ProcessDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"passport" | "functions" | "diagrams" | "systems" | "documents" | "next">("passport");
+  const [refs, setRefs] = useState<Refs | null>(null);
+  const [systems, setSystems] = useState<InfoSystem[]>([]);
+  const [diagramNodeOptions, setDiagramNodeOptions] = useState<{ id: number; label: string }[]>([]);
 
   const load = () => {
     setLoading(true);
     processModelApi.processDetail(nodeId).then(setDetail).finally(() => setLoading(false));
   };
   useEffect(load, [nodeId]);
+  useEffect(() => {
+    processModelApi.refs().then(setRefs);
+    processModelApi.systems().then((r) => setSystems(r.items));
+  }, []);
+
+  useEffect(() => {
+    const asIs = detail?.diagrams.find((d) => d.variant === "as_is");
+    if (!asIs) { setDiagramNodeOptions([]); return; }
+    processModelApi.diagramFull(asIs.id).then((full) => {
+      setDiagramNodeOptions(
+        full.nodes
+          .filter((n) => n.node_type === "task")
+          .map((n) => ({ id: n.id, label: n.label || `Операция #${n.id}` }))
+      );
+    });
+  }, [detail?.diagrams]);
 
   const setStatus = async (status: string) => {
     await processModelApi.setProcessStatus(nodeId, status as never);
@@ -349,7 +371,8 @@ function ProcessDetailPanel({
       )}
 
       {tab === "diagrams" && (
-        <DiagramsTab processNodeId={detail.node.id} diagrams={detail.diagrams} canEdit={canEdit} canConfirm={canConfirm} onChanged={load} />
+        <DiagramsTab processNodeId={detail.node.id} diagrams={detail.diagrams} canEdit={canEdit} canConfirm={canConfirm}
+          refs={refs} people={people} onChanged={load} />
       )}
 
       {tab === "systems" && (
@@ -377,13 +400,16 @@ function ProcessDetailPanel({
       )}
 
       {tab === "next" && (
-        <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center">
-          <Icon name="Construction" size={24} className="text-slate-300 mx-auto mb-2" />
-          <p className="text-sm text-slate-500">
-            Риски и контроли, показатели и проблемы — следующая итерация. Паспорт, архитектура
-            и схемы уже готовят для них данные.
-          </p>
-        </div>
+        <RisksMetricsTab
+          processNodeId={detail.node.id}
+          refs={refs}
+          canEdit={canEdit}
+          canConfirm={canConfirm}
+          people={people}
+          orgUnits={orgUnits}
+          systems={systems}
+          diagramNodeOptions={diagramNodeOptions}
+        />
       )}
     </div>
   );

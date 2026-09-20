@@ -1,5 +1,5 @@
 import Icon from "@/components/ui/icon";
-import { DiagramNode, NODE_TYPE_ICON } from "@/lib/execProcessModelApi";
+import { DiagramNode, NODE_TYPE_ICON, QUALITATIVE_LEVEL_STYLE } from "@/lib/execProcessModelApi";
 import { NODE_DEFAULT_SIZE } from "./diagramLayout";
 
 const TYPE_STYLE: Record<string, { bg: string; border: string; text: string; shape: "circle" | "rect" | "diamond" }> = {
@@ -23,6 +23,8 @@ export default function DiagramNodeShape({
   node,
   selected,
   readOnly,
+  showRisks,
+  hasIssue,
   onMouseDownNode,
   onStartConnect,
   onFinishConnect,
@@ -31,6 +33,8 @@ export default function DiagramNodeShape({
   node: DiagramNode;
   selected: boolean;
   readOnly: boolean;
+  showRisks?: boolean;
+  hasIssue?: boolean;
   onMouseDownNode: (e: React.MouseEvent) => void;
   onStartConnect: (e: React.MouseEvent) => void;
   onFinishConnect: () => void;
@@ -69,6 +73,26 @@ export default function DiagramNodeShape({
         {node.is_critical && (
           <span className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-red-500 flex items-center justify-center" title="Критичная операция">
             <Icon name="Flame" size={10} className="text-white" />
+          </span>
+        )}
+        {showRisks && node.ref_risk_id && (
+          <span
+            className={`absolute -bottom-2 -left-2 w-4 h-4 rounded-full flex items-center justify-center border border-white ${
+              node.ref_risk_level ? QUALITATIVE_LEVEL_STYLE[node.ref_risk_level].dot : "bg-slate-400"
+            }`}
+            title={`Риск: ${node.ref_risk_title || ""}${node.ref_risk_controls_count ? "" : " (без контроля)"}`}
+          >
+            <Icon name="ShieldAlert" size={10} className="text-white" />
+          </span>
+        )}
+        {showRisks && node.ref_risk_id && !node.ref_risk_controls_count && (
+          <span className="absolute -bottom-2 left-4 w-4 h-4 rounded-full bg-white border border-amber-400 flex items-center justify-center" title="Риск без контроля">
+            <Icon name="AlertTriangle" size={9} className="text-amber-600" />
+          </span>
+        )}
+        {showRisks && hasIssue && (
+          <span className="absolute -bottom-2 -right-2 w-4 h-4 rounded-full bg-orange-500 flex items-center justify-center border border-white" title="Есть проблема AS-IS">
+            <Icon name="AlertCircle" size={9} className="text-white" />
           </span>
         )}
         {unconfirmed && (

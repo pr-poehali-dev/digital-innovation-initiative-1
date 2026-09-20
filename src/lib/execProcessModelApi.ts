@@ -30,6 +30,18 @@ export type NodeType = "start" | "end" | "task" | "gateway" | "subprocess" | "do
 export type LaneType = "org_unit" | "role" | "placeholder";
 export type DiagramVariant = "as_is" | "to_be";
 
+export type QualitativeLevel = "low" | "medium" | "high" | "critical";
+export type ControlType = "preventive" | "detective";
+export type ControlMethod = "manual" | "automated" | "mixed";
+export type MetricKind = "result" | "quality" | "deadline" | "cost" | "risk";
+export type ProblemType =
+  | "delay" | "extra_approval" | "duplication" | "manual_operation" | "responsibility_gap"
+  | "no_control" | "data_gap" | "system_limitation" | "normative_conflict" | "other";
+export type IssueStatus = "open" | "addressed" | "closed";
+export type EffectType =
+  | "time_reduction" | "risk_reduction" | "quality_improvement" | "cost_reduction"
+  | "manual_op_elimination" | "control_strengthening" | "automation" | "duplication_elimination";
+
 export interface Refs {
   levels: Record<ProcessLevel, string>;
   statuses: Record<ModelStatus, string>;
@@ -37,6 +49,15 @@ export interface Refs {
   confirmation_statuses: Record<string, string>;
   node_types: Record<NodeType, string>;
   lane_types: Record<LaneType, string>;
+  qualitative_levels: Record<QualitativeLevel, string>;
+  control_types: Record<ControlType, string>;
+  control_methods: Record<ControlMethod, string>;
+  control_periodicities: Record<string, string>;
+  metric_kinds: Record<MetricKind, string>;
+  metric_periodicities: Record<string, string>;
+  problem_types: Record<ProblemType, string>;
+  issue_statuses: Record<IssueStatus, string>;
+  effect_types: Record<EffectType, string>;
   user_role: string;
   can_confirm: boolean;
   can_edit: boolean;
@@ -171,10 +192,174 @@ export interface ProcessDetail {
   functions: { id: number; code: string | null; title: string }[];
   systems: InfoSystem[];
   documents: { id: number; title: string; source_type: string; state: string; confidentiality_level: string }[];
-  diagrams: { id: number; variant: "as_is" | "to_be"; title: string | null; model_status: ModelStatus; version: number; updated_at: string }[];
+  diagrams: { id: number; variant: "as_is" | "to_be"; title: string | null; model_status: ModelStatus; version: number; updated_at: string; base_diagram_id?: number | null }[];
   risks: { id: number; title: string; qualitative_level: string | null; controls_count: number }[];
   metrics: { id: number; title: string; metric_kind: string }[];
   issues: { id: number; title: string; status: string }[];
+}
+
+// ── Итерация 3: риски / контроли / показатели / проблемы / улучшения ────────
+
+export interface ProcessRisk {
+  id: number;
+  process_node_id: number;
+  diagram_node_id: number | null;
+  diagram_node_label: string | null;
+  title: string;
+  event_description: string | null;
+  cause: string | null;
+  consequence: string | null;
+  qualitative_level: QualitativeLevel | null;
+  severity_rank: number | null;
+  owner_person_id: number | null;
+  owner_name: string | null;
+  owner_role: string | null;
+  source_note: string | null;
+  comment: string | null;
+  linked_initiative_risk_id: number | null;
+  verification_status: "user_draft" | "confirmed";
+  controls_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProcessControl {
+  id: number;
+  risk_id: number;
+  title: string;
+  goal_note: string | null;
+  control_type: ControlType | null;
+  method: ControlMethod | null;
+  diagram_node_id: number | null;
+  diagram_node_label: string | null;
+  responsible_role: string | null;
+  responsible_person_id: number | null;
+  responsible_name: string | null;
+  responsible_org_unit_id: number | null;
+  responsible_org_unit_name: string | null;
+  periodicity: string | null;
+  evidence_note: string | null;
+  last_evidence_confirmed_by: string | null;
+  last_evidence_confirmed_at: string | null;
+  normative_document_note: string | null;
+  info_system_id: number | null;
+  info_system_name: string | null;
+  comment: string | null;
+  verification_status: "user_draft" | "confirmed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProcessMetric {
+  id: number;
+  process_node_id: number;
+  diagram_node_id: number | null;
+  diagram_node_label: string | null;
+  title: string;
+  metric_kind: MetricKind;
+  measures_note: string | null;
+  formula: string | null;
+  unit: string | null;
+  data_source: string | null;
+  periodicity: string | null;
+  plan_value: string | null;
+  fact_value: string | null;
+  threshold_note: string | null;
+  owner_person_id: number | null;
+  owner_name: string | null;
+  goal_link_note: string | null;
+  verification_status: "user_draft" | "confirmed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MetricCheckItem {
+  code: string;
+  message: string;
+  metric_id: number | null;
+}
+
+export interface ProcessIssue {
+  id: number;
+  process_node_id: number;
+  diagram_node_id: number | null;
+  diagram_node_label: string | null;
+  title: string;
+  description: string | null;
+  problem_type: ProblemType | null;
+  cause: string | null;
+  impact_note: string | null;
+  source_note: string | null;
+  severity_rank: number | null;
+  improvement_direction: string | null;
+  status: IssueStatus;
+  verification_status: "user_draft" | "confirmed";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RiskControlCheckItem {
+  code: string;
+  message: string;
+  risk_id?: number;
+  control_id?: number;
+  diagram_node_id?: number;
+}
+
+export interface ProcessImprovement {
+  id: number;
+  to_be_diagram_id: number;
+  to_be_node_id: number | null;
+  to_be_node_label: string | null;
+  as_is_issue_id: number | null;
+  issue_title: string | null;
+  description: string;
+  expected_effect_note: string | null;
+  effect_type: EffectType | null;
+  result_metric_id: number | null;
+  owner_person_id: number | null;
+  owner_name: string | null;
+  status: "user_draft" | "confirmed";
+  initiative_id: number | null;
+  initiative_title: string | null;
+  initiative_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiagramDiffEntry {
+  id?: number;
+  as_is_id?: number;
+  to_be_id?: number;
+  label?: string | null;
+  title?: string | null;
+  node_type?: string;
+  changed_fields?: string[];
+}
+
+export interface DiagramDiffGroup {
+  added: DiagramDiffEntry[];
+  removed: DiagramDiffEntry[];
+  changed: DiagramDiffEntry[];
+  unchanged: DiagramDiffEntry[];
+}
+
+export interface DiagramCompareResult {
+  as_is_diagram_id: number;
+  to_be_diagram_id: number;
+  nodes: DiagramDiffGroup;
+  edges: DiagramDiffGroup;
+  lanes: DiagramDiffGroup;
+  risks: { removed_on_operations: number[]; still_present_on_operations: number[] };
+  summary: { added: number; removed: number; changed: number };
+}
+
+export interface InitiativeLite {
+  id: number;
+  title: string;
+  external_code: string | null;
+  status: string;
 }
 
 export interface CompletenessItem {
@@ -248,6 +433,7 @@ export interface DiagramLane {
   placeholder_label: string | null;
   needs_clarification: boolean;
   sort_order: number;
+  origin_lane_id: number | null;
 }
 
 export interface DiagramNode {
@@ -278,9 +464,12 @@ export interface DiagramNode {
   ref_system_name: string | null;
   ref_risk_id: number | null;
   ref_risk_title: string | null;
+  ref_risk_level: QualitativeLevel | null;
+  ref_risk_controls_count: number | null;
   system_note: string | null;
   document_note: string | null;
   note: string | null;
+  origin_node_id: number | null;
 }
 
 export interface DiagramEdge {
@@ -290,6 +479,7 @@ export interface DiagramEdge {
   target_node_id: number;
   label: string | null;
   edge_type: "flow" | "conditional";
+  origin_edge_id: number | null;
 }
 
 export interface DiagramFull {
@@ -412,6 +602,55 @@ export const processModelApi = {
 
   saveDiagramEdge: (data: Record<string, unknown>): Promise<{ id: number }> => post("diagram_edge_save", data),
   deleteDiagramEdge: (id: number): Promise<{ id: number }> => post("diagram_edge_delete", { id }),
+
+  // ── Итерация 3: риски процесса ──────────────────────────────────────────
+  processRisks: (processNodeId: number): Promise<{ items: ProcessRisk[] }> =>
+    req(`/?action=process_risks&process_node_id=${processNodeId}`),
+  saveRisk: (data: Record<string, unknown>): Promise<{ id: number }> => post("risk_save", data),
+  deleteRisk: (id: number): Promise<{ id: number }> => post("risk_delete", { id }),
+  confirmRisk: (id: number, confirm: boolean): Promise<{ id: number }> =>
+    post(confirm ? "risk_confirm" : "risk_unconfirm", { id }),
+
+  // Контроли
+  processControls: (riskId: number): Promise<{ items: ProcessControl[] }> =>
+    req(`/?action=process_controls&risk_id=${riskId}`),
+  saveControl: (data: Record<string, unknown>): Promise<{ id: number }> => post("control_save", data),
+  deleteControl: (id: number): Promise<{ id: number }> => post("control_delete", { id }),
+  confirmControl: (id: number, confirm: boolean): Promise<{ id: number }> =>
+    post(confirm ? "control_confirm" : "control_unconfirm", { id }),
+  riskControlChecks: (processNodeId: number): Promise<{ items: RiskControlCheckItem[] }> =>
+    req(`/?action=risk_control_checks&process_node_id=${processNodeId}`),
+
+  // Показатели
+  processMetrics: (processNodeId: number): Promise<{ items: ProcessMetric[] }> =>
+    req(`/?action=process_metrics&process_node_id=${processNodeId}`),
+  saveMetric: (data: Record<string, unknown>): Promise<{ id: number }> => post("metric_save", data),
+  deleteMetric: (id: number): Promise<{ id: number }> => post("metric_delete", { id }),
+  metricChecks: (processNodeId: number): Promise<{ items: MetricCheckItem[] }> =>
+    req(`/?action=metric_checks&process_node_id=${processNodeId}`),
+
+  // Проблемы AS-IS
+  processIssues: (processNodeId: number): Promise<{ items: ProcessIssue[] }> =>
+    req(`/?action=process_issues&process_node_id=${processNodeId}`),
+  saveIssue: (data: Record<string, unknown>): Promise<{ id: number }> => post("issue_save", data),
+  deleteIssue: (id: number): Promise<{ id: number }> => post("issue_delete", { id }),
+  linkIssueInitiative: (issueId: number, initiativeId: number, note?: string): Promise<{ id: number }> =>
+    post("issue_initiative_link", { issue_id: issueId, initiative_id: initiativeId, expected_effect_note: note }),
+  unlinkIssueInitiative: (issueId: number, initiativeId: number): Promise<{ id: number }> =>
+    post("issue_initiative_unlink", { issue_id: issueId, initiative_id: initiativeId }),
+
+  // TO-BE: создание из AS-IS, сравнение, улучшения
+  createToBeFromAsIs: (asIsDiagramId: number): Promise<{ id: number }> =>
+    post("diagram_create_to_be", { as_is_diagram_id: asIsDiagramId }),
+  compareDiagrams: (asIsId: number, toBeId: number): Promise<DiagramCompareResult> =>
+    req(`/?action=diagram_compare&as_is_id=${asIsId}&to_be_id=${toBeId}`),
+  improvements: (toBeDiagramId: number): Promise<{ items: ProcessImprovement[] }> =>
+    req(`/?action=improvements&to_be_diagram_id=${toBeDiagramId}`),
+  saveImprovement: (data: Record<string, unknown>): Promise<{ id: number }> => post("improvement_save", data),
+  deleteImprovement: (id: number): Promise<{ id: number }> => post("improvement_delete", { id }),
+  suggestInitiativeLinks: (toBeDiagramId: number): Promise<{ items: InitiativeLite[] }> =>
+    req(`/?action=improvement_suggest_initiatives&to_be_diagram_id=${toBeDiagramId}`),
+  initiativesLite: (): Promise<{ items: InitiativeLite[] }> => req("/?action=initiatives_lite"),
 };
 
 export const LEVEL_ORDER: ProcessLevel[] = ["direction", "process", "subprocess", "operation"];
@@ -422,4 +661,17 @@ export const STATUS_STYLE: Record<ModelStatus, { title: string; cls: string }> =
   confirmed: { title: "Подтверждён", cls: "bg-green-50 text-green-700 border-green-200" },
   published: { title: "Опубликован", cls: "bg-emerald-50 text-emerald-700 border-emerald-300" },
   archived: { title: "Архив", cls: "bg-slate-100 text-slate-500 border-slate-200" },
+};
+
+export const QUALITATIVE_LEVEL_STYLE: Record<QualitativeLevel, { title: string; cls: string; dot: string }> = {
+  low: { title: "Низкий", cls: "bg-slate-100 text-slate-600 border-slate-200", dot: "bg-slate-400" },
+  medium: { title: "Средний", cls: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
+  high: { title: "Высокий", cls: "bg-orange-50 text-orange-700 border-orange-200", dot: "bg-orange-500" },
+  critical: { title: "Критичный", cls: "bg-red-50 text-red-700 border-red-200", dot: "bg-red-600" },
+};
+
+export const ISSUE_STATUS_STYLE: Record<IssueStatus, { title: string; cls: string }> = {
+  open: { title: "Открыта", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  addressed: { title: "В работе", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  closed: { title: "Закрыта", cls: "bg-green-50 text-green-700 border-green-200" },
 };

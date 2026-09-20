@@ -1236,6 +1236,37 @@ def handler(event: dict, context) -> dict:
             plan_project_rows = rows(cur)
             plan_project = plan_project_rows[0] if plan_project_rows else None
 
+            # Обратная ссылка из контура «Процессное управление» (read-only —
+            # тот контур сам решает, когда связывать проблему/изменение с этой
+            # инициативой; здесь мы только показываем уже подтверждённые связи).
+            process_links = []
+            try:
+                cur.execute(f"""
+                    SELECT n.id AS process_node_id, n.name AS process_name,
+                           iss.id AS issue_id, iss.title AS issue_title,
+                           l.expected_effect_note
+                    FROM {SCHEMA}.exec_process_issue_initiative_link l
+                    JOIN {SCHEMA}.exec_process_issue iss ON iss.id = l.issue_id
+                    JOIN {SCHEMA}.exec_process_node n ON n.id = iss.process_node_id
+                    WHERE l.initiative_id = %s AND COALESCE(iss.is_test_data, false) = false
+                """, (iid,))
+                issue_links = rows(cur)
+                cur.execute(f"""
+                    SELECT im.id AS improvement_id, im.description, im.expected_effect_note, im.effect_type,
+                           n.id AS process_node_id, n.name AS process_name
+                    FROM {SCHEMA}.exec_process_improvement im
+                    JOIN {SCHEMA}.exec_process_diagram d ON d.id = im.to_be_diagram_id
+                    JOIN {SCHEMA}.exec_process_node n ON n.id = d.process_node_id
+                    WHERE im.initiative_id = %s AND COALESCE(im.is_test_data, false) = false
+                      AND COALESCE(d.is_test_data, false) = false
+                """, (iid,))
+                improvement_links = rows(cur)
+                process_links = {"issues": issue_links, "improvements": improvement_links}
+            except Exception:
+                # Контур процессного управления может быть ещё не развёрнут в этой
+                # среде — обратная ссылка тогда просто не показывается.
+                process_links = {"issues": [], "improvements": []}
+
             return cors({"ok": True, "data": {
                 "initiative": item[0], "stakeholders": stakeholders,
                 "decisions": decisions, "assignments": assignments,
@@ -1243,6 +1274,7 @@ def handler(event: dict, context) -> dict:
                 "issue_stats": issue_stats, "risk_stats": risk_stats,
                 "labor": labor, "functions": functions, "action_stats": action_stats,
                 "decision_requests": decision_requests, "plan_project": plan_project,
+                "process_links": process_links,
                 "dictionaries": load_dictionaries(cur),
             }})
 
