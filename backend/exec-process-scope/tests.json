@@ -1,0 +1,82 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized refs",
+      "method": "GET",
+      "path": "/?action=refs",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized get_or_create",
+      "method": "GET",
+      "path": "/?action=get_or_create",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_scope blocked",
+      "method": "POST",
+      "path": "/?action=save_scope",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized save_unit_decision blocked",
+      "method": "POST",
+      "path": "/?action=save_unit_decision",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized upload_document blocked",
+      "method": "POST",
+      "path": "/?action=upload_document",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized document_download blocked",
+      "method": "GET",
+      "path": "/?action=document_download&id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized completeness blocked",
+      "method": "GET",
+      "path": "/?action=completeness&scope_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized confirm_stage blocked",
+      "method": "POST",
+      "path": "/?action=confirm_stage",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unknown action without auth still 401 first",
+      "method": "GET",
+      "path": "/?action=totally_unknown_action",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -75,6 +75,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: "chief.center", label: "Центр цифровизации ВК", icon: "Building2", href: "/cabinet/exec/center", active: true },
       { id: "chief.model", label: "Модель Центра", icon: "Network", href: "/cabinet/exec/model", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.orgModel", label: "Организационная модель", icon: "FolderTree", href: "/cabinet/exec/org-model", active: true, badge: { text: "Новое", tone: "info" } },
+      { id: "chief.processScopeWizard", label: "Процессная модель Блока ВК", icon: "GraduationCap", href: "/cabinet/exec/process-model/block-vk", active: true, badge: { text: "Пилот", tone: "info" } },
       { id: "chief.goals", label: "Цели и показатели", icon: "Target", href: "/cabinet/exec/goals", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.documentsHub", label: "Управленческие документы", icon: "FileStack", href: "/cabinet/exec/documents-hub", active: true, badge: { text: "Новое", tone: "info" } },
       { id: "chief.centerCase", label: "Обоснование создания", icon: "FileText", href: "/cabinet/exec/center-case", active: true, badge: { text: "Новое", tone: "info" } },
