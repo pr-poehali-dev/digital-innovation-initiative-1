@@ -1,0 +1,82 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized refs",
+      "method": "GET",
+      "path": "/?action=refs",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized overview",
+      "method": "GET",
+      "path": "/?action=overview",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized functions",
+      "method": "GET",
+      "path": "/?action=functions",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized function_save blocked",
+      "method": "POST",
+      "path": "/?action=function_save",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized process_tree",
+      "method": "GET",
+      "path": "/?action=process_tree",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized process_node_save blocked",
+      "method": "POST",
+      "path": "/?action=process_node_save",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized process_detail",
+      "method": "GET",
+      "path": "/?action=process_detail&id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized passport_save blocked",
+      "method": "POST",
+      "path": "/?action=passport_save",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unknown action without auth still 401 first",
+      "method": "GET",
+      "path": "/?action=totally_unknown_action",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

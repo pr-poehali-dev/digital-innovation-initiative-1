@@ -65,6 +65,7 @@ import ExecGoalsPage from "./pages/cabinet/exec/ExecGoalsPage";
 import ExecDocumentsHubPage from "./pages/cabinet/exec/ExecDocumentsHubPage";
 import ExecCenterWizardPage from "./pages/cabinet/exec/ExecCenterWizardPage";
 import ExecProcessScopeWizardPage from "./pages/cabinet/exec/ExecProcessScopeWizardPage";
+import ExecProcessModelPage from "./pages/cabinet/exec/ExecProcessModelPage";
 import ExecCenterCasePage from "./pages/cabinet/exec/ExecCenterCasePage";
 import ExecCenterDeckPage from "./pages/cabinet/exec/ExecCenterDeckPage";
 import ExecCenterDeckPresentPage from "./pages/cabinet/exec/ExecCenterDeckPresentPage";
@@ -224,6 +225,7 @@ const App = () => (
               <Route path="/cabinet/exec/model" element={<ExecRoute><ExecCenterModelPage /></ExecRoute>} />
               <Route path="/cabinet/exec/model/wizard" element={<ExecRoute><ExecCenterWizardPage /></ExecRoute>} />
               <Route path="/cabinet/exec/org-model" element={<ExecRoute><ExecOrgModelPage /></ExecRoute>} />
+              <Route path="/cabinet/exec/process-model" element={<ExecRoute><ExecProcessModelPage /></ExecRoute>} />
               <Route path="/cabinet/exec/process-model/block-vk" element={<ExecRoute><ExecProcessScopeWizardPage /></ExecRoute>} />
               <Route path="/cabinet/exec/goals" element={<ExecRoute><ExecGoalsPage /></ExecRoute>} />
               <Route path="/cabinet/exec/documents-hub" element={<ExecRoute><ExecDocumentsHubPage /></ExecRoute>} />

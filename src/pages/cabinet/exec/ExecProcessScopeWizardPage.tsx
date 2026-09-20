@@ -116,10 +116,10 @@ export default function ExecProcessScopeWizardPage() {
             </p>
           </div>
           <button
-            onClick={() => nav("/cabinet/exec/org-model")}
+            onClick={() => nav("/cabinet/exec/process-model")}
             className="text-sm text-slate-500 hover:text-slate-900 transition-colors"
           >
-            Выйти из мастера
+            К обзору «Процессное управление»
           </button>
         </div>
 
@@ -164,10 +164,15 @@ export default function ExecProcessScopeWizardPage() {
             ))}
 
             <div className="pt-3 mt-3 border-t border-slate-100">
-              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2.5 opacity-60">
-                <p className="text-xs text-slate-400 font-medium">Функции подразделений</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Запланировано, пока недоступно</p>
-              </div>
+              <button
+                onClick={() => nav("/cabinet/exec/process-model?tab=wizard&stage=functions")}
+                className="w-full text-left rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2.5 hover:bg-violet-50 transition-colors"
+              >
+                <p className="text-xs text-violet-700 font-medium flex items-center gap-1.5">
+                  Функции подразделений <Icon name="ArrowRight" size={11} />
+                </p>
+                <p className="text-[10px] text-violet-500 mt-0.5">Следующий этап общего маршрута</p>
+              </button>
             </div>
           </div>
 

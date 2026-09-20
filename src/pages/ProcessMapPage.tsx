@@ -220,6 +220,22 @@ export default function ProcessMapPage() {
           </div>
         </div>
 
+        <div className="border-2 border-violet-300 bg-violet-50 rounded-xl px-4 py-3.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-start gap-2.5">
+            <Icon name="Network" size={17} className="text-violet-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-violet-900 leading-relaxed">
+              <p className="font-semibold">Эта страница — архивный черновик</p>
+              <p className="text-xs text-violet-700">
+                Официальная процессная модель Блока ВК теперь строится в разделе «Процессное управление» с пошаговым помощником.
+              </p>
+            </div>
+          </div>
+          <a href="/cabinet/exec/process-model"
+            className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 transition-colors flex-shrink-0">
+            Открыть «Процессное управление»
+          </a>
+        </div>
+
         <div className="border-2 border-amber-300 bg-amber-50 rounded-xl px-4 py-3.5">
           <div className="flex items-start gap-2.5">
             <Icon name="TriangleAlert" size={17} className="text-amber-600 flex-shrink-0 mt-0.5" />
