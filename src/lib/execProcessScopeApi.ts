@@ -49,7 +49,15 @@ export interface ScopeUnit {
   scope_id: number;
   org_unit_id: number;
   decision: "included" | "excluded";
+  /** true — подразделение добавлено ПОЛЬЗОВАТЕЛЕМ через форму «Добавить
+   * подразделение» уже после создания паспорта. Все подразделения, подставленные
+   * системой при первом открытии мастера (включая функциональные, структурно
+   * не дочерние), сюда НЕ относятся — см. is_structural_child. */
   is_manually_added: boolean;
+  /** false — подразделение относится к Блоку ВК функционально, но не является
+   * дочерним оргюнитом в оргструктуре (например ДФМ). Это объективный факт
+   * структуры, а не признак ручного добавления пользователем. */
+  is_structural_child: boolean;
   exclusion_reason: string | null;
   confirmation_status: "pending" | "confirmed";
   comment: string | null;
@@ -88,6 +96,7 @@ export interface ScopeDocument {
   state: string;
   confidentiality_level: string;
   is_current_version: boolean;
+  is_test_data: boolean;
   confirmed_actual_by: string | null;
   confirmed_actual_at: string | null;
   comment: string | null;

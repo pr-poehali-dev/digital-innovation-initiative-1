@@ -98,6 +98,14 @@ function UnitRow({
                 добавлено вручную
               </span>
             )}
+            {!unit.is_manually_added && !unit.is_structural_child && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200"
+                title="Подставлено системой вместе с остальными подразделениями. Не является дочерним оргюнитом Блока ВК в оргструктуре — включено по функциональному признаку."
+              >
+                не дочернее в оргструктуре
+              </span>
+            )}
             {isPending ? (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
                 ожидает решения

@@ -30,15 +30,19 @@ _s = os.environ.get("MAIN_DB_SCHEMA", "").strip()
 SCHEMA = _s if _s else "t_p61016064_digital_innovation_i"
 
 BLOCK_VK_ORG_UNIT_ID_DEFAULT = 23
-# Подразделения, которые предлагаются мастером по умолчанию при первом
-# открытии (Этап "перенос портфеля" уже подтвердил их состав). ДФМ не
-# является структурным потомком org_unit 23 в org_units, поэтому помечен
-# как добавленный вручную — пользователь всё равно должен нажать «Подтвердить».
+# Подразделения, которые ВСЕ ОДИНАКОВО подставляются системой при первом
+# открытии мастера (этап "перенос портфеля" уже подтвердил их состав) —
+# ни одно из них не считается "добавленным вручную пользователем"
+# (is_manually_added=False для всех четырёх). ДФМ отличается только тем,
+# что структурно не является дочерним оргюнитом Блока ВК в org_units
+# (is_structural_child=False) — это объективный факт оргструктуры, а не
+# признак ручного добавления. Пользователь по-прежнему должен подтвердить
+# каждое подразделение отдельно на шаге 2.
 DEFAULT_SEED_UNITS = [
-    {"org_unit_id": 25, "is_manually_added": False},   # СВА — дочерний
-    {"org_unit_id": 26, "is_manually_added": False},   # ДВКиК — дочерний
-    {"org_unit_id": 24, "is_manually_added": False},   # ДРКНОиПНП — дочерний
-    {"org_unit_id": 1, "is_manually_added": True,
+    {"org_unit_id": 25, "is_structural_child": True},   # СВА — дочерний
+    {"org_unit_id": 26, "is_structural_child": True},   # ДВКиК — дочерний
+    {"org_unit_id": 24, "is_structural_child": True},   # ДРКНОиПНП — дочерний
+    {"org_unit_id": 1, "is_structural_child": False,
      "comment": "Функционально относится к контуру Блока ВК по портфелю инициатив, "
                 "структурно не является дочерним подразделением в оргструктуре."},
 ]
@@ -65,6 +69,9 @@ DOC_STATES = {
 # Доступ к скачиванию по уровню конфиденциальности — минимальная роль кабинета.
 ROLE_RANK = {"viewer": 0, "contributor": 1, "curator": 2, "head": 3}
 CONF_MIN_ROLE = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
+# Та же шкала используется для запрета САМОВОЛЬНОГО понижения уровня —
+# понизить (уменьшить строгость) может только пользователь с can_confirm.
+CONF_RANK = {"public": 0, "internal": 1, "confidential": 2, "restricted": 3}
 
 ALLOWED_EXT = {"pdf", "docx", "doc", "rtf", "txt"}
 MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -224,9 +231,9 @@ def get_or_create_scope(cur, block_org_unit_id: int, actor: str):
             continue
         cur.execute(
             f"INSERT INTO {SCHEMA}.exec_process_model_scope_unit "
-            f"(scope_id, org_unit_id, decision, is_manually_added, comment, updated_by) "
-            f"VALUES (%s,%s,'included',%s,%s,%s)",
-            (scope_id, seed["org_unit_id"], seed["is_manually_added"],
+            f"(scope_id, org_unit_id, decision, is_manually_added, is_structural_child, comment, updated_by) "
+            f"VALUES (%s,%s,'included',false,%s,%s,%s)",
+            (scope_id, seed["org_unit_id"], seed["is_structural_child"],
              seed.get("comment"), actor),
         )
 
@@ -240,29 +247,34 @@ def get_or_create_scope(cur, block_org_unit_id: int, actor: str):
 def scope_units(cur, scope_id: int):
     cur.execute(f"""
         SELECT su.id, su.scope_id, su.org_unit_id, su.decision, su.is_manually_added,
+               su.is_structural_child,
                su.exclusion_reason, su.confirmation_status, su.comment,
                su.updated_by, su.updated_at,
                u.code, u.name, u.short_name, u.type, u.parent_id
         FROM {SCHEMA}.exec_process_model_scope_unit su
         JOIN {SCHEMA}.org_units u ON u.id = su.org_unit_id
         WHERE su.scope_id = %s
-        ORDER BY su.is_manually_added, u.code
+        ORDER BY su.is_structural_child DESC, u.code
     """, (scope_id,))
     return rows(cur)
 
 
-def scope_documents(cur, scope_id: int):
+def scope_documents(cur, scope_id: int, include_test_data: bool = False):
+    """По умолчанию технические/тестовые записи (is_test_data=true) скрыты —
+    они не должны выглядеть как реальные нормативные документы. Показать их
+    можно только явным include_test_data=true (например для администратора)."""
+    cond = "" if include_test_data else "AND d.is_test_data = false"
     cur.execute(f"""
         SELECT d.id, d.scope_id, d.org_unit_id, d.source_type, d.title, d.doc_number,
                d.doc_date, d.issuer, d.valid_from, d.valid_to, d.version_label,
-               d.state, d.confidentiality_level, d.is_current_version,
+               d.state, d.confidentiality_level, d.is_current_version, d.is_test_data,
                d.confirmed_actual_by, d.confirmed_actual_at, d.comment,
                d.original_filename, d.mime_type, d.file_size, d.s3_key IS NOT NULL AS has_file,
-               d.uploaded_by, d.fixed_at,
-               u.code AS org_unit_code, u.name AS org_unit_name
+               d.uploaded_by, d.fixed_at
+               , u.code AS org_unit_code, u.name AS org_unit_name
         FROM {SCHEMA}.exec_source_document d
         LEFT JOIN {SCHEMA}.org_units u ON u.id = d.org_unit_id
-        WHERE d.scope_id = %s
+        WHERE d.scope_id = %s {cond}
         ORDER BY d.fixed_at DESC
     """, (scope_id,))
     return rows(cur)
@@ -282,12 +294,12 @@ def scope_candidates(cur, block_org_unit_id: int, scope_id: int):
     return rows(cur)
 
 
-def full_scope_payload(cur, scope: dict):
+def full_scope_payload(cur, scope: dict, include_test_data: bool = False):
     scope_id = scope["id"]
     return {
         "scope": scope,
         "units": scope_units(cur, scope_id),
-        "documents": scope_documents(cur, scope_id),
+        "documents": scope_documents(cur, scope_id, include_test_data=include_test_data),
         "candidates": scope_candidates(cur, scope["block_org_unit_id"], scope_id),
     }
 
@@ -436,6 +448,8 @@ def add_manual_unit(cur, body: dict, actor: str):
     org_unit_id = as_int(body.get("org_unit_id"))
     if not scope_id or not org_unit_id:
         return None, "Не указаны паспорт модели или подразделение"
+    if _scope_confirmed(cur, scope_id):
+        return None, "Этап уже подтверждён — для изменений сначала снимите подтверждение"
     cur.execute(
         f"SELECT id FROM {SCHEMA}.org_units WHERE id = %s AND is_archived = false", (org_unit_id,),
     )
@@ -465,6 +479,8 @@ def remove_manual_unit(cur, body: dict, actor: str):
     org_unit_id = as_int(body.get("org_unit_id"))
     if not scope_id or not org_unit_id:
         return None, "Не указаны паспорт модели или подразделение"
+    if _scope_confirmed(cur, scope_id):
+        return None, "Этап уже подтверждён — для изменений сначала снимите подтверждение"
     cur.execute(
         f"SELECT id, is_manually_added FROM {SCHEMA}.exec_process_model_scope_unit "
         f"WHERE scope_id = %s AND org_unit_id = %s",
@@ -577,7 +593,15 @@ def upload_document(cur, body: dict, actor: str):
     return {"id": doc_id, "size": len(data)}, None
 
 
-def save_document_meta(cur, body: dict, actor: str):
+def _scope_confirmed(cur, scope_id) -> bool:
+    if not scope_id:
+        return False
+    cur.execute(f"SELECT model_status FROM {SCHEMA}.exec_process_model_scope WHERE id = %s", (scope_id,))
+    r = cur.fetchone()
+    return bool(r and r[0] == "confirmed")
+
+
+def save_document_meta(cur, body: dict, actor: str, can_confirm_role: bool):
     doc_id = as_int(body.get("id"))
     if not doc_id:
         return None, "Не указан документ"
@@ -585,13 +609,35 @@ def save_document_meta(cur, body: dict, actor: str):
     before = rows(cur)
     if not before:
         return None, "Документ не найден"
+    if _scope_confirmed(cur, before[0].get("scope_id")):
+        return None, "Этап уже подтверждён — для изменений сначала снимите подтверждение"
 
     vals = _clean_doc_meta(body)
     if not vals:
         return doc_id, None
+
+    # Понижение уровня конфиденциальности (менее строгий уровень, чем был) —
+    # чувствительное действие, доступное только пользователю с can_confirm.
+    # Повышение строгости разрешено всем, кто может редактировать документ.
+    lower_confidentiality = False
+    if "confidentiality_level" in vals:
+        old_level = before[0].get("confidentiality_level") or "internal"
+        new_level = vals["confidentiality_level"]
+        if CONF_RANK.get(new_level, 1) < CONF_RANK.get(old_level, 1):
+            if not can_confirm_role:
+                return None, ("Понижать уровень конфиденциальности может только уполномоченный "
+                              "пользователь (с правом подтверждения)")
+            lower_confidentiality = True
+
     sets = ", ".join(f"{k} = %s" for k in vals)
+    extra_sql = ""
+    params = list(vals.values())
+    if lower_confidentiality:
+        extra_sql = ", confidentiality_lowered_by = %s, confidentiality_lowered_at = now()"
+        params.append(actor)
     cur.execute(
-        f"UPDATE {SCHEMA}.exec_source_document SET {sets} WHERE id = %s", list(vals.values()) + [doc_id],
+        f"UPDATE {SCHEMA}.exec_source_document SET {sets}{extra_sql} WHERE id = %s",
+        params + [doc_id],
     )
     log_change(cur, actor, "source_document", doc_id, "update_meta", before=before[0], after=vals)
     return doc_id, None
@@ -602,6 +648,12 @@ def mark_current_version(cur, body: dict, actor: str):
     flag = as_bool(body.get("is_current_version"), True)
     if not doc_id:
         return None, "Не указан документ"
+    cur.execute(f"SELECT scope_id FROM {SCHEMA}.exec_source_document WHERE id = %s", (doc_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Документ не найден"
+    if _scope_confirmed(cur, r[0]):
+        return None, "Этап уже подтверждён — для изменений сначала снимите подтверждение"
     if flag:
         try:
             cur.execute(
@@ -625,6 +677,12 @@ def confirm_document_actual(cur, body: dict, actor: str):
     doc_id = as_int(body.get("id"))
     if not doc_id:
         return None, "Не указан документ"
+    cur.execute(f"SELECT scope_id FROM {SCHEMA}.exec_source_document WHERE id = %s", (doc_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Документ не найден"
+    if _scope_confirmed(cur, r[0]):
+        return None, "Этап уже подтверждён — для изменений сначала снимите подтверждение"
     cur.execute(
         f"UPDATE {SCHEMA}.exec_source_document SET "
         f"confirmed_actual_by = %s, confirmed_actual_at = now() WHERE id = %s",
@@ -640,6 +698,12 @@ def archive_document(cur, body: dict, actor: str):
     doc_id = as_int(body.get("id"))
     if not doc_id:
         return None, "Не указан документ"
+    cur.execute(f"SELECT scope_id FROM {SCHEMA}.exec_source_document WHERE id = %s", (doc_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Документ не найден"
+    if _scope_confirmed(cur, r[0]):
+        return None, "Этап уже подтверждён — для изменений сначала снимите подтверждение"
     cur.execute(
         f"UPDATE {SCHEMA}.exec_source_document SET state = 'repealed', "
         f"is_current_version = false, comment = COALESCE(%s, comment) WHERE id = %s",
@@ -865,7 +929,10 @@ def handler(event: dict, context) -> dict:
             if scope is None:
                 return cors({"ok": False, "error": {"message": "Подразделение Блока ВК не найдено"}}, 404)
             conn.commit()
-            return cors({"ok": True, "data": full_scope_payload(cur, scope)})
+            # Технические/тестовые документы скрыты из рабочего списка по
+            # умолчанию — показать их можно только явным флагом (для админ-проверки).
+            include_test = as_bool(qs.get("include_test_data") or body.get("include_test_data"))
+            return cors({"ok": True, "data": full_scope_payload(cur, scope, include_test_data=include_test)})
 
         if action == "save_scope":
             sid, err = save_scope(cur, body, actor)
@@ -925,9 +992,9 @@ def handler(event: dict, context) -> dict:
             return cors({"ok": True, "data": res})
 
         if action == "save_document_meta":
-            did, err = save_document_meta(cur, body, actor)
+            did, err = save_document_meta(cur, body, actor, can_confirm)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return cors({"ok": False, "error": {"message": err}}, 403 if "уполномоченный" in err else 400)
             conn.commit()
             return cors({"ok": True, "data": {"id": did}})
 
