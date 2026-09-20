@@ -807,6 +807,488 @@ def resolve_clarification(cur, body: dict, actor: str):
     return note_id, None
 
 
+# ── Схемы процессов (AS-IS / TO-BE) ─────────────────────────────────────────
+# Структурированная модель: типизированные узлы, рёбра, дорожки с координатами
+# и размерами — НЕ произвольный SVG/PNG/JSON-«картинка». Каждый узел хранит
+# свой тип и ссылки на процессные сущности (роль, человека, документ, систему,
+# риск). Детерминированные проверки (validate_diagram) не используют ИИ.
+
+NODE_TYPES = {
+    "start": "Начальное событие",
+    "end": "Конечное событие",
+    "task": "Операция",
+    "gateway": "Решение",
+    "sub" + "process": "Подпроцесс",
+    "document": "Документ",
+    "system": "Информационная система",
+    "control": "Контрольная процедура",
+    "note": "Примечание",
+}
+LANE_TYPES = {"org_unit": "Подразделение", "role": "Роль", "placeholder": "Требует уточнения"}
+
+
+def get_or_create_diagram(cur, process_node_id: int, variant: str, actor: str):
+    cur.execute(
+        f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s AND variant = %s",
+        (process_node_id, variant),
+    )
+    existing = rows(cur)
+    if existing:
+        return existing[0], False
+
+    cur.execute(f"SELECT name FROM {SCHEMA}.exec_process_node WHERE id = %s", (process_node_id,))
+    node_row = cur.fetchone()
+    if not node_row:
+        return None, None
+    title = f"{'AS-IS' if variant == 'as_is' else 'TO-BE'}: {node_row[0]}"
+
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_diagram (process_node_id, variant, title, updated_by) "
+        f"VALUES (%s,%s,%s,%s) RETURNING *",
+        (process_node_id, variant, title, actor),
+    )
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_diagram", new_id, "create", after={"process_node_id": process_node_id, "variant": variant})
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (new_id,))
+    return rows(cur)[0], True
+
+
+def get_diagram_full(cur, diagram_id: int):
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (diagram_id,))
+    d = rows(cur)
+    if not d:
+        return None
+    diagram = d[0]
+
+    cur.execute(f"""
+        SELECT l.*, u.name AS org_unit_name
+        FROM {SCHEMA}.exec_process_diagram_lane l
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
+        WHERE l.diagram_id = %s ORDER BY l.sort_order, l.id
+    """, (diagram_id,))
+    lanes = rows(cur)
+
+    cur.execute(f"""
+        SELECT n.*, p.display_name AS ref_person_name, u.name AS ref_org_unit_name,
+               s.name AS ref_system_name, doc.title AS ref_document_title,
+               r.title AS ref_risk_title
+        FROM {SCHEMA}.exec_process_diagram_node n
+        LEFT JOIN {SCHEMA}.exec_person p ON p.id = n.ref_person_id
+        LEFT JOIN {SCHEMA}.org_units u ON u.id = n.ref_org_unit_id
+        LEFT JOIN {SCHEMA}.exec_info_system s ON s.id = n.ref_system_id
+        LEFT JOIN {SCHEMA}.exec_source_document doc ON doc.id = n.ref_document_id
+        LEFT JOIN {SCHEMA}.exec_process_risk r ON r.id = n.ref_risk_id
+        WHERE n.diagram_id = %s ORDER BY n.id
+    """, (diagram_id,))
+    nodes = rows(cur)
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE diagram_id = %s ORDER BY id", (diagram_id,))
+    edges = rows(cur)
+
+    node_id_process = None
+    cur.execute(f"SELECT process_node_id FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (diagram_id,))
+    r = cur.fetchone()
+    if r:
+        node_id_process = r[0]
+
+    return {"diagram": diagram, "lanes": lanes, "nodes": nodes, "edges": edges, "process_node_id": node_id_process}
+
+
+def _diagram_editable(cur, diagram_id: int) -> bool:
+    cur.execute(f"SELECT model_status FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (diagram_id,))
+    r = cur.fetchone()
+    return bool(r) and r[0] not in ("confirmed", "published")
+
+
+def save_lane(cur, body: dict, actor: str):
+    diagram_id = as_int(body.get("diagram_id"))
+    lane_id = as_int(body.get("id"))
+    if not diagram_id and not lane_id:
+        return None, "Не указана диаграмма"
+    if lane_id:
+        cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
+        r = cur.fetchone()
+        if not r:
+            return None, "Дорожка не найдена"
+        diagram_id = r[0]
+    if not _diagram_editable(cur, diagram_id):
+        return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+
+    lane_type = body.get("lane_type") or "org_unit"
+    if lane_type not in LANE_TYPES:
+        return None, "Некорректный тип дорожки"
+    title = nz(body.get("title"))
+    if not title:
+        return None, "Укажите название дорожки"
+
+    vals = {
+        "title": title,
+        "lane_type": lane_type,
+        "org_unit_id": as_int(body.get("org_unit_id")) if lane_type == "org_unit" else None,
+        "role_title": nz(body.get("role_title")) if lane_type == "role" else None,
+        "placeholder_label": nz(body.get("placeholder_label")) if lane_type == "placeholder" else None,
+        "needs_clarification": as_bool(body.get("needs_clarification")),
+        "sort_order": as_int(body.get("sort_order")) or 0,
+    }
+    if lane_id:
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_lane SET {sets} WHERE id = %s",
+                    list(vals.values()) + [lane_id])
+        log_change(cur, actor, "process_diagram_lane", lane_id, "update", after=vals)
+        return lane_id, None
+    vals["diagram_id"] = diagram_id
+    cols = ", ".join(vals)
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_lane ({cols}) VALUES ({ph}) RETURNING id",
+                list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_diagram_lane", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_lane(cur, body: dict, actor: str):
+    lane_id = as_int(body.get("id"))
+    if not lane_id:
+        return None, "Не указана дорожка"
+    cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Дорожка не найдена"
+    if not _diagram_editable(cur, r[0]):
+        return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+    cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_node SET lane_id = NULL WHERE lane_id = %s", (lane_id,))
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
+    log_change(cur, actor, "process_diagram_lane", lane_id, "delete")
+    return lane_id, None
+
+
+NODE_FIELDS = [
+    "lane_id", "node_type", "label", "pos_x", "pos_y", "width", "height",
+    "description", "input_note", "output_note", "duration_note", "is_critical",
+    "confirmation_status", "gateway_outcomes", "ref_role_title", "ref_person_id",
+    "ref_org_unit_id", "ref_document_id", "ref_system_id", "ref_risk_id",
+    "system_note", "document_note", "note",
+]
+NODE_INT_FIELDS = {"lane_id", "ref_person_id", "ref_org_unit_id", "ref_document_id", "ref_system_id", "ref_risk_id"}
+NODE_NUM_FIELDS = {"pos_x", "pos_y", "width", "height"}
+NODE_BOOL_FIELDS = {"is_critical"}
+
+
+def save_diagram_node(cur, body: dict, actor: str):
+    diagram_id = as_int(body.get("diagram_id"))
+    node_id = as_int(body.get("id"))
+    if not diagram_id and not node_id:
+        return None, "Не указана диаграмма"
+    if node_id:
+        cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
+        r = cur.fetchone()
+        if not r:
+            return None, "Элемент не найден"
+        diagram_id = r[0]
+    if not _diagram_editable(cur, diagram_id):
+        return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+
+    vals = {}
+    for f in NODE_FIELDS:
+        if f not in body:
+            continue
+        v = body.get(f)
+        if f in NODE_INT_FIELDS:
+            vals[f] = as_int(v)
+        elif f in NODE_NUM_FIELDS:
+            try:
+                vals[f] = float(v) if v is not None else None
+            except (TypeError, ValueError):
+                vals[f] = None
+        elif f in NODE_BOOL_FIELDS:
+            vals[f] = as_bool(v)
+        else:
+            vals[f] = nz(v)
+
+    if node_id:
+        if not vals:
+            return node_id, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_diagram_node SET {sets}, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [node_id],
+        )
+        return node_id, None
+
+    node_type = vals.get("node_type")
+    if node_type not in NODE_TYPES:
+        return None, "Некорректный тип элемента"
+    vals["diagram_id"] = diagram_id
+    vals.setdefault("pos_x", 40)
+    vals.setdefault("pos_y", 40)
+    cols = ", ".join(vals)
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_node ({cols}) VALUES ({ph}) RETURNING id",
+                list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_diagram_node", new_id, "create", after=vals)
+    return new_id, None
+
+
+def delete_diagram_node(cur, body: dict, actor: str):
+    node_id = as_int(body.get("id"))
+    if not node_id:
+        return None, "Не указан элемент"
+    cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Элемент не найден"
+    if not _diagram_editable(cur, r[0]):
+        return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+    cur.execute(
+        f"DELETE FROM {SCHEMA}.exec_process_diagram_edge WHERE source_node_id = %s OR target_node_id = %s",
+        (node_id, node_id),
+    )
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
+    log_change(cur, actor, "process_diagram_node", node_id, "delete")
+    return node_id, None
+
+
+def save_diagram_edge(cur, body: dict, actor: str):
+    diagram_id = as_int(body.get("diagram_id"))
+    source_id = as_int(body.get("source_node_id"))
+    target_id = as_int(body.get("target_node_id"))
+    if not diagram_id or not source_id or not target_id:
+        return None, "Не указаны параметры связи"
+    if not _diagram_editable(cur, diagram_id):
+        return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+    if source_id == target_id:
+        return None, "Нельзя соединить элемент сам с собой"
+    cur.execute(
+        f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_diagram_node WHERE id IN (%s,%s) AND diagram_id = %s",
+        (source_id, target_id, diagram_id),
+    )
+    if cur.fetchone()[0] != 2:
+        return None, "Элемент связи не принадлежит этой схеме"
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_diagram_edge (diagram_id, source_node_id, target_node_id, label, edge_type) "
+        f"VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        (diagram_id, source_id, target_id, nz(body.get("label")), body.get("edge_type") or "flow"),
+    )
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_diagram_edge", new_id, "create",
+               after={"source": source_id, "target": target_id})
+    return new_id, None
+
+
+def delete_diagram_edge(cur, body: dict, actor: str):
+    edge_id = as_int(body.get("id"))
+    if not edge_id:
+        return None, "Не указана связь"
+    cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_edge WHERE id = %s", (edge_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Связь не найдена"
+    if not _diagram_editable(cur, r[0]):
+        return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+    cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_edge WHERE id = %s", (edge_id,))
+    log_change(cur, actor, "process_diagram_edge", edge_id, "delete")
+    return edge_id, None
+
+
+def save_diagram_canvas(cur, body: dict, actor: str):
+    diagram_id = as_int(body.get("diagram_id"))
+    if not diagram_id:
+        return None, "Не указана диаграмма"
+    vals = {}
+    for f in ("canvas_scale", "canvas_x", "canvas_y"):
+        if f in body:
+            try:
+                vals[f] = float(body[f])
+            except (TypeError, ValueError):
+                pass
+    if not vals:
+        return diagram_id, None
+    sets = ", ".join(f"{k} = %s" for k in vals)
+    cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram SET {sets}, updated_at = now() WHERE id = %s",
+                list(vals.values()) + [diagram_id])
+    return diagram_id, None
+
+
+def autosave_draft(cur, body: dict, actor: str):
+    diagram_id = as_int(body.get("diagram_id"))
+    snapshot = body.get("snapshot")
+    if not diagram_id or snapshot is None:
+        return None, "Не указаны данные для автосохранения"
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_diagram_draft_snapshot (diagram_id, actor, snapshot_json) "
+        f"VALUES (%s,%s,%s) RETURNING id",
+        (diagram_id, actor, json.dumps(snapshot, ensure_ascii=False)),
+    )
+    new_id = cur.fetchone()[0]
+    cur.execute(
+        f"DELETE FROM {SCHEMA}.exec_process_diagram_draft_snapshot "
+        f"WHERE diagram_id = %s AND id <> %s AND created_at < now() - interval '1 hour'",
+        (diagram_id, new_id),
+    )
+    return new_id, None
+
+
+def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
+    diagram_id = as_int(body.get("id"))
+    new_status = body.get("status")
+    if not diagram_id or new_status not in MODEL_STATUSES:
+        return None, "Некорректные параметры"
+    if new_status in ("confirmed", "published") and not can_confirm_role:
+        return None, "Недостаточно прав для подтверждения/публикации"
+    if new_status == "confirmed":
+        check = validate_diagram(cur, diagram_id)
+        if check["errors"]:
+            return None, "Нельзя подтвердить схему с ошибками — исправьте их на вкладке «Проверить схему»"
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (diagram_id,))
+    before = rows(cur)
+    if not before:
+        return None, "Схема не найдена"
+
+    extra = ""
+    params = [new_status]
+    if new_status == "published":
+        extra = ", published_at = now(), published_by = %s, version = version + 1"
+        params.append(actor)
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_diagram SET model_status = %s{extra}, updated_by = %s, updated_at = now() WHERE id = %s",
+        params + [actor, diagram_id],
+    )
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_version_history (entity_type, entity_id, version, status, author, comment) "
+        f"VALUES ('diagram', %s, %s, %s, %s, %s)",
+        (diagram_id, before[0]["version"], new_status, actor, nz(body.get("comment"))),
+    )
+    log_change(cur, actor, "process_diagram", diagram_id, f"status_{new_status}", before=before[0])
+    return diagram_id, None
+
+
+def validate_diagram(cur, diagram_id: int):
+    """Детерминированная проверка схемы — без ИИ. Возвращает списки errors/warnings,
+    каждый пункт с кодом, текстом и списком id затронутых элементов."""
+    full = get_diagram_full(cur, diagram_id)
+    errors, warnings = [], []
+    if not full:
+        return {"errors": errors, "warnings": warnings}
+
+    nodes = full["nodes"]
+    edges = full["edges"]
+    node_by_id = {n["id"]: n for n in nodes}
+
+    starts = [n for n in nodes if n["node_type"] == "start"]
+    ends = [n for n in nodes if n["node_type"] == "end"]
+    if not starts:
+        errors.append({"code": "no_start", "message": "На схеме отсутствует начальное событие", "node_ids": []})
+    if not ends:
+        errors.append({"code": "no_end", "message": "На схеме отсутствует конечное событие", "node_ids": []})
+
+    incoming = {n["id"]: 0 for n in nodes}
+    outgoing = {n["id"]: 0 for n in nodes}
+    for e in edges:
+        if e["source_node_id"] in outgoing:
+            outgoing[e["source_node_id"]] += 1
+        if e["target_node_id"] in incoming:
+            incoming[e["target_node_id"]] += 1
+        if e["source_node_id"] == e["target_node_id"]:
+            errors.append({"code": "self_loop", "message": "Связь элемента с самим собой",
+                            "node_ids": [e["source_node_id"]]})
+
+    for n in nodes:
+        nt = n["node_type"]
+        has_in = incoming.get(n["id"], 0) > 0
+        has_out = outgoing.get(n["id"], 0) > 0
+        if nt == "start" and not has_out:
+            errors.append({"code": "disconnected", "message": f'«{n["label"] or "Начало"}» не связано со схемой',
+                            "node_ids": [n["id"]]})
+        elif nt == "end" and not has_in:
+            errors.append({"code": "disconnected", "message": f'«{n["label"] or "Завершение"}» не связано со схемой',
+                            "node_ids": [n["id"]]})
+        elif nt not in ("start", "end", "note") and not has_in and not has_out:
+            errors.append({"code": "disconnected", "message": f'Элемент «{n["label"] or NODE_TYPES.get(nt, nt)}» не связан со схемой',
+                            "node_ids": [n["id"]]})
+        elif nt in ("task", "gateway", "sub" + "process", "control") and (not has_in or not has_out):
+            errors.append({"code": "broken_flow", "message": f'Разорванный поток у элемента «{n["label"] or NODE_TYPES.get(nt, nt)}»',
+                            "node_ids": [n["id"]]})
+
+        if nt == "task" and n.get("lane_id") is None:
+            errors.append({"code": "task_outside_lane", "message": f'Операция «{n["label"] or "без названия"}» находится вне дорожки',
+                            "node_ids": [n["id"]]})
+
+    for e in edges:
+        if e["source_node_id"] not in node_by_id or e["target_node_id"] not in node_by_id:
+            errors.append({"code": "dangling_ref", "message": "Связь ссылается на отсутствующий элемент", "node_ids": []})
+
+    for n in nodes:
+        nt = n["node_type"]
+        if nt == "task":
+            if not n.get("ref_person_id") and not n.get("ref_role_title") and not (n.get("lane_id") and node_lane_resolved(full, n["lane_id"])):
+                warnings.append({"code": "task_no_executor", "message": f'Операция «{n["label"] or "без названия"}» без исполнителя',
+                                  "node_ids": [n["id"]]})
+            if not n.get("output_note"):
+                warnings.append({"code": "task_no_result", "message": f'Операция «{n["label"] or "без названия"}» без результата',
+                                  "node_ids": [n["id"]]})
+        if nt == "gateway" and outgoing.get(n["id"], 0) < 2 and not n.get("gateway_outcomes"):
+            warnings.append({"code": "gateway_unclear", "message": f'Решение «{n["label"] or "без названия"}» без понятных вариантов выхода',
+                              "node_ids": [n["id"]]})
+        if nt == "document" and not n.get("ref_document_id") and n.get("document_note"):
+            warnings.append({"code": "document_text_only", "message": f'Документ «{n.get("document_note")}» указан только текстом',
+                              "node_ids": [n["id"]]})
+        if nt == "system" and not n.get("ref_system_id") and n.get("system_note"):
+            warnings.append({"code": "system_text_only", "message": f'Система «{n.get("system_note")}» указана только текстом',
+                              "node_ids": [n["id"]]})
+        if n.get("confirmation_status") != "confirmed":
+            warnings.append({"code": "unconfirmed_element", "message": f'Элемент «{n["label"] or NODE_TYPES.get(nt, nt)}» не подтверждён',
+                              "node_ids": [n["id"]]})
+
+    for lane in full["lanes"]:
+        if lane.get("needs_clarification") or lane.get("lane_type") == "placeholder":
+            warnings.append({"code": "lane_unconfirmed", "message": f'Дорожка «{lane["title"]}» требует уточнения ответственного',
+                              "node_ids": []})
+
+    cur.execute(f"SELECT process_node_id FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (diagram_id,))
+    r = cur.fetchone()
+    if r:
+        cur.execute(
+            f"SELECT COUNT(*) FROM {SCHEMA}.exec_function_process_link WHERE process_node_id = %s", (r[0],),
+        )
+        if cur.fetchone()[0] == 0:
+            warnings.append({"code": "process_no_function", "message": "Процесс не связан ни с одной функцией", "node_ids": []})
+
+    return {"errors": errors, "warnings": warnings}
+
+
+def node_lane_resolved(full: dict, lane_id: int) -> bool:
+    lane = next((l for l in full["lanes"] if l["id"] == lane_id), None)
+    if not lane:
+        return False
+    return lane.get("lane_type") == "org_unit" and bool(lane.get("org_unit_id"))
+
+
+def export_diagram_data(cur, diagram_id: int):
+    """Данные для экспорта PNG/PDF на фронтенде — формируются из
+    структурированной схемы (узлы/рёбра/дорожки), не хранятся как картинка."""
+    full = get_diagram_full(cur, diagram_id)
+    if not full:
+        return None
+    cur.execute(f"""
+        SELECT n.name AS process_name, sc.title AS scope_title
+        FROM {SCHEMA}.exec_process_node n
+        JOIN {SCHEMA}.exec_process_model_scope sc ON sc.id = n.scope_id
+        WHERE n.id = %s
+    """, (full["process_node_id"],))
+    meta_rows = rows(cur)
+    meta = meta_rows[0] if meta_rows else {}
+    full["export_meta"] = {
+        "process_name": meta.get("process_name"),
+        "variant": full["diagram"]["variant"],
+        "version": full["diagram"]["version"],
+        "status": full["diagram"]["model_status"],
+        "generated_at": None,
+    }
+    return full
+
+
 # ── HTTP handler ─────────────────────────────────────────────────────────────
 
 def handler(event: dict, context) -> dict:
@@ -842,6 +1324,8 @@ def handler(event: dict, context) -> dict:
                 "statuses": MODEL_STATUSES,
                 "participation_kinds": PARTICIPATION_KINDS,
                 "confirmation_statuses": CONFIRMATION_STATUSES,
+                "node_types": NODE_TYPES,
+                "lane_types": LANE_TYPES,
                 "user_role": user.get("role"),
                 "can_confirm": can_confirm,
                 "can_edit": can_edit,
@@ -1030,6 +1514,126 @@ def handler(event: dict, context) -> dict:
                 WHERE record_state = 'active' ORDER BY display_name
             """)
             return cors({"ok": True, "data": {"items": rows(cur)}})
+
+        # ── Схемы процессов ──────────────────────────────────────────────────
+
+        if action == "diagram_get_or_create":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            node_id = as_int(qs.get("process_node_id") or body.get("process_node_id"))
+            variant = qs.get("variant") or body.get("variant") or "as_is"
+            if not node_id or variant not in ("as_is", "to_be"):
+                return cors({"ok": False, "error": {"message": "Не указан процесс или тип схемы"}}, 400)
+            diagram, created = get_or_create_diagram(cur, node_id, variant, actor)
+            if diagram is None:
+                return cors({"ok": False, "error": {"message": "Процесс не найден"}}, 404)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": diagram["id"], "created": created}})
+
+        if action == "diagram_full":
+            diagram_id = as_int(qs.get("id"))
+            if not diagram_id:
+                return cors({"ok": False, "error": {"message": "Не указана схема"}}, 400)
+            full = get_diagram_full(cur, diagram_id)
+            if not full:
+                return cors({"ok": False, "error": {"message": "Схема не найдена"}}, 404)
+            return cors({"ok": True, "data": full})
+
+        if action == "diagram_set_status":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            did, err = set_diagram_status(cur, body, actor, can_confirm)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 403 if "прав" in err else 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": did}})
+
+        if action == "diagram_save_canvas":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            did, err = save_diagram_canvas(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": did}})
+
+        if action == "diagram_validate":
+            diagram_id = as_int(qs.get("id") or body.get("id"))
+            if not diagram_id:
+                return cors({"ok": False, "error": {"message": "Не указана схема"}}, 400)
+            return cors({"ok": True, "data": validate_diagram(cur, diagram_id)})
+
+        if action == "diagram_export_data":
+            diagram_id = as_int(qs.get("id"))
+            if not diagram_id:
+                return cors({"ok": False, "error": {"message": "Не указана схема"}}, 400)
+            data = export_diagram_data(cur, diagram_id)
+            if not data:
+                return cors({"ok": False, "error": {"message": "Схема не найдена"}}, 404)
+            return cors({"ok": True, "data": data})
+
+        if action == "diagram_autosave":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            sid, err = autosave_draft(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": sid}})
+
+        if action == "lane_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            lid, err = save_lane(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": lid}})
+
+        if action == "lane_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            lid, err = delete_lane(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": lid}})
+
+        if action == "diagram_node_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            nid, err = save_diagram_node(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": nid}})
+
+        if action == "diagram_node_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            nid, err = delete_diagram_node(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": nid}})
+
+        if action == "diagram_edge_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            eid, err = save_diagram_edge(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": eid}})
+
+        if action == "diagram_edge_delete":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            eid, err = delete_diagram_edge(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": eid}})
 
         return cors({"ok": False, "error": {"message": f"Неизвестное действие: {action}"}}, 400)
 

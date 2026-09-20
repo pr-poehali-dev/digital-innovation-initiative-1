@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Реестр гипотез — Лаборатория решений</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#161d33; --navy2:#1f2a4a; --red:#b01e2e; --red-dark:#8f1724;
+  --bg:#f4f5f8; --card:#ffffff; --line:#e4e6ee; --muted:#6b7280; --text:#1a1f2e;
+  --green:#1f9d5a; --amber:#e0972a; --grey-badge:#94a0b8;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);}
+a{text-decoration:none;color:inherit}
+.topbar{background:var(--navy);color:#fff;display:flex;align-items:center;gap:24px;padding:0 28px;height:60px;position:sticky;top:0;z-index:50;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+.topbar .brand{font-weight:800;font-size:15px;letter-spacing:.02em;display:flex;align-items:center;gap:10px;white-space:nowrap}
+.topbar .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--red)}
+.topbar .crumbs{font-size:12px;color:#aab2c8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .crumbs b{color:#fff;font-weight:600}
+.subnav{background:var(--navy2);display:flex;gap:2px;padding:0 20px;overflow-x:auto;position:sticky;top:60px;z-index:40;border-bottom:2px solid var(--red)}
+.subnav a{padding:11px 14px;font-size:12.5px;color:#c3cadf;white-space:nowrap;border-bottom:2px solid transparent;transition:.15s}
+.subnav a:hover{color:#fff;background:rgba(255,255,255,.05)}
+.subnav a.active{color:#fff;border-bottom:2px solid var(--red);background:rgba(255,255,255,.06);font-weight:600}
+.wrap{max-width:1360px;margin:0 auto;padding:24px 28px 60px}
+.pagehead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap}
+.pagehead h1{font-size:21px;margin:0 0 4px;color:var(--navy)}
+.pagehead p{margin:0;color:var(--muted);font-size:13px;max-width:720px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;font-size:12.5px;font-weight:600;border:1px solid transparent;cursor:pointer}
+.btn-primary{background:var(--red);color:#fff}
+.btn-primary:hover{background:var(--red-dark)}
+.btn-outline{background:#fff;border-color:var(--line);color:var(--navy)}
+.btn-outline:hover{border-color:var(--navy)}
+.btn-ghost{background:transparent;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+.card-pad{padding:18px 20px}
+.grid{display:grid;gap:16px}
+.section-title{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin:0 0 10px}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;letter-spacing:.02em}
+.badge-green{background:#e5f7ec;color:var(--green)}
+.badge-amber{background:#fdf1e0;color:var(--amber)}
+.badge-red{background:#fbe6e8;color:var(--red)}
+.badge-grey{background:#eef0f5;color:var(--grey-badge)}
+.badge-navy{background:#e7eaf5;color:var(--navy)}
+.stepper{display:flex;align-items:center;gap:0;margin:6px 0 2px;overflow-x:auto;padding-bottom:4px}
+.step{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:108px;position:relative}
+.step .circ{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2px solid var(--line);background:#fff;color:var(--muted);z-index:2}
+.step.done .circ{background:var(--green);border-color:var(--green);color:#fff}
+.step.active .circ{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 0 0 4px rgba(176,30,46,.15)}
+.step .lbl{font-size:10.5px;text-align:center;color:var(--muted);max-width:100px;line-height:1.25}
+.step.active .lbl{color:var(--navy);font-weight:700}
+.step.done .lbl{color:var(--text)}
+.step::before{content:'';position:absolute;top:15px;left:-50%;width:100%;height:2px;background:var(--line);z-index:1}
+.step:first-child::before{display:none}
+.step.done::before{background:var(--green)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700;padding:9px 12px;border-bottom:1px solid var(--line);background:#fafbfd}
+td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+.tag{display:inline-block;background:#eef0f5;color:var(--navy);font-size:10.5px;padding:2px 8px;border-radius:5px;margin:1px 3px 1px 0}
+.progress{height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.progress > div{height:100%;background:var(--red)}
+.kpi{display:flex;flex-direction:column;gap:2px}
+.kpi .n{font-size:24px;font-weight:800;color:var(--navy)}
+.kpi .l{font-size:11px;color:var(--muted)}
+.avatar{width:22px;height:22px;border-radius:50%;background:var(--navy2);color:#fff;font-size:9.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;margin-right:5px}
+.flag{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:var(--red)}
+.hint{font-size:11px;color:var(--muted);font-style:italic}
+.two-col{display:grid;grid-template-columns:1fr 320px;gap:18px}
+.checklist-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.checklist-item:last-child{border-bottom:none}
+.chk{width:20px;height:20px;border-radius:5px;flex:0 0 20px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;margin-top:1px}
+.chk-ok{background:var(--green);color:#fff}
+.chk-bad{background:var(--red);color:#fff}
+.chk-wait{background:var(--line);color:var(--muted)}
+.pill-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px;flex-wrap:wrap}
+.pill-tabs a{padding:8px 14px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent}
+.pill-tabs a.active{color:var(--red);border-color:var(--red)}
+.proto-banner{background:#fff8e6;border:1px solid #f0d99a;color:#8a6115;font-size:11.5px;padding:7px 16px;text-align:center}
+.diagram-canvas{position:relative;background:#fbfcfe;border:1px dashed var(--line);border-radius:10px;min-height:520px;overflow:hidden}
+.node{position:absolute;background:#fff;border:2px solid var(--navy);border-radius:10px;padding:8px 12px;font-size:11px;font-weight:700;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.06);color:var(--navy)}
+.node.center{background:var(--red);color:#fff;border-color:var(--red);border-radius:50%;width:118px;height:118px;display:flex;align-items:center;justify-content:center;font-size:12px;padding:6px}
+.node.small{font-size:9.5px;font-weight:600;padding:6px 9px}
+.edge-label{position:absolute;font-size:9px;color:var(--muted);background:#fbfcfe;padding:0 4px}
+.evbox{border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fafbfd;font-size:12px;display:flex;gap:10px}
+.evbox .ic{width:32px;height:32px;border-radius:8px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex:0 0 32px}
+.toolbar{display:flex;gap:6px;padding:10px;background:#fff;border:1px solid var(--line);border-radius:10px 10px 0 0;border-bottom:none}
+.tool{width:34px;height:34px;border-radius:7px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--navy);background:#fff}
+.tool.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+.slide-thumb{border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;font-size:10px;position:relative}
+.slide-thumb .num{position:absolute;top:6px;left:8px;font-size:9px;color:var(--muted);font-weight:700}
+.slide-thumb .body{margin-top:14px;height:78px;background:linear-gradient(135deg,#eef0f5,#fff);border-radius:5px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:9px;text-align:center;padding:6px}
+.mini-gantt-row{display:grid;grid-template-columns:170px 1fr;align-items:center;gap:8px;padding:5px 0;font-size:10.5px}
+.mini-gantt-track{position:relative;height:16px;background:#f1f2f6;border-radius:4px}
+.mini-gantt-bar{position:absolute;height:16px;border-radius:4px;top:0}
+.connector-svg{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+::-webkit-scrollbar{height:8px;width:8px}
+::-webkit-scrollbar-thumb{background:#c9cee0;border-radius:4px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span>ТРАЕКТОРИЯ · Лаборатория управленческих решений</div>
+  <div class="crumbs">Портфель лаборатории &nbsp;/&nbsp; <b>Разработка концепции «6И»</b></div>
+</div>
+<div class="subnav"><a href="portfolio.html" class="">Портфель</a><a href="case.html" class="">Паспорт кейса</a><a href="stage.html" class="">Стадия и шлюз</a><a href="hypotheses.html" class="active">Гипотезы</a><a href="evidence.html" class="">Доказательства</a><a href="concept.html" class="">Конструктор концепции</a><a href="variants.html" class="">Матрица вариантов</a><a href="canvas.html" class="">Холст: 6И</a><a href="justification.html" class="">Карта обоснования</a><a href="document.html" class="">Комплект документов</a></div>
+<div class="proto-banner">⚠ КЛИКАБЕЛЬНЫЙ ПРОТОТИП — статический макет для обсуждения потока и вёрстки, без бэкенда и базы данных. Данные условные.</div>
+
+<div class="wrap">
+
+<div class="pagehead">
+  <div>
+    <h1>Реестр гипотез</h1>
+    <p>Гипотеза — формулировка; проверка — конкретный способ её подтверждения. Одна гипотеза может иметь несколько независимых проверок.</p>
+  </div>
+  <button class="btn btn-primary">+ Новая гипотеза</button>
+</div>
+
+<div class="grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px">
+  <div class="card card-pad kpi"><div class="n">8</div><div class="l">Всего гипотез</div></div>
+  <div class="card card-pad kpi" style="border-left:3px solid var(--green)"><div class="n">5</div><div class="l">Подтверждено</div></div>
+  <div class="card card-pad kpi" style="border-left:3px solid var(--amber)"><div class="n">2</div><div class="l">Частично / на проверке</div></div>
+  <div class="card card-pad kpi" style="border-left:3px solid var(--red)"><div class="n">1</div><div class="l">Опровергнута</div></div>
+</div>
+
+<div class="card" style="overflow:hidden">
+  <table>
+    <tr><th>ID</th><th>Формулировка</th><th>Статус</th><th>Проверки</th></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H1</b></td>
+      <td>Можно создать шесть параллельных потоков с зависимостями и общими вехами <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-green">Подтверждена</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Моделирование в Ганте кабинета</td><td>Сеть построена, критический путь выявлен автоматически</td><td>Вывод: подтверждена</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H2</b></td>
+      <td>Кабинет руководителя показывает отклонения без ручной сборки презентации <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-green">Подтверждена</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Тест дашборда на пилотных данных</td><td>Отклонения по срокам отображаются автоматически</td><td>Вывод: подтверждена</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H3</b></td>
+      <td>Карточка требования связывается с ВНД, процессом, инициативой, ресурсом и риском <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-amber">Частично подтверждена</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Прототип карточки требования</td><td>Связи с риском и решением работают, связи с процессом — нет отдельной сущности</td><td>Вывод: требует доработки процессного модуля</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H4</b></td>
+      <td>Решения Комплаенс-комитета можно связать с требованиями и задачами <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-green">Подтверждена</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Тест на реальном вопросе комитета</td><td>Журнал решений и контроль исполнения работают</td><td>Вывод: подтверждена</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H5</b></td>
+      <td>Реестр гипотез поддерживает полный цикл проверки <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-green">Подтверждена</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Ведение данного реестра как самопроверка</td><td>Полный цикл: гипотеза → проверка → доказательство → вывод</td><td>Вывод: подтверждена</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H6</b></td>
+      <td>Материалы можно экспортировать в Word, PowerPoint и Excel <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-amber">На проверке</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Экспорт концепции и Ганта</td><td>Экспорт выполнен, доказательство (файл) не приложено</td><td>Вывод: ожидает доказательства</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H7</b></td>
+      <td>Можно описывать процессы по логике Business Studio/BPMN <span class="badge badge-grey">Обычная</span></td>
+      <td><span class="badge badge-red">Опровергнута</span></td>
+      <td>1 проверки</td>
+    </tr>
+    <tr><td style='padding-left:24px;color:var(--muted)'>↳ Проверка текущего процессного модуля</td><td>Нет иерархии, версий и BPMN-схем — требуется отдельная разработка</td><td>Вывод: опровергнута для текущей версии</td></tr>
+    
+    <tr style="background:#fafbfd">
+      <td><b>H8</b></td>
+      <td>Доступы разделяются по ролям <span class="badge badge-red">Критичная</span></td>
+      <td><span class="badge badge-grey">Не начата</span></td>
+      <td>0 проверки</td>
+    </tr>
+    
+    
+  </table>
+</div>
+
+<div class="card card-pad" style="margin-top:18px">
+  <div class="section-title">Карточка проверки — пример (H3, метод: прототип карточки требования)</div>
+  <table>
+    <tr><td style="width:180px;color:var(--muted)">Метод</td><td>Прототип карточки требования на реальных данных пилота</td></tr>
+    <tr><td style="color:var(--muted)">Ответственный</td><td><span class="avatar">АИ</span>Аналитик интеграции</td></tr>
+    <tr><td style="color:var(--muted)">Срок</td><td>Неделя 16</td></tr>
+    <tr><td style="color:var(--muted)">Критерий подтверждения</td><td>Все связи доступны из одной карточки</td></tr>
+    <tr><td style="color:var(--muted)">Результат</td><td>Связи с риском, решением, ресурсом — реализованы. Связь с процессом отсутствует как отдельная сущность</td></tr>
+    <tr><td style="color:var(--muted)">Доказательства</td><td><span class="tag">📎 Скриншот карточки</span><span class="tag">📎 Протокол демонстрации</span></td></tr>
+  </table>
+</div>
+
+</div>
+</body>
+</html>

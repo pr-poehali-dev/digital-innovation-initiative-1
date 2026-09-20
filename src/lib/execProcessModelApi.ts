@@ -26,11 +26,17 @@ export type ProcessLevel = "direction" | "process" | "subprocess" | "operation";
 export type ModelStatus = "draft" | "in_review" | "confirmed" | "published" | "archived";
 export type ParticipationKind = "owner" | "executor" | "reviewer" | "consumer" | "supplier";
 
+export type NodeType = "start" | "end" | "task" | "gateway" | "subprocess" | "document" | "system" | "control" | "note";
+export type LaneType = "org_unit" | "role" | "placeholder";
+export type DiagramVariant = "as_is" | "to_be";
+
 export interface Refs {
   levels: Record<ProcessLevel, string>;
   statuses: Record<ModelStatus, string>;
   participation_kinds: Record<ParticipationKind, string>;
   confirmation_statuses: Record<string, string>;
+  node_types: Record<NodeType, string>;
+  lane_types: Record<LaneType, string>;
   user_role: string;
   can_confirm: boolean;
   can_edit: boolean;
@@ -214,6 +220,109 @@ export interface ClarificationNote {
   created_at: string;
 }
 
+export interface ProcessDiagram {
+  id: number;
+  process_node_id: number;
+  variant: DiagramVariant;
+  base_diagram_id: number | null;
+  title: string | null;
+  model_status: ModelStatus;
+  version: number;
+  canvas_scale: number;
+  canvas_x: number;
+  canvas_y: number;
+  published_at: string | null;
+  published_by: string | null;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface DiagramLane {
+  id: number;
+  diagram_id: number;
+  title: string;
+  lane_type: LaneType;
+  org_unit_id: number | null;
+  org_unit_name: string | null;
+  role_title: string | null;
+  placeholder_label: string | null;
+  needs_clarification: boolean;
+  sort_order: number;
+}
+
+export interface DiagramNode {
+  id: number;
+  diagram_id: number;
+  lane_id: number | null;
+  node_type: NodeType;
+  label: string | null;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  description: string | null;
+  input_note: string | null;
+  output_note: string | null;
+  duration_note: string | null;
+  is_critical: boolean;
+  confirmation_status: "user_draft" | "confirmed";
+  gateway_outcomes: string | null;
+  ref_role_title: string | null;
+  ref_person_id: number | null;
+  ref_person_name: string | null;
+  ref_org_unit_id: number | null;
+  ref_org_unit_name: string | null;
+  ref_document_id: number | null;
+  ref_document_title: string | null;
+  ref_system_id: number | null;
+  ref_system_name: string | null;
+  ref_risk_id: number | null;
+  ref_risk_title: string | null;
+  system_note: string | null;
+  document_note: string | null;
+  note: string | null;
+}
+
+export interface DiagramEdge {
+  id: number;
+  diagram_id: number;
+  source_node_id: number;
+  target_node_id: number;
+  label: string | null;
+  edge_type: "flow" | "conditional";
+}
+
+export interface DiagramFull {
+  diagram: ProcessDiagram;
+  lanes: DiagramLane[];
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  process_node_id: number;
+}
+
+export interface DiagramIssue {
+  code: string;
+  message: string;
+  node_ids: number[];
+}
+
+export interface DiagramValidation {
+  errors: DiagramIssue[];
+  warnings: DiagramIssue[];
+}
+
+export const NODE_TYPE_ICON: Record<NodeType, string> = {
+  start: "Circle",
+  end: "CircleDot",
+  task: "Square",
+  gateway: "Diamond",
+  subprocess: "Layers",
+  document: "FileText",
+  system: "Server",
+  control: "ShieldCheck",
+  note: "StickyNote",
+};
+
 export const processModelApi = {
   refs: (): Promise<Refs> => req("/?action=refs"),
 
@@ -280,6 +389,29 @@ export const processModelApi = {
   // Справочники
   orgUnits: (): Promise<{ items: OrgUnitRef[] }> => req("/?action=org_units"),
   people: (): Promise<{ items: PersonRef[] }> => req("/?action=people"),
+
+  // Схемы процессов
+  diagramGetOrCreate: (processNodeId: number, variant: DiagramVariant): Promise<{ id: number; created: boolean }> =>
+    post("diagram_get_or_create", { process_node_id: processNodeId, variant }),
+  diagramFull: (id: number): Promise<DiagramFull> => req(`/?action=diagram_full&id=${id}`),
+  diagramSetStatus: (id: number, status: ModelStatus, comment?: string): Promise<{ id: number }> =>
+    post("diagram_set_status", { id, status, comment }),
+  diagramSaveCanvas: (diagramId: number, data: { canvas_scale?: number; canvas_x?: number; canvas_y?: number }): Promise<{ id: number }> =>
+    post("diagram_save_canvas", { diagram_id: diagramId, ...data }),
+  diagramValidate: (id: number): Promise<DiagramValidation> => req(`/?action=diagram_validate&id=${id}`),
+  diagramExportData: (id: number): Promise<DiagramFull & { export_meta: Record<string, unknown> }> =>
+    req(`/?action=diagram_export_data&id=${id}`),
+  diagramAutosave: (diagramId: number, snapshot: unknown): Promise<{ id: number }> =>
+    post("diagram_autosave", { diagram_id: diagramId, snapshot }),
+
+  saveLane: (data: Record<string, unknown>): Promise<{ id: number }> => post("lane_save", data),
+  deleteLane: (id: number): Promise<{ id: number }> => post("lane_delete", { id }),
+
+  saveDiagramNode: (data: Record<string, unknown>): Promise<{ id: number }> => post("diagram_node_save", data),
+  deleteDiagramNode: (id: number): Promise<{ id: number }> => post("diagram_node_delete", { id }),
+
+  saveDiagramEdge: (data: Record<string, unknown>): Promise<{ id: number }> => post("diagram_edge_save", data),
+  deleteDiagramEdge: (id: number): Promise<{ id: number }> => post("diagram_edge_delete", { id }),
 };
 
 export const LEVEL_ORDER: ProcessLevel[] = ["direction", "process", "subprocess", "operation"];

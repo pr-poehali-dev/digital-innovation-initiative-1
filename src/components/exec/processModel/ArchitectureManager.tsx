@@ -13,6 +13,7 @@ import {
   OrgUnitRef,
 } from "@/lib/execProcessModelApi";
 import PassportForm from "./PassportForm";
+import DiagramsTab from "./DiagramsTab";
 
 const LEVEL_LABEL: Record<ProcessLevel, string> = {
   direction: "Направление",
@@ -265,7 +266,7 @@ function ProcessDetailPanel({
 }) {
   const [detail, setDetail] = useState<ProcessDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"passport" | "functions" | "systems" | "documents" | "next">("passport");
+  const [tab, setTab] = useState<"passport" | "functions" | "diagrams" | "systems" | "documents" | "next">("passport");
 
   const load = () => {
     setLoading(true);
@@ -284,9 +285,10 @@ function ProcessDetailPanel({
   const TABS = [
     { id: "passport", label: "Паспорт", icon: "IdCard" },
     { id: "functions", label: "Функции", icon: "ListTree" },
+    { id: "diagrams", label: "Схемы", icon: "GitBranch" },
     { id: "systems", label: "Системы", icon: "Server" },
     { id: "documents", label: "Документы", icon: "FileText" },
-    { id: "next", label: "Схемы, риски, показатели", icon: "GitBranch" },
+    { id: "next", label: "Риски и показатели", icon: "ShieldAlert" },
   ] as const;
 
   return (
@@ -346,6 +348,10 @@ function ProcessDetailPanel({
         <FunctionLinkBlock nodeId={detail.node.id} linked={detail.functions} canEdit={canEdit} onChanged={load} />
       )}
 
+      {tab === "diagrams" && (
+        <DiagramsTab processNodeId={detail.node.id} diagrams={detail.diagrams} canEdit={canEdit} canConfirm={canConfirm} onChanged={load} />
+      )}
+
       {tab === "systems" && (
         <div className="space-y-2">
           {detail.systems.length === 0 ? (
@@ -374,8 +380,8 @@ function ProcessDetailPanel({
         <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center">
           <Icon name="Construction" size={24} className="text-slate-300 mx-auto mb-2" />
           <p className="text-sm text-slate-500">
-            Графический редактор схем AS-IS/TO-BE, риски и контроли, показатели и проблемы —
-            следующая итерация. Паспорт и архитектура уже готовят для них данные.
+            Риски и контроли, показатели и проблемы — следующая итерация. Паспорт, архитектура
+            и схемы уже готовят для них данные.
           </p>
         </div>
       )}
