@@ -518,7 +518,17 @@ export const execApi = {
 
   myDay: (): Promise<MyDayData> => req("/?action=my_day"),
 
-  portfolioSummary: (): Promise<PortfolioSummary> => req("/?action=portfolio_summary"),
+  // Итерация 4, раздел 9: по умолчанию — без тестовых данных, без фильтра
+  // портфеля (сохраняет старое поведение страницы «Портфель инициатив»,
+  // которая показывает все нетестовые инициативы, а не только Блок ВК).
+  // Передайте opts.portfolioId, чтобы получить сводку именно рабочего
+  // портфеля Блока ВК (например, для отдельного обзора с явной подписью).
+  portfolioSummary: (opts?: { portfolioId?: number; includeTestData?: boolean }): Promise<PortfolioSummary> => {
+    const params = new URLSearchParams({ action: "portfolio_summary" });
+    if (opts?.portfolioId) params.set("portfolio_id", String(opts.portfolioId));
+    if (opts?.includeTestData) params.set("include_test_data", "1");
+    return req(`/?${params.toString()}`);
+  },
 };
 
 export interface MyDayData {
@@ -569,6 +579,7 @@ export interface PortfolioSummary {
     needs_decision: number;
     budget_not_ready: number;
   };
+  scope?: { portfolio_id: number | null; include_test_data: boolean };
 }
 
 export const BUDGET_STATUS_LABEL: Record<string, { title: string; cls: string }> = {

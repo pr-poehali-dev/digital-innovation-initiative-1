@@ -886,11 +886,14 @@ def roadmap_data(cur, date_from, date_to, filters: dict):
                (p.plan_end IS NOT NULL AND p.plan_end < CURRENT_DATE
                    AND p.status NOT IN ('completed','cancelled')) AS is_overdue,
                (SELECT count(*) FROM {SCHEMA}.exec_risk r
-                 WHERE r.project_id = p.id AND r.status = 'active' AND r.probability * r.impact >= 15) AS critical_risk_count,
+                 WHERE r.project_id = p.id AND r.status = 'active' AND r.probability * r.impact >= 15
+                   AND COALESCE(r.is_test_data, false) = false) AS critical_risk_count,
                (SELECT count(*) FROM {SCHEMA}.exec_issue i
-                 WHERE i.project_id = p.id AND i.status IN ('open','in_progress')) AS open_issue_count,
+                 WHERE i.project_id = p.id AND i.status IN ('open','in_progress')
+                   AND COALESCE(i.is_test_data, false) = false) AS open_issue_count,
                (SELECT count(*) FROM {SCHEMA}.exec_resource_requirement rr
-                 WHERE rr.project_id = p.id AND rr.status NOT IN ('closed','cancelled')) AS resource_gap_count
+                 WHERE rr.project_id = p.id AND rr.status NOT IN ('closed','cancelled')
+                   AND COALESCE(rr.is_test_data, false) = false) AS resource_gap_count
         FROM {SCHEMA}.exec_project p
         LEFT JOIN {SCHEMA}.exec_initiative ei ON ei.id = p.initiative_id
         LEFT JOIN {SCHEMA}.exec_person mp ON mp.id = p.manager_person_id

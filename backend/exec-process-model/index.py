@@ -28,8 +28,10 @@
 
 Формат ответа: {"ok": true, "data": {...}} / {"ok": false, "error": {"message": "..."}}
 """
+import base64
 import decimal
 import difflib
+import hashlib
 import json
 import os
 import re
@@ -98,14 +100,14 @@ def validate_status_transition(current: str, new_status: str, can_confirm_role: 
     return None
 
 
-def record_review_decision(cur, entity_type: str, entity_id: int, version: int, new_status: str, actor: str, comment):
+def record_review_decision(cur, entity_type: str, entity_id: int, version: int, new_status: str, actor: str, comment, actor_authorized: bool = True):
     decision = STATUS_TO_REVIEW_DECISION.get(new_status)
     if not decision:
         return
     cur.execute(
         f"INSERT INTO {SCHEMA}.exec_process_review_decision "
-        f"(entity_type, entity_id, version, decision, actor, comment) VALUES (%s,%s,%s,%s,%s,%s)",
-        (entity_type, entity_id, version, decision, actor, nz(comment)),
+        f"(entity_type, entity_id, version, decision, actor, comment, actor_authorized) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+        (entity_type, entity_id, version, decision, actor, nz(comment), actor_authorized),
     )
 
 
@@ -335,34 +337,78 @@ def log_change(cur, actor, entity, eid, action, before=None, after=None, reason=
     return cur.fetchone()[0]
 
 
-def check_optimistic_lock(before: dict, body: dict, updated_by_field: str = "updated_by") -> dict | None:
+def check_optimistic_lock(before: dict, body: dict, updated_by_field: str = "updated_by", entity_type: str = None) -> dict | None:
     """Защита от незаметной перезаписи чужих изменений (итерация 4, раздел 1):
     если клиент прислал expected_updated_at (значение updated_at, которое он
     видел при открытии формы) и оно отличается от текущего — отклоняем
-    сохранение структурированной ошибкой конфликта (код 'conflict'), а не
-    голым текстом, чтобы фронтенд мог показать, кем и когда объект был
-    изменён, и предложить перечитать актуальную версию вместо молчаливой
-    перезаписи. Поле expected_updated_at необязательно — старые вызовы без
-    него продолжают работать как раньше (обратная совместимость)."""
+    сохранение структурированной ошибкой конфликта, а не голым текстом, чтобы
+    фронтенд мог показать объект и его id, ожидаемую/текущую ревизию, кем и
+    когда изменено, и предложить перечитать актуальную версию отдельным
+    запросом вместо молчаливой перезаписи. Поле expected_updated_at
+    необязательно — старые вызовы без него продолжают работать как раньше
+    (обратная совместимость). Нет и не будет параметра «перезаписать всё
+    равно» для обычного пользователя — единственный выход из конфликта:
+    перечитать и повторить правки вручную."""
     expected = body.get("expected_updated_at")
     if not expected:
         return None
     current = before.get("updated_at")
     if current is not None and str(current) != str(expected):
         return {
-            "code": "conflict",
+            "code": "optimistic_lock_conflict",
             "message": "Запись изменена другим пользователем после открытия формы — перечитайте актуальную версию, сравните изменения и повторите свои правки вручную",
+            "entity_type": entity_type,
+            "entity_id": before.get("id"),
+            "expected_updated_at": str(expected),
             "current_updated_at": str(current),
             "changed_by": before.get(updated_by_field) or before.get("created_by") or before.get("published_by"),
+            "current_data": before,
         }
     return None
 
 
-def err_response(err):
+def record_edit_conflict(cur, entity_type: str, actor: str, lock_err: dict):
+    """Сохраняет обнаруженный конфликт optimistic locking в постоянный журнал
+    (раздел 1/3/10 ТЗ итерации 4) — иначе HTTP 409 виден только в моменте и
+    публикационный чек-лист не может проверить «есть незавершённый конфликт
+    редактирования», а аудит не может подтвердить, что конфликт вообще
+    фиксировался. Коммитится сразу — ошибочный save-запрос не проходит через
+    handler'овский conn.commit(), а голое закрытие соединения откатило бы
+    незакоммиченную запись конфликта."""
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_edit_conflict_log "
+        f"(entity_type, entity_id, actor, expected_updated_at, current_updated_at, changed_by) "
+        f"VALUES (%s,%s,%s,%s,%s,%s)",
+        (entity_type, lock_err.get("entity_id"), actor, lock_err.get("expected_updated_at"),
+         lock_err.get("current_updated_at"), lock_err.get("changed_by")),
+    )
+    cur.connection.commit()
+
+
+def resolve_edit_conflicts(cur, entity_type: str, entity_id: int):
+    """Успешное сохранение записи закрывает её открытые конфликты — раздел 10
+    ТЗ: конфликт зафиксирован в аудите, но не блокирует публикацию навечно,
+    если пользователь честно перечитал и сохранил актуальную версию."""
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_edit_conflict_log SET resolved_at = now() "
+        f"WHERE entity_type = %s AND entity_id = %s AND resolved_at IS NULL",
+        (entity_type, entity_id),
+    )
+
+
+def err_response(err, cur=None, actor: str = None):
     """Единая точка возврата ошибки save/delete-действий: структурированный
-    конфликт (dict от check_optimistic_lock) -> 409, ошибка прав -> 403,
-    остальные текстовые ошибки валидации -> 400."""
+    конфликт optimistic locking -> 409 + запись в постоянный журнал конфликтов
+    (если переданы cur/actor); непройденный публикационный чек-лист -> 422;
+    ошибка прав -> 403; остальные текстовые ошибки валидации -> 400."""
     if isinstance(err, dict):
+        if err.get("code") == "publication_validation_failed":
+            return cors({"ok": False, "error": err}, 422)
+        if err.get("code") == "optimistic_lock_conflict" and cur is not None and actor:
+            try:
+                record_edit_conflict(cur, err.get("entity_type") or "unknown", actor, err)
+            except Exception:
+                pass
         return cors({"ok": False, "error": err}, 409)
     code = 403 if "прав" in err else 400
     return cors({"ok": False, "error": {"message": err}}, code)
@@ -461,6 +507,71 @@ def get_overview(cur, scope_id: int):
         (scope_id,))
     open_questions = cur.fetchone()[0]
 
+    # ── Итерация 4, раздел 8: недостающие показатели обзора модели ──────────
+    cur.execute(f"""
+        SELECT c.id FROM {SCHEMA}.exec_process_control c
+        JOIN {SCHEMA}.exec_process_risk r ON r.id = c.risk_id
+        JOIN {SCHEMA}.exec_process_node n ON n.id = r.process_node_id
+        WHERE n.scope_id = %s AND c.is_test_data = false AND c.verification_status != 'confirmed'
+    """, (scope_id,))
+    unconfirmed_controls_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT n.id FROM {SCHEMA}.exec_process_node n
+        WHERE n.scope_id = %s AND n.is_test_data = false AND n.level = 'process' AND n.is_current = true
+          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_process_metric m WHERE m.process_node_id = n.id AND m.is_test_data = false)
+    """, (scope_id,))
+    processes_without_metrics_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT i.id FROM {SCHEMA}.exec_process_issue i
+        JOIN {SCHEMA}.exec_process_node n ON n.id = i.process_node_id
+        WHERE n.scope_id = %s AND i.is_test_data = false
+          AND NOT EXISTS (SELECT 1 FROM {SCHEMA}.exec_process_improvement im WHERE im.as_is_issue_id = i.id)
+    """, (scope_id,))
+    issues_without_improvements_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT im.id FROM {SCHEMA}.exec_process_improvement im
+        JOIN {SCHEMA}.exec_process_diagram d ON d.id = im.to_be_diagram_id
+        JOIN {SCHEMA}.exec_process_node n ON n.id = d.process_node_id
+        WHERE n.scope_id = %s AND im.is_test_data = false AND im.initiative_id IS NULL
+    """, (scope_id,))
+    improvements_without_initiatives_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT n.id FROM {SCHEMA}.exec_process_node n
+        WHERE n.scope_id = %s AND n.is_test_data = false AND n.is_current = true AND n.model_status = 'in_review'
+    """, (scope_id,))
+    models_in_review_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT DISTINCT n.id FROM {SCHEMA}.exec_process_node n
+        WHERE n.scope_id = %s AND n.is_test_data = false AND n.model_status = 'published'
+    """, (scope_id,))
+    published_versions_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT DISTINCT n.id FROM {SCHEMA}.exec_process_edit_conflict_log ecl
+        JOIN {SCHEMA}.exec_process_node n ON (
+            (ecl.entity_type = 'process_node' AND ecl.entity_id = n.id)
+            OR (ecl.entity_type = 'process_passport' AND ecl.entity_id = n.id)
+        )
+        WHERE n.scope_id = %s AND ecl.resolved_at IS NULL
+    """, (scope_id,))
+    edit_conflicts_ids = [r[0] for r in cur.fetchall()]
+
+    cur.execute(f"""
+        SELECT n.id FROM {SCHEMA}.exec_process_node n
+        WHERE n.scope_id = %s AND n.is_test_data = false AND n.is_current = true AND n.level = 'process' AND n.model_status = 'confirmed'
+    """, (scope_id,))
+    confirmed_process_ids = [r[0] for r in cur.fetchall()]
+    publication_blocked_ids = []
+    for pid in confirmed_process_ids:
+        cl = publication_checklist(cur, pid)
+        if cl and cl["blocking_errors"]:
+            publication_blocked_ids.append(pid)
+
     scope_confirmed = bool(scope and scope.get("model_status") == "confirmed")
     stages = [
         ("boundaries", "Границы Блока ВК", scope_confirmed),
@@ -497,6 +608,24 @@ def get_overview(cur, scope_id: int):
             "processes_without_owner": processes_without_owner,
             "docs_need_confirmation": docs_need_confirmation,
             "open_questions": open_questions,
+            "unconfirmed_controls": len(unconfirmed_controls_ids),
+            "processes_without_metrics": len(processes_without_metrics_ids),
+            "issues_without_improvements": len(issues_without_improvements_ids),
+            "improvements_without_initiatives": len(improvements_without_initiatives_ids),
+            "models_in_review": len(models_in_review_ids),
+            "published_versions": len(published_versions_ids),
+            "edit_conflicts": len(edit_conflicts_ids),
+            "publication_blocking_errors": len(publication_blocked_ids),
+        },
+        "filters": {
+            "unconfirmed_controls": unconfirmed_controls_ids,
+            "processes_without_metrics": processes_without_metrics_ids,
+            "issues_without_improvements": issues_without_improvements_ids,
+            "improvements_without_initiatives": improvements_without_initiatives_ids,
+            "models_in_review": models_in_review_ids,
+            "published_versions": published_versions_ids,
+            "edit_conflicts": edit_conflicts_ids,
+            "publication_blocking_errors": publication_blocked_ids,
         },
         "stages": [{"code": c, "label": l, "done": ok} for c, l, ok in stages],
         "progress_pct": progress_pct,
@@ -651,15 +780,19 @@ def confirm_function(cur, body: dict, actor: str, confirm: bool):
 # ── Архитектура процессов ────────────────────────────────────────────────────
 
 def process_tree(cur, scope_id: int):
+    """Дерево архитектуры показывает только is_current=true записи — старые
+    версии (is_current=false), отпочковавшиеся при «Создать новую версию»
+    (раздел 5 ТЗ итерации 4), доступны исключительно через реестр версий на
+    чтение, а не как параллельные узлы дерева."""
     cur.execute(f"""
         SELECT n.*, p.display_name AS owner_name, u.name AS org_unit_name,
-               (SELECT COUNT(*) FROM {SCHEMA}.exec_process_node c WHERE c.parent_id = n.id AND c.is_test_data = false) AS children_count,
+               (SELECT COUNT(*) FROM {SCHEMA}.exec_process_node c WHERE c.parent_id = n.id AND c.is_test_data = false AND c.is_current = true) AS children_count,
                (SELECT COUNT(*) FROM {SCHEMA}.exec_function_process_link l WHERE l.process_node_id = n.id) AS function_links_count,
                EXISTS(SELECT 1 FROM {SCHEMA}.exec_process_passport pp WHERE pp.process_node_id = n.id AND pp.goal IS NOT NULL AND pp.goal <> '') AS has_passport
         FROM {SCHEMA}.exec_process_node n
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = n.owner_person_id
         LEFT JOIN {SCHEMA}.org_units u ON u.id = n.responsible_org_unit_id
-        WHERE n.scope_id = %s AND n.is_test_data = false
+        WHERE n.scope_id = %s AND n.is_test_data = false AND n.is_current = true
         ORDER BY n.sort_order, n.code NULLS LAST, n.name
     """, (scope_id,))
     return rows(cur)
@@ -684,7 +817,7 @@ def save_process_node(cur, body: dict, actor: str):
             return None, "Узел не найден"
         if before[0]["model_status"] in ("confirmed", "published"):
             return None, "Узел подтверждён/опубликован — для изменений верните черновой статус"
-        lock_err = check_optimistic_lock(before[0], body)
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_node")
         if lock_err:
             return None, lock_err
         if not vals:
@@ -695,6 +828,7 @@ def save_process_node(cur, body: dict, actor: str):
             list(vals.values()) + [actor, nid],
         )
         log_change(cur, actor, "process_node", nid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_node", nid)
         return nid, None
 
     scope_id = as_int(body.get("scope_id"))
@@ -761,6 +895,11 @@ def build_process_snapshot(cur, node_id: int) -> dict:
 
 
 def set_process_status(cur, body: dict, actor: str, can_confirm_role: bool):
+    """Переход статуса процесса. Раздел 1/3 ТЗ итерации 4 — жёсткий серверный
+    блокер: published достижим ТОЛЬКО если publication_checklist() не нашёл ни
+    одной блокирующей ошибки. Это не только скрытая кнопка на фронте — прямой
+    API-вызов action=process_node_set_status тоже отклоняется структурированным
+    409 publication_validation_failed."""
     nid = as_int(body.get("id"))
     new_status = body.get("status")
     if not nid or not new_status:
@@ -771,7 +910,7 @@ def set_process_status(cur, body: dict, actor: str, can_confirm_role: bool):
     if not before:
         return None, "Узел не найден"
 
-    lock_err = check_optimistic_lock(before[0], body)
+    lock_err = check_optimistic_lock(before[0], body, entity_type="process_node")
     if lock_err:
         return None, lock_err
 
@@ -784,9 +923,22 @@ def set_process_status(cur, body: dict, actor: str, can_confirm_role: bool):
         if pc and not pc["can_confirm"]:
             return None, "Нельзя подтвердить: не заполнены обязательные поля паспорта (цель, границы, запуск, входы/выходы, владелец)"
 
+    if new_status == "published":
+        checklist = publication_checklist(cur, nid)
+        if not checklist or not checklist["can_publish"]:
+            return None, {
+                "code": "publication_validation_failed",
+                "message": "Публикация невозможна — не выполнен публикационный чек-лист",
+                "blocking_errors": checklist["blocking_errors"] if checklist else [],
+                "warnings": checklist["warnings"] if checklist else [],
+                "overrides_required": checklist["overrides_required"] if checklist else [],
+            }
+
     snapshot = None
+    checksum = None
     if new_status == "published":
         snapshot = build_process_snapshot(cur, nid)
+        checksum = hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, default=str, sort_keys=True).encode("utf-8")).hexdigest()
 
     extra = ""
     params = [new_status]
@@ -800,13 +952,15 @@ def set_process_status(cur, body: dict, actor: str, can_confirm_role: bool):
     version_to_record = before[0]["version"] + 1 if new_status == "published" else before[0]["version"]
     cur.execute(
         f"INSERT INTO {SCHEMA}.exec_process_version_history "
-        f"(entity_type, entity_id, version, status, author, comment, snapshot_json) "
-        f"VALUES ('process_node', %s, %s, %s, %s, %s, %s)",
+        f"(entity_type, entity_id, version, status, author, comment, snapshot_json, snapshot_checksum) "
+        f"VALUES ('process_node', %s, %s, %s, %s, %s, %s, %s)",
         (nid, version_to_record, new_status, actor, nz(body.get("comment")),
-         json.dumps(snapshot, ensure_ascii=False, default=str) if snapshot is not None else None),
+         json.dumps(snapshot, ensure_ascii=False, default=str) if snapshot is not None else None, checksum),
     )
-    record_review_decision(cur, "process_node", nid, version_to_record, new_status, actor, body.get("comment"))
+    record_review_decision(cur, "process_node", nid, version_to_record, new_status, actor, body.get("comment"),
+                            actor_authorized=can_confirm_role if new_status in STATUS_REQUIRES_CONFIRM_ROLE else True)
     log_change(cur, actor, "process_node", nid, f"status_{new_status}", before=before[0])
+    resolve_edit_conflicts(cur, "process_node", nid)
     return nid, None
 
 
@@ -851,7 +1005,8 @@ def get_process_detail(cur, node_id: int):
     systems = rows(cur)
 
     cur.execute(f"""
-        SELECT d.id, d.title, d.source_type, d.state, d.confidentiality_level
+        SELECT d.id, d.title, d.source_type, d.state, d.confidentiality_level,
+               d.confirmed_actual_by, d.confirmed_actual_at, l.is_required
         FROM {SCHEMA}.exec_process_document_link l
         JOIN {SCHEMA}.exec_source_document d ON d.id = l.document_id
         WHERE l.process_node_id = %s ORDER BY d.title
@@ -888,7 +1043,7 @@ def save_passport(cur, body: dict, actor: str):
     before = rows(cur)
     if not before:
         return None, "Паспорт не найден"
-    lock_err = check_optimistic_lock(before[0], body)
+    lock_err = check_optimistic_lock(before[0], body, entity_type="process_passport")
     if lock_err:
         return None, lock_err
     fields = ["goal", "boundaries_note", "trigger_event", "inputs_note",
@@ -903,6 +1058,7 @@ def save_passport(cur, body: dict, actor: str):
         list(vals.values()) + [actor, node_id],
     )
     log_change(cur, actor, "process_passport", node_id, "update", before=before[0], after=vals)
+    resolve_edit_conflicts(cur, "process_passport", node_id)
     return node_id, None
 
 
@@ -937,6 +1093,196 @@ def passport_completeness(cur, node_id: int):
     return {"ready": ready, "needs_attention": needs_attention, "can_confirm": can_confirm}
 
 
+# ── Итерация 4, раздел 3: единый публикационный чек-лист ────────────────────
+# Серверная агрегированная проверка ВСЕЙ версии процесса перед переходом в
+# published. Возвращает {"can_publish": bool, "blocking_errors": [...],
+# "warnings": [...]} — каждый пункт с кодом, текстом, и по возможности
+# ref_type/ref_id для перехода «куда исправить». НИКОГДА не используется ИИ:
+# все проверки — точные предикаты по полям БД.
+
+def _pub_err(code, message, ref_type=None, ref_id=None):
+    return {"code": code, "message": message, "ref_type": ref_type, "ref_id": ref_id}
+
+
+def publication_checklist(cur, node_id: int):
+    detail = get_process_detail(cur, node_id)
+    if not detail:
+        return None
+    node = detail["node"]
+    errors, warnings = [], []
+
+    # ── Блокирующие ошибки ────────────────────────────────────────────────
+    if not node.get("owner_person_id"):
+        errors.append(_pub_err("no_owner", "Не назначен владелец процесса", "process_node", node_id))
+
+    p = detail["passport"] or {}
+    if not nz(p.get("goal")):
+        errors.append(_pub_err("no_goal", "Не заполнена цель процесса", "passport", node_id))
+    if not nz(p.get("outputs_note")):
+        errors.append(_pub_err("no_expected_result", "Не заполнен ожидаемый результат (выходы процесса)", "passport", node_id))
+
+    as_is_diagrams = [d for d in detail["diagrams"] if d["variant"] == "as_is"]
+    if not as_is_diagrams:
+        errors.append(_pub_err("no_as_is", "Отсутствует схема AS-IS", "process_node", node_id))
+    else:
+        as_is_confirmed = [d for d in as_is_diagrams if d["model_status"] in ("confirmed", "published")]
+        if not as_is_confirmed:
+            errors.append(_pub_err("as_is_not_confirmed", "Нет подтверждённой схемы AS-IS", "diagram", as_is_diagrams[0]["id"]))
+        for d in as_is_diagrams:
+            check = validate_diagram(cur, d["id"])
+            for e in check["errors"]:
+                ref_id = e["node_ids"][0] if e.get("node_ids") else d["id"]
+                ref_type = "diagram_node" if e.get("node_ids") else "diagram"
+                if e["code"] == "no_start":
+                    errors.append(_pub_err("no_start_event", f'Схема «{d["title"]}»: отсутствует начальное событие', "diagram", d["id"]))
+                elif e["code"] == "no_end":
+                    errors.append(_pub_err("no_end_event", f'Схема «{d["title"]}»: отсутствует конечное событие', "diagram", d["id"]))
+                elif e["code"] in ("disconnected", "broken_flow", "self_loop"):
+                    errors.append(_pub_err("broken_flow", f'Схема «{d["title"]}»: {e["message"]}', ref_type, ref_id))
+                elif e["code"] == "task_outside_lane":
+                    errors.append(_pub_err("task_outside_lane", f'Схема «{d["title"]}»: {e["message"]}', ref_type, ref_id))
+                elif e["code"] == "dangling_ref":
+                    errors.append(_pub_err("dangling_ref", f'Схема «{d["title"]}»: {e["message"]}', "diagram", d["id"]))
+                else:
+                    errors.append(_pub_err(e["code"], f'Схема «{d["title"]}»: {e["message"]}', ref_type, ref_id))
+
+    required_participants = [pt for pt in detail["participants"] if pt.get("is_required", True)]
+    unconfirmed_participants = [pt for pt in required_participants if pt.get("confirmation_status") != "confirmed"]
+    if unconfirmed_participants:
+        for pt in unconfirmed_participants:
+            errors.append(_pub_err("participant_unconfirmed",
+                                    f'Обязательный участник «{pt.get("role_title") or "без роли"}» не подтверждён',
+                                    "process_participant", pt["id"]))
+
+    required_docs = [d for d in detail["documents"] if d.get("is_required", True)]
+    for d in required_docs:
+        if not d.get("id"):
+            errors.append(_pub_err("required_document_missing", "Отсутствует обязательный документ", "process_node", node_id))
+        elif not d.get("confirmed_actual_by"):
+            errors.append(_pub_err("required_document_unconfirmed",
+                                    f'Обязательный документ «{d.get("title")}» не подтверждён как актуальный',
+                                    "document", d["id"]))
+
+    # Критичные риски: контроль ОПРЕДЕЛЁН И ПОДТВЕРЖДЁН, либо риск принят
+    # уполномоченным лицом, либо разработка контроля включена в улучшение с
+    # владельцем и сроком. «Требует уточнения» НЕ считается существующим
+    # контролем.
+    critical_risks = [r for r in detail["risks"] if r.get("qualitative_level") == "critical"]
+    for r in critical_risks:
+        cur.execute(
+            f"SELECT * FROM {SCHEMA}.exec_process_control WHERE risk_id = %s AND is_test_data = false",
+            (r["id"],),
+        )
+        controls = rows(cur)
+        has_confirmed_control = any(
+            c.get("verification_status") == "confirmed" and nz(c.get("title")) for c in controls
+        )
+        risk_accepted = bool(r.get("accepted_by"))
+        control_plan_ok = False
+        if r.get("control_plan_improvement_id"):
+            cur.execute(
+                f"SELECT * FROM {SCHEMA}.exec_process_improvement WHERE id = %s",
+                (r["control_plan_improvement_id"],),
+            )
+            imp_rows = rows(cur)
+            if imp_rows:
+                imp = imp_rows[0]
+                control_plan_ok = bool(imp.get("owner_person_id")) and bool(imp.get("due_date"))
+        if not (has_confirmed_control or risk_accepted or control_plan_ok):
+            errors.append(_pub_err(
+                "critical_risk_no_decision",
+                f'Критичный риск «{r.get("title") or "без названия"}» не имеет управленческого решения по контролю '
+                f'(контроль не подтверждён, риск не принят, план разработки контроля не назначен)',
+                "risk", r["id"],
+            ))
+
+    # Незавершённый конфликт редактирования — по process_node и всем его
+    # диаграммам/дочерним сущностям.
+    cur.execute(f"""
+        SELECT COUNT(*) FROM {SCHEMA}.exec_process_edit_conflict_log
+        WHERE resolved_at IS NULL AND (
+            (entity_type = 'process_node' AND entity_id = %s)
+            OR (entity_type = 'process_passport' AND entity_id = %s)
+            OR (entity_type IN ('process_risk','process_control','process_metric','process_issue','process_improvement','process_participant')
+                AND entity_id IN (
+                    SELECT id FROM {SCHEMA}.exec_process_risk WHERE process_node_id = %s
+                    UNION SELECT id FROM {SCHEMA}.exec_process_metric WHERE process_node_id = %s
+                    UNION SELECT id FROM {SCHEMA}.exec_process_issue WHERE process_node_id = %s
+                    UNION SELECT id FROM {SCHEMA}.exec_process_participant WHERE process_node_id = %s
+                ))
+            OR (entity_type IN ('process_diagram','process_diagram_lane','process_diagram_node','process_diagram_edge')
+                AND entity_id IN (SELECT id FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s))
+        )
+    """, (node_id, node_id, node_id, node_id, node_id, node_id, node_id))
+    if cur.fetchone()[0] > 0:
+        errors.append(_pub_err("unresolved_edit_conflict", "Есть незавершённый конфликт редактирования — перечитайте актуальные данные и сохраните заново", "process_node", node_id))
+
+    if node.get("model_status") != "confirmed":
+        errors.append(_pub_err("invalid_status", f'Модель находится в недопустимом статусе «{MODEL_STATUSES.get(node.get("model_status"), node.get("model_status"))}» — публикация возможна только из статуса «Подтверждён»', "process_node", node_id))
+
+    # Проверка/подтверждение выполнены неуполномоченным пользователем.
+    cur.execute(f"""
+        SELECT actor, actor_authorized, decision FROM {SCHEMA}.exec_process_review_decision
+        WHERE entity_type = 'process_node' AND entity_id = %s AND decision = 'confirmed'
+          AND is_test_data = false ORDER BY created_at DESC LIMIT 1
+    """, (node_id,))
+    r = cur.fetchone()
+    if r and r[1] is False:
+        errors.append(_pub_err("unauthorized_confirmation", f'Подтверждение выполнено пользователем «{r[0]}» без прав уполномоченного', "process_node", node_id))
+
+    # ── Предупреждения (требуют явного решения, но не блокируют) ───────────
+    if not any(m.get("metric_kind") == "result" for m in detail["metrics"]):
+        warnings.append(_pub_err("no_result_metric", "Нет показателя результата", "process_node", node_id))
+
+    for r in detail["risks"]:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE risk_id = %s AND is_test_data = false", (r["id"],))
+        for c in rows(cur):
+            if c.get("method") != "automated":
+                warnings.append(_pub_err("control_not_automated", f'Контроль «{c.get("title") or "без названия"}» не автоматизирован', "control", c["id"]))
+
+    for m in detail["metrics"]:
+        if not nz(m.get("data_source")):
+            warnings.append(_pub_err("metric_no_source", f'Показатель «{m.get("title") or "без названия"}» без источника', "metric", m["id"]))
+
+    for d in detail["diagrams"]:
+        if d["variant"] != "as_is":
+            continue
+        cur.execute(f"SELECT id, title FROM {SCHEMA}.exec_process_issue WHERE process_node_id = %s AND is_test_data = false", (node_id,))
+        for iss in rows(cur):
+            cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_improvement WHERE as_is_issue_id = %s", (iss["id"],))
+            if cur.fetchone()[0] == 0:
+                warnings.append(_pub_err("issue_no_improvement", f'Проблема «{iss.get("title") or "без названия"}» не связана с улучшением', "issue", iss["id"]))
+
+    for d in detail["diagrams"]:
+        if d["variant"] != "to_be":
+            continue
+        for imp in list_improvements(cur, d["id"]):
+            if not imp.get("initiative_id"):
+                warnings.append(_pub_err("improvement_no_initiative", f'Улучшение «{(imp.get("description") or "")[:60]}» не связано с инициативой', "improvement", imp["id"]))
+
+    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_clarification_note WHERE entity_id = %s AND status != 'resolved'", (node_id,))
+    open_q = cur.fetchone()[0]
+    if open_q:
+        warnings.append(_pub_err("open_questions", f"Есть {open_q} открытых вопросов на уточнение, не блокирующих публикацию", "process_node", node_id))
+
+    # Явно принятые предупреждения уполномоченным пользователем — исключаем
+    # из overrides_required (раздел 3 ТЗ: предупреждение можно принять только
+    # явным решением с комментарием, без «Игнорировать всё»).
+    cur.execute(f"""
+        SELECT warning_code, warning_ref_id FROM {SCHEMA}.exec_process_warning_decision
+        WHERE entity_type = 'process_node' AND entity_id = %s AND is_test_data = false
+    """, (node_id,))
+    accepted = {(w["warning_code"], w["warning_ref_id"]) for w in rows(cur)}
+    overrides_required = [w for w in warnings if (w["code"], w.get("ref_id")) not in accepted]
+
+    return {
+        "can_publish": len(errors) == 0,
+        "blocking_errors": errors,
+        "warnings": warnings,
+        "overrides_required": overrides_required,
+    }
+
+
 # ── Итерация 3: риски процесса ───────────────────────────────────────────────
 # Вероятность/влияние НЕ придумываются — только качественный уровень.
 # severity_rank выводится детерминированно из qualitative_level (только для
@@ -945,9 +1291,9 @@ def passport_completeness(cur, node_id: int):
 RISK_FIELDS = [
     "process_node_id", "diagram_node_id", "title", "event_description", "cause", "consequence",
     "qualitative_level", "owner_person_id", "owner_role", "source_note", "comment",
-    "linked_initiative_risk_id", "verification_status",
+    "linked_initiative_risk_id", "verification_status", "control_plan_improvement_id",
 ]
-RISK_INT_FIELDS = {"process_node_id", "diagram_node_id", "owner_person_id", "linked_initiative_risk_id"}
+RISK_INT_FIELDS = {"process_node_id", "diagram_node_id", "owner_person_id", "linked_initiative_risk_id", "control_plan_improvement_id"}
 
 
 def list_process_risks(cur, process_node_id: int):
@@ -995,7 +1341,7 @@ def save_process_risk(cur, body: dict, actor: str):
         before = rows(cur)
         if not before:
             return None, "Риск не найден"
-        lock_err = check_optimistic_lock(before[0], body)
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_risk")
         if lock_err:
             return None, lock_err
         if not vals:
@@ -1008,6 +1354,7 @@ def save_process_risk(cur, body: dict, actor: str):
         if "diagram_node_id" in vals:
             sync_diagram_node_ref(rid, before[0].get("diagram_node_id"), vals["diagram_node_id"])
         log_change(cur, actor, "process_risk", rid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_risk", rid)
         return rid, None
 
     node_id = vals.get("process_node_id")
@@ -1056,6 +1403,34 @@ def confirm_process_risk(cur, body: dict, actor: str, confirm: bool):
     return rid, None
 
 
+def accept_process_risk(cur, body: dict, actor: str, can_confirm_role: bool, accept: bool):
+    """Раздел 3 ТЗ итерации 4: риск принят «как есть» уполномоченным лицом —
+    отдельное явное управленческое решение, а не побочный эффект save_process_risk
+    (иначе любой редактор мог бы молча «принять» критичный риск без контроля).
+    Требует can_confirm и обязательного комментария-обоснования."""
+    rid = as_int(body.get("id"))
+    if not rid:
+        return None, "Не указан риск"
+    if accept:
+        if not can_confirm_role:
+            return None, "Недостаточно прав для принятия риска — нужны права уполномоченного"
+        note = nz(body.get("accepted_note"))
+        if not note:
+            return None, "Укажите обоснование принятия риска"
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_risk SET accepted_by = %s, accepted_at = now(), accepted_note = %s, updated_at = now() WHERE id = %s",
+            (actor, note, rid),
+        )
+        log_change(cur, actor, "process_risk", rid, "accept", after={"accepted_note": note})
+    else:
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_risk SET accepted_by = NULL, accepted_at = NULL, accepted_note = NULL, updated_at = now() WHERE id = %s",
+            (rid,),
+        )
+        log_change(cur, actor, "process_risk", rid, "unaccept")
+    return rid, None
+
+
 # ── Контрольные процедуры ────────────────────────────────────────────────────
 
 CONTROL_FIELDS = [
@@ -1100,7 +1475,7 @@ def save_process_control(cur, body: dict, actor: str):
         before = rows(cur)
         if not before:
             return None, "Контроль не найден"
-        lock_err = check_optimistic_lock(before[0], body)
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_control")
         if lock_err:
             return None, lock_err
         if not vals:
@@ -1121,6 +1496,7 @@ def save_process_control(cur, body: dict, actor: str):
             params + [cid],
         )
         log_change(cur, actor, "process_control", cid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_control", cid)
         return cid, None
 
     risk_id = vals.get("risk_id")
@@ -1202,7 +1578,7 @@ def save_process_metric(cur, body: dict, actor: str):
         before = rows(cur)
         if not before:
             return None, "Показатель не найден"
-        lock_err = check_optimistic_lock(before[0], body)
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_metric")
         if lock_err:
             return None, lock_err
         if not vals:
@@ -1213,6 +1589,7 @@ def save_process_metric(cur, body: dict, actor: str):
             list(vals.values()) + [mid],
         )
         log_change(cur, actor, "process_metric", mid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_metric", mid)
         return mid, None
 
     node_id = vals.get("process_node_id")
@@ -1307,7 +1684,7 @@ def save_process_issue(cur, body: dict, actor: str):
         before = rows(cur)
         if not before:
             return None, "Проблема не найдена"
-        lock_err = check_optimistic_lock(before[0], body)
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_issue")
         if lock_err:
             return None, lock_err
         if not vals:
@@ -1318,6 +1695,7 @@ def save_process_issue(cur, body: dict, actor: str):
             list(vals.values()) + [iid],
         )
         log_change(cur, actor, "process_issue", iid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_issue", iid)
         return iid, None
 
     node_id = vals.get("process_node_id")
@@ -1435,16 +1813,47 @@ def risk_control_checks(cur, process_node_id: int):
 # ── Участники, системы, документы, связи с функциями ────────────────────────
 
 def save_participant(cur, body: dict, actor: str):
+    pid = as_int(body.get("id"))
+    if pid:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_participant WHERE id = %s", (pid,))
+        before = rows(cur)
+        if not before:
+            return None, "Участник не найден"
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_participant")
+        if lock_err:
+            return None, lock_err
+        fields = ["role_title", "person_id", "org_unit_id", "participation_kind", "is_required"]
+        vals = {}
+        for f in fields:
+            if f not in body:
+                continue
+            if f in ("person_id", "org_unit_id"):
+                vals[f] = as_int(body[f])
+            elif f == "is_required":
+                vals[f] = as_bool(body[f])
+            else:
+                vals[f] = nz(body.get(f))
+        if not vals:
+            return pid, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_participant SET {sets}, updated_by = %s, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [actor, pid],
+        )
+        log_change(cur, actor, "process_participant", pid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_participant", pid)
+        return pid, None
+
     node_id = as_int(body.get("process_node_id"))
     role_title = nz(body.get("role_title"))
     if not node_id or not role_title:
         return None, "Укажите роль участника"
     cur.execute(
         f"INSERT INTO {SCHEMA}.exec_process_participant "
-        f"(process_node_id, role_title, person_id, org_unit_id, participation_kind) "
-        f"VALUES (%s,%s,%s,%s,%s) RETURNING id",
+        f"(process_node_id, role_title, person_id, org_unit_id, participation_kind, is_required, updated_by) "
+        f"VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (node_id, role_title, as_int(body.get("person_id")), as_int(body.get("org_unit_id")),
-         body.get("participation_kind") or "executor"),
+         body.get("participation_kind") or "executor", as_bool(body.get("is_required"), True), actor),
     )
     new_id = cur.fetchone()[0]
     log_change(cur, actor, "process_participant", new_id, "create", after=body)
@@ -1455,8 +1864,23 @@ def remove_participant(cur, body: dict, actor: str):
     pid = as_int(body.get("id"))
     if not pid:
         return None, "Не указан участник"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_participant WHERE id = %s", (pid,))
+    before = rows(cur)
     cur.execute(f"DELETE FROM {SCHEMA}.exec_process_participant WHERE id = %s", (pid,))
-    log_change(cur, actor, "process_participant", pid, "delete")
+    log_change(cur, actor, "process_participant", pid, "delete", before=before[0] if before else None)
+    return pid, None
+
+
+def confirm_participant(cur, body: dict, actor: str, confirm: bool):
+    pid = as_int(body.get("id"))
+    if not pid:
+        return None, "Не указан участник"
+    status = "confirmed" if confirm else "user_draft"
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_participant SET confirmation_status = %s, updated_by = %s, updated_at = now() WHERE id = %s",
+        (status, actor, pid),
+    )
+    log_change(cur, actor, "process_participant", pid, "confirm" if confirm else "unconfirm")
     return pid, None
 
 
@@ -1505,10 +1929,11 @@ def link_document(cur, body: dict, actor: str, link: bool):
     if not node_id or not document_id:
         return None, "Не указаны параметры связи"
     if link:
+        is_required = as_bool(body.get("is_required"), True)
         cur.execute(
-            f"INSERT INTO {SCHEMA}.exec_process_document_link (process_node_id, document_id) "
-            f"VALUES (%s,%s) ON CONFLICT DO NOTHING",
-            (node_id, document_id),
+            f"INSERT INTO {SCHEMA}.exec_process_document_link (process_node_id, document_id, is_required) "
+            f"VALUES (%s,%s,%s) ON CONFLICT (process_node_id, document_id) DO UPDATE SET is_required = EXCLUDED.is_required",
+            (node_id, document_id, is_required),
         )
     else:
         cur.execute(
@@ -1685,7 +2110,7 @@ def save_lane(cur, body: dict, actor: str):
             return None, "Дорожка не найдена"
         before = before_rows[0]
         diagram_id = before["diagram_id"]
-        lock_err = check_optimistic_lock(before, body)
+        lock_err = check_optimistic_lock(before, body, entity_type="process_diagram_lane")
         if lock_err:
             return None, lock_err
     if not _diagram_editable(cur, diagram_id):
@@ -1712,6 +2137,7 @@ def save_lane(cur, body: dict, actor: str):
         cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_lane SET {sets}, updated_by = %s, updated_at = now() WHERE id = %s",
                     list(vals.values()) + [actor, lane_id])
         log_change(cur, actor, "process_diagram_lane", lane_id, "update", before=before, after=vals, context_id=diagram_id)
+        resolve_edit_conflicts(cur, "process_diagram_lane", lane_id)
         return lane_id, None
     vals["diagram_id"] = diagram_id
     vals["updated_by"] = actor
@@ -1772,7 +2198,7 @@ def save_diagram_node(cur, body: dict, actor: str):
         # чтобы не мешать перетаскиванию, если только клиент явно не просит
         # проверку (expected_updated_at передаётся из свойств/формы, а не из
         # обработчика перетаскивания на холсте).
-        lock_err = check_optimistic_lock(before, body)
+        lock_err = check_optimistic_lock(before, body, entity_type="process_diagram_node")
         if lock_err:
             return None, lock_err
     if not _diagram_editable(cur, diagram_id):
@@ -1805,6 +2231,7 @@ def save_diagram_node(cur, body: dict, actor: str):
             list(vals.values()) + [node_id],
         )
         log_change(cur, actor, "process_diagram_node", node_id, "update", before=before, after=vals, context_id=diagram_id)
+        resolve_edit_conflicts(cur, "process_diagram_node", node_id)
         return node_id, None
 
     node_type = vals.get("node_type")
@@ -1855,6 +2282,35 @@ def delete_diagram_node(cur, body: dict, actor: str):
 
 
 def save_diagram_edge(cur, body: dict, actor: str):
+    edge_id = as_int(body.get("id"))
+    if edge_id:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE id = %s", (edge_id,))
+        before_rows = rows(cur)
+        if not before_rows:
+            return None, "Связь не найдена"
+        before = before_rows[0]
+        diagram_id = before["diagram_id"]
+        lock_err = check_optimistic_lock(before, body, entity_type="process_diagram_edge")
+        if lock_err:
+            return None, lock_err
+        if not _diagram_editable(cur, diagram_id):
+            return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+        vals = {}
+        if "label" in body:
+            vals["label"] = nz(body.get("label"))
+        if "edge_type" in body:
+            vals["edge_type"] = body.get("edge_type") or "flow"
+        if not vals:
+            return edge_id, None
+        sets = ", ".join(f"{k} = %s" for k in vals)
+        cur.execute(
+            f"UPDATE {SCHEMA}.exec_process_diagram_edge SET {sets}, updated_by = %s, updated_at = now() WHERE id = %s",
+            list(vals.values()) + [actor, edge_id],
+        )
+        log_change(cur, actor, "process_diagram_edge", edge_id, "update", before=before, after=vals, context_id=diagram_id)
+        resolve_edit_conflicts(cur, "process_diagram_edge", edge_id)
+        return edge_id, None
+
     diagram_id = as_int(body.get("diagram_id"))
     source_id = as_int(body.get("source_node_id"))
     target_id = as_int(body.get("target_node_id"))
@@ -1912,13 +2368,24 @@ def diagram_action_log(cur, diagram_id: int, limit: int = 20):
     return rows(cur)
 
 
-def undo_last_diagram_action(cur, body: dict, actor: str):
+def undo_last_diagram_action(cur, body: dict, actor: str, can_confirm_role: bool):
     """Отмена последнего сохранённого действия текущего сеанса на схеме
     (раздел 8 ТЗ итерации 4): перемещение узла, изменение свойства,
     удаление элемента — реализовано через before_json audit_log, без
     отдельного стека undo. Если явно указан log_id — отменяется конкретная
     запись (например «отменить это перемещение»), иначе — последнее
-    неотменённое действие по диаграмме."""
+    неотменённое действие по диаграмме.
+
+    Раздел 10 ТЗ итерации 4 — безопасность отмены:
+      * отменить можно только своё действие, либо (can_confirm_role=True)
+        действие любого автора — «специальное право»;
+      * нельзя отменить, если поверх него уже есть более новое неотменённое
+        изменение того же элемента, сделанное ДРУГИМ пользователем — иначе
+        отмена молча уничтожит чужую свежую правку;
+      * отмена подтверждённой/опубликованной схемы запрещена (через
+        _diagram_editable);
+      * повторный запрос с тем же log_id идемпотентен — просто сообщает, что
+        действие уже отменено, не откатывает следующее действие в очереди."""
     diagram_id = as_int(body.get("diagram_id"))
     log_id = as_int(body.get("log_id"))
     if not diagram_id:
@@ -1928,12 +2395,12 @@ def undo_last_diagram_action(cur, body: dict, actor: str):
 
     if log_id:
         cur.execute(f"""
-            SELECT id, entity_type, entity_id, action, before_json, after_json, undone_at
+            SELECT id, entity_type, entity_id, action, before_json, after_json, undone_at, actor, created_at
             FROM {SCHEMA}.exec_audit_log WHERE id = %s AND context_id = %s
         """, (log_id, diagram_id))
     else:
         cur.execute(f"""
-            SELECT id, entity_type, entity_id, action, before_json, after_json, undone_at
+            SELECT id, entity_type, entity_id, action, before_json, after_json, undone_at, actor, created_at
             FROM {SCHEMA}.exec_audit_log
             WHERE context_id = %s AND entity_type IN ('process_diagram_lane', 'process_diagram_node', 'process_diagram_edge')
               AND undone_at IS NULL
@@ -1942,9 +2409,15 @@ def undo_last_diagram_action(cur, body: dict, actor: str):
     r = cur.fetchone()
     if not r:
         return None, "Нечего отменять"
-    entry_id, entity_type, entity_id, action, before_json, after_json, undone_at = r
+    entry_id, entity_type, entity_id, action, before_json, after_json, undone_at, entry_actor, entry_created_at = r
     if undone_at:
+        # Идемпотентность: повторный запрос на уже отменённую запись не ищет
+        # следующее действие и ничего не откатывает — просто честно сообщает,
+        # что отменять уже нечего.
         return None, "Это действие уже отменено"
+
+    if entry_actor != actor and not can_confirm_role:
+        return None, "Можно отменить только собственное действие — для отмены чужого действия нужны права уполномоченного"
 
     table = {
         "process_diagram_lane": "exec_process_diagram_lane",
@@ -1953,6 +2426,20 @@ def undo_last_diagram_action(cur, body: dict, actor: str):
     }.get(entity_type)
     if not table:
         return None, "Это действие нельзя отменить"
+
+    # Поверх отменяемого действия уже есть более новое неотменённое изменение
+    # ТОГО ЖЕ элемента от другого пользователя — отмена перезаписала бы его
+    # работу молча, поэтому блокируем и просим сначала разобраться вручную.
+    cur.execute(f"""
+        SELECT actor, action, created_at FROM {SCHEMA}.exec_audit_log
+        WHERE entity_type = %s AND entity_id = %s AND id != %s AND created_at > %s
+          AND undone_at IS NULL AND action IN ('create', 'update', 'delete')
+        ORDER BY created_at DESC LIMIT 1
+    """, (entity_type, entity_id, entry_id, entry_created_at))
+    newer = cur.fetchone()
+    if newer and newer[0] != actor:
+        return None, (f"Поверх этого действия уже есть более новое изменение того же элемента "
+                       f"от пользователя {newer[0]} — отмена невозможна, чтобы не потерять его правку")
 
     before = before_json if isinstance(before_json, dict) else (json.loads(before_json) if before_json else None)
 
@@ -1981,14 +2468,28 @@ def undo_last_diagram_action(cur, body: dict, actor: str):
         ph = ", ".join(["%s"] * (1 + len(restore_cols)))
         cur.execute(f"INSERT INTO {SCHEMA}.{table} ({cols}) VALUES ({ph}) ON CONFLICT (id) DO NOTHING",
                     [entity_id] + list(restore_cols.values()))
+        skipped_edges = 0
         if cascade_edges:
             for e in cascade_edges:
+                # Восстанавливаем связь только если оба её конца всё ещё
+                # существуют на схеме — иначе это создало бы связь в никуда
+                # («конфликт» из раздела 10 ТЗ: не восстанавливаем при
+                # конфликте состояния).
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_diagram_node WHERE id IN (%s,%s)",
+                    (e.get("source_node_id"), e.get("target_node_id")),
+                )
+                if cur.fetchone()[0] != 2:
+                    skipped_edges += 1
+                    continue
                 e_cols = {k: v for k, v in e.items() if k not in ("id", "created_at")}
                 cols2 = ", ".join(["id"] + list(e_cols.keys()))
                 ph2 = ", ".join(["%s"] * (1 + len(e_cols)))
                 cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_edge ({cols2}) VALUES ({ph2}) ON CONFLICT (id) DO NOTHING",
                             [e["id"]] + list(e_cols.values()))
         result_note = "Элемент восстановлен"
+        if skipped_edges:
+            result_note += f" (без {skipped_edges} связи(ей) — второй конец уже не существует)"
     else:
         return None, "Это действие нельзя отменить"
 
@@ -2037,6 +2538,11 @@ def autosave_draft(cur, body: dict, actor: str):
 
 
 def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
+    """Переход статуса диаграммы. Раздел 1 ТЗ итерации 4: published для схемы
+    тоже заблокирован без полного публикационного чек-листа процесса-владельца
+    (схема — часть версии процесса, отдельно «опубликованной» схемы без
+    опубликованного процесса быть не должно) плюс собственная детерминированная
+    проверка схемы (validate_diagram)."""
     diagram_id = as_int(body.get("id"))
     new_status = body.get("status")
     if not diagram_id or not new_status:
@@ -2047,7 +2553,7 @@ def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
     if not before:
         return None, "Схема не найдена"
 
-    lock_err = check_optimistic_lock(before[0], body)
+    lock_err = check_optimistic_lock(before[0], body, entity_type="process_diagram")
     if lock_err:
         return None, lock_err
 
@@ -2060,7 +2566,35 @@ def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
         if check["errors"]:
             return None, "Нельзя подтвердить схему с ошибками — исправьте их на вкладке «Проверить схему»"
 
-    snapshot = get_diagram_full(cur, diagram_id) if new_status == "published" else None
+    if new_status == "published":
+        check = validate_diagram(cur, diagram_id)
+        if check["errors"]:
+            return None, {
+                "code": "publication_validation_failed",
+                "message": "Публикация схемы невозможна — есть ошибки схемы",
+                "blocking_errors": [
+                    {"code": e["code"], "message": e["message"], "ref_type": "diagram_node",
+                     "ref_id": (e["node_ids"][0] if e.get("node_ids") else diagram_id)}
+                    for e in check["errors"]
+                ],
+                "warnings": [], "overrides_required": [],
+            }
+        process_node_id = before[0].get("process_node_id")
+        checklist = publication_checklist(cur, process_node_id) if process_node_id else None
+        if checklist and not checklist["can_publish"]:
+            return None, {
+                "code": "publication_validation_failed",
+                "message": "Публикация схемы невозможна — процесс-владелец не прошёл публикационный чек-лист",
+                "blocking_errors": checklist["blocking_errors"],
+                "warnings": checklist["warnings"],
+                "overrides_required": checklist["overrides_required"],
+            }
+
+    snapshot = None
+    checksum = None
+    if new_status == "published":
+        snapshot = get_diagram_full(cur, diagram_id)
+        checksum = hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, default=str, sort_keys=True).encode("utf-8")).hexdigest()
 
     extra = ""
     params = [new_status]
@@ -2074,13 +2608,15 @@ def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
     version_to_record = before[0]["version"] + 1 if new_status == "published" else before[0]["version"]
     cur.execute(
         f"INSERT INTO {SCHEMA}.exec_process_version_history "
-        f"(entity_type, entity_id, version, status, author, comment, snapshot_json) "
-        f"VALUES ('diagram', %s, %s, %s, %s, %s, %s)",
+        f"(entity_type, entity_id, version, status, author, comment, snapshot_json, snapshot_checksum) "
+        f"VALUES ('diagram', %s, %s, %s, %s, %s, %s, %s)",
         (diagram_id, version_to_record, new_status, actor, nz(body.get("comment")),
-         json.dumps(snapshot, ensure_ascii=False, default=str) if snapshot is not None else None),
+         json.dumps(snapshot, ensure_ascii=False, default=str) if snapshot is not None else None, checksum),
     )
-    record_review_decision(cur, "diagram", diagram_id, version_to_record, new_status, actor, body.get("comment"))
+    record_review_decision(cur, "diagram", diagram_id, version_to_record, new_status, actor, body.get("comment"),
+                            actor_authorized=can_confirm_role if new_status in STATUS_REQUIRES_CONFIRM_ROLE else True)
     log_change(cur, actor, "process_diagram", diagram_id, f"status_{new_status}", before=before[0])
+    resolve_edit_conflicts(cur, "process_diagram", diagram_id)
     return diagram_id, None
 
 
@@ -2409,7 +2945,7 @@ def compare_diagrams(cur, as_is_id: int, to_be_id: int):
 
 IMPROVEMENT_FIELDS = [
     "to_be_diagram_id", "to_be_node_id", "as_is_issue_id", "description", "expected_effect_note",
-    "effect_type", "result_metric_id", "owner_person_id", "status", "initiative_id",
+    "effect_type", "result_metric_id", "owner_person_id", "status", "initiative_id", "due_date",
 ]
 IMPROVEMENT_INT_FIELDS = {"to_be_diagram_id", "to_be_node_id", "as_is_issue_id", "result_metric_id", "owner_person_id", "initiative_id"}
 
@@ -2449,7 +2985,7 @@ def save_improvement(cur, body: dict, actor: str):
         before = rows(cur)
         if not before:
             return None, "Изменение не найдено"
-        lock_err = check_optimistic_lock(before[0], body)
+        lock_err = check_optimistic_lock(before[0], body, entity_type="process_improvement")
         if lock_err:
             return None, lock_err
         if not vals:
@@ -2460,6 +2996,7 @@ def save_improvement(cur, body: dict, actor: str):
             list(vals.values()) + [actor, iid],
         )
         log_change(cur, actor, "process_improvement", iid, "update", before=before[0], after=vals)
+        resolve_edit_conflicts(cur, "process_improvement", iid)
         return iid, None
 
     diagram_id = vals.get("to_be_diagram_id")
@@ -2485,6 +3022,9 @@ def delete_improvement(cur, body: dict, actor: str):
     before = rows(cur)
     if not before:
         return None, "Изменение не найдено"
+    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_risk WHERE control_plan_improvement_id = %s", (iid,))
+    if cur.fetchone()[0] > 0:
+        return None, "На это улучшение ссылается план разработки контроля критичного риска — сначала отвяжите риск"
     cur.execute(f"DELETE FROM {SCHEMA}.exec_process_improvement WHERE id = %s", (iid,))
     log_change(cur, actor, "process_improvement", iid, "delete", before=before[0])
     return iid, None
@@ -2508,6 +3048,818 @@ def suggest_initiative_links(cur, to_be_diagram_id: int):
         WHERE iss.process_node_id = %s
     """, (process_node_id,))
     return rows(cur)
+
+
+# ── Итерация 4, раздел 7: отчёт о полноте ────────────────────────────────────
+# Категории отчёта — фиксированный список, каждая даёт статус ready/
+# needs_attention/missing/not_applicable, признак блокировки публикации,
+# объяснение и ссылку (ref_type/ref_id) на место исправления.
+COMPLETENESS_CATEGORIES = [
+    "boundaries", "documents", "functions", "passport", "diagram", "roles",
+    "risks", "controls", "metrics", "issues", "to_be", "initiatives", "approval", "publication",
+]
+COMPLETENESS_STATUS_LABELS = {
+    "ready": "Готово", "needs_attention": "Требует внимания", "missing": "Отсутствует", "not_applicable": "Не применимо",
+}
+
+
+def _cc(category, status, blocks_publication, explanation, ref_type=None, ref_id=None):
+    return {
+        "category": category, "status": status, "blocks_publication": blocks_publication,
+        "explanation": explanation, "ref_type": ref_type, "ref_id": ref_id,
+    }
+
+
+def process_completeness(cur, node_id: int):
+    """Полнота ОДНОГО процесса по всем категориям раздела 7 ТЗ итерации 4 —
+    строится из уже существующих детерминированных проверок (passport_completeness,
+    validate_diagram, risk_control_checks, metric_checks, publication_checklist),
+    не дублирует их логику заново."""
+    detail = get_process_detail(cur, node_id)
+    if not detail:
+        return None
+    node = detail["node"]
+    items = []
+
+    # Границы — на уровне процесса это заполненность boundaries_note паспорта.
+    p = detail["passport"] or {}
+    if nz(p.get("boundaries_note")):
+        items.append(_cc("boundaries", "ready", False, "Границы процесса описаны", "passport", node_id))
+    else:
+        items.append(_cc("boundaries", "missing", True, "Границы процесса не описаны", "passport", node_id))
+
+    # Документы.
+    docs = detail["documents"]
+    required_docs = [d for d in docs if d.get("is_required", True)]
+    if not required_docs:
+        items.append(_cc("documents", "not_applicable", False, "Обязательные документы не назначены", "process_node", node_id))
+    elif all(d.get("confirmed_actual_by") for d in required_docs):
+        items.append(_cc("documents", "ready", False, "Все обязательные документы подтверждены", "process_node", node_id))
+    else:
+        items.append(_cc("documents", "missing", True, "Есть неподтверждённые обязательные документы", "process_node", node_id))
+
+    # Функции.
+    if detail["functions"]:
+        items.append(_cc("functions", "ready", False, "Процесс связан с функцией подразделения", "process_node", node_id))
+    else:
+        items.append(_cc("functions", "needs_attention", False, "Процесс не связан ни с одной функцией", "process_node", node_id))
+
+    # Паспорт.
+    pc = passport_completeness(cur, node_id)
+    if pc and pc["can_confirm"]:
+        items.append(_cc("passport", "ready", False, "Паспорт заполнен", "passport", node_id))
+    elif pc:
+        items.append(_cc("passport", "missing", True, "Паспорт не заполнен полностью", "passport", node_id))
+    else:
+        items.append(_cc("passport", "missing", True, "Паспорт отсутствует", "passport", node_id))
+
+    # Схема (AS-IS).
+    as_is = [d for d in detail["diagrams"] if d["variant"] == "as_is"]
+    if not as_is:
+        items.append(_cc("diagram", "missing", True, "Нет схемы AS-IS", "process_node", node_id))
+    else:
+        d = as_is[0]
+        check = validate_diagram(cur, d["id"])
+        if check["errors"]:
+            items.append(_cc("diagram", "missing", True, f'Схема AS-IS содержит {len(check["errors"])} ошибок', "diagram", d["id"]))
+        elif check["warnings"]:
+            items.append(_cc("diagram", "needs_attention", False, f'Схема AS-IS содержит {len(check["warnings"])} предупреждений', "diagram", d["id"]))
+        else:
+            items.append(_cc("diagram", "ready", False, "Схема AS-IS корректна", "diagram", d["id"]))
+
+    # Роли/участники.
+    required_participants = [pt for pt in detail["participants"] if pt.get("is_required", True)]
+    if not required_participants:
+        items.append(_cc("roles", "missing", True, "Не назначены обязательные участники", "process_node", node_id))
+    elif all(pt.get("confirmation_status") == "confirmed" for pt in required_participants):
+        items.append(_cc("roles", "ready", False, "Обязательные участники подтверждены", "process_node", node_id))
+    else:
+        items.append(_cc("roles", "missing", True, "Есть неподтверждённые обязательные участники", "process_node", node_id))
+
+    # Риски.
+    risks = detail["risks"]
+    if not risks:
+        items.append(_cc("risks", "needs_attention", False, "Риски не выявлены", "process_node", node_id))
+    else:
+        critical_no_decision = 0
+        for r in risks:
+            cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE risk_id = %s AND is_test_data = false", (r["id"],))
+            controls = rows(cur)
+            has_confirmed = any(c.get("verification_status") == "confirmed" for c in controls)
+            if r.get("qualitative_level") == "critical" and not (has_confirmed or r.get("accepted_by") or r.get("control_plan_improvement_id")):
+                critical_no_decision += 1
+        if critical_no_decision:
+            items.append(_cc("risks", "missing", True, f"{critical_no_decision} критичных риска(ов) без решения по контролю", "process_node", node_id))
+        else:
+            items.append(_cc("risks", "ready", False, "Риски выявлены, критичные — с решением по контролю", "process_node", node_id))
+
+    # Контроли.
+    all_controls = []
+    for r in risks:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE risk_id = %s AND is_test_data = false", (r["id"],))
+        all_controls.extend(rows(cur))
+    if not all_controls:
+        items.append(_cc("controls", "not_applicable" if not risks else "needs_attention", False, "Контроли не заведены", "process_node", node_id))
+    elif all(c.get("verification_status") == "confirmed" for c in all_controls):
+        items.append(_cc("controls", "ready", False, "Все контроли подтверждены", "process_node", node_id))
+    else:
+        items.append(_cc("controls", "needs_attention", False, "Есть неподтверждённые контроли", "process_node", node_id))
+
+    # Показатели.
+    metrics = detail["metrics"]
+    if not metrics:
+        items.append(_cc("metrics", "needs_attention", False, "Показатели не заведены", "process_node", node_id))
+    elif any(m.get("metric_kind") == "result" for m in metrics):
+        items.append(_cc("metrics", "ready", False, "Есть показатель результата", "process_node", node_id))
+    else:
+        items.append(_cc("metrics", "needs_attention", False, "Нет показателя результата", "process_node", node_id))
+
+    # Проблемы AS-IS.
+    issues = detail["issues"]
+    if not issues:
+        items.append(_cc("issues", "not_applicable", False, "Проблемы AS-IS не выявлены", "process_node", node_id))
+    else:
+        unresolved = 0
+        for iss in issues:
+            cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_process_improvement WHERE as_is_issue_id = %s", (iss["id"],))
+            if cur.fetchone()[0] == 0:
+                unresolved += 1
+        if unresolved:
+            items.append(_cc("issues", "needs_attention", False, f"{unresolved} проблема(ы) не связаны с улучшением", "process_node", node_id))
+        else:
+            items.append(_cc("issues", "ready", False, "Все проблемы связаны с улучшениями", "process_node", node_id))
+
+    # TO-BE.
+    to_be = [d for d in detail["diagrams"] if d["variant"] == "to_be"]
+    if not to_be:
+        items.append(_cc("to_be", "not_applicable", False, "Схема TO-BE не создана", "process_node", node_id))
+    else:
+        d = to_be[0]
+        check = validate_diagram(cur, d["id"])
+        if check["errors"]:
+            items.append(_cc("to_be", "missing", False, f'Схема TO-BE содержит {len(check["errors"])} ошибок', "diagram", d["id"]))
+        else:
+            items.append(_cc("to_be", "ready", False, "Схема TO-BE корректна", "diagram", d["id"]))
+
+    # Инициативы (через улучшения TO-BE).
+    improvements = []
+    for d in to_be:
+        improvements.extend(list_improvements(cur, d["id"]))
+    if not improvements:
+        items.append(_cc("initiatives", "not_applicable", False, "Улучшений TO-BE нет", "process_node", node_id))
+    elif all(im.get("initiative_id") for im in improvements):
+        items.append(_cc("initiatives", "ready", False, "Все улучшения связаны с инициативами", "process_node", node_id))
+    else:
+        items.append(_cc("initiatives", "needs_attention", False, "Есть улучшения без связи с инициативой", "process_node", node_id))
+
+    # Согласование.
+    cur.execute(f"""
+        SELECT decision, actor_authorized FROM {SCHEMA}.exec_process_review_decision
+        WHERE entity_type = 'process_node' AND entity_id = %s AND is_test_data = false
+        ORDER BY created_at DESC LIMIT 1
+    """, (node_id,))
+    last_decision = cur.fetchone()
+    if not last_decision:
+        items.append(_cc("approval", "needs_attention", False, "Процесс ещё не отправлялся на согласование", "process_node", node_id))
+    elif last_decision[0] == "confirmed" and last_decision[1]:
+        items.append(_cc("approval", "ready", False, "Процесс подтверждён уполномоченным пользователем", "process_node", node_id))
+    elif last_decision[0] == "confirmed" and not last_decision[1]:
+        items.append(_cc("approval", "missing", True, "Подтверждение выполнено неуполномоченным пользователем", "process_node", node_id))
+    else:
+        items.append(_cc("approval", "needs_attention", False, "Согласование не завершено", "process_node", node_id))
+
+    # Публикация.
+    if node.get("model_status") == "published":
+        items.append(_cc("publication", "ready", False, "Процесс опубликован", "process_node", node_id))
+    elif node.get("model_status") == "confirmed":
+        cl = publication_checklist(cur, node_id)
+        if cl and cl["can_publish"]:
+            items.append(_cc("publication", "needs_attention", False, "Готов к публикации", "process_node", node_id))
+        else:
+            n_err = len(cl["blocking_errors"]) if cl else 0
+            items.append(_cc("publication", "missing", True, f"Публикация заблокирована: {n_err} ошибок чек-листа", "process_node", node_id))
+    else:
+        items.append(_cc("publication", "not_applicable", False, "Процесс ещё не подтверждён", "process_node", node_id))
+
+    return {
+        "process_node_id": node_id, "name": node.get("name"), "code": node.get("code"),
+        "model_status": node.get("model_status"), "items": items,
+    }
+
+
+def completeness_report(cur, scope_id: int):
+    """Иерархический отчёт о полноте раздела 7 ТЗ: Блок ВК → подразделение →
+    направление → процесс → версия. Строится снизу вверх — сначала считает
+    process_completeness() для каждого процесса, затем агрегирует по
+    направлению/подразделению/блоку худшим статусом категории (worst-case:
+    missing > needs_attention > ready > not_applicable)."""
+    cur.execute(f"""
+        SELECT id, name, code, level, parent_id, responsible_org_unit_id
+        FROM {SCHEMA}.exec_process_node
+        WHERE scope_id = %s AND is_test_data = false AND is_current = true
+        ORDER BY level, sort_order, code
+    """, (scope_id,))
+    all_nodes = rows(cur)
+    process_nodes = [n for n in all_nodes if n["level"] == "process"]
+
+    process_reports = {n["id"]: process_completeness(cur, n["id"]) for n in process_nodes}
+
+    rank = {"missing": 3, "needs_attention": 2, "ready": 1, "not_applicable": 0}
+
+    def worst_category_status(cat, node_ids):
+        statuses = []
+        for nid in node_ids:
+            rep = process_reports.get(nid)
+            if not rep:
+                continue
+            for it in rep["items"]:
+                if it["category"] == cat:
+                    statuses.append(it)
+        if not statuses:
+            return _cc(cat, "not_applicable", False, "Нет процессов для оценки", None, None)
+        worst = max(statuses, key=lambda i: rank.get(i["status"], 0))
+        return worst
+
+    direction_nodes = [n for n in all_nodes if n["level"] == "direction"]
+    directions_out = []
+    for d in direction_nodes:
+        proc_ids = [n["id"] for n in process_nodes if n["parent_id"] == d["id"]]
+        directions_out.append({
+            "process_node_id": d["id"], "name": d["name"], "code": d["code"],
+            "items": [worst_category_status(cat, proc_ids) for cat in COMPLETENESS_CATEGORIES],
+            "processes": [process_reports[pid] for pid in proc_ids if pid in process_reports],
+        })
+
+    all_process_ids = list(process_reports.keys())
+    scope_summary = {
+        "items": [worst_category_status(cat, all_process_ids) for cat in COMPLETENESS_CATEGORIES],
+    }
+
+    return {
+        "scope_id": scope_id,
+        "scope_summary": scope_summary,
+        "directions": directions_out,
+        "categories": COMPLETENESS_CATEGORIES,
+        "status_labels": COMPLETENESS_STATUS_LABELS,
+    }
+
+
+# ── Итерация 4, раздел 7: экспорт отчёта о полноте в PDF/XLSX ────────────────
+# Шрифт встроен как base64 в font_data.py (см. комментарий там) — деплой
+# облачной функции не переносит произвольные .ttf рядом с index.py, только
+# .py-модули той же папки, поэтому TTFont регистрируется из BytesIO, а не с
+# диска.
+
+
+def _flatten_completeness_rows(report: dict):
+    """Готовит плоский список строк «уровень / объект / категория / статус /
+    объяснение / блокирует ли публикацию» для табличных экспортов — единый
+    источник и для PDF, и для XLSX, чтобы цифры совпадали."""
+    labels = report["status_labels"]
+    out = []
+    for it in report["scope_summary"]["items"]:
+        out.append({
+            "level": "Блок ВК", "object": "Блок внутреннего контроля", "category": it["category"],
+            "status": labels.get(it["status"], it["status"]), "blocks": "Да" if it["blocks_publication"] else "Нет",
+            "explanation": it["explanation"],
+        })
+    for d in report["directions"]:
+        for it in d["items"]:
+            out.append({
+                "level": "Направление", "object": d["name"], "category": it["category"],
+                "status": labels.get(it["status"], it["status"]), "blocks": "Да" if it["blocks_publication"] else "Нет",
+                "explanation": it["explanation"],
+            })
+        for p in d["processes"]:
+            for it in p["items"]:
+                out.append({
+                    "level": "Процесс", "object": p["name"], "category": it["category"],
+                    "status": labels.get(it["status"], it["status"]), "blocks": "Да" if it["blocks_publication"] else "Нет",
+                    "explanation": it["explanation"],
+                })
+    return out
+
+
+CATEGORY_LABELS_RU = {
+    "boundaries": "Границы", "documents": "Документы", "functions": "Функции", "passport": "Паспорт",
+    "diagram": "Схема", "roles": "Роли", "risks": "Риски", "controls": "Контроли", "metrics": "Показатели",
+    "issues": "Проблемы", "to_be": "TO-BE", "initiatives": "Инициативы", "approval": "Согласование", "publication": "Публикация",
+}
+
+
+def export_completeness_pdf(report: dict, generated_by: str) -> bytes:
+    """PDF-отчёт о полноте с Unicode-шрифтом (DejaVu Sans) — раздел 7 ТЗ
+    итерации 4 прямо требует, чтобы кириллица не отображалась квадратами."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    import io as _io
+    from datetime import datetime
+    import font_data
+
+    pdfmetrics.registerFont(TTFont("DejaVuSans", _io.BytesIO(font_data.regular_bytes())))
+    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", _io.BytesIO(font_data.bold_bytes())))
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=15 * mm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("TitleRu", parent=styles["Title"], fontName="DejaVuSans-Bold", fontSize=16)
+    normal_style = ParagraphStyle("NormalRu", parent=styles["Normal"], fontName="DejaVuSans", fontSize=9, leading=12)
+    small_style = ParagraphStyle("SmallRu", parent=styles["Normal"], fontName="DejaVuSans", fontSize=8, leading=10)
+
+    elements = [
+        Paragraph("Отчёт о полноте процессной модели — Блок внутреннего контроля", title_style),
+        Spacer(1, 4 * mm),
+        Paragraph(f"Сформирован: {datetime.now().strftime('%d.%m.%Y %H:%M')} · {generated_by}", small_style),
+        Spacer(1, 6 * mm),
+    ]
+
+    rows_flat = _flatten_completeness_rows(report)
+    header = ["Уровень", "Объект", "Категория", "Статус", "Блокирует публикацию", "Пояснение"]
+    table_data = [header]
+    status_colors = {"Готово": colors.HexColor("#059669"), "Требует внимания": colors.HexColor("#d97706"),
+                      "Отсутствует": colors.HexColor("#dc2626"), "Не применимо": colors.HexColor("#94a3b8")}
+    for r in rows_flat:
+        table_data.append([
+            Paragraph(r["level"], small_style), Paragraph(r["object"], small_style),
+            Paragraph(CATEGORY_LABELS_RU.get(r["category"], r["category"]), small_style),
+            Paragraph(r["status"], small_style), Paragraph(r["blocks"], small_style),
+            Paragraph(r["explanation"] or "", small_style),
+        ])
+
+    t = Table(table_data, colWidths=[22 * mm, 38 * mm, 22 * mm, 26 * mm, 20 * mm, 52 * mm], repeatRows=1)
+    style_cmds = [
+        ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+    ]
+    t.setStyle(TableStyle(style_cmds))
+    elements.append(t)
+    elements.append(Spacer(1, 6 * mm))
+    elements.append(Paragraph(
+        "Тестовые данные (is_test_data=true) исключены из отчёта — цифры отражают только рабочий контур процессной модели.",
+        small_style,
+    ))
+    doc.build(elements)
+    return buf.getvalue()
+
+
+def export_completeness_xlsx(report: dict, generated_by: str) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io as _io
+    from datetime import datetime
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Полнота модели"
+    ws.append(["Отчёт о полноте процессной модели — Блок внутреннего контроля"])
+    ws.append([f"Сформирован: {datetime.now().strftime('%d.%m.%Y %H:%M')} · {generated_by}"])
+    ws.append([])
+    header = ["Уровень", "Объект", "Категория", "Статус", "Блокирует публикацию", "Пояснение"]
+    ws.append(header)
+    header_row = ws.max_row
+    for col in range(1, len(header) + 1):
+        c = ws.cell(row=header_row, column=col)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1E293B")
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+
+    status_fill = {
+        "Готово": PatternFill("solid", fgColor="D1FAE5"),
+        "Требует внимания": PatternFill("solid", fgColor="FEF3C7"),
+        "Отсутствует": PatternFill("solid", fgColor="FEE2E2"),
+        "Не применимо": PatternFill("solid", fgColor="F1F5F9"),
+    }
+    for r in _flatten_completeness_rows(report):
+        ws.append([r["level"], r["object"], CATEGORY_LABELS_RU.get(r["category"], r["category"]),
+                   r["status"], r["blocks"], r["explanation"]])
+        cell = ws.cell(row=ws.max_row, column=4)
+        if r["status"] in status_fill:
+            cell.fill = status_fill[r["status"]]
+
+    widths = [16, 34, 16, 18, 16, 60]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    ws.append([])
+    ws.append(["Тестовые данные (is_test_data=true) исключены из отчёта."])
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ── Итерация 4, раздел 4: замечания экрана согласования ─────────────────────
+
+REMARK_FIELDS = ["entity_type", "entity_id", "diagram_id", "diagram_node_id", "risk_id", "field_ref", "text"]
+REMARK_INT_FIELDS = {"entity_id", "diagram_id", "diagram_node_id", "risk_id"}
+
+
+def list_remarks(cur, process_node_id: int):
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_process_remark
+        WHERE process_node_id = %s AND is_test_data = false
+        ORDER BY (status = 'open') DESC, created_at DESC
+    """, (process_node_id,))
+    return rows(cur)
+
+
+def save_remark(cur, body: dict, actor: str):
+    process_node_id = as_int(body.get("process_node_id"))
+    if not process_node_id:
+        return None, "Не указан процесс"
+    text = nz(body.get("text"))
+    if not text:
+        return None, "Укажите текст замечания"
+    vals = {"process_node_id": process_node_id, "text": text, "author": actor}
+    for f in REMARK_FIELDS:
+        if f == "text" or f not in body:
+            continue
+        vals[f] = as_int(body[f]) if f in REMARK_INT_FIELDS else nz(body.get(f))
+    if not vals.get("entity_type"):
+        vals["entity_type"] = "process_node"
+    cols = ", ".join(vals.keys())
+    ph = ", ".join(["%s"] * len(vals))
+    cur.execute(f"INSERT INTO {SCHEMA}.exec_process_remark ({cols}) VALUES ({ph}) RETURNING id", list(vals.values()))
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_remark", new_id, "create", after=vals)
+    return new_id, None
+
+
+def resolve_remark(cur, body: dict, actor: str, can_confirm_role: bool, status: str):
+    """status: resolved (устранено автором/исполнителем) или accepted_exception
+    (принято как исключение — только уполномоченным, раздел 4 ТЗ). Подтверждение
+    проверяющего (reviewer_confirmed_by) — отдельный шаг после resolved, тоже
+    только уполномоченным."""
+    rid = as_int(body.get("id"))
+    if not rid:
+        return None, "Не указано замечание"
+    if status not in ("resolved", "accepted_exception", "open"):
+        return None, "Некорректный статус замечания"
+    if status == "accepted_exception" and not can_confirm_role:
+        return None, "Принять замечание как исключение может только уполномоченный пользователь"
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_remark SET status = %s, resolved_by = %s, resolved_at = now(), "
+        f"resolution_note = %s, updated_by = %s, updated_at = now() WHERE id = %s",
+        (status, actor, nz(body.get("resolution_note")), actor, rid),
+    )
+    log_change(cur, actor, "process_remark", rid, f"status_{status}")
+    return rid, None
+
+
+def confirm_remark(cur, body: dict, actor: str, can_confirm_role: bool):
+    if not can_confirm_role:
+        return None, "Подтвердить устранение замечания может только уполномоченный проверяющий"
+    rid = as_int(body.get("id"))
+    if not rid:
+        return None, "Не указано замечание"
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_remark SET reviewer_confirmed_by = %s, reviewer_confirmed_at = now() WHERE id = %s",
+        (actor, rid),
+    )
+    log_change(cur, actor, "process_remark", rid, "reviewer_confirm")
+    return rid, None
+
+
+# ── Итерация 4, раздел 3: явное решение по предупреждению ────────────────────
+
+def save_warning_decision(cur, body: dict, actor: str, can_confirm_role: bool):
+    """Предупреждение чек-листа можно принять только явным решением
+    уполномоченного пользователя с обязательным комментарием — нет и не будет
+    кнопки «Игнорировать всё» (раздел 3 ТЗ итерации 4)."""
+    if not can_confirm_role:
+        return None, "Принять предупреждение может только уполномоченный пользователь"
+    entity_type = body.get("entity_type")
+    entity_id = as_int(body.get("entity_id"))
+    warning_code = nz(body.get("warning_code"))
+    comment = nz(body.get("comment"))
+    if not entity_type or not entity_id or not warning_code:
+        return None, "Не указаны параметры предупреждения"
+    if not comment:
+        return None, "Укажите комментарий — обоснование принятия предупреждения обязательно"
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_warning_decision "
+        f"(entity_type, entity_id, warning_code, warning_ref_id, actor, comment) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+        (entity_type, entity_id, warning_code, as_int(body.get("warning_ref_id")), actor, comment),
+    )
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, "process_warning_decision", new_id, "create", after=body)
+    return new_id, None
+
+
+def list_warning_decisions(cur, entity_type: str, entity_id: int):
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_process_warning_decision
+        WHERE entity_type = %s AND entity_id = %s AND is_test_data = false
+        ORDER BY created_at DESC
+    """, (entity_type, entity_id))
+    return rows(cur)
+
+
+# ── Итерация 4, раздел 5: реестр версий процесса ─────────────────────────────
+
+def process_version_registry(cur, root_lineage_id: int):
+    """Все версии одного логического процесса (по root_lineage_id): текущая
+    активная + исторические, с номером/статусом/автором/датой/комментарием и
+    флагом is_current. Раздел 5 ТЗ — «пользователь должен работать с версиями
+    через интерфейс», не только через backend-снимок."""
+    cur.execute(f"""
+        SELECT n.id, n.name, n.code, n.model_status, n.version, n.is_current, n.derived_from_id,
+               n.published_at, n.published_by, n.created_by, n.created_at, n.updated_at
+        FROM {SCHEMA}.exec_process_node n
+        WHERE n.root_lineage_id = %s AND n.is_test_data = false
+        ORDER BY n.id DESC
+    """, (root_lineage_id,))
+    return rows(cur)
+
+
+def create_new_process_version(cur, body: dict, actor: str):
+    """«Создать новую версию» из опубликованного процесса (раздел 5 ТЗ):
+    клонирует узел архитектуры + паспорт + участников + связи функций/систем/
+    документов в новый черновик (is_current=true, derived_from_id=источник),
+    исходная опубликованная запись помечается is_current=false и остаётся
+    неизменяемой историей, доступной только на чтение через реестр версий.
+    Диаграммы клонируются отдельным шагом при первом открытии редактора
+    (get_or_create_diagram уже поддерживает копирование через diagram_id)."""
+    source_id = as_int(body.get("source_process_node_id"))
+    if not source_id:
+        return None, "Не указан исходный процесс"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_node WHERE id = %s", (source_id,))
+    src_rows = rows(cur)
+    if not src_rows:
+        return None, "Исходный процесс не найден"
+    src = src_rows[0]
+    if src["model_status"] != "published":
+        return None, "Новую версию можно создать только из опубликованного процесса"
+
+    cur.execute(f"""
+        SELECT COUNT(*) FROM {SCHEMA}.exec_process_node
+        WHERE root_lineage_id = %s AND is_current = true AND id != %s
+    """, (src.get("root_lineage_id") or src["id"], source_id))
+    if cur.fetchone()[0] > 0:
+        return None, "У этого процесса уже есть активная версия-черновик — откройте её вместо создания новой"
+
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_node "
+        f"(scope_id, code, name, level, parent_id, owner_person_id, responsible_org_unit_id, result_description, "
+        f"sort_order, root_lineage_id, derived_from_id, created_by, updated_by) "
+        f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (src["scope_id"], src["code"], src["name"], src["level"], src["parent_id"], src["owner_person_id"],
+         src["responsible_org_unit_id"], src["result_description"], src["sort_order"],
+         src.get("root_lineage_id") or src["id"], source_id, actor, actor),
+    )
+    new_id = cur.fetchone()[0]
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_passport WHERE process_node_id = %s", (source_id,))
+    p_rows = rows(cur)
+    p = p_rows[0] if p_rows else {}
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_passport "
+        f"(process_node_id, goal, boundaries_note, trigger_event, inputs_note, outputs_note, suppliers_note, consumers_note, updated_by) "
+        f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (new_id, p.get("goal"), p.get("boundaries_note"), p.get("trigger_event"), p.get("inputs_note"),
+         p.get("outputs_note"), p.get("suppliers_note"), p.get("consumers_note"), actor),
+    )
+
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_participant WHERE process_node_id = %s", (source_id,))
+    for pt in rows(cur):
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_participant "
+            f"(process_node_id, role_title, person_id, org_unit_id, participation_kind, is_required, updated_by) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (new_id, pt.get("role_title"), pt.get("person_id"), pt.get("org_unit_id"),
+             pt.get("participation_kind"), pt.get("is_required", True), actor),
+        )
+
+    cur.execute(f"SELECT function_id FROM {SCHEMA}.exec_function_process_link WHERE process_node_id = %s", (source_id,))
+    for (fid,) in cur.fetchall():
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_function_process_link (function_id, process_node_id, created_by) "
+            f"VALUES (%s,%s,%s) ON CONFLICT DO NOTHING", (fid, new_id, actor),
+        )
+    cur.execute(f"SELECT system_id FROM {SCHEMA}.exec_process_system_link WHERE process_node_id = %s", (source_id,))
+    for (sid,) in cur.fetchall():
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_system_link (process_node_id, system_id) "
+            f"VALUES (%s,%s) ON CONFLICT DO NOTHING", (new_id, sid),
+        )
+    cur.execute(f"SELECT document_id, is_required FROM {SCHEMA}.exec_process_document_link WHERE process_node_id = %s", (source_id,))
+    for did, is_req in cur.fetchall():
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_document_link (process_node_id, document_id, is_required) "
+            f"VALUES (%s,%s,%s) ON CONFLICT DO NOTHING", (new_id, did, is_req),
+        )
+
+    # Диаграммы AS-IS/TO-BE клонируются со всеми дорожками/узлами/связями —
+    # новая версия должна открываться в редакторе сразу готовой, а не пустой.
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE process_node_id = %s AND is_test_data = false", (source_id,))
+    for d in rows(cur):
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.exec_process_diagram "
+            f"(process_node_id, variant, title, base_diagram_id, derived_from_id, updated_by) "
+            f"VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+            (new_id, d["variant"], d["title"], d.get("base_diagram_id"), d["id"], actor),
+        )
+        new_diagram_id = cur.fetchone()[0]
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_lane WHERE diagram_id = %s AND is_test_data = false", (d["id"],))
+        lane_id_map = {}
+        for lane in rows(cur):
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_process_diagram_lane "
+                f"(diagram_id, title, org_unit_id, role_title, lane_type, placeholder_label, needs_clarification, sort_order, origin_lane_id, updated_by) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (new_diagram_id, lane["title"], lane.get("org_unit_id"), lane.get("role_title"), lane["lane_type"],
+                 lane.get("placeholder_label"), lane.get("needs_clarification"), lane.get("sort_order"), lane["id"], actor),
+            )
+            lane_id_map[lane["id"]] = cur.fetchone()[0]
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_node WHERE diagram_id = %s AND is_test_data = false", (d["id"],))
+        node_id_map = {}
+        for n in rows(cur):
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_process_diagram_node "
+                f"(diagram_id, lane_id, node_type, label, pos_x, pos_y, width, height, description, input_note, "
+                f"output_note, duration_note, is_critical, confirmation_status, gateway_outcomes, ref_role_title, "
+                f"ref_person_id, ref_org_unit_id, ref_document_id, ref_system_id, ref_risk_id, system_note, document_note, "
+                f"note, origin_node_id, updated_by) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (new_diagram_id, lane_id_map.get(n.get("lane_id")), n["node_type"], n["label"], n.get("pos_x"),
+                 n.get("pos_y"), n.get("width"), n.get("height"), n.get("description"), n.get("input_note"),
+                 n.get("output_note"), n.get("duration_note"), n.get("is_critical"), n.get("confirmation_status"),
+                 n.get("gateway_outcomes"), n.get("ref_role_title"), n.get("ref_person_id"), n.get("ref_org_unit_id"),
+                 n.get("ref_document_id"), n.get("ref_system_id"), n.get("ref_risk_id"), n.get("system_note"),
+                 n.get("document_note"), n.get("note"), n["id"], actor),
+            )
+            node_id_map[n["id"]] = cur.fetchone()[0]
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE diagram_id = %s AND is_test_data = false", (d["id"],))
+        for e in rows(cur):
+            if e["source_node_id"] not in node_id_map or e["target_node_id"] not in node_id_map:
+                continue
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.exec_process_diagram_edge "
+                f"(diagram_id, source_node_id, target_node_id, label, edge_type, origin_edge_id, updated_by) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (new_diagram_id, node_id_map[e["source_node_id"]], node_id_map[e["target_node_id"]],
+                 e.get("label"), e.get("edge_type"), e["id"], actor),
+            )
+
+    cur.execute(f"UPDATE {SCHEMA}.exec_process_node SET is_current = false WHERE id = %s", (source_id,))
+    log_change(cur, actor, "process_node", new_id, "create_new_version", after={"source_process_node_id": source_id})
+    return new_id, None
+
+
+def archive_process_version(cur, body: dict, actor: str, can_confirm_role: bool):
+    """Архивирование неактуальной версии — раздел 5 ТЗ. Разрешено только для
+    версий с is_current=false (историческая, уже не редактируемая), либо для
+    черновика статуса draft/needs_revision (осознанный отказ от черновика).
+    Опубликованную ТЕКУЩУЮ версию нельзя архивировать напрямую — сначала
+    создаётся новая версия, тогда старая станет is_current=false."""
+    if not can_confirm_role:
+        return None, "Архивировать версию может только уполномоченный пользователь"
+    nid = as_int(body.get("id"))
+    if not nid:
+        return None, "Не указан процесс"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_node WHERE id = %s", (nid,))
+    before_rows = rows(cur)
+    if not before_rows:
+        return None, "Процесс не найден"
+    before = before_rows[0]
+    if before["is_current"] and before["model_status"] not in ("draft", "needs_revision"):
+        return None, "Нельзя архивировать текущую опубликованную/подтверждённую версию — сначала создайте новую версию"
+    cur.execute(
+        f"UPDATE {SCHEMA}.exec_process_node SET model_status = 'archived', updated_by = %s, updated_at = now() WHERE id = %s",
+        (actor, nid),
+    )
+    log_change(cur, actor, "process_node", nid, "archive_version", before=before)
+    return nid, None
+
+
+# ── Итерация 4, раздел 5: сравнение версий процесса ──────────────────────────
+
+def compare_process_versions(cur, version_a_id: int, version_b_id: int):
+    """Сравнение двух версий одного процесса (по snapshot_json истории версий,
+    если версия опубликована и есть снимок — иначе по текущим живым данным).
+    Раздел 5 ТЗ: изменения паспорта, функций, архитектуры, AS-IS/TO-BE, ролей и
+    дорожек, рисков/контролей, показателей, проблем/улучшений, связей с
+    инициативами, документов."""
+    def load(nid):
+        cur.execute(f"""
+            SELECT snapshot_json FROM {SCHEMA}.exec_process_version_history
+            WHERE entity_type = 'process_node' AND entity_id = %s AND snapshot_json IS NOT NULL
+            ORDER BY created_at DESC LIMIT 1
+        """, (nid,))
+        r = cur.fetchone()
+        if r and r[0]:
+            return r[0] if isinstance(r[0], dict) else json.loads(r[0])
+        return build_process_snapshot(cur, nid)
+
+    a = load(version_a_id)
+    b = load(version_b_id)
+    if not a or not b:
+        return None
+
+    def diff_scalar_fields(obj_a, obj_b, fields):
+        out = []
+        for f in fields:
+            va, vb = (obj_a or {}).get(f), (obj_b or {}).get(f)
+            if (va or None) != (vb or None):
+                out.append({"field": f, "before": va, "after": vb})
+        return out
+
+    passport_diff = diff_scalar_fields(a.get("passport"), b.get("passport"),
+        ["goal", "boundaries_note", "trigger_event", "inputs_note", "outputs_note", "suppliers_note", "consumers_note"])
+
+    def by_id(items, key="id"):
+        return {i[key]: i for i in (items or []) if i.get(key) is not None}
+
+    funcs_a, funcs_b = by_id(a.get("functions")), by_id(b.get("functions"))
+    functions_diff = {
+        "added": [v for k, v in funcs_b.items() if k not in funcs_a],
+        "removed": [v for k, v in funcs_a.items() if k not in funcs_b],
+    }
+
+    node_diff = diff_scalar_fields(a.get("node"), b.get("node"),
+        ["name", "code", "level", "owner_person_id", "responsible_org_unit_id", "result_description"])
+
+    def diagram_by_variant(snap):
+        return {d["diagram"]["variant"]: d for d in (snap.get("diagrams") or [])}
+
+    diagrams_a, diagrams_b = diagram_by_variant(a), diagram_by_variant(b)
+    diagrams_diff = {}
+    for variant in ("as_is", "to_be"):
+        da, db = diagrams_a.get(variant), diagrams_b.get(variant)
+        if not da and not db:
+            continue
+        na = by_id(da["nodes"]) if da else {}
+        nb = by_id(db["nodes"]) if db else {}
+        ea = by_id(da["edges"]) if da else {}
+        eb = by_id(db["edges"]) if db else {}
+        la = by_id(da["lanes"]) if da else {}
+        lb = by_id(db["lanes"]) if db else {}
+        diagrams_diff[variant] = {
+            "nodes": {"added": [v for k, v in nb.items() if k not in na], "removed": [v for k, v in na.items() if k not in nb]},
+            "edges": {"added": [v for k, v in eb.items() if k not in ea], "removed": [v for k, v in ea.items() if k not in eb]},
+            "lanes": {"added": [v for k, v in lb.items() if k not in la], "removed": [v for k, v in la.items() if k not in lb]},
+        }
+
+    risks_a, risks_b = by_id(a.get("risks")), by_id(b.get("risks"))
+    risks_diff = {
+        "added": [v for k, v in risks_b.items() if k not in risks_a],
+        "removed": [v for k, v in risks_a.items() if k not in risks_b],
+    }
+
+    metrics_a, metrics_b = by_id(a.get("metrics")), by_id(b.get("metrics"))
+    metrics_diff = {
+        "added": [v for k, v in metrics_b.items() if k not in metrics_a],
+        "removed": [v for k, v in metrics_a.items() if k not in metrics_b],
+    }
+
+    issues_a, issues_b = by_id(a.get("issues")), by_id(b.get("issues"))
+    issues_diff = {
+        "added": [v for k, v in issues_b.items() if k not in issues_a],
+        "removed": [v for k, v in issues_a.items() if k not in issues_b],
+    }
+
+    improvements_a = by_id(a.get("improvements"))
+    improvements_b = by_id(b.get("improvements"))
+    improvements_diff = {
+        "added": [v for k, v in improvements_b.items() if k not in improvements_a],
+        "removed": [v for k, v in improvements_a.items() if k not in improvements_b],
+    }
+
+    docs_a, docs_b = by_id(a.get("documents")), by_id(b.get("documents"))
+    documents_diff = {
+        "added": [v for k, v in docs_b.items() if k not in docs_a],
+        "removed": [v for k, v in docs_a.items() if k not in docs_b],
+    }
+
+    initiative_links_a = {(l.get("issue_id"), l.get("initiative_id")) for l in (a.get("initiative_links") or [])}
+    initiative_links_b = {(l.get("issue_id"), l.get("initiative_id")) for l in (b.get("initiative_links") or [])}
+    initiatives_diff = {
+        "added": list(initiative_links_b - initiative_links_a),
+        "removed": list(initiative_links_a - initiative_links_b),
+    }
+
+    return {
+        "node": node_diff,
+        "passport": passport_diff,
+        "functions": functions_diff,
+        "diagrams": diagrams_diff,
+        "risks": risks_diff,
+        "metrics": metrics_diff,
+        "issues": issues_diff,
+        "improvements": improvements_diff,
+        "documents": documents_diff,
+        "initiative_links": initiatives_diff,
+    }
 
 
 # ── HTTP handler ─────────────────────────────────────────────────────────────
@@ -2566,11 +3918,42 @@ def handler(event: dict, context) -> dict:
             sid = default_scope_id(cur)
             return cors({"ok": True, "data": {"scope_id": sid}})
 
+
+
         if action == "overview":
             scope_id = as_int(qs.get("scope_id")) or default_scope_id(cur)
             if not scope_id:
                 return cors({"ok": True, "data": None})
             return cors({"ok": True, "data": get_overview(cur, scope_id)})
+
+        # ── Итерация 4, раздел 7: отчёт о полноте и экспорт ──────────────────
+
+        if action == "completeness_report":
+            scope_id = as_int(qs.get("scope_id")) or default_scope_id(cur)
+            if not scope_id:
+                return cors({"ok": False, "error": {"message": "Не указана модель"}}, 400)
+            return cors({"ok": True, "data": completeness_report(cur, scope_id)})
+
+        if action in ("completeness_export_pdf", "completeness_export_xlsx"):
+            scope_id = as_int(qs.get("scope_id")) or default_scope_id(cur)
+            if not scope_id:
+                return cors({"ok": False, "error": {"message": "Не указана модель"}}, 400)
+            report = completeness_report(cur, scope_id)
+            try:
+                if action == "completeness_export_pdf":
+                    file_bytes = export_completeness_pdf(report, actor)
+                    filename = "otchet-o-polnote.pdf"
+                    mime = "application/pdf"
+                else:
+                    file_bytes = export_completeness_xlsx(report, actor)
+                    filename = "otchet-o-polnote.xlsx"
+                    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            except Exception as e:
+                return cors({"ok": False, "error": {"message": f"Ошибка формирования файла: {e}"}}, 500)
+            return cors({"ok": True, "data": {
+                "filename": filename, "mime": mime,
+                "base64": base64.b64encode(file_bytes).decode("ascii"),
+            }})
 
         if action == "functions":
             scope_id = as_int(qs.get("scope_id")) or default_scope_id(cur)
@@ -2613,7 +3996,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = save_process_node(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2622,7 +4005,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = set_process_status(cur, body, actor, can_confirm)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2640,7 +4023,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = save_passport(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2658,7 +4041,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             pid, err = save_participant(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": pid}})
 
@@ -2666,6 +4049,15 @@ def handler(event: dict, context) -> dict:
             if not can_edit:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             pid, err = remove_participant(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": pid}})
+
+        if action in ("participant_confirm", "participant_unconfirm"):
+            if not can_confirm:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав для подтверждения"}}, 403)
+            pid, err = confirm_participant(cur, body, actor, action == "participant_confirm")
             if err:
                 return cors({"ok": False, "error": {"message": err}}, 400)
             conn.commit()
@@ -2785,7 +4177,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             did, err = set_diagram_status(cur, body, actor, can_confirm)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": did}})
 
@@ -2794,7 +4186,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             did, err = save_diagram_canvas(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": did}})
 
@@ -2818,7 +4210,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             sid, err = autosave_draft(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": sid}})
 
@@ -2827,7 +4219,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             lid, err = save_lane(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": lid}})
 
@@ -2836,7 +4228,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             lid, err = delete_lane(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": lid}})
 
@@ -2845,7 +4237,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = save_diagram_node(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2854,7 +4246,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = delete_diagram_node(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2863,7 +4255,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             eid, err = save_diagram_edge(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": eid}})
 
@@ -2872,7 +4264,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             eid, err = delete_diagram_edge(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": eid}})
 
@@ -2887,9 +4279,9 @@ def handler(event: dict, context) -> dict:
         if action == "diagram_undo":
             if not can_edit:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
-            result, err = undo_last_diagram_action(cur, body, actor)
+            result, err = undo_last_diagram_action(cur, body, actor, can_confirm)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": result})
 
@@ -2908,7 +4300,7 @@ def handler(event: dict, context) -> dict:
             decision = "taken_in_work" if action == "review_take_in_work" else "commented"
             did, err = review_take_in_work_or_comment(cur, body, actor, decision)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": did}})
 
@@ -2930,6 +4322,99 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Версия не найдена"}}, 404)
             return cors({"ok": True, "data": snap})
 
+        # ── Итерация 4, раздел 3: публикационный чек-лист ────────────────────
+
+        if action == "publication_checklist":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            checklist = publication_checklist(cur, node_id)
+            if checklist is None:
+                return cors({"ok": False, "error": {"message": "Процесс не найден"}}, 404)
+            return cors({"ok": True, "data": checklist})
+
+        # ── Итерация 4, раздел 4: замечания экрана согласования ──────────────
+
+        if action == "remarks":
+            node_id = as_int(qs.get("process_node_id"))
+            if not node_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": list_remarks(cur, node_id)}})
+
+        if action == "remark_save":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            rid, err = save_remark(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action in ("remark_resolve", "remark_accept_exception", "remark_reopen"):
+            status = {"remark_resolve": "resolved", "remark_accept_exception": "accepted_exception", "remark_reopen": "open"}[action]
+            rid, err = resolve_remark(cur, body, actor, can_confirm, status)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        if action == "remark_reviewer_confirm":
+            rid, err = confirm_remark(cur, body, actor, can_confirm)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
+        # ── Итерация 4, раздел 3: явное решение по предупреждению ────────────
+
+        if action == "warning_decisions":
+            entity_type = qs.get("entity_type")
+            entity_id = as_int(qs.get("entity_id"))
+            if not entity_type or not entity_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
+            return cors({"ok": True, "data": {"items": list_warning_decisions(cur, entity_type, entity_id)}})
+
+        if action == "warning_decision_save":
+            wid, err = save_warning_decision(cur, body, actor, can_confirm)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": wid}})
+
+        # ── Итерация 4, раздел 5: реестр версий и сравнение ──────────────────
+
+        if action == "process_version_registry":
+            root_id = as_int(qs.get("root_lineage_id"))
+            if not root_id:
+                return cors({"ok": False, "error": {"message": "Не указан процесс"}}, 400)
+            return cors({"ok": True, "data": {"items": process_version_registry(cur, root_id)}})
+
+        if action == "process_version_create_new":
+            if not can_confirm:
+                return cors({"ok": False, "error": {"message": "Создать новую версию может только уполномоченный пользователь"}}, 403)
+            nid, err = create_new_process_version(cur, body, actor)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": nid}})
+
+        if action == "process_version_archive":
+            nid, err = archive_process_version(cur, body, actor, can_confirm)
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": nid}})
+
+        if action == "process_version_compare":
+            va = as_int(qs.get("version_a_id"))
+            vb = as_int(qs.get("version_b_id"))
+            if not va or not vb:
+                return cors({"ok": False, "error": {"message": "Не указаны обе версии для сравнения"}}, 400)
+            result = compare_process_versions(cur, va, vb)
+            if result is None:
+                return cors({"ok": False, "error": {"message": "Версия не найдена"}}, 404)
+            return cors({"ok": True, "data": result})
+
         # ── Итерация 3: риски процесса ──────────────────────────────────────
 
         if action == "process_risks":
@@ -2943,7 +4428,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             rid, err = save_process_risk(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
 
@@ -2965,6 +4450,13 @@ def handler(event: dict, context) -> dict:
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
 
+        if action in ("risk_accept", "risk_unaccept"):
+            rid, err = accept_process_risk(cur, body, actor, can_confirm, action == "risk_accept")
+            if err:
+                return cors({"ok": False, "error": {"message": err}}, 400)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": rid}})
+
         # ── Контрольные процедуры ────────────────────────────────────────────
 
         if action == "process_controls":
@@ -2978,7 +4470,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             cid, err = save_process_control(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": cid}})
 
@@ -3019,7 +4511,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             mid, err = save_process_metric(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": mid}})
 
@@ -3051,7 +4543,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             iid, err = save_process_issue(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": iid}})
 
@@ -3105,7 +4597,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             iid, err = save_improvement(cur, body, actor)
             if err:
-                return err_response(err)
+                return err_response(err, cur, actor)
             conn.commit()
             return cors({"ok": True, "data": {"id": iid}})
 

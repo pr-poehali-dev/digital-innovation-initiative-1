@@ -6,20 +6,57 @@ import { accessHeaders } from "./execAccess";
 const BASE = "https://functions.poehali.dev/2114209b-904f-48c4-97a0-516c96626f50";
 
 // Итерация 4, раздел 1: сервер отклоняет устаревшее сохранение структурированной
-// ошибкой { code: "conflict", message, current_updated_at, changed_by } (HTTP 409).
+// ошибкой { code: "optimistic_lock_conflict", message, entity_type, entity_id,
+// expected_updated_at, current_updated_at, changed_by, current_data } (HTTP 409).
 // ConflictError несёт эти поля дальше во фронтенд-код, чтобы форма могла
-// показать «кем и когда изменено» и предложить перечитать/сравнить/повторить,
-// а не просто вывести голый текст ошибки.
+// показать объект/его id, обе ревизии, «кем и когда изменено» и предложить
+// перечитать/сравнить/повторить свои правки вручную — без кнопки
+// «перезаписать всё равно» для обычного пользователя.
 export class ConflictError extends Error {
-  code = "conflict" as const;
+  code = "optimistic_lock_conflict" as const;
+  entityType?: string;
+  entityId?: number;
+  expectedUpdatedAt?: string;
   currentUpdatedAt?: string;
   changedBy?: string | null;
-  constructor(message: string, currentUpdatedAt?: string, changedBy?: string | null) {
+  currentData?: Record<string, unknown>;
+  constructor(message: string, opts: {
+    entityType?: string; entityId?: number; expectedUpdatedAt?: string;
+    currentUpdatedAt?: string; changedBy?: string | null; currentData?: Record<string, unknown>;
+  } = {}) {
     super(message);
     this.name = "ConflictError";
-    this.currentUpdatedAt = currentUpdatedAt;
-    this.changedBy = changedBy;
+    this.entityType = opts.entityType;
+    this.entityId = opts.entityId;
+    this.expectedUpdatedAt = opts.expectedUpdatedAt;
+    this.currentUpdatedAt = opts.currentUpdatedAt;
+    this.changedBy = opts.changedBy;
+    this.currentData = opts.currentData;
   }
+}
+
+// Итерация 4, раздел 3: сервер отклоняет переход в published структурированной
+// ошибкой { code: "publication_validation_failed", blocking_errors, warnings,
+// overrides_required } (HTTP 422) — публикационный чек-лист не пройден.
+export class PublicationValidationError extends Error {
+  code = "publication_validation_failed" as const;
+  blockingErrors: ChecklistItem[];
+  warnings: ChecklistItem[];
+  overridesRequired: ChecklistItem[];
+  constructor(message: string, blockingErrors: ChecklistItem[], warnings: ChecklistItem[], overridesRequired: ChecklistItem[]) {
+    super(message);
+    this.name = "PublicationValidationError";
+    this.blockingErrors = blockingErrors;
+    this.warnings = warnings;
+    this.overridesRequired = overridesRequired;
+  }
+}
+
+export interface ChecklistItem {
+  code: string;
+  message: string;
+  ref_type?: string;
+  ref_id?: number;
 }
 
 async function req(path: string, options: RequestInit = {}) {
@@ -34,8 +71,17 @@ async function req(path: string, options: RequestInit = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
     const err = data?.error;
-    if (res.status === 409 && err?.code === "conflict") {
-      throw new ConflictError(err.message || "Запись изменена другим пользователем", err.current_updated_at, err.changed_by);
+    if (res.status === 409 && err?.code === "optimistic_lock_conflict") {
+      throw new ConflictError(err.message || "Запись изменена другим пользователем", {
+        entityType: err.entity_type, entityId: err.entity_id, expectedUpdatedAt: err.expected_updated_at,
+        currentUpdatedAt: err.current_updated_at, changedBy: err.changed_by, currentData: err.current_data,
+      });
+    }
+    if (res.status === 422 && err?.code === "publication_validation_failed") {
+      throw new PublicationValidationError(
+        err.message || "Публикация невозможна — не выполнен публикационный чек-лист",
+        err.blocking_errors || [], err.warnings || [], err.overrides_required || [],
+      );
     }
     throw new Error(err?.message || "Ошибка загрузки данных");
   }
@@ -107,6 +153,15 @@ export interface OverviewMetrics {
   processes_without_owner: number;
   docs_need_confirmation: number;
   open_questions: number;
+  // Итерация 4, раздел 8: расширенные метрики обзора модели
+  unconfirmed_controls: number;
+  processes_without_metrics: number;
+  issues_without_improvements: number;
+  improvements_without_initiatives: number;
+  models_in_review: number;
+  published_versions: number;
+  edit_conflicts: number;
+  publication_blocking_errors: number;
 }
 
 export interface OverviewUnit {
@@ -118,10 +173,24 @@ export interface OverviewUnit {
   confirmation_status: string;
 }
 
+// Итерация 4, раздел 8: списки id для перехода в отфильтрованный список по
+// клику на карточку метрики обзора модели.
+export interface OverviewFilters {
+  unconfirmed_controls: number[];
+  processes_without_metrics: number[];
+  issues_without_improvements: number[];
+  improvements_without_initiatives: number[];
+  models_in_review: number[];
+  published_versions: number[];
+  edit_conflicts: number[];
+  publication_blocking_errors: number[];
+}
+
 export interface Overview {
   scope: Record<string, unknown> | null;
   units: OverviewUnit[];
   metrics: OverviewMetrics;
+  filters?: OverviewFilters;
   stages: OverviewStage[];
   progress_pct: number;
   next_step: { code: string; label: string } | null;
@@ -177,6 +246,14 @@ export interface ProcessNode {
   children_count: number;
   function_links_count: number;
   has_passport: boolean;
+  // Итерация 4, раздел 5: реестр версий процесса — is_current отличает
+  // актуальную (редактируемую/просматриваемую в дереве) запись от старых
+  // версий; root_lineage_id связывает все версии одного логического
+  // процесса; derived_from_id указывает версию-источник при «Создать новую
+  // версию».
+  is_current: boolean;
+  root_lineage_id: number;
+  derived_from_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -203,6 +280,11 @@ export interface ProcessParticipant {
   org_unit_id: number | null;
   org_unit_name: string | null;
   participation_kind: ParticipationKind;
+  // Итерация 4: обязательный участник должен быть подтверждён явным
+  // решением (не одним лишь фактом сохранения формы), иначе публикационный
+  // чек-лист заблокирует переход в published.
+  confirmation_status: "user_draft" | "confirmed";
+  is_required: boolean;
 }
 
 export interface InfoSystem {
@@ -217,7 +299,10 @@ export interface ProcessDetail {
   participants: ProcessParticipant[];
   functions: { id: number; code: string | null; title: string }[];
   systems: InfoSystem[];
-  documents: { id: number; title: string; source_type: string; state: string; confidentiality_level: string }[];
+  documents: {
+    id: number; title: string; source_type: string; state: string; confidentiality_level: string;
+    confirmed_actual_by: string | null; confirmed_actual_at: string | null; is_required: boolean;
+  }[];
   diagrams: { id: number; variant: "as_is" | "to_be"; title: string | null; model_status: ModelStatus; version: number; updated_at: string; base_diagram_id?: number | null }[];
   risks: { id: number; title: string; qualitative_level: string | null; controls_count: number }[];
   metrics: { id: number; title: string; metric_kind: string }[];
@@ -245,6 +330,14 @@ export interface ProcessRisk {
   linked_initiative_risk_id: number | null;
   verification_status: "user_draft" | "confirmed";
   controls_count: number;
+  // Итерация 4, раздел 3: явное управленческое решение «принять риск как
+  // есть» (только уполномоченный, с обязательным обоснованием) и/или ссылка
+  // на улучшение, в рамках которого запланирована разработка контроля —
+  // публикационный чек-лист учитывает оба варианта для критичных рисков.
+  accepted_by: string | null;
+  accepted_at: string | null;
+  accepted_note: string | null;
+  control_plan_improvement_id: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -556,8 +649,149 @@ export interface ReviewDecision {
   comment: string | null;
   found_issues: string | null;
   open_questions: string | null;
+  // Раздел 4 ТЗ: если ни у одного решения нет назначенного проверяющего
+  // (ни роли, ни подразделения), UI обязан честно показать «Адресат не
+  // назначен» — без подстановки случайного сотрудника.
   reviewer_assigned: boolean;
+  // Раздел 3 ТЗ: submitted/confirmed/published, сделанные без прав
+  // уполномоченного (can_confirm на момент решения), помечаются
+  // actor_authorized=false — publication_checklist их учитывает отдельным
+  // блокирующим пунктом.
+  actor_authorized: boolean;
   created_at: string;
+}
+
+// ── Итерация 4, раздел 4: замечания экрана согласования ──────────────────────
+export type RemarkStatus = "open" | "resolved" | "accepted_exception";
+export interface Remark {
+  id: number;
+  process_node_id: number;
+  entity_type: string | null;
+  entity_id: number | null;
+  diagram_id: number | null;
+  diagram_node_id: number | null;
+  risk_id: number | null;
+  field_ref: string | null;
+  text: string;
+  author: string;
+  status: RemarkStatus;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  reviewer_confirmed_by: string | null;
+  reviewer_confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Итерация 4, раздел 3: явное решение по предупреждению чек-листа ─────────
+export interface WarningDecision {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  warning_code: string;
+  warning_ref_id: number | null;
+  actor: string;
+  comment: string;
+  created_at: string;
+}
+
+// ── Итерация 4, раздел 3: публикационный чек-лист ────────────────────────────
+export interface PublicationChecklist {
+  can_publish: boolean;
+  blocking_errors: ChecklistItem[];
+  warnings: ChecklistItem[];
+  overrides_required: ChecklistItem[];
+}
+
+// ── Итерация 4, раздел 7: отчёт о полноте модели и экспорт в PDF/XLSX ────────
+// Совпадает по смыслу с ChecklistItem публикационного чек-листа, но это
+// отдельный тип: тут другой набор полей (category/status/blocks_publication/
+// explanation) и другая семантика — это не блокирующая ошибка/предупреждение
+// конкретной публикации, а сводная оценка полноты по категории раздела 7 ТЗ.
+export interface CompletenessCategoryItem {
+  category: string;
+  status: "ready" | "needs_attention" | "missing" | "not_applicable";
+  blocks_publication: boolean;
+  explanation: string;
+  ref_type: string | null;
+  ref_id: number | null;
+}
+
+export interface ProcessCompletenessReport {
+  process_node_id: number;
+  name: string;
+  code: string | null;
+  model_status: ModelStatus;
+  items: CompletenessCategoryItem[];
+}
+
+export interface DirectionCompletenessReport {
+  process_node_id: number;
+  name: string;
+  code: string | null;
+  items: CompletenessCategoryItem[];
+  processes: ProcessCompletenessReport[];
+}
+
+export interface CompletenessReport {
+  scope_id: number;
+  scope_summary: { items: CompletenessCategoryItem[] };
+  directions: DirectionCompletenessReport[];
+  categories: string[];
+  status_labels: Record<string, string>;
+}
+
+export interface ExportFileResult {
+  filename: string;
+  mime: string;
+  base64: string;
+}
+
+// ── Итерация 4, раздел 5: реестр версий процесса и сравнение ────────────────
+export interface ProcessVersionEntry {
+  id: number;
+  name: string;
+  code: string | null;
+  model_status: ModelStatus;
+  version: number;
+  is_current: boolean;
+  derived_from_id: number | null;
+  published_at: string | null;
+  published_by: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FieldDiff {
+  field: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface AddedRemovedDiff<T = Record<string, unknown>> {
+  added: T[];
+  removed: T[];
+}
+
+export interface DiagramSectionDiff {
+  nodes: AddedRemovedDiff;
+  edges: AddedRemovedDiff;
+  lanes: AddedRemovedDiff;
+}
+
+export interface ProcessVersionCompareResult {
+  node: FieldDiff[];
+  passport: FieldDiff[];
+  functions: AddedRemovedDiff;
+  diagrams: { as_is?: DiagramSectionDiff; to_be?: DiagramSectionDiff };
+  risks: AddedRemovedDiff;
+  metrics: AddedRemovedDiff;
+  issues: AddedRemovedDiff;
+  improvements: AddedRemovedDiff;
+  documents: AddedRemovedDiff;
+  initiative_links: AddedRemovedDiff;
 }
 
 // ── Итерация 4, раздел 3: версии и неизменяемая публикация ───────────────────
@@ -630,6 +864,8 @@ export const processModelApi = {
   // Участники
   saveParticipant: (data: Record<string, unknown>): Promise<{ id: number }> => post("participant_save", data),
   removeParticipant: (id: number): Promise<{ id: number }> => post("participant_remove", { id }),
+  confirmParticipant: (id: number, confirm: boolean): Promise<{ id: number }> =>
+    post(confirm ? "participant_confirm" : "participant_unconfirm", { id }),
 
   // Системы
   systems: (): Promise<{ items: InfoSystem[] }> => req("/?action=systems"),
@@ -641,8 +877,8 @@ export const processModelApi = {
     post("process_system_unlink", { process_node_id: processNodeId, system_id: systemId }),
 
   // Документы
-  linkDocument: (processNodeId: number, documentId: number): Promise<{ id: number }> =>
-    post("process_document_link", { process_node_id: processNodeId, document_id: documentId }),
+  linkDocument: (processNodeId: number, documentId: number, isRequired?: boolean): Promise<{ id: number }> =>
+    post("process_document_link", { process_node_id: processNodeId, document_id: documentId, is_required: isRequired }),
   unlinkDocument: (processNodeId: number, documentId: number): Promise<{ id: number }> =>
     post("process_document_unlink", { process_node_id: processNodeId, document_id: documentId }),
 
@@ -696,8 +932,11 @@ export const processModelApi = {
   // ── Итерация 4, раздел 4: маршрут согласования ────────────────────────────
   reviewDecisions: (entityType: "process_node" | "diagram", entityId: number): Promise<{ items: ReviewDecision[] }> =>
     req(`/?action=review_decisions&entity_type=${entityType}&entity_id=${entityId}`),
-  reviewTakeInWork: (entityType: "process_node" | "diagram", entityId: number, comment?: string): Promise<{ id: number }> =>
-    post("review_take_in_work", { entity_type: entityType, entity_id: entityId, comment }),
+  reviewTakeInWork: (
+    entityType: "process_node" | "diagram",
+    entityId: number,
+    data?: { comment?: string; reviewer_role?: string; reviewer_org_unit_id?: number },
+  ): Promise<{ id: number }> => post("review_take_in_work", { entity_type: entityType, entity_id: entityId, ...data }),
   reviewComment: (
     entityType: "process_node" | "diagram",
     entityId: number,
@@ -709,6 +948,41 @@ export const processModelApi = {
     req(`/?action=version_history&entity_type=${entityType}&entity_id=${entityId}`),
   versionSnapshot: (historyId: number): Promise<VersionSnapshot> => req(`/?action=version_snapshot&id=${historyId}`),
 
+  // ── Итерация 4, раздел 3: публикационный чек-лист ─────────────────────────
+  publicationChecklist: (processNodeId: number): Promise<PublicationChecklist> =>
+    req(`/?action=publication_checklist&process_node_id=${processNodeId}`),
+
+  // ── Итерация 4, раздел 4: замечания экрана согласования ───────────────────
+  remarks: (processNodeId: number): Promise<{ items: Remark[] }> =>
+    req(`/?action=remarks&process_node_id=${processNodeId}`),
+  saveRemark: (data: {
+    process_node_id: number; entity_type?: string; entity_id?: number; diagram_id?: number;
+    diagram_node_id?: number; risk_id?: number; field_ref?: string; text: string;
+  }): Promise<{ id: number }> => post("remark_save", data),
+  resolveRemark: (id: number, resolutionNote?: string): Promise<{ id: number }> =>
+    post("remark_resolve", { id, resolution_note: resolutionNote }),
+  acceptRemarkException: (id: number, resolutionNote?: string): Promise<{ id: number }> =>
+    post("remark_accept_exception", { id, resolution_note: resolutionNote }),
+  reopenRemark: (id: number, resolutionNote?: string): Promise<{ id: number }> =>
+    post("remark_reopen", { id, resolution_note: resolutionNote }),
+  confirmRemark: (id: number): Promise<{ id: number }> => post("remark_reviewer_confirm", { id }),
+
+  // ── Итерация 4, раздел 3: явное решение по предупреждению ─────────────────
+  warningDecisions: (entityType: "process_node", entityId: number): Promise<{ items: WarningDecision[] }> =>
+    req(`/?action=warning_decisions&entity_type=${entityType}&entity_id=${entityId}`),
+  saveWarningDecision: (data: {
+    entity_type: "process_node"; entity_id: number; warning_code: string; warning_ref_id?: number; comment: string;
+  }): Promise<{ id: number }> => post("warning_decision_save", data),
+
+  // ── Итерация 4, раздел 5: реестр версий процесса и сравнение ──────────────
+  processVersionRegistry: (rootLineageId: number): Promise<{ items: ProcessVersionEntry[] }> =>
+    req(`/?action=process_version_registry&root_lineage_id=${rootLineageId}`),
+  processVersionCreateNew: (sourceProcessNodeId: number): Promise<{ id: number }> =>
+    post("process_version_create_new", { source_process_node_id: sourceProcessNodeId }),
+  processVersionArchive: (id: number): Promise<{ id: number }> => post("process_version_archive", { id }),
+  processVersionCompare: (versionAId: number, versionBId: number): Promise<ProcessVersionCompareResult> =>
+    req(`/?action=process_version_compare&version_a_id=${versionAId}&version_b_id=${versionBId}`),
+
   // ── Итерация 3: риски процесса ──────────────────────────────────────────
   processRisks: (processNodeId: number): Promise<{ items: ProcessRisk[] }> =>
     req(`/?action=process_risks&process_node_id=${processNodeId}`),
@@ -716,6 +990,11 @@ export const processModelApi = {
   deleteRisk: (id: number): Promise<{ id: number }> => post("risk_delete", { id }),
   confirmRisk: (id: number, confirm: boolean): Promise<{ id: number }> =>
     post(confirm ? "risk_confirm" : "risk_unconfirm", { id }),
+  // Итерация 4, раздел 3: «принять риск как есть» — отдельное явное решение
+  // уполномоченного с обязательным обоснованием (не путать с confirmRisk).
+  acceptRisk: (id: number, acceptedNote: string): Promise<{ id: number }> =>
+    post("risk_accept", { id, accepted_note: acceptedNote }),
+  unacceptRisk: (id: number): Promise<{ id: number }> => post("risk_unaccept", { id }),
 
   // Контроли
   processControls: (riskId: number): Promise<{ items: ProcessControl[] }> =>
@@ -758,6 +1037,14 @@ export const processModelApi = {
   suggestInitiativeLinks: (toBeDiagramId: number): Promise<{ items: InitiativeLite[] }> =>
     req(`/?action=improvement_suggest_initiatives&to_be_diagram_id=${toBeDiagramId}`),
   initiativesLite: (): Promise<{ items: InitiativeLite[] }> => req("/?action=initiatives_lite"),
+
+  // ── Итерация 4, раздел 7: отчёт о полноте модели и экспорт ────────────────
+  completenessReport: (scopeId?: number): Promise<CompletenessReport> =>
+    req(`/?action=completeness_report${scopeId ? `&scope_id=${scopeId}` : ""}`),
+  completenessExportPdf: (scopeId?: number): Promise<ExportFileResult> =>
+    req(`/?action=completeness_export_pdf${scopeId ? `&scope_id=${scopeId}` : ""}`),
+  completenessExportXlsx: (scopeId?: number): Promise<ExportFileResult> =>
+    req(`/?action=completeness_export_xlsx${scopeId ? `&scope_id=${scopeId}` : ""}`),
 };
 
 export const LEVEL_ORDER: ProcessLevel[] = ["direction", "process", "subprocess", "operation"];

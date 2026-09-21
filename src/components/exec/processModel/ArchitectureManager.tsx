@@ -19,6 +19,9 @@ import PassportForm from "./PassportForm";
 import DiagramsTab from "./DiagramsTab";
 import RisksMetricsTab from "./RisksMetricsTab";
 import ConflictDialog from "./ConflictDialog";
+import ProcessApprovalScreen from "./ProcessApprovalScreen";
+import ProcessVersionRegistry from "./ProcessVersionRegistry";
+import PublicationChecklistPanel from "./PublicationChecklistPanel";
 
 const LEVEL_LABEL: Record<ProcessLevel, string> = {
   direction: "Направление",
@@ -288,7 +291,7 @@ function ProcessDetailPanel({
 }) {
   const [detail, setDetail] = useState<ProcessDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"passport" | "functions" | "diagrams" | "systems" | "documents" | "next">("passport");
+  const [tab, setTab] = useState<"passport" | "functions" | "diagrams" | "systems" | "documents" | "next" | "approval" | "versions">("passport");
   const [refs, setRefs] = useState<Refs | null>(null);
   const [systems, setSystems] = useState<InfoSystem[]>([]);
   const [diagramNodeOptions, setDiagramNodeOptions] = useState<{ id: number; label: string }[]>([]);
@@ -317,11 +320,14 @@ function ProcessDetailPanel({
 
   const [statusError, setStatusError] = useState("");
   const [statusConflict, setStatusConflict] = useState<ConflictError | null>(null);
+  const [showPublishChecklist, setShowPublishChecklist] = useState(false);
 
   // Итерация 4, раздел 2: переходы строго по STATUS_TRANSITIONS backend —
   // нельзя перескакивать между произвольными статусами. Раздел 1: сервер
   // проверяет expected_updated_at, чтобы не подтвердить/не опубликовать
-  // версию, которую кто-то уже изменил после открытия карточки.
+  // версию, которую кто-то уже изменил после открытия карточки. Переход в
+  // published здесь не используется напрямую — см. publishProcess ниже,
+  // который идёт через панель чек-листа и сам ловит 422.
   const setStatus = async (status: string) => {
     setStatusError("");
     try {
@@ -334,6 +340,34 @@ function ProcessDetailPanel({
     }
   };
 
+  // Раздел 3: перед показом самой кнопки публикации/при попытке
+  // опубликовать сначала честно проверяем publication_checklist — кнопка
+  // «Опубликовать» здесь открывает панель чек-листа вместо мгновенного
+  // вызова смены статуса.
+  const requestPublish = () => {
+    setShowPublishChecklist(true);
+  };
+
+  // Публикация из модалки чек-листа: конфликт версии закрывает модалку и
+  // показывает ConflictDialog; PublicationValidationError сознательно
+  // пробрасывается обратно в PublicationChecklistPanel — она сама ловит эту
+  // ошибку и рисует тот же список blocking_errors/warnings внутри себя.
+  const publishProcess = async () => {
+    try {
+      await processModelApi.setProcessStatus(nodeId, "published" as never, undefined, detail?.node.updated_at);
+      load();
+      onChanged();
+      setShowPublishChecklist(false);
+    } catch (e) {
+      if (e instanceof ConflictError) {
+        setShowPublishChecklist(false);
+        setStatusConflict(e);
+        return;
+      }
+      throw e;
+    }
+  };
+
   if (loading || !detail) return <Loading />;
 
   const TABS = [
@@ -343,6 +377,8 @@ function ProcessDetailPanel({
     { id: "systems", label: "Системы", icon: "Server" },
     { id: "documents", label: "Документы", icon: "FileText" },
     { id: "next", label: "Риски и показатели", icon: "ShieldAlert" },
+    { id: "approval", label: "Согласование", icon: "GitPullRequestArrow" },
+    { id: "versions", label: "Версии", icon: "History" },
   ] as const;
 
   return (
@@ -391,7 +427,7 @@ function ProcessDetailPanel({
           )}
           {canConfirm && detail.node.model_status === "confirmed" && (
             <>
-              <button onClick={() => setStatus("published")}
+              <button onClick={requestPublish}
                 className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
                 Опубликовать
               </button>
@@ -418,6 +454,26 @@ function ProcessDetailPanel({
           onReload={() => { setStatusConflict(null); load(); }}
           onDismiss={() => setStatusConflict(null)}
         />
+      )}
+
+      {showPublishChecklist && (
+        <div className="fixed inset-0 z-[90] flex items-start justify-center bg-slate-900/40 p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl my-8 rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200">
+              <p className="text-sm font-semibold text-slate-900">Публикация процесса «{detail.node.name}»</p>
+              <button onClick={() => setShowPublishChecklist(false)} className="text-slate-400 hover:text-slate-700">
+                <Icon name="X" size={16} />
+              </button>
+            </div>
+            <div className="p-4">
+              <PublicationChecklistPanel
+                processNodeId={nodeId}
+                canConfirm={canConfirm}
+                onPublish={publishProcess}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="border-b border-slate-200 overflow-x-auto">
@@ -481,6 +537,25 @@ function ProcessDetailPanel({
           orgUnits={orgUnits}
           systems={systems}
           diagramNodeOptions={diagramNodeOptions}
+        />
+      )}
+
+      {tab === "approval" && (
+        <ProcessApprovalScreen
+          processNodeId={detail.node.id}
+          refs={refs}
+          canEdit={canEdit}
+          canConfirm={canConfirm}
+          onChanged={load}
+        />
+      )}
+
+      {tab === "versions" && (
+        <ProcessVersionRegistry
+          rootLineageId={detail.node.root_lineage_id}
+          currentProcessNodeId={detail.node.id}
+          canConfirm={canConfirm}
+          onChanged={onChanged}
         />
       )}
     </div>

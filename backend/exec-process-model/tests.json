@@ -133,6 +133,38 @@
       "expectedStatus": 401,
       "expectedBody": { "ok": false },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized publication_checklist blocked",
+      "method": "GET",
+      "path": "/?action=publication_checklist&process_node_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized remarks blocked",
+      "method": "GET",
+      "path": "/?action=remarks&process_node_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized process_version_registry blocked",
+      "method": "GET",
+      "path": "/?action=process_version_registry&root_lineage_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized process_version_compare blocked",
+      "method": "GET",
+      "path": "/?action=process_version_compare&version_a_id=1&version_b_id=2",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
     }
   ]
 }

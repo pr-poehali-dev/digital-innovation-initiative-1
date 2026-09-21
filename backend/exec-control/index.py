@@ -98,7 +98,7 @@ RISK_LEVEL_SQL = """
     END
 """
 
-OVERDUE_MS = "(m.plan_date < CURRENT_DATE AND m.status NOT IN ('achieved','cancelled'))"
+OVERDUE_MS = "(m.plan_date < CURRENT_DATE AND m.status NOT IN ('achieved','cancelled') AND COALESCE(m.is_test_data, false) = false)"
 
 
 def validate(kind: str, d: dict, existing: dict = None):
@@ -230,7 +230,7 @@ def log_schedule_change(cur, actor, object_kind, object_id, project_id, layer, f
 
 
 def milestones(cur, initiative_id=None, include_closed=True):
-    conds, params = [], []
+    conds, params = ["COALESCE(m.is_test_data, false) = false"], []
     if initiative_id:
         conds.append("m.initiative_id = %s")
         params.append(initiative_id)
@@ -260,7 +260,7 @@ def milestones(cur, initiative_id=None, include_closed=True):
 
 
 def issues(cur, initiative_id=None, include_closed=True):
-    conds, params = [], []
+    conds, params = ["COALESCE(s.is_test_data, false) = false"], []
     if initiative_id:
         conds.append("s.initiative_id = %s")
         params.append(initiative_id)
@@ -288,7 +288,7 @@ def issues(cur, initiative_id=None, include_closed=True):
 
 
 def risks(cur, initiative_id=None, include_closed=True):
-    conds, params = [], []
+    conds, params = ["COALESCE(r.is_test_data, false) = false"], []
     if initiative_id:
         conds.append("r.initiative_id = %s")
         params.append(initiative_id)
@@ -452,6 +452,7 @@ def control_focus(cur):
         JOIN {SCHEMA}.exec_initiative i ON i.id = s.initiative_id
         WHERE s.criticality IN ('critical','high')
           AND s.status NOT IN ('resolved','closed','irrelevant')
+          AND COALESCE(s.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY CASE s.criticality WHEN 'critical' THEN 1 ELSE 2 END, s.due_at NULLS LAST
     """)
     out["critical_issues"] = rows(cur)
@@ -465,12 +466,14 @@ def control_focus(cur):
             FROM {SCHEMA}.exec_issue s
             JOIN {SCHEMA}.exec_initiative i ON i.id = s.initiative_id
             WHERE s.is_blocking = true AND COALESCE(s.block_status,'active') = 'active'
+              AND COALESCE(s.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
             UNION ALL
             SELECT r.id, LEFT(r.description, 200), LEFT(r.description, 200), r.block_what, r.block_deadline,
                    i.id, i.title, 'risk'
             FROM {SCHEMA}.exec_risk r
             JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
             WHERE r.is_blocking = true AND COALESCE(r.block_status,'active') = 'active'
+              AND COALESCE(r.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ) q ORDER BY block_deadline NULLS LAST
     """)
     out["blockers"] = rows(cur)
@@ -483,6 +486,7 @@ def control_focus(cur):
         JOIN {SCHEMA}.exec_initiative i ON i.id = m.initiative_id
         WHERE m.plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
           AND m.status NOT IN ('achieved','cancelled')
+          AND COALESCE(m.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY m.plan_date
     """)
     out["upcoming_milestones"] = rows(cur)
@@ -493,7 +497,7 @@ def control_focus(cur):
                (CURRENT_DATE - m.plan_date) AS days_overdue
         FROM {SCHEMA}.exec_milestone m
         JOIN {SCHEMA}.exec_initiative i ON i.id = m.initiative_id
-        WHERE {OVERDUE_MS}
+        WHERE {OVERDUE_MS} AND COALESCE(i.is_test_data, false) = false
         ORDER BY m.plan_date
     """)
     out["overdue_milestones"] = rows(cur)
@@ -506,6 +510,7 @@ def control_focus(cur):
         FROM {SCHEMA}.exec_risk r
         JOIN {SCHEMA}.exec_initiative i ON i.id = r.initiative_id
         WHERE (r.risk_score >= 10 OR r.severity_rank >= 3) AND r.status IN ('active','accepted')
+          AND COALESCE(r.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY COALESCE(r.risk_score, r.severity_rank * 5) DESC
     """)
     out["high_risks"] = rows(cur)
@@ -519,6 +524,7 @@ def control_focus(cur):
         LEFT JOIN {SCHEMA}.exec_collegial_body b ON b.id = d.review_body_id
         WHERE d.needs_group_review = true
           AND d.status NOT IN ('decided','rejected','deferred')
+          AND COALESCE(d.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY COALESCE(d.review_target_date, d.due_at) NULLS LAST
     """)
     out["group_agenda"] = rows(cur)
@@ -535,6 +541,7 @@ def control_focus(cur):
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = COALESCE(s.initiative_id, r.initiative_id)
         WHERE e.status IN ('sent','in_review')
           AND e.level_code IN ('group','block','corporate')
+          AND COALESCE(i.is_test_data, false) = false
         ORDER BY e.review_due_at NULLS LAST
     """)
     out["my_escalations"] = rows(cur)
@@ -545,7 +552,7 @@ def control_focus(cur):
                (i.owner_person_id IS NULL) AS no_owner,
                (i.plan_end IS NULL) AS no_deadline
         FROM {SCHEMA}.exec_initiative i
-        WHERE i.status NOT IN ('closed','done')
+        WHERE i.status NOT IN ('closed','done') AND COALESCE(i.is_test_data, false) = false
     """)
     stalled = []
     for r in rows(cur):
@@ -570,19 +577,25 @@ def control_focus(cur):
     cur.execute(f"""
         SELECT
           (SELECT COUNT(*) FROM {SCHEMA}.exec_issue
-           WHERE criticality IN ('critical','high') AND status NOT IN ('resolved','closed','irrelevant')) AS critical_issues,
+           WHERE criticality IN ('critical','high') AND status NOT IN ('resolved','closed','irrelevant')
+             AND COALESCE(is_test_data, false) = false) AS critical_issues,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_issue
-           WHERE is_blocking AND COALESCE(block_status,'active') = 'active') +
+           WHERE is_blocking AND COALESCE(block_status,'active') = 'active'
+             AND COALESCE(is_test_data, false) = false) +
           (SELECT COUNT(*) FROM {SCHEMA}.exec_risk
-           WHERE is_blocking AND COALESCE(block_status,'active') = 'active') AS blockers,
+           WHERE is_blocking AND COALESCE(block_status,'active') = 'active'
+             AND COALESCE(is_test_data, false) = false) AS blockers,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_milestone m WHERE {OVERDUE_MS}) AS overdue_milestones,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_milestone
            WHERE plan_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
-             AND status NOT IN ('achieved','cancelled')) AS upcoming_milestones,
+             AND status NOT IN ('achieved','cancelled')
+             AND COALESCE(is_test_data, false) = false) AS upcoming_milestones,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_risk
-           WHERE (risk_score >= 10 OR severity_rank >= 3) AND status IN ('active','accepted')) AS high_risks,
+           WHERE (risk_score >= 10 OR severity_rank >= 3) AND status IN ('active','accepted')
+             AND COALESCE(is_test_data, false) = false) AS high_risks,
           (SELECT COUNT(*) FROM {SCHEMA}.exec_escalation
-           WHERE status IN ('sent','in_review')) AS open_escalations
+           WHERE status IN ('sent','in_review')
+             AND COALESCE(is_test_data, false) = false) AS open_escalations
     """)
     out["metrics"] = rows(cur)[0]
     return out

@@ -252,6 +252,11 @@ def diagnostics(cur):
 
 
 def focus_data(cur):
+    """Итерация 4, раздел 9 ТЗ: пользовательские экраны по умолчанию НЕ должны
+    показывать общесистемные числа с тестовыми объектами. Все счётчики и
+    списки здесь по умолчанию исключают is_test_data=true — «Мой фокус»
+    показывает рабочую картину руководителя, а не смесь с тестовыми
+    инициативами/решениями/вехами, созданными для проверки функциональности."""
     out = {}
 
     cur.execute(f"""
@@ -260,7 +265,7 @@ def focus_data(cur):
         FROM {SCHEMA}.exec_initiative i
         LEFT JOIN {SCHEMA}.exec_person ow ON ow.id = i.owner_person_id
         LEFT JOIN {SCHEMA}.exec_person mg ON mg.id = i.manager_person_id
-        WHERE i.status NOT IN ('closed')
+        WHERE i.status NOT IN ('closed') AND COALESCE(i.is_test_data, false) = false
         ORDER BY CASE i.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2
                  WHEN 'medium' THEN 3 ELSE 4 END, i.plan_end NULLS LAST
     """)
@@ -274,6 +279,7 @@ def focus_data(cur):
         JOIN {SCHEMA}.exec_decision_type dt ON dt.code = d.decision_type_code
         JOIN {SCHEMA}.exec_initiative i ON i.id = d.initiative_id
         WHERE d.status NOT IN ('decided','rejected','deferred')
+          AND COALESCE(d.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY d.due_at NULLS LAST
     """)
     out["pending_decisions"] = rows(cur)
@@ -286,6 +292,7 @@ def focus_data(cur):
         LEFT JOIN {SCHEMA}.exec_person p ON p.id = s.person_id
         JOIN {SCHEMA}.exec_initiative i ON i.id = s.initiative_id
         WHERE s.next_action IS NOT NULL AND s.engagement_status <> 'done'
+          AND COALESCE(s.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY s.next_action_due NULLS LAST
     """)
     out["stakeholder_actions"] = rows(cur)
@@ -295,6 +302,7 @@ def focus_data(cur):
         FROM {SCHEMA}.exec_decision_instance d
         JOIN {SCHEMA}.exec_initiative i ON i.id = d.initiative_id
         WHERE d.due_at < CURRENT_DATE AND d.status NOT IN ('decided','rejected','deferred')
+          AND COALESCE(d.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY d.due_at
     """)
     out["escalations"] = rows(cur)
@@ -305,26 +313,32 @@ def focus_data(cur):
         JOIN {SCHEMA}.exec_decision_type dt ON dt.code = d.decision_type_code
         JOIN {SCHEMA}.exec_initiative i ON i.id = d.initiative_id
         WHERE d.status IN ('review','preparing')
+          AND COALESCE(d.is_test_data, false) = false AND COALESCE(i.is_test_data, false) = false
         ORDER BY d.due_at NULLS LAST
     """)
     out["group_agenda"] = rows(cur)
 
-    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_initiative WHERE status NOT IN ('closed')")
+    cur.execute(f"""SELECT COUNT(*) FROM {SCHEMA}.exec_initiative
+                    WHERE status NOT IN ('closed') AND COALESCE(is_test_data, false) = false""")
     total_init = cur.fetchone()[0]
-    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_initiative WHERE owner_person_id IS NULL AND status NOT IN ('closed')")
+    cur.execute(f"""SELECT COUNT(*) FROM {SCHEMA}.exec_initiative
+                    WHERE owner_person_id IS NULL AND status NOT IN ('closed') AND COALESCE(is_test_data, false) = false""")
     no_owner = cur.fetchone()[0]
-    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_initiative WHERE effect_owner_person_id IS NULL AND status NOT IN ('closed','idea')")
+    cur.execute(f"""SELECT COUNT(*) FROM {SCHEMA}.exec_initiative
+                    WHERE effect_owner_person_id IS NULL AND status NOT IN ('closed','idea') AND COALESCE(is_test_data, false) = false""")
     no_effect = cur.fetchone()[0]
     cur.execute(f"""SELECT COUNT(*) FROM {SCHEMA}.exec_decision_instance
-                    WHERE status NOT IN ('decided','rejected','deferred')""")
+                    WHERE status NOT IN ('decided','rejected','deferred') AND COALESCE(is_test_data, false) = false""")
     open_dec = cur.fetchone()[0]
     cur.execute(f"""SELECT COUNT(*) FROM {SCHEMA}.exec_decision_instance
-                    WHERE due_at < CURRENT_DATE AND status NOT IN ('decided','rejected','deferred')""")
+                    WHERE due_at < CURRENT_DATE AND status NOT IN ('decided','rejected','deferred')
+                      AND COALESCE(is_test_data, false) = false""")
     overdue_dec = cur.fetchone()[0]
     cur.execute(f"""SELECT COUNT(*) FROM {SCHEMA}.exec_stakeholder
-                    WHERE next_action_due < CURRENT_DATE AND engagement_status <> 'done'""")
+                    WHERE next_action_due < CURRENT_DATE AND engagement_status <> 'done'
+                      AND COALESCE(is_test_data, false) = false""")
     overdue_act = cur.fetchone()[0]
-    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_stakeholder")
+    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.exec_stakeholder WHERE COALESCE(is_test_data, false) = false")
     total_sh = cur.fetchone()[0]
 
     out["metrics"] = {
@@ -426,6 +440,7 @@ def my_day_v2(cur, actor, tz):
         LEFT JOIN {SCHEMA}.exec_project p ON p.id = a.project_id
         WHERE a.status NOT IN ('done','done_by_executor','accepted_by_head','cancelled')
           AND a.due_at IS NOT NULL AND a.due_at < CURRENT_DATE
+          AND COALESCE(a.is_test_data, false) = false
         ORDER BY a.due_at LIMIT 30
     """)
     overdue_actions = rows(cur)
@@ -445,7 +460,7 @@ def my_day_v2(cur, actor, tz):
         FROM {SCHEMA}.exec_action a
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
         WHERE a.status NOT IN ('done','done_by_executor','accepted_by_head','cancelled')
-          AND a.due_at = %s
+          AND a.due_at = %s AND COALESCE(a.is_test_data, false) = false
     """, (today,))
     today_actions = rows(cur)
 
@@ -469,7 +484,7 @@ def my_day_v2(cur, actor, tz):
         FROM {SCHEMA}.exec_action a
         LEFT JOIN {SCHEMA}.exec_initiative i ON i.id = a.initiative_id
         WHERE a.status NOT IN ('done','done_by_executor','accepted_by_head','cancelled')
-          AND a.due_at BETWEEN %s AND %s
+          AND a.due_at BETWEEN %s AND %s AND COALESCE(a.is_test_data, false) = false
         ORDER BY a.due_at
     """, (monday, sunday))
     week_actions = rows(cur)
@@ -501,7 +516,7 @@ def my_day_v2(cur, actor, tz):
 
     cur.execute(f"""
         SELECT id, question, due_at, status, initiative_id FROM {SCHEMA}.exec_decision_instance
-        WHERE status NOT IN ('decided','rejected','deferred')
+        WHERE status NOT IN ('decided','rejected','deferred') AND COALESCE(is_test_data, false) = false
         ORDER BY due_at NULLS LAST LIMIT 20
     """)
     pending_decisions = rows(cur)
@@ -509,7 +524,7 @@ def my_day_v2(cur, actor, tz):
     cur.execute(f"""
         SELECT id, question, due_at, control_result, initiative_id FROM {SCHEMA}.exec_decision_instance
         WHERE status = 'decided' AND due_at IS NOT NULL AND due_at <= CURRENT_DATE
-          AND (control_result IS NULL OR control_result = '')
+          AND (control_result IS NULL OR control_result = '') AND COALESCE(is_test_data, false) = false
         ORDER BY due_at LIMIT 20
     """)
     decisions_awaiting_control = rows(cur)
@@ -520,6 +535,7 @@ def my_day_v2(cur, actor, tz):
         FROM {SCHEMA}.exec_risk
         WHERE status = 'active'
           AND (probability * impact >= 15 OR severity_rank >= 4)
+          AND COALESCE(is_test_data, false) = false
         ORDER BY COALESCE(probability * impact, severity_rank * 5) DESC LIMIT 10
     """)
     critical_risks = rows(cur)
@@ -527,6 +543,7 @@ def my_day_v2(cur, actor, tz):
     cur.execute(f"""
         SELECT id, title, criticality, initiative_id FROM {SCHEMA}.exec_issue
         WHERE status IN ('open','in_progress') AND criticality IN ('high','critical')
+          AND COALESCE(is_test_data, false) = false
         ORDER BY criticality DESC LIMIT 10
     """)
     critical_issues = rows(cur)
@@ -1366,9 +1383,34 @@ def handler(event: dict, context) -> dict:
 
         if action == "portfolio_summary":
             # Сводка портфеля: статусы, готовность к бюджету, отклонения.
+            # Итерация 4, раздел 9 ТЗ: по умолчанию — БЕЗ тестовых данных
+            # (это ломало пользовательский экран: 16 инициатив вместо 7
+            # рабочих). Фильтр по конкретному портфелю (portfolio_id=N) —
+            # явный опт-ин параметром запроса, а не поведение по умолчанию,
+            # чтобы не менять состав уже существующей страницы «Портфель
+            # инициатив» (она управляет ВСЕМИ нетестовыми инициативами, а не
+            # только портфелем Блока ВК). Для «обзора Блока ВК» отдельный
+            # экран передаёт portfolio_id явно.
+            include_test_data = qs.get("include_test_data") == "1"
+            portfolio_id = as_int(qs.get("portfolio_id"))
+
+            conds = ["status <> 'closed'"]
+            if not include_test_data:
+                conds.append("COALESCE(is_test_data, false) = false")
+            if portfolio_id is not None:
+                conds.append(f"portfolio_id = {int(portfolio_id)}")
+            where_active = " AND ".join(conds)
+
+            base_conds = []
+            if not include_test_data:
+                base_conds.append("COALESCE(is_test_data, false) = false")
+            if portfolio_id is not None:
+                base_conds.append(f"portfolio_id = {int(portfolio_id)}")
+            where_base = (" WHERE " + " AND ".join(base_conds)) if base_conds else ""
+
             cur.execute(f"""
                 SELECT status, COUNT(*) AS cnt
-                FROM {SCHEMA}.exec_initiative WHERE status <> 'closed'
+                FROM {SCHEMA}.exec_initiative WHERE {where_active}
                 GROUP BY status
             """)
             by_status = rows(cur)
@@ -1376,7 +1418,7 @@ def handler(event: dict, context) -> dict:
             cur.execute(f"""
                 SELECT budget_status, COUNT(*) AS cnt, SUM(COALESCE(budget_amount,0)) AS amount
                 FROM {SCHEMA}.exec_initiative
-                WHERE status <> 'closed' AND budget_year IS NOT NULL
+                WHERE {where_active} AND budget_year IS NOT NULL
                 GROUP BY budget_status
             """)
             by_budget_status = rows(cur)
@@ -1399,12 +1441,13 @@ def handler(event: dict, context) -> dict:
                         AND d.status NOT IN ('decided','rejected','deferred'))) AS needs_decision,
                   COUNT(*) FILTER (WHERE budget_year IS NOT NULL
                       AND budget_status NOT IN ('approved','not_required')) AS budget_not_ready
-                FROM {SCHEMA}.exec_initiative
+                FROM {SCHEMA}.exec_initiative{where_base}
             """)
             flags = rows(cur)[0]
 
             return cors({"ok": True, "data": {
                 "by_status": by_status, "by_budget_status": by_budget_status, "flags": flags,
+                "scope": {"portfolio_id": portfolio_id, "include_test_data": include_test_data},
             }})
 
         if action == "my_day":

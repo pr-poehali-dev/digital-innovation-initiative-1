@@ -3,13 +3,114 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Icon from "@/components/ui/icon";
 import { Loading, ErrorBox, Empty } from "@/components/exec/ExecUI";
-import { processModelApi, Overview, Refs, ClarificationNote } from "@/lib/execProcessModelApi";
+import { processModelApi, Overview, Refs, ClarificationNote, OverviewFilters } from "@/lib/execProcessModelApi";
+import { execApi, PortfolioSummary } from "@/lib/execCabinetApi";
 import { PROCESS_MODEL_WIZARD_GUIDE, getWizardStage, WizardStageCode } from "@/config/processModelWizardGuide";
 import WizardAssistant from "@/components/exec/processModel/WizardAssistant";
 import FunctionsManager from "@/components/exec/processModel/FunctionsManager";
 import ArchitectureManager from "@/components/exec/processModel/ArchitectureManager";
+import CompletenessReportView from "@/components/exec/processModel/CompletenessReportView";
 
-type TopTab = "overview" | "wizard" | "documents" | "functions" | "architecture" | "questions";
+// Итерация 4, раздел 8-9 ТЗ: код портфеля Блока ВК в справочнике exec_portfolio
+// (см. миграцию V0501). На обзор модели выводится ТОЛЬКО этот портфель, а не
+// общесистемные 16 инициатив (9 из которых тестовые) — раздел 9 ТЗ прямо
+// запрещает показывать в пользовательских экранах общесистемные числа с
+// тестовыми объектами по умолчанию.
+const BLOCK_VK_PORTFOLIO_CODE = "BLOCK-VK-2026";
+
+/**
+ * Отдельный блок «Инициативы Блока ВК» на обзоре процессной модели —
+ * с явной подписью портфеля, чтобы не путать с общесистемным списком
+ * инициатив (/cabinet/exec/initiatives показывает ВСЕ нетестовые инициативы
+ * по всем портфелям, здесь — только рабочий портфель Блока ВК).
+ */
+function BlockVkInitiativesSummary() {
+  const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [portfolioTitle, setPortfolioTitle] = useState<string>("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    execApi
+      .portfolios()
+      .then(async (pf) => {
+        const bkPortfolio = pf.items.find((p) => p.code === BLOCK_VK_PORTFOLIO_CODE) || pf.items[0];
+        if (!bkPortfolio) {
+          if (!cancelled) setError("Портфель Блока ВК не найден в справочнике");
+          return;
+        }
+        if (!cancelled) setPortfolioTitle(bkPortfolio.title);
+        const s = await execApi.portfolioSummary({ portfolioId: bkPortfolio.id });
+        if (!cancelled) setSummary(s);
+      })
+      .catch((e) => !cancelled && setError((e as Error).message))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return null;
+  if (error) return <div className="text-xs text-red-600">{error}</div>;
+  if (!summary) return null;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div>
+          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+            Рабочий портфель Блока ВК{portfolioTitle ? ` · ${portfolioTitle}` : ""}
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Только этот портфель — без тестовых данных и без инициатив других подразделений
+          </p>
+        </div>
+        <a
+          href="/cabinet/exec/initiatives"
+          className="text-xs text-violet-600 hover:text-violet-800 flex items-center gap-1"
+        >
+          Открыть портфель <Icon name="ArrowRight" size={12} />
+        </a>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-[11px] text-slate-500">Инициатив в портфеле</p>
+          <p className="text-xl font-semibold text-slate-900 mt-1">{summary.flags.active_total}</p>
+        </div>
+        <div className={`rounded-lg border p-3 ${summary.flags.no_owner > 0 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+          <p className="text-[11px] text-slate-500">Без владельца</p>
+          <p className={`text-xl font-semibold mt-1 ${summary.flags.no_owner > 0 ? "text-amber-700" : "text-slate-900"}`}>{summary.flags.no_owner}</p>
+        </div>
+        <div className={`rounded-lg border p-3 ${summary.flags.needs_decision > 0 ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+          <p className="text-[11px] text-slate-500">Требуют решения</p>
+          <p className={`text-xl font-semibold mt-1 ${summary.flags.needs_decision > 0 ? "text-amber-700" : "text-slate-900"}`}>{summary.flags.needs_decision}</p>
+        </div>
+        <div className={`rounded-lg border p-3 ${summary.flags.overdue_milestone > 0 ? "border-red-200 bg-red-50" : "border-slate-200 bg-slate-50"}`}>
+          <p className="text-[11px] text-slate-500">Просроченные вехи</p>
+          <p className={`text-xl font-semibold mt-1 ${summary.flags.overdue_milestone > 0 ? "text-red-700" : "text-slate-900"}`}>{summary.flags.overdue_milestone}</p>
+        </div>
+      </div>
+      {/* Раздел 9 ТЗ итерации 4: контрольная арифметика инициатив (16 всего,
+          9 тестовых, 6 в портфеле Блока ВК) оставляет одну нетестовую
+          инициативу вне этого портфеля — «Создание Центра цифровизации и
+          развития технологий контрольной деятельности (ЦЦиРТКД)». Это
+          инициатива более высокого уровня управления — про СОЗДАНИЕ самого
+          Центра/Блока, а не про операционную работу внутри уже созданного
+          Блока ВК, поэтому она сознательно не отнесена к его рабочему
+          портфелю и учитывается отдельно на уровне вышестоящего руководства. */}
+      <p className="text-[11px] text-slate-400 mt-3 border-t border-slate-100 pt-3">
+        Отдельно от этого портфеля ведётся инициатива «Создание Центра цифровизации и развития технологий
+        контрольной деятельности (ЦЦиРТКД)» — она про создание самого Центра/Блока как организационной единицы
+        (уровень вышестоящего руководства), а не про операционную работу внутри уже созданного Блока ВК, поэтому
+        не включена в рабочий портфель выше.
+      </p>
+    </div>
+  );
+}
+
+type TopTab = "overview" | "wizard" | "documents" | "functions" | "architecture" | "questions" | "completeness";
 
 const TOP_TABS: { id: TopTab; label: string; icon: string }[] = [
   { id: "overview", label: "Обзор модели", icon: "LayoutDashboard" },
@@ -18,10 +119,71 @@ const TOP_TABS: { id: TopTab; label: string; icon: string }[] = [
   { id: "functions", label: "Функции", icon: "ListTree" },
   { id: "architecture", label: "Архитектура процессов", icon: "Network" },
   { id: "questions", label: "Вопросы на уточнение", icon: "HelpCircle" },
+  { id: "completeness", label: "Отчёт о полноте", icon: "ClipboardList" },
 ];
+
+// Итерация 4, раздел 8: подпись элемента списка в модалке карточки метрики —
+// для каждой метрики свой тип сущности, на которую ссылается id.
+const FILTER_ITEM_LABEL: Record<keyof OverviewFilters, string> = {
+  unconfirmed_controls: "Контроль",
+  processes_without_metrics: "Процесс",
+  issues_without_improvements: "Проблема",
+  improvements_without_initiatives: "Улучшение",
+  models_in_review: "Процесс",
+  published_versions: "Процесс",
+  edit_conflicts: "Процесс",
+  publication_blocking_errors: "Процесс",
+};
+
+function FilterIdsModal({
+  title,
+  ids,
+  itemLabel,
+  onClose,
+}: {
+  title: string;
+  ids: number[];
+  itemLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-200">
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <Icon name="X" size={16} />
+          </button>
+        </div>
+        <div className="p-4 max-h-[50vh] overflow-y-auto">
+          {ids.length === 0 ? (
+            <p className="text-xs text-slate-400">Список пуст.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {ids.map((id) => (
+                <span key={id} className="text-xs px-2 py-1 rounded-md border border-slate-200 bg-slate-50 text-slate-700">
+                  {itemLabel} #{id}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* TODO: заменить простой список id на переход к отфильтрованному
+              реестру/карточке конкретной сущности, когда для соответствующего
+              раздела появится прямой deep-link (риски/контроли, показатели,
+              проблемы, улучшения, реестр версий). */}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function OverviewScreen({ overview, onNavigate }: { overview: Overview; onNavigate: (tab: TopTab, stageCode?: string) => void }) {
   const m = overview.metrics;
+  const filters = overview.filters;
+  const [activeFilter, setActiveFilter] = useState<{ title: string; ids: number[]; itemLabel: string } | null>(null);
 
   const metricCards = [
     { label: "Функций", value: m.functions_total, sub: `подтверждено: ${m.functions_confirmed}`, icon: "ListTree", tone: "default" as const },
@@ -32,6 +194,19 @@ function OverviewScreen({ overview, onNavigate }: { overview: Overview; onNaviga
     { label: "Процессы без владельца", value: m.processes_without_owner, icon: "UserX", tone: m.processes_without_owner > 0 ? "warning" as const : "success" as const },
     { label: "Документы без подтверждения", value: m.docs_need_confirmation, icon: "FileWarning", tone: m.docs_need_confirmation > 0 ? "warning" as const : "success" as const },
     { label: "Открытые вопросы", value: m.open_questions, icon: "HelpCircle", tone: m.open_questions > 0 ? "warning" as const : "success" as const },
+  ];
+
+  // Итерация 4, раздел 8: расширенные метрики обзора модели — каждая с
+  // filterKey, по которому берётся список id из overview.filters для модалки.
+  const extraMetricCards: { label: string; value: number; icon: string; tone: "default" | "danger" | "warning" | "success"; filterKey: keyof OverviewFilters }[] = [
+    { label: "Неподтверждённые контроли", value: m.unconfirmed_controls, icon: "ShieldQuestion", tone: m.unconfirmed_controls > 0 ? "warning" : "success", filterKey: "unconfirmed_controls" },
+    { label: "Процессы без показателей", value: m.processes_without_metrics, icon: "Gauge", tone: m.processes_without_metrics > 0 ? "warning" : "success", filterKey: "processes_without_metrics" },
+    { label: "Проблемы без улучшений", value: m.issues_without_improvements, icon: "AlertOctagon", tone: m.issues_without_improvements > 0 ? "warning" : "success", filterKey: "issues_without_improvements" },
+    { label: "Улучшения без инициатив", value: m.improvements_without_initiatives, icon: "Lightbulb", tone: m.improvements_without_initiatives > 0 ? "warning" : "success", filterKey: "improvements_without_initiatives" },
+    { label: "Модели на проверке", value: m.models_in_review, icon: "Hourglass", tone: "default", filterKey: "models_in_review" },
+    { label: "Опубликованные версии", value: m.published_versions, icon: "BadgeCheck", tone: "success", filterKey: "published_versions" },
+    { label: "Конфликты редактирования", value: m.edit_conflicts, icon: "GitMerge", tone: m.edit_conflicts > 0 ? "danger" : "success", filterKey: "edit_conflicts" },
+    { label: "Блокирующие ошибки публикации", value: m.publication_blocking_errors, icon: "ShieldX", tone: m.publication_blocking_errors > 0 ? "danger" : "success", filterKey: "publication_blocking_errors" },
   ];
 
   const toneCls = {
@@ -95,6 +270,47 @@ function OverviewScreen({ overview, onNavigate }: { overview: Overview; onNaviga
           </div>
         ))}
       </div>
+
+      <div>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">Углублённые метрики (итерация 4)</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {extraMetricCards.map((c) => {
+            const ids = filters?.[c.filterKey] || [];
+            const clickable = c.value > 0 && ids.length > 0;
+            return (
+              <button
+                key={c.label}
+                type="button"
+                disabled={!clickable}
+                onClick={() => clickable && setActiveFilter({ title: c.label, ids, itemLabel: FILTER_ITEM_LABEL[c.filterKey] })}
+                className={`text-left rounded-xl border p-3.5 ${toneCls[c.tone]} ${clickable ? "cursor-pointer hover:border-violet-300 hover:shadow-sm transition-all" : "cursor-default"}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-[11px] text-slate-500 leading-snug">{c.label}</p>
+                  <Icon name={c.icon} size={14} className="text-slate-400 flex-shrink-0" />
+                </div>
+                <p className={`text-xl font-semibold mt-1.5 ${valueCls[c.tone]}`}>{c.value}</p>
+                {clickable && (
+                  <p className="text-[10px] text-violet-500 mt-0.5 flex items-center gap-0.5">
+                    Показать список <Icon name="ArrowRight" size={10} />
+                  </p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeFilter && (
+        <FilterIdsModal
+          title={activeFilter.title}
+          ids={activeFilter.ids}
+          itemLabel={activeFilter.itemLabel}
+          onClose={() => setActiveFilter(null)}
+        />
+      )}
+
+      <BlockVkInitiativesSummary />
 
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">Путь построения модели</p>
@@ -429,6 +645,7 @@ export default function ExecProcessModelPage() {
         {tab === "functions" && <FunctionsManager scopeId={scopeId} canEdit={!!refs?.can_edit} />}
         {tab === "architecture" && <ArchitectureManager scopeId={scopeId} canEdit={!!refs?.can_edit} canConfirm={!!refs?.can_confirm} />}
         {tab === "questions" && <QuestionsScreen scopeId={scopeId} />}
+        {tab === "completeness" && <CompletenessReportView scopeId={scopeId} />}
       </div>
     </Layout>
   );
