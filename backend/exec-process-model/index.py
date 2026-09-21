@@ -49,10 +49,136 @@ PROCESS_LEVELS = {
 MODEL_STATUSES = {
     "draft": "Черновик",
     "in_review": "На проверке",
+    "needs_revision": "Требует доработки",
     "confirmed": "Подтверждён",
     "published": "Опубликован",
     "archived": "Архив",
 }
+# ── Итерация 4, раздел 2: жизненный цикл модели ──────────────────────────────
+# Явный список допустимых переходов — нельзя перескакивать между произвольными
+# статусами или публиковать непроверенную модель. Действует одинаково для
+# process_node и diagram (набор статусов у обеих сущностей идентичен).
+STATUS_TRANSITIONS = {
+    "draft": {"in_review", "archived"},
+    "in_review": {"confirmed", "needs_revision", "draft", "archived"},
+    "needs_revision": {"draft", "in_review", "archived"},
+    "confirmed": {"published", "needs_revision", "archived"},
+    "published": {"archived"},
+    "archived": set(),
+}
+# Статусы, переход в которые требует роли проверяющего/уполномоченного
+# (can_confirm) — в системе пока нет отдельной роли "проверяющий" отдельно от
+# "уполномоченный на подтверждение/публикацию", поэтому используется тот же
+# признак can_confirm. Это осознанное ограничение текущей итерации.
+STATUS_REQUIRES_CONFIRM_ROLE = {"confirmed", "published", "needs_revision", "archived"}
+# Соответствие перехода статуса записи в журнал решений согласования
+# (exec_process_review_decision) — используется set_process_status/
+# set_diagram_status, чтобы маршрут согласования не поддерживался вручную.
+STATUS_TO_REVIEW_DECISION = {
+    "in_review": "submitted",
+    "needs_revision": "needs_revision",
+    "confirmed": "confirmed",
+    "published": "published",
+}
+
+
+def validate_status_transition(current: str, new_status: str, can_confirm_role: bool):
+    """Общая проверка перехода статуса для process_node и diagram (раздел 2
+    ТЗ итерации 4). Возвращает текст ошибки или None."""
+    if new_status not in MODEL_STATUSES:
+        return "Некорректный статус"
+    if new_status == current:
+        return None
+    allowed = STATUS_TRANSITIONS.get(current, set())
+    if new_status not in allowed:
+        return (f"Недопустимый переход статуса: «{MODEL_STATUSES.get(current, current)}» → "
+                f"«{MODEL_STATUSES.get(new_status, new_status)}»")
+    if new_status in STATUS_REQUIRES_CONFIRM_ROLE and not can_confirm_role:
+        return "Недостаточно прав для этого перехода статуса"
+    return None
+
+
+def record_review_decision(cur, entity_type: str, entity_id: int, version: int, new_status: str, actor: str, comment):
+    decision = STATUS_TO_REVIEW_DECISION.get(new_status)
+    if not decision:
+        return
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_review_decision "
+        f"(entity_type, entity_id, version, decision, actor, comment) VALUES (%s,%s,%s,%s,%s,%s)",
+        (entity_type, entity_id, version, decision, actor, nz(comment)),
+    )
+
+
+# ── Итерация 4, раздел 4: маршрут согласования ───────────────────────────────
+REVIEW_ENTITY_TABLES = {"process_node": "exec_process_node", "diagram": "exec_process_diagram"}
+
+
+def list_review_decisions(cur, entity_type: str, entity_id: int):
+    if entity_type not in REVIEW_ENTITY_TABLES:
+        return []
+    cur.execute(f"""
+        SELECT * FROM {SCHEMA}.exec_process_review_decision
+        WHERE entity_type = %s AND entity_id = %s AND is_test_data = false
+        ORDER BY created_at DESC, id DESC
+    """, (entity_type, entity_id))
+    return rows(cur)
+
+
+def review_take_in_work_or_comment(cur, body: dict, actor: str, decision: str):
+    """«Принять в работу» и «Оставить замечание» — действия проверяющего,
+    которые НЕ меняют статус модели (в отличие от submit/needs_revision/
+    confirmed/published, которые идут через set_process_status/
+    set_diagram_status и сами пишут в этот же журнал). Раздел 4 ТЗ итерации 4:
+    если в справочнике нет подтверждённого проверяющего на этот процесс,
+    reviewer_role/reviewer_org_unit_id остаются как переданы текстом/ссылкой,
+    а reviewer_assigned=false явно показывает «Адресат не назначен» — без
+    подстановки случайного сотрудника."""
+    entity_type = body.get("entity_type")
+    entity_id = as_int(body.get("entity_id"))
+    table = REVIEW_ENTITY_TABLES.get(entity_type)
+    if not table or not entity_id:
+        return None, "Некорректный объект проверки"
+    cur.execute(f"SELECT version FROM {SCHEMA}.{table} WHERE id = %s", (entity_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Объект не найден"
+    reviewer_org_unit_id = as_int(body.get("reviewer_org_unit_id"))
+    cur.execute(
+        f"INSERT INTO {SCHEMA}.exec_process_review_decision "
+        f"(entity_type, entity_id, version, decision, actor, reviewer_role, reviewer_org_unit_id, "
+        f"comment, found_issues, open_questions, reviewer_assigned) "
+        f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (entity_type, entity_id, r[0], decision, actor, nz(body.get("reviewer_role")), reviewer_org_unit_id,
+         nz(body.get("comment")), nz(body.get("found_issues")), nz(body.get("open_questions")),
+         bool(reviewer_org_unit_id or nz(body.get("reviewer_role")))),
+    )
+    new_id = cur.fetchone()[0]
+    log_change(cur, actor, f"review_{entity_type}", entity_id, decision, after={"comment": body.get("comment")})
+    return new_id, None
+
+
+def list_version_history(cur, entity_type: str, entity_id: int):
+    if entity_type not in REVIEW_ENTITY_TABLES:
+        return []
+    cur.execute(f"""
+        SELECT id, entity_type, entity_id, version, status, author, comment,
+               published_basis_note, (snapshot_json IS NOT NULL) AS has_snapshot, created_at
+        FROM {SCHEMA}.exec_process_version_history
+        WHERE entity_type = %s AND entity_id = %s AND is_test_data = false
+        ORDER BY created_at DESC, id DESC
+    """, (entity_type, entity_id))
+    return rows(cur)
+
+
+def get_version_snapshot(cur, history_id: int):
+    cur.execute(f"""
+        SELECT id, entity_type, entity_id, version, status, author, comment, snapshot_json, created_at
+        FROM {SCHEMA}.exec_process_version_history WHERE id = %s
+    """, (history_id,))
+    r = rows(cur)
+    return r[0] if r else None
+
+
 PARTICIPATION_KINDS = {
     "owner": "Владелец",
     "executor": "Исполнитель",
@@ -193,32 +319,53 @@ def as_bool(v, default=False):
     return str(v).strip().lower() in ("1", "true", "yes", "on")
 
 
-def log_change(cur, actor, entity, eid, action, before=None, after=None, reason=None):
+def log_change(cur, actor, entity, eid, action, before=None, after=None, reason=None, context_id=None):
+    """context_id — id диаграммы-владельца для lane/diagram_node/diagram_edge
+    (итерация 4, раздел 8): позволяет строить «журнал последних действий»
+    конкретной схемы без сканирования всего audit_log."""
     cur.execute(
         f"INSERT INTO {SCHEMA}.exec_audit_log "
-        f"(entity_type, entity_id, action, actor, before_json, after_json, reason) "
-        f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
+        f"(entity_type, entity_id, action, actor, before_json, after_json, reason, context_id) "
+        f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
         (entity, eid, action, actor,
          json.dumps(before, ensure_ascii=False, default=str) if before is not None else None,
          json.dumps(after, ensure_ascii=False, default=str) if after is not None else None,
-         reason),
+         reason, context_id),
     )
+    return cur.fetchone()[0]
 
 
-def check_optimistic_lock(before: dict, body: dict) -> str | None:
-    """Простая защита от незаметной перезаписи чужих изменений (раздел 11 ТЗ):
+def check_optimistic_lock(before: dict, body: dict, updated_by_field: str = "updated_by") -> dict | None:
+    """Защита от незаметной перезаписи чужих изменений (итерация 4, раздел 1):
     если клиент прислал expected_updated_at (значение updated_at, которое он
     видел при открытии формы) и оно отличается от текущего — отклоняем
-    сохранение, чтобы не потерять параллельно внесённые изменения другого
-    пользователя. Поле необязательно — старые вызовы без него продолжают
-    работать как раньше (для обратной совместимости)."""
+    сохранение структурированной ошибкой конфликта (код 'conflict'), а не
+    голым текстом, чтобы фронтенд мог показать, кем и когда объект был
+    изменён, и предложить перечитать актуальную версию вместо молчаливой
+    перезаписи. Поле expected_updated_at необязательно — старые вызовы без
+    него продолжают работать как раньше (обратная совместимость)."""
     expected = body.get("expected_updated_at")
     if not expected:
         return None
     current = before.get("updated_at")
     if current is not None and str(current) != str(expected):
-        return "Запись изменена другим пользователем после открытия формы — обновите страницу и повторите изменения"
+        return {
+            "code": "conflict",
+            "message": "Запись изменена другим пользователем после открытия формы — перечитайте актуальную версию, сравните изменения и повторите свои правки вручную",
+            "current_updated_at": str(current),
+            "changed_by": before.get(updated_by_field) or before.get("created_by") or before.get("published_by"),
+        }
     return None
+
+
+def err_response(err):
+    """Единая точка возврата ошибки save/delete-действий: структурированный
+    конфликт (dict от check_optimistic_lock) -> 409, ошибка прав -> 403,
+    остальные текстовые ошибки валидации -> 400."""
+    if isinstance(err, dict):
+        return cors({"ok": False, "error": err}, 409)
+    code = 403 if "прав" in err else 400
+    return cors({"ok": False, "error": {"message": err}}, code)
 
 
 def normalize_text(s: str) -> str:
@@ -537,6 +684,9 @@ def save_process_node(cur, body: dict, actor: str):
             return None, "Узел не найден"
         if before[0]["model_status"] in ("confirmed", "published"):
             return None, "Узел подтверждён/опубликован — для изменений верните черновой статус"
+        lock_err = check_optimistic_lock(before[0], body)
+        if lock_err:
+            return None, lock_err
         if not vals:
             return nid, None
         sets = ", ".join(f"{k} = %s" for k in vals)
@@ -569,20 +719,74 @@ def save_process_node(cur, body: dict, actor: str):
     return new_id, None
 
 
+def build_process_snapshot(cur, node_id: int) -> dict:
+    """Итерация 4, раздел 3: неизменяемый снимок процесса на момент
+    публикации — архитектура, паспорт, диаграммы AS-IS/TO-BE (с дорожками/
+    узлами/связями), риски/контроли, показатели, проблемы/улучшения, связи с
+    инициативами, документы/системы. Сохраняется в
+    exec_process_version_history.snapshot_json и больше не меняется —
+    последующие правки идут только в новый черновик."""
+    detail = get_process_detail(cur, node_id)
+    if not detail:
+        return {}
+    diagrams_full = []
+    for d in detail["diagrams"]:
+        full = get_diagram_full(cur, d["id"])
+        if full:
+            diagrams_full.append(full)
+    risks = []
+    for r in detail["risks"]:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_control WHERE risk_id = %s AND is_test_data = false", (r["id"],))
+        risks.append({**r, "controls": rows(cur)})
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_issue WHERE process_node_id = %s AND is_test_data = false", (node_id,))
+    issues = rows(cur)
+    improvements = []
+    for d in detail["diagrams"]:
+        if d["variant"] == "to_be":
+            improvements.extend(list_improvements(cur, d["id"]))
+    cur.execute(f"""
+        SELECT il.issue_id, il.initiative_id, il.expected_effect_note, i.title AS initiative_title
+        FROM {SCHEMA}.exec_process_issue_initiative_link il
+        JOIN {SCHEMA}.exec_initiative i ON i.id = il.initiative_id
+        WHERE il.issue_id IN (SELECT id FROM {SCHEMA}.exec_process_issue WHERE process_node_id = %s)
+    """, (node_id,))
+    initiative_links = rows(cur)
+    return {
+        "node": detail["node"], "passport": detail["passport"], "participants": detail["participants"],
+        "functions": detail["functions"], "systems": detail["systems"], "documents": detail["documents"],
+        "diagrams": diagrams_full, "risks": risks, "metrics": detail["metrics"], "issues": issues,
+        "improvements": improvements, "initiative_links": initiative_links,
+        "completeness": passport_completeness(cur, node_id),
+    }
+
+
 def set_process_status(cur, body: dict, actor: str, can_confirm_role: bool):
     nid = as_int(body.get("id"))
     new_status = body.get("status")
-    if not nid or new_status not in MODEL_STATUSES:
+    if not nid or not new_status:
         return None, "Некорректные параметры"
-    if new_status in ("confirmed", "published") and not can_confirm_role:
-        return None, "Недостаточно прав для подтверждения/публикации"
 
     cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_node WHERE id = %s", (nid,))
     before = rows(cur)
     if not before:
         return None, "Узел не найден"
-    if before[0]["model_status"] == "published" and new_status != "archived" and not can_confirm_role:
-        return None, "Опубликованный узел нельзя изменить без прав подтверждения"
+
+    lock_err = check_optimistic_lock(before[0], body)
+    if lock_err:
+        return None, lock_err
+
+    trans_err = validate_status_transition(before[0]["model_status"], new_status, can_confirm_role)
+    if trans_err:
+        return None, trans_err
+
+    if new_status == "confirmed":
+        pc = passport_completeness(cur, nid)
+        if pc and not pc["can_confirm"]:
+            return None, "Нельзя подтвердить: не заполнены обязательные поля паспорта (цель, границы, запуск, входы/выходы, владелец)"
+
+    snapshot = None
+    if new_status == "published":
+        snapshot = build_process_snapshot(cur, nid)
 
     extra = ""
     params = [new_status]
@@ -593,11 +797,15 @@ def set_process_status(cur, body: dict, actor: str, can_confirm_role: bool):
         f"UPDATE {SCHEMA}.exec_process_node SET model_status = %s{extra}, updated_by = %s, updated_at = now() WHERE id = %s",
         params + [actor, nid],
     )
+    version_to_record = before[0]["version"] + 1 if new_status == "published" else before[0]["version"]
     cur.execute(
-        f"INSERT INTO {SCHEMA}.exec_process_version_history (entity_type, entity_id, version, status, author, comment) "
-        f"VALUES ('process_node', %s, %s, %s, %s, %s)",
-        (nid, before[0]["version"], new_status, actor, nz(body.get("comment"))),
+        f"INSERT INTO {SCHEMA}.exec_process_version_history "
+        f"(entity_type, entity_id, version, status, author, comment, snapshot_json) "
+        f"VALUES ('process_node', %s, %s, %s, %s, %s, %s)",
+        (nid, version_to_record, new_status, actor, nz(body.get("comment")),
+         json.dumps(snapshot, ensure_ascii=False, default=str) if snapshot is not None else None),
     )
+    record_review_decision(cur, "process_node", nid, version_to_record, new_status, actor, body.get("comment"))
     log_change(cur, actor, "process_node", nid, f"status_{new_status}", before=before[0])
     return nid, None
 
@@ -676,6 +884,13 @@ def save_passport(cur, body: dict, actor: str):
     node_id = as_int(body.get("process_node_id"))
     if not node_id:
         return None, "Не указан процесс"
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_passport WHERE process_node_id = %s", (node_id,))
+    before = rows(cur)
+    if not before:
+        return None, "Паспорт не найден"
+    lock_err = check_optimistic_lock(before[0], body)
+    if lock_err:
+        return None, lock_err
     fields = ["goal", "boundaries_note", "trigger_event", "inputs_note",
               "outputs_note", "suppliers_note", "consumers_note"]
     vals = {f: nz(body.get(f)) for f in fields if f in body}
@@ -687,7 +902,7 @@ def save_passport(cur, body: dict, actor: str):
         f"WHERE process_node_id = %s",
         list(vals.values()) + [actor, node_id],
     )
-    log_change(cur, actor, "process_passport", node_id, "update", after=vals)
+    log_change(cur, actor, "process_passport", node_id, "update", before=before[0], after=vals)
     return node_id, None
 
 
@@ -1462,12 +1677,17 @@ def save_lane(cur, body: dict, actor: str):
     lane_id = as_int(body.get("id"))
     if not diagram_id and not lane_id:
         return None, "Не указана диаграмма"
+    before = None
     if lane_id:
-        cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
-        r = cur.fetchone()
-        if not r:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
+        before_rows = rows(cur)
+        if not before_rows:
             return None, "Дорожка не найдена"
-        diagram_id = r[0]
+        before = before_rows[0]
+        diagram_id = before["diagram_id"]
+        lock_err = check_optimistic_lock(before, body)
+        if lock_err:
+            return None, lock_err
     if not _diagram_editable(cur, diagram_id):
         return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
 
@@ -1489,17 +1709,18 @@ def save_lane(cur, body: dict, actor: str):
     }
     if lane_id:
         sets = ", ".join(f"{k} = %s" for k in vals)
-        cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_lane SET {sets} WHERE id = %s",
-                    list(vals.values()) + [lane_id])
-        log_change(cur, actor, "process_diagram_lane", lane_id, "update", after=vals)
+        cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_lane SET {sets}, updated_by = %s, updated_at = now() WHERE id = %s",
+                    list(vals.values()) + [actor, lane_id])
+        log_change(cur, actor, "process_diagram_lane", lane_id, "update", before=before, after=vals, context_id=diagram_id)
         return lane_id, None
     vals["diagram_id"] = diagram_id
+    vals["updated_by"] = actor
     cols = ", ".join(vals)
     ph = ", ".join(["%s"] * len(vals))
     cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_lane ({cols}) VALUES ({ph}) RETURNING id",
                 list(vals.values()))
     new_id = cur.fetchone()[0]
-    log_change(cur, actor, "process_diagram_lane", new_id, "create", after=vals)
+    log_change(cur, actor, "process_diagram_lane", new_id, "create", after=vals, context_id=diagram_id)
     return new_id, None
 
 
@@ -1507,15 +1728,17 @@ def delete_lane(cur, body: dict, actor: str):
     lane_id = as_int(body.get("id"))
     if not lane_id:
         return None, "Не указана дорожка"
-    cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
-    r = cur.fetchone()
-    if not r:
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
+    before_rows = rows(cur)
+    if not before_rows:
         return None, "Дорожка не найдена"
-    if not _diagram_editable(cur, r[0]):
+    before = before_rows[0]
+    diagram_id = before["diagram_id"]
+    if not _diagram_editable(cur, diagram_id):
         return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
     cur.execute(f"UPDATE {SCHEMA}.exec_process_diagram_node SET lane_id = NULL WHERE lane_id = %s", (lane_id,))
     cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_lane WHERE id = %s", (lane_id,))
-    log_change(cur, actor, "process_diagram_lane", lane_id, "delete")
+    log_change(cur, actor, "process_diagram_lane", lane_id, "delete", before=before, context_id=diagram_id)
     return lane_id, None
 
 
@@ -1536,12 +1759,22 @@ def save_diagram_node(cur, body: dict, actor: str):
     node_id = as_int(body.get("id"))
     if not diagram_id and not node_id:
         return None, "Не указана диаграмма"
+    before = None
     if node_id:
-        cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
-        r = cur.fetchone()
-        if not r:
+        cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
+        before_rows = rows(cur)
+        if not before_rows:
             return None, "Элемент не найден"
-        diagram_id = r[0]
+        before = before_rows[0]
+        diagram_id = before["diagram_id"]
+        # Перемещение мышью (drag-and-drop) шлёт частые save с только pos_x/
+        # pos_y — не блокируем эти "тихие" сохранения жёстким конфликтом,
+        # чтобы не мешать перетаскиванию, если только клиент явно не просит
+        # проверку (expected_updated_at передаётся из свойств/формы, а не из
+        # обработчика перетаскивания на холсте).
+        lock_err = check_optimistic_lock(before, body)
+        if lock_err:
+            return None, lock_err
     if not _diagram_editable(cur, diagram_id):
         return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
 
@@ -1565,17 +1798,20 @@ def save_diagram_node(cur, body: dict, actor: str):
     if node_id:
         if not vals:
             return node_id, None
+        vals["updated_by"] = actor
         sets = ", ".join(f"{k} = %s" for k in vals)
         cur.execute(
             f"UPDATE {SCHEMA}.exec_process_diagram_node SET {sets}, updated_at = now() WHERE id = %s",
             list(vals.values()) + [node_id],
         )
+        log_change(cur, actor, "process_diagram_node", node_id, "update", before=before, after=vals, context_id=diagram_id)
         return node_id, None
 
     node_type = vals.get("node_type")
     if node_type not in NODE_TYPES:
         return None, "Некорректный тип элемента"
     vals["diagram_id"] = diagram_id
+    vals["updated_by"] = actor
     vals.setdefault("pos_x", 40)
     vals.setdefault("pos_y", 40)
     cols = ", ".join(vals)
@@ -1583,26 +1819,38 @@ def save_diagram_node(cur, body: dict, actor: str):
     cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_node ({cols}) VALUES ({ph}) RETURNING id",
                 list(vals.values()))
     new_id = cur.fetchone()[0]
-    log_change(cur, actor, "process_diagram_node", new_id, "create", after=vals)
+    log_change(cur, actor, "process_diagram_node", new_id, "create", after=vals, context_id=diagram_id)
     return new_id, None
 
 
 def delete_diagram_node(cur, body: dict, actor: str):
+    """Удаление элемента схемы вместе со связанными рёбрами. Полное состояние
+    узла и удалённых рёбер сохраняется в before_json audit_log, чтобы
+    «Восстановить удалённый элемент» (раздел 8 ТЗ итерации 4) могло вернуть
+    и узел, и его связи, а не только пустую запись."""
     node_id = as_int(body.get("id"))
     if not node_id:
         return None, "Не указан элемент"
-    cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
-    r = cur.fetchone()
-    if not r:
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
+    node_before_rows = rows(cur)
+    if not node_before_rows:
         return None, "Элемент не найден"
-    if not _diagram_editable(cur, r[0]):
+    node_before = node_before_rows[0]
+    diagram_id = node_before["diagram_id"]
+    if not _diagram_editable(cur, diagram_id):
         return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
+    cur.execute(
+        f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE source_node_id = %s OR target_node_id = %s",
+        (node_id, node_id),
+    )
+    cascade_edges = rows(cur)
     cur.execute(
         f"DELETE FROM {SCHEMA}.exec_process_diagram_edge WHERE source_node_id = %s OR target_node_id = %s",
         (node_id, node_id),
     )
     cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_node WHERE id = %s", (node_id,))
-    log_change(cur, actor, "process_diagram_node", node_id, "delete")
+    log_change(cur, actor, "process_diagram_node", node_id, "delete",
+               before={**node_before, "_cascade_edges": cascade_edges}, context_id=diagram_id)
     return node_id, None
 
 
@@ -1623,13 +1871,13 @@ def save_diagram_edge(cur, body: dict, actor: str):
     if cur.fetchone()[0] != 2:
         return None, "Элемент связи не принадлежит этой схеме"
     cur.execute(
-        f"INSERT INTO {SCHEMA}.exec_process_diagram_edge (diagram_id, source_node_id, target_node_id, label, edge_type) "
-        f"VALUES (%s,%s,%s,%s,%s) RETURNING id",
-        (diagram_id, source_id, target_id, nz(body.get("label")), body.get("edge_type") or "flow"),
+        f"INSERT INTO {SCHEMA}.exec_process_diagram_edge (diagram_id, source_node_id, target_node_id, label, edge_type, updated_by) "
+        f"VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+        (diagram_id, source_id, target_id, nz(body.get("label")), body.get("edge_type") or "flow", actor),
     )
     new_id = cur.fetchone()[0]
     log_change(cur, actor, "process_diagram_edge", new_id, "create",
-               after={"source": source_id, "target": target_id})
+               after={"source": source_id, "target": target_id}, context_id=diagram_id)
     return new_id, None
 
 
@@ -1637,15 +1885,117 @@ def delete_diagram_edge(cur, body: dict, actor: str):
     edge_id = as_int(body.get("id"))
     if not edge_id:
         return None, "Не указана связь"
-    cur.execute(f"SELECT diagram_id FROM {SCHEMA}.exec_process_diagram_edge WHERE id = %s", (edge_id,))
-    r = cur.fetchone()
-    if not r:
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE id = %s", (edge_id,))
+    before_rows = rows(cur)
+    if not before_rows:
         return None, "Связь не найдена"
-    if not _diagram_editable(cur, r[0]):
+    before = before_rows[0]
+    diagram_id = before["diagram_id"]
+    if not _diagram_editable(cur, diagram_id):
         return None, "Схема подтверждена/опубликована — для изменений верните черновой статус"
     cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_edge WHERE id = %s", (edge_id,))
-    log_change(cur, actor, "process_diagram_edge", edge_id, "delete")
+    log_change(cur, actor, "process_diagram_edge", edge_id, "delete", before=before, context_id=diagram_id)
     return edge_id, None
+
+
+def diagram_action_log(cur, diagram_id: int, limit: int = 20):
+    """Журнал последних действий текущей диаграммы (раздел 8 ТЗ итерации 4) —
+    отдельно по дорожкам/узлам/связям этой конкретной схемы, без служебных
+    экшенов вроде статуса. Используется для отображения «истории действий» и
+    для выбора, что отменить."""
+    cur.execute(f"""
+        SELECT id, entity_type, entity_id, action, actor, before_json, after_json, undone_at, undone_by, created_at
+        FROM {SCHEMA}.exec_audit_log
+        WHERE context_id = %s AND entity_type IN ('process_diagram_lane', 'process_diagram_node', 'process_diagram_edge')
+        ORDER BY created_at DESC, id DESC LIMIT %s
+    """, (diagram_id, limit))
+    return rows(cur)
+
+
+def undo_last_diagram_action(cur, body: dict, actor: str):
+    """Отмена последнего сохранённого действия текущего сеанса на схеме
+    (раздел 8 ТЗ итерации 4): перемещение узла, изменение свойства,
+    удаление элемента — реализовано через before_json audit_log, без
+    отдельного стека undo. Если явно указан log_id — отменяется конкретная
+    запись (например «отменить это перемещение»), иначе — последнее
+    неотменённое действие по диаграмме."""
+    diagram_id = as_int(body.get("diagram_id"))
+    log_id = as_int(body.get("log_id"))
+    if not diagram_id:
+        return None, "Не указана диаграмма"
+    if not _diagram_editable(cur, diagram_id):
+        return None, "Схема подтверждена/опубликована — отмена действий недоступна"
+
+    if log_id:
+        cur.execute(f"""
+            SELECT id, entity_type, entity_id, action, before_json, after_json, undone_at
+            FROM {SCHEMA}.exec_audit_log WHERE id = %s AND context_id = %s
+        """, (log_id, diagram_id))
+    else:
+        cur.execute(f"""
+            SELECT id, entity_type, entity_id, action, before_json, after_json, undone_at
+            FROM {SCHEMA}.exec_audit_log
+            WHERE context_id = %s AND entity_type IN ('process_diagram_lane', 'process_diagram_node', 'process_diagram_edge')
+              AND undone_at IS NULL
+            ORDER BY created_at DESC, id DESC LIMIT 1
+        """, (diagram_id,))
+    r = cur.fetchone()
+    if not r:
+        return None, "Нечего отменять"
+    entry_id, entity_type, entity_id, action, before_json, after_json, undone_at = r
+    if undone_at:
+        return None, "Это действие уже отменено"
+
+    table = {
+        "process_diagram_lane": "exec_process_diagram_lane",
+        "process_diagram_node": "exec_process_diagram_node",
+        "process_diagram_edge": "exec_process_diagram_edge",
+    }.get(entity_type)
+    if not table:
+        return None, "Это действие нельзя отменить"
+
+    before = before_json if isinstance(before_json, dict) else (json.loads(before_json) if before_json else None)
+
+    if action == "create":
+        # Отмена создания -> удаляем запись (если она ещё существует).
+        if entity_type == "process_diagram_node":
+            cur.execute(f"DELETE FROM {SCHEMA}.exec_process_diagram_edge WHERE source_node_id = %s OR target_node_id = %s", (entity_id, entity_id))
+        cur.execute(f"DELETE FROM {SCHEMA}.{table} WHERE id = %s", (entity_id,))
+        result_note = "Создание отменено — элемент удалён"
+    elif action == "update":
+        if not before:
+            return None, "Нет данных для отмены — восстановление невозможно"
+        restore_cols = {k: v for k, v in before.items() if k not in ("id", "created_at", "updated_at", "is_test_data", "diagram_id", "_cascade_edges")}
+        if not restore_cols:
+            return None, "Нет данных для отмены"
+        sets = ", ".join(f"{k} = %s" for k in restore_cols)
+        cur.execute(f"UPDATE {SCHEMA}.{table} SET {sets}, updated_by = %s, updated_at = now() WHERE id = %s",
+                    list(restore_cols.values()) + [actor, entity_id])
+        result_note = "Изменение отменено — восстановлено предыдущее значение"
+    elif action == "delete":
+        if not before:
+            return None, "Нет данных для восстановления"
+        cascade_edges = before.pop("_cascade_edges", None)
+        restore_cols = {k: v for k, v in before.items() if k not in ("id", "created_at", "updated_at")}
+        cols = ", ".join(["id"] + list(restore_cols.keys()))
+        ph = ", ".join(["%s"] * (1 + len(restore_cols)))
+        cur.execute(f"INSERT INTO {SCHEMA}.{table} ({cols}) VALUES ({ph}) ON CONFLICT (id) DO NOTHING",
+                    [entity_id] + list(restore_cols.values()))
+        if cascade_edges:
+            for e in cascade_edges:
+                e_cols = {k: v for k, v in e.items() if k not in ("id", "created_at")}
+                cols2 = ", ".join(["id"] + list(e_cols.keys()))
+                ph2 = ", ".join(["%s"] * (1 + len(e_cols)))
+                cur.execute(f"INSERT INTO {SCHEMA}.exec_process_diagram_edge ({cols2}) VALUES ({ph2}) ON CONFLICT (id) DO NOTHING",
+                            [e["id"]] + list(e_cols.values()))
+        result_note = "Элемент восстановлен"
+    else:
+        return None, "Это действие нельзя отменить"
+
+    cur.execute(f"UPDATE {SCHEMA}.exec_audit_log SET undone_at = now(), undone_by = %s WHERE id = %s", (actor, entry_id))
+    log_change(cur, actor, entity_type, entity_id, "undo", after={"undone_log_id": entry_id, "original_action": action},
+               context_id=diagram_id)
+    return {"entity_type": entity_type, "entity_id": entity_id, "note": result_note}, None
 
 
 def save_diagram_canvas(cur, body: dict, actor: str):
@@ -1689,19 +2039,28 @@ def autosave_draft(cur, body: dict, actor: str):
 def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
     diagram_id = as_int(body.get("id"))
     new_status = body.get("status")
-    if not diagram_id or new_status not in MODEL_STATUSES:
+    if not diagram_id or not new_status:
         return None, "Некорректные параметры"
-    if new_status in ("confirmed", "published") and not can_confirm_role:
-        return None, "Недостаточно прав для подтверждения/публикации"
-    if new_status == "confirmed":
-        check = validate_diagram(cur, diagram_id)
-        if check["errors"]:
-            return None, "Нельзя подтвердить схему с ошибками — исправьте их на вкладке «Проверить схему»"
 
     cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram WHERE id = %s", (diagram_id,))
     before = rows(cur)
     if not before:
         return None, "Схема не найдена"
+
+    lock_err = check_optimistic_lock(before[0], body)
+    if lock_err:
+        return None, lock_err
+
+    trans_err = validate_status_transition(before[0]["model_status"], new_status, can_confirm_role)
+    if trans_err:
+        return None, trans_err
+
+    if new_status == "confirmed":
+        check = validate_diagram(cur, diagram_id)
+        if check["errors"]:
+            return None, "Нельзя подтвердить схему с ошибками — исправьте их на вкладке «Проверить схему»"
+
+    snapshot = get_diagram_full(cur, diagram_id) if new_status == "published" else None
 
     extra = ""
     params = [new_status]
@@ -1712,11 +2071,15 @@ def set_diagram_status(cur, body: dict, actor: str, can_confirm_role: bool):
         f"UPDATE {SCHEMA}.exec_process_diagram SET model_status = %s{extra}, updated_by = %s, updated_at = now() WHERE id = %s",
         params + [actor, diagram_id],
     )
+    version_to_record = before[0]["version"] + 1 if new_status == "published" else before[0]["version"]
     cur.execute(
-        f"INSERT INTO {SCHEMA}.exec_process_version_history (entity_type, entity_id, version, status, author, comment) "
-        f"VALUES ('diagram', %s, %s, %s, %s, %s)",
-        (diagram_id, before[0]["version"], new_status, actor, nz(body.get("comment"))),
+        f"INSERT INTO {SCHEMA}.exec_process_version_history "
+        f"(entity_type, entity_id, version, status, author, comment, snapshot_json) "
+        f"VALUES ('diagram', %s, %s, %s, %s, %s, %s)",
+        (diagram_id, version_to_record, new_status, actor, nz(body.get("comment")),
+         json.dumps(snapshot, ensure_ascii=False, default=str) if snapshot is not None else None),
     )
+    record_review_decision(cur, "diagram", diagram_id, version_to_record, new_status, actor, body.get("comment"))
     log_change(cur, actor, "process_diagram", diagram_id, f"status_{new_status}", before=before[0])
     return diagram_id, None
 
@@ -2193,6 +2556,7 @@ def handler(event: dict, context) -> dict:
                 "problem_types": PROBLEM_TYPES,
                 "issue_statuses": ISSUE_STATUSES,
                 "effect_types": EFFECT_TYPES,
+                "status_transitions": {k: sorted(v) for k, v in STATUS_TRANSITIONS.items()},
                 "user_role": user.get("role"),
                 "can_confirm": can_confirm,
                 "can_edit": can_edit,
@@ -2249,7 +2613,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = save_process_node(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2258,7 +2622,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = set_process_status(cur, body, actor, can_confirm)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 403 if "прав" in err else 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2276,7 +2640,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = save_passport(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2421,7 +2785,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             did, err = set_diagram_status(cur, body, actor, can_confirm)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 403 if "прав" in err else 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": did}})
 
@@ -2430,7 +2794,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             did, err = save_diagram_canvas(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": did}})
 
@@ -2454,7 +2818,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             sid, err = autosave_draft(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": sid}})
 
@@ -2463,7 +2827,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             lid, err = save_lane(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": lid}})
 
@@ -2472,7 +2836,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             lid, err = delete_lane(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": lid}})
 
@@ -2481,7 +2845,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = save_diagram_node(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2490,7 +2854,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             nid, err = delete_diagram_node(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": nid}})
 
@@ -2499,7 +2863,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             eid, err = save_diagram_edge(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": eid}})
 
@@ -2508,9 +2872,63 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             eid, err = delete_diagram_edge(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": eid}})
+
+        # ── Итерация 4: журнал действий и отмена (раздел 8 ТЗ) ──────────────
+
+        if action == "diagram_action_log":
+            diagram_id = as_int(qs.get("diagram_id"))
+            if not diagram_id:
+                return cors({"ok": False, "error": {"message": "Не указана схема"}}, 400)
+            return cors({"ok": True, "data": {"items": diagram_action_log(cur, diagram_id)}})
+
+        if action == "diagram_undo":
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            result, err = undo_last_diagram_action(cur, body, actor)
+            if err:
+                return err_response(err)
+            conn.commit()
+            return cors({"ok": True, "data": result})
+
+        # ── Итерация 4: маршрут согласования (раздел 4 ТЗ) ───────────────────
+
+        if action == "review_decisions":
+            entity_type = qs.get("entity_type")
+            entity_id = as_int(qs.get("entity_id"))
+            if not entity_type or not entity_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект проверки"}}, 400)
+            return cors({"ok": True, "data": {"items": list_review_decisions(cur, entity_type, entity_id)}})
+
+        if action in ("review_take_in_work", "review_comment"):
+            if not can_edit:
+                return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
+            decision = "taken_in_work" if action == "review_take_in_work" else "commented"
+            did, err = review_take_in_work_or_comment(cur, body, actor, decision)
+            if err:
+                return err_response(err)
+            conn.commit()
+            return cors({"ok": True, "data": {"id": did}})
+
+        # ── Итерация 4: версии и публикация (раздел 3 ТЗ) ────────────────────
+
+        if action == "version_history":
+            entity_type = qs.get("entity_type")
+            entity_id = as_int(qs.get("entity_id"))
+            if not entity_type or not entity_id:
+                return cors({"ok": False, "error": {"message": "Не указан объект"}}, 400)
+            return cors({"ok": True, "data": {"items": list_version_history(cur, entity_type, entity_id)}})
+
+        if action == "version_snapshot":
+            history_id = as_int(qs.get("id"))
+            if not history_id:
+                return cors({"ok": False, "error": {"message": "Не указана версия"}}, 400)
+            snap = get_version_snapshot(cur, history_id)
+            if not snap:
+                return cors({"ok": False, "error": {"message": "Версия не найдена"}}, 404)
+            return cors({"ok": True, "data": snap})
 
         # ── Итерация 3: риски процесса ──────────────────────────────────────
 
@@ -2525,7 +2943,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             rid, err = save_process_risk(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": rid}})
 
@@ -2560,7 +2978,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             cid, err = save_process_control(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": cid}})
 
@@ -2601,7 +3019,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             mid, err = save_process_metric(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": mid}})
 
@@ -2633,7 +3051,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             iid, err = save_process_issue(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": iid}})
 
@@ -2687,7 +3105,7 @@ def handler(event: dict, context) -> dict:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
             iid, err = save_improvement(cur, body, actor)
             if err:
-                return cors({"ok": False, "error": {"message": err}}, 400)
+                return err_response(err)
             conn.commit()
             return cors({"ok": True, "data": {"id": iid}})
 

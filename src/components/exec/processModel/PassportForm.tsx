@@ -8,7 +8,9 @@ import {
   PersonRef,
   OrgUnitRef,
   ParticipationKind,
+  ConflictError,
 } from "@/lib/execProcessModelApi";
+import ConflictDialog from "./ConflictDialog";
 
 const PARTICIPATION_LABEL: Record<ParticipationKind, string> = {
   owner: "Владелец",
@@ -159,6 +161,7 @@ export default function PassportForm({
   const [saved, setSaved] = useState(false);
   const [completeness, setCompleteness] = useState<CompletenessResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [conflict, setConflict] = useState<ConflictError | null>(null);
 
   useEffect(() => {
     setGoal(p?.goal || ""); setBoundaries(p?.boundaries_note || ""); setTrigger(p?.trigger_event || "");
@@ -172,6 +175,9 @@ export default function PassportForm({
     processModelApi.passportCompleteness(detail.node.id).then(setCompleteness).finally(() => setChecking(false));
   };
 
+  // Итерация 4, раздел 1: сервер отклоняет устаревшее сохранение (409), если
+  // паспорт был изменён другим пользователем после открытия формы —
+  // expected_updated_at берём из уже загруженного паспорта.
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -181,12 +187,16 @@ export default function PassportForm({
         goal: goal.trim(), boundaries_note: boundaries.trim(), trigger_event: trigger.trim(),
         inputs_note: inputs.trim(), outputs_note: outputs.trim(),
         suppliers_note: suppliers.trim(), consumers_note: consumers.trim(),
+        expected_updated_at: p?.updated_at,
       });
       if (ownerId !== (detail.node.owner_person_id ? String(detail.node.owner_person_id) : "")) {
-        await processModelApi.saveProcessNode({ id: detail.node.id, owner_person_id: ownerId ? Number(ownerId) : null });
+        await processModelApi.saveProcessNode({ id: detail.node.id, owner_person_id: ownerId ? Number(ownerId) : null, expected_updated_at: detail.node.updated_at });
       }
       setSaved(true);
       onChanged();
+    } catch (e) {
+      if (e instanceof ConflictError) setConflict(e);
+      else throw e;
     } finally {
       setSaving(false);
     }
@@ -195,6 +205,14 @@ export default function PassportForm({
   const disabled = !canEdit || detail.node.model_status === "confirmed" || detail.node.model_status === "published";
 
   return (
+    <>
+    {conflict && (
+      <ConflictDialog
+        error={conflict}
+        onReload={() => { setConflict(null); onChanged(); }}
+        onDismiss={() => setConflict(null)}
+      />
+    )}
     <div className="grid md:grid-cols-[1fr_260px] gap-4">
       <div className="space-y-3">
         <SelectField label="Владелец процесса" value={ownerId} onChange={(v) => { setOwnerId(v); setSaved(false); }}
@@ -265,5 +283,6 @@ export default function PassportForm({
         )}
       </div>
     </div>
+    </>
   );
 }

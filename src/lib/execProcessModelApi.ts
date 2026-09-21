@@ -5,6 +5,23 @@ import { accessHeaders } from "./execAccess";
 // YandexGPT/Yandex Vision, все проверки — точные сравнения строк на сервере.
 const BASE = "https://functions.poehali.dev/2114209b-904f-48c4-97a0-516c96626f50";
 
+// Итерация 4, раздел 1: сервер отклоняет устаревшее сохранение структурированной
+// ошибкой { code: "conflict", message, current_updated_at, changed_by } (HTTP 409).
+// ConflictError несёт эти поля дальше во фронтенд-код, чтобы форма могла
+// показать «кем и когда изменено» и предложить перечитать/сравнить/повторить,
+// а не просто вывести голый текст ошибки.
+export class ConflictError extends Error {
+  code = "conflict" as const;
+  currentUpdatedAt?: string;
+  changedBy?: string | null;
+  constructor(message: string, currentUpdatedAt?: string, changedBy?: string | null) {
+    super(message);
+    this.name = "ConflictError";
+    this.currentUpdatedAt = currentUpdatedAt;
+    this.changedBy = changedBy;
+  }
+}
+
 async function req(path: string, options: RequestInit = {}) {
   const res = await fetch(`${BASE}${path}`, {
     ...options,
@@ -15,7 +32,13 @@ async function req(path: string, options: RequestInit = {}) {
     },
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) throw new Error(data?.error?.message || "Ошибка загрузки данных");
+  if (!res.ok || !data.ok) {
+    const err = data?.error;
+    if (res.status === 409 && err?.code === "conflict") {
+      throw new ConflictError(err.message || "Запись изменена другим пользователем", err.current_updated_at, err.changed_by);
+    }
+    throw new Error(err?.message || "Ошибка загрузки данных");
+  }
   return data.data;
 }
 
@@ -23,7 +46,7 @@ const post = (action: string, body: unknown) =>
   req(`/?action=${action}`, { method: "POST", body: JSON.stringify(body) });
 
 export type ProcessLevel = "direction" | "process" | "subprocess" | "operation";
-export type ModelStatus = "draft" | "in_review" | "confirmed" | "published" | "archived";
+export type ModelStatus = "draft" | "in_review" | "needs_revision" | "confirmed" | "published" | "archived";
 export type ParticipationKind = "owner" | "executor" | "reviewer" | "consumer" | "supplier";
 
 export type NodeType = "start" | "end" | "task" | "gateway" | "subprocess" | "document" | "system" | "control" | "note";
@@ -58,6 +81,9 @@ export interface Refs {
   problem_types: Record<ProblemType, string>;
   issue_statuses: Record<IssueStatus, string>;
   effect_types: Record<EffectType, string>;
+  // Итерация 4, раздел 2: допустимые переходы статуса — UI не должен
+  // предлагать/пропускать переходы, которых нет в этом списке.
+  status_transitions: Record<ModelStatus, ModelStatus[]>;
   user_role: string;
   can_confirm: boolean;
   can_edit: boolean;
@@ -470,6 +496,7 @@ export interface DiagramNode {
   document_note: string | null;
   note: string | null;
   origin_node_id: number | null;
+  updated_at: string;
 }
 
 export interface DiagramEdge {
@@ -499,6 +526,63 @@ export interface DiagramIssue {
 export interface DiagramValidation {
   errors: DiagramIssue[];
   warnings: DiagramIssue[];
+}
+
+// ── Итерация 4, раздел 8: журнал действий и отмена ───────────────────────────
+export interface DiagramActionLogEntry {
+  id: number;
+  entity_type: "process_diagram_lane" | "process_diagram_node" | "process_diagram_edge";
+  entity_id: number;
+  action: "create" | "update" | "delete" | "undo";
+  actor: string;
+  before_json: Record<string, unknown> | null;
+  after_json: Record<string, unknown> | null;
+  undone_at: string | null;
+  undone_by: string | null;
+  created_at: string;
+}
+
+// ── Итерация 4, раздел 4: маршрут согласования ───────────────────────────────
+export type ReviewDecisionKind = "submitted" | "taken_in_work" | "commented" | "needs_revision" | "confirmed" | "published";
+export interface ReviewDecision {
+  id: number;
+  entity_type: "process_node" | "diagram";
+  entity_id: number;
+  version: number;
+  decision: ReviewDecisionKind;
+  actor: string;
+  reviewer_role: string | null;
+  reviewer_org_unit_id: number | null;
+  comment: string | null;
+  found_issues: string | null;
+  open_questions: string | null;
+  reviewer_assigned: boolean;
+  created_at: string;
+}
+
+// ── Итерация 4, раздел 3: версии и неизменяемая публикация ───────────────────
+export interface VersionHistoryEntry {
+  id: number;
+  entity_type: "process_node" | "diagram";
+  entity_id: number;
+  version: number;
+  status: ModelStatus;
+  author: string;
+  comment: string | null;
+  published_basis_note: string | null;
+  has_snapshot: boolean;
+  created_at: string;
+}
+export interface VersionSnapshot {
+  id: number;
+  entity_type: "process_node" | "diagram";
+  entity_id: number;
+  version: number;
+  status: ModelStatus;
+  author: string;
+  comment: string | null;
+  snapshot_json: Record<string, unknown> | null;
+  created_at: string;
 }
 
 export const NODE_TYPE_ICON: Record<NodeType, string> = {
@@ -534,8 +618,8 @@ export const processModelApi = {
   processTree: (scopeId: number): Promise<{ items: ProcessNode[] }> =>
     req(`/?action=process_tree&scope_id=${scopeId}`),
   saveProcessNode: (data: Record<string, unknown>): Promise<{ id: number }> => post("process_node_save", data),
-  setProcessStatus: (id: number, status: ModelStatus, comment?: string): Promise<{ id: number }> =>
-    post("process_node_set_status", { id, status, comment }),
+  setProcessStatus: (id: number, status: ModelStatus, comment?: string, expectedUpdatedAt?: string): Promise<{ id: number }> =>
+    post("process_node_set_status", { id, status, comment, expected_updated_at: expectedUpdatedAt }),
   processDetail: (id: number): Promise<ProcessDetail> => req(`/?action=process_detail&id=${id}`),
 
   // Паспорт
@@ -584,8 +668,8 @@ export const processModelApi = {
   diagramGetOrCreate: (processNodeId: number, variant: DiagramVariant): Promise<{ id: number; created: boolean }> =>
     post("diagram_get_or_create", { process_node_id: processNodeId, variant }),
   diagramFull: (id: number): Promise<DiagramFull> => req(`/?action=diagram_full&id=${id}`),
-  diagramSetStatus: (id: number, status: ModelStatus, comment?: string): Promise<{ id: number }> =>
-    post("diagram_set_status", { id, status, comment }),
+  diagramSetStatus: (id: number, status: ModelStatus, comment?: string, expectedUpdatedAt?: string): Promise<{ id: number }> =>
+    post("diagram_set_status", { id, status, comment, expected_updated_at: expectedUpdatedAt }),
   diagramSaveCanvas: (diagramId: number, data: { canvas_scale?: number; canvas_x?: number; canvas_y?: number }): Promise<{ id: number }> =>
     post("diagram_save_canvas", { diagram_id: diagramId, ...data }),
   diagramValidate: (id: number): Promise<DiagramValidation> => req(`/?action=diagram_validate&id=${id}`),
@@ -602,6 +686,28 @@ export const processModelApi = {
 
   saveDiagramEdge: (data: Record<string, unknown>): Promise<{ id: number }> => post("diagram_edge_save", data),
   deleteDiagramEdge: (id: number): Promise<{ id: number }> => post("diagram_edge_delete", { id }),
+
+  // ── Итерация 4, раздел 8: журнал действий и отмена ───────────────────────
+  diagramActionLog: (diagramId: number): Promise<{ items: DiagramActionLogEntry[] }> =>
+    req(`/?action=diagram_action_log&diagram_id=${diagramId}`),
+  diagramUndo: (diagramId: number, logId?: number): Promise<{ entity_type: string; entity_id: number; note: string }> =>
+    post("diagram_undo", { diagram_id: diagramId, log_id: logId }),
+
+  // ── Итерация 4, раздел 4: маршрут согласования ────────────────────────────
+  reviewDecisions: (entityType: "process_node" | "diagram", entityId: number): Promise<{ items: ReviewDecision[] }> =>
+    req(`/?action=review_decisions&entity_type=${entityType}&entity_id=${entityId}`),
+  reviewTakeInWork: (entityType: "process_node" | "diagram", entityId: number, comment?: string): Promise<{ id: number }> =>
+    post("review_take_in_work", { entity_type: entityType, entity_id: entityId, comment }),
+  reviewComment: (
+    entityType: "process_node" | "diagram",
+    entityId: number,
+    data: { comment?: string; found_issues?: string; open_questions?: string; reviewer_role?: string; reviewer_org_unit_id?: number },
+  ): Promise<{ id: number }> => post("review_comment", { entity_type: entityType, entity_id: entityId, ...data }),
+
+  // ── Итерация 4, раздел 3: версии и неизменяемая публикация ───────────────
+  versionHistory: (entityType: "process_node" | "diagram", entityId: number): Promise<{ items: VersionHistoryEntry[] }> =>
+    req(`/?action=version_history&entity_type=${entityType}&entity_id=${entityId}`),
+  versionSnapshot: (historyId: number): Promise<VersionSnapshot> => req(`/?action=version_snapshot&id=${historyId}`),
 
   // ── Итерация 3: риски процесса ──────────────────────────────────────────
   processRisks: (processNodeId: number): Promise<{ items: ProcessRisk[] }> =>
@@ -659,6 +765,7 @@ export const LEVEL_ORDER: ProcessLevel[] = ["direction", "process", "subprocess"
 export const STATUS_STYLE: Record<ModelStatus, { title: string; cls: string }> = {
   draft: { title: "Черновик", cls: "bg-slate-100 text-slate-600 border-slate-200" },
   in_review: { title: "На проверке", cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  needs_revision: { title: "Требует доработки", cls: "bg-orange-50 text-orange-700 border-orange-200" },
   confirmed: { title: "Подтверждён", cls: "bg-green-50 text-green-700 border-green-200" },
   published: { title: "Опубликован", cls: "bg-emerald-50 text-emerald-700 border-emerald-300" },
   archived: { title: "Архив", cls: "bg-slate-100 text-slate-500 border-slate-200" },

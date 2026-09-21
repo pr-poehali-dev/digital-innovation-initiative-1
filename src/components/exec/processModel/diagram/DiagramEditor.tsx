@@ -12,6 +12,7 @@ import {
   InfoSystem,
   STATUS_STYLE,
   DiagramVariant,
+  ConflictError,
 } from "@/lib/execProcessModelApi";
 import DiagramCanvas from "./DiagramCanvas";
 import DiagramPalette from "./DiagramPalette";
@@ -19,6 +20,8 @@ import DiagramPropertiesPanel from "./DiagramPropertiesPanel";
 import DiagramAssistant from "./DiagramAssistant";
 import DiagramMiniMap from "./DiagramMiniMap";
 import DiagramLaneModal from "./DiagramLanePanel";
+import DiagramActionHistory from "./DiagramActionHistory";
+import ConflictDialog from "../ConflictDialog";
 import { NODE_DEFAULT_SIZE, CANVAS_MIN_WIDTH, LANE_HEIGHT, UNASSIGNED_LANE_HEIGHT } from "./diagramLayout";
 import { exportDiagramPng, exportDiagramPdf } from "./diagramExport";
 
@@ -61,6 +64,8 @@ export default function DiagramEditor({
   const [statusMsg, setStatusMsg] = useState("");
   const [showRisks, setShowRisks] = useState(true);
   const [issueNodeIds, setIssueNodeIds] = useState<Set<number>>(new Set());
+  const [showHistory, setShowHistory] = useState(false);
+  const [statusConflict, setStatusConflict] = useState<ConflictError | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -195,12 +200,16 @@ export default function DiagramEditor({
     flash("Вопрос сохранён");
   };
 
+  // Итерация 4, разделы 1-2: строгие переходы статуса на backend
+  // (STATUS_TRANSITIONS), expected_updated_at защищает от подтверждения/
+  // публикации версии, которую кто-то уже изменил после открытия схемы.
   const setStatus = async (status: string) => {
     try {
-      await processModelApi.diagramSetStatus(diagramId, status as never);
+      await processModelApi.diagramSetStatus(diagramId, status as never, undefined, full?.diagram.updated_at);
       load();
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ConflictError) setStatusConflict(e);
+      else setError((e as Error).message);
     }
   };
 
@@ -245,6 +254,11 @@ export default function DiagramEditor({
           <button onClick={() => setShowAssistant((v) => !v)} className={`text-xs px-2 py-1 rounded-md border flex items-center gap-1 ${showAssistant ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
             <Icon name="Compass" size={12} /> Помощник
           </button>
+          {!readOnly && (
+            <button onClick={() => setShowHistory((v) => !v)} className={`text-xs px-2 py-1 rounded-md border flex items-center gap-1 ${showHistory ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+              <Icon name="History" size={12} /> Журнал действий
+            </button>
+          )}
           <button onClick={handleExportPng} className="text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center gap-1"><Icon name="Image" size={12} /> PNG</button>
           <button onClick={handleExportPdf} className="text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center gap-1"><Icon name="FileDown" size={12} /> PDF</button>
           <button onClick={onToggleFullscreen} className="w-7 h-7 rounded-md border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50">
@@ -254,15 +268,35 @@ export default function DiagramEditor({
             <button onClick={() => setStatus("in_review")} className="text-xs px-2.5 py-1 rounded-md border border-blue-300 text-blue-700 hover:bg-blue-50">На проверку</button>
           )}
           {canConfirm && full.diagram.model_status === "in_review" && (
-            <button onClick={() => setStatus("confirmed")} className="text-xs px-2.5 py-1 rounded-md bg-green-600 text-white hover:bg-green-700">Подтвердить</button>
+            <>
+              <button onClick={() => setStatus("confirmed")} className="text-xs px-2.5 py-1 rounded-md bg-green-600 text-white hover:bg-green-700">Подтвердить</button>
+              <button onClick={() => setStatus("needs_revision")} className="text-xs px-2.5 py-1 rounded-md border border-orange-300 text-orange-700 hover:bg-orange-50">На доработку</button>
+              <button onClick={() => setStatus("draft")} className="text-xs px-2.5 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50">В черновик</button>
+            </>
+          )}
+          {canEdit && full.diagram.model_status === "needs_revision" && (
+            <button onClick={() => setStatus("draft")} className="text-xs px-2.5 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50">Взять в доработку</button>
           )}
           {canConfirm && full.diagram.model_status === "confirmed" && (
-            <button onClick={() => setStatus("draft")} className="text-xs px-2.5 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50">В черновик</button>
+            <>
+              <button onClick={() => setStatus("published")} className="text-xs px-2.5 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Опубликовать</button>
+              <button onClick={() => setStatus("needs_revision")} className="text-xs px-2.5 py-1 rounded-md border border-orange-300 text-orange-700 hover:bg-orange-50">На доработку</button>
+            </>
+          )}
+          {canConfirm && full.diagram.model_status === "published" && (
+            <button onClick={() => setStatus("archived")} className="text-xs px-2.5 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50">В архив</button>
           )}
         </div>
       </div>
 
       {error && <div className="px-3.5 pt-2"><ErrorBox message={error} onRetry={load} /></div>}
+      {statusConflict && (
+        <ConflictDialog
+          error={statusConflict}
+          onReload={() => { setStatusConflict(null); load(); }}
+          onDismiss={() => setStatusConflict(null)}
+        />
+      )}
 
       {/* Рабочая область */}
       <div className="flex-1 flex min-h-0">
@@ -312,7 +346,16 @@ export default function DiagramEditor({
           />
         )}
 
-        {showAssistant && !selectedNode && (
+        {showHistory && !selectedNode && (
+          <DiagramActionHistory
+            diagramId={diagramId}
+            readOnly={readOnly}
+            onClose={() => setShowHistory(false)}
+            onChanged={load}
+          />
+        )}
+
+        {showAssistant && !selectedNode && !showHistory && (
           <DiagramAssistant
             diagramId={diagramId}
             validation={validation}

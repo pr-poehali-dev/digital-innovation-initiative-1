@@ -77,6 +77,62 @@
       "expectedStatus": 401,
       "expectedBody": { "ok": false },
       "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized diagram_node_save blocked",
+      "method": "POST",
+      "path": "/?action=diagram_node_save",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized diagram_undo blocked",
+      "method": "POST",
+      "path": "/?action=diagram_undo",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized diagram_action_log blocked",
+      "method": "GET",
+      "path": "/?action=diagram_action_log&diagram_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized review_decisions blocked",
+      "method": "GET",
+      "path": "/?action=review_decisions&entity_type=process_node&entity_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized review_take_in_work blocked",
+      "method": "POST",
+      "path": "/?action=review_take_in_work",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized version_history blocked",
+      "method": "GET",
+      "path": "/?action=version_history&entity_type=process_node&entity_id=1",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unauthorized process_node_set_status blocked",
+      "method": "POST",
+      "path": "/?action=process_node_set_status",
+      "expectedStatus": 401,
+      "expectedBody": { "ok": false },
+      "bodyMatcher": "partial"
     }
   ]
 }

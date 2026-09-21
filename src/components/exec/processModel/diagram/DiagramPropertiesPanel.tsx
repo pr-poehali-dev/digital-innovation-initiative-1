@@ -10,7 +10,9 @@ import {
   NODE_TYPE_ICON,
   QUALITATIVE_LEVEL_STYLE,
   processModelApi,
+  ConflictError,
 } from "@/lib/execProcessModelApi";
+import ConflictDialog from "../ConflictDialog";
 
 const NODE_TYPE_LABEL: Record<string, string> = {
   start: "Начальное событие", end: "Конечное событие", task: "Операция", gateway: "Решение",
@@ -59,6 +61,7 @@ export default function DiagramPropertiesPanel({
   const [note, setNote] = useState(node.note || "");
   const [confirmed, setConfirmed] = useState(node.confirmation_status === "confirmed");
   const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState<ConflictError | null>(null);
 
   useEffect(() => {
     setLabel(node.label || ""); setDescription(node.description || ""); setLaneId(node.lane_id ? String(node.lane_id) : "");
@@ -70,12 +73,19 @@ export default function DiagramPropertiesPanel({
     setNote(node.note || ""); setConfirmed(node.confirmation_status === "confirmed");
   }, [node.id]);
 
+  // Итерация 4, раздел 1: expected_updated_at защищает изменения свойств
+  // (текст, роль, критичность и т.п.) от незаметной перезаписи — в отличие
+  // от перемещения мышью на холсте (handleMoveNode в DiagramEditor), которое
+  // сознательно не блокируется жёстким конфликтом, чтобы не мешать drag&drop.
   const save = async (patch: Record<string, unknown>) => {
     if (readOnly) return;
     setSaving(true);
     try {
-      await processModelApi.saveDiagramNode({ id: node.id, ...patch });
+      await processModelApi.saveDiagramNode({ id: node.id, expected_updated_at: node.updated_at, ...patch });
       onChanged();
+    } catch (e) {
+      if (e instanceof ConflictError) setConflict(e);
+      else throw e;
     } finally {
       setSaving(false);
     }
@@ -83,6 +93,13 @@ export default function DiagramPropertiesPanel({
 
   return (
     <div className="w-[300px] flex-shrink-0 border-l border-slate-200 bg-white h-full overflow-y-auto">
+      {conflict && (
+        <ConflictDialog
+          error={conflict}
+          onReload={() => { setConflict(null); onChanged(); }}
+          onDismiss={() => setConflict(null)}
+        />
+      )}
       <div className="flex items-center justify-between gap-2 p-3.5 border-b border-slate-200 sticky top-0 bg-white z-10">
         <div className="flex items-center gap-2 min-w-0">
           <Icon name={NODE_TYPE_ICON[node.node_type]} size={15} className="text-violet-600 flex-shrink-0" />

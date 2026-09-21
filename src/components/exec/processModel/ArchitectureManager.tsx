@@ -13,10 +13,12 @@ import {
   OrgUnitRef,
   InfoSystem,
   Refs,
+  ConflictError,
 } from "@/lib/execProcessModelApi";
 import PassportForm from "./PassportForm";
 import DiagramsTab from "./DiagramsTab";
 import RisksMetricsTab from "./RisksMetricsTab";
+import ConflictDialog from "./ConflictDialog";
 
 const LEVEL_LABEL: Record<ProcessLevel, string> = {
   direction: "Направление",
@@ -63,7 +65,12 @@ function NodeModal({
   const [result, setResult] = useState(node?.result_description || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [conflict, setConflict] = useState<ConflictError | null>(null);
 
+  // Итерация 4, раздел 1: expected_updated_at — версия узла, которую видел
+  // пользователь при открытии формы. Если сервер вернёт 409, значит узел
+  // изменили параллельно — показываем ConflictDialog вместо молчаливой
+  // перезаписи.
   const save = async () => {
     if (!name.trim()) {
       setError("Укажите название");
@@ -82,15 +89,27 @@ function NodeModal({
         owner_person_id: ownerId ? Number(ownerId) : null,
         responsible_org_unit_id: orgUnitId ? Number(orgUnitId) : null,
         result_description: result.trim() || null,
+        expected_updated_at: node?.updated_at,
       });
       onSaved();
       onClose();
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ConflictError) setConflict(e);
+      else setError((e as Error).message);
     } finally {
       setSaving(false);
     }
   };
+
+  if (conflict) {
+    return (
+      <ConflictDialog
+        error={conflict}
+        onReload={() => { onSaved(); onClose(); }}
+        onDismiss={() => setConflict(null)}
+      />
+    );
+  }
 
   return (
     <Modal
@@ -296,10 +315,23 @@ function ProcessDetailPanel({
     });
   }, [detail?.diagrams]);
 
+  const [statusError, setStatusError] = useState("");
+  const [statusConflict, setStatusConflict] = useState<ConflictError | null>(null);
+
+  // Итерация 4, раздел 2: переходы строго по STATUS_TRANSITIONS backend —
+  // нельзя перескакивать между произвольными статусами. Раздел 1: сервер
+  // проверяет expected_updated_at, чтобы не подтвердить/не опубликовать
+  // версию, которую кто-то уже изменил после открытия карточки.
   const setStatus = async (status: string) => {
-    await processModelApi.setProcessStatus(nodeId, status as never);
-    load();
-    onChanged();
+    setStatusError("");
+    try {
+      await processModelApi.setProcessStatus(nodeId, status as never, undefined, detail?.node.updated_at);
+      load();
+      onChanged();
+    } catch (e) {
+      if (e instanceof ConflictError) setStatusConflict(e);
+      else setStatusError((e as Error).message);
+    }
   };
 
   if (loading || !detail) return <Loading />;
@@ -328,25 +360,65 @@ function ProcessDetailPanel({
             {detail.node.org_unit_name && ` · ${detail.node.org_unit_name}`}
           </p>
         </div>
-        {canEdit && detail.node.model_status === "draft" && (
-          <button onClick={() => setStatus("in_review")}
-            className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">
-            Отправить на проверку
-          </button>
-        )}
-        {canConfirm && detail.node.model_status === "in_review" && (
-          <button onClick={() => setStatus("confirmed")}
-            className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700">
-            Подтвердить
-          </button>
-        )}
-        {canConfirm && detail.node.model_status === "confirmed" && (
-          <button onClick={() => setStatus("draft")}
-            className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
-            Вернуть в черновик
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {canEdit && detail.node.model_status === "draft" && (
+            <button onClick={() => setStatus("in_review")}
+              className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">
+              Отправить на проверку
+            </button>
+          )}
+          {canConfirm && detail.node.model_status === "in_review" && (
+            <>
+              <button onClick={() => setStatus("confirmed")}
+                className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700">
+                Подтвердить
+              </button>
+              <button onClick={() => setStatus("needs_revision")}
+                className="text-xs px-3 py-1.5 rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50">
+                Вернуть на доработку
+              </button>
+              <button onClick={() => setStatus("draft")}
+                className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+                В черновик
+              </button>
+            </>
+          )}
+          {canEdit && detail.node.model_status === "needs_revision" && (
+            <button onClick={() => setStatus("draft")}
+              className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+              Взять в доработку (в черновик)
+            </button>
+          )}
+          {canConfirm && detail.node.model_status === "confirmed" && (
+            <>
+              <button onClick={() => setStatus("published")}
+                className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+                Опубликовать
+              </button>
+              <button onClick={() => setStatus("needs_revision")}
+                className="text-xs px-3 py-1.5 rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50">
+                Вернуть на доработку
+              </button>
+            </>
+          )}
+          {canConfirm && detail.node.model_status === "published" && (
+            <button onClick={() => setStatus("archived")}
+              className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+              В архив
+            </button>
+          )}
+        </div>
       </div>
+      {statusError && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{statusError}</div>
+      )}
+      {statusConflict && (
+        <ConflictDialog
+          error={statusConflict}
+          onReload={() => { setStatusConflict(null); load(); }}
+          onDismiss={() => setStatusConflict(null)}
+        />
+      )}
 
       <div className="border-b border-slate-200 overflow-x-auto">
         <div className="flex gap-1 min-w-max">
