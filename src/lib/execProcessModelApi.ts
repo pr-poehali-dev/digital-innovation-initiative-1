@@ -639,8 +639,9 @@ export const processModelApi = {
   unlinkIssueInitiative: (issueId: number, initiativeId: number): Promise<{ id: number }> =>
     post("issue_initiative_unlink", { issue_id: issueId, initiative_id: initiativeId }),
 
-  // TO-BE: создание из AS-IS, сравнение, улучшения
-  createToBeFromAsIs: (asIsDiagramId: number): Promise<{ id: number }> =>
+  // TO-BE: создание из AS-IS, сравнение, улучшения. created=false — TO-BE
+  // уже существовала (повторный клик не создаёт вторую копию).
+  createToBeFromAsIs: (asIsDiagramId: number): Promise<{ id: number; created: boolean }> =>
     post("diagram_create_to_be", { as_is_diagram_id: asIsDiagramId }),
   compareDiagrams: (asIsId: number, toBeId: number): Promise<DiagramCompareResult> =>
     req(`/?action=diagram_compare&as_is_id=${asIsId}&to_be_id=${toBeId}`),

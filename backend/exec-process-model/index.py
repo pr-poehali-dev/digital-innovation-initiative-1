@@ -28,6 +28,7 @@
 
 Формат ответа: {"ok": true, "data": {...}} / {"ok": false, "error": {"message": "..."}}
 """
+import decimal
 import difflib
 import json
 import os
@@ -150,9 +151,22 @@ def authenticate(conn, headers: dict):
     return get_cabinet_user(conn, sid)
 
 
+def _pyval(v):
+    """Decimal (NUMERIC-колонки: pos_x/pos_y/width/height/canvas_*) должен
+    прийти на фронтенд как JSON-число, а не строка — иначе React-код,
+    складывающий координаты через `+`, получает конкатенацию строк вместо
+    сложения (например "40.00" + 52800 → "5280040.00"), и CSS `top`/`left`
+    ломается. json.dumps(default=str) без этой конвертации превращает
+    Decimal в строку."""
+    if isinstance(v, decimal.Decimal):
+        f = float(v)
+        return int(f) if f == int(f) else f
+    return v
+
+
 def rows(cur):
     cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
+    return [{c: _pyval(v) for c, v in zip(cols, r)} for r in cur.fetchall()]
 
 
 def nz(v):
@@ -265,7 +279,7 @@ def get_overview(cur, scope_id: int):
     cur.execute(f"""
         SELECT d.variant, COUNT(*) FROM {SCHEMA}.exec_process_diagram d
         JOIN {SCHEMA}.exec_process_node n ON n.id = d.process_node_id
-        WHERE n.scope_id = %s AND d.is_test_data = false GROUP BY d.variant
+        WHERE n.scope_id = %s AND d.is_test_data = false AND n.is_test_data = false GROUP BY d.variant
     """, (scope_id,))
     diagrams_by_variant = {r[0]: r[1] for r in cur.fetchall()}
 
@@ -1406,7 +1420,7 @@ def get_diagram_full(cur, diagram_id: int):
         SELECT l.*, u.name AS org_unit_name
         FROM {SCHEMA}.exec_process_diagram_lane l
         LEFT JOIN {SCHEMA}.org_units u ON u.id = l.org_unit_id
-        WHERE l.diagram_id = %s ORDER BY l.sort_order, l.id
+        WHERE l.diagram_id = %s AND l.is_test_data = false ORDER BY l.sort_order, l.id
     """, (diagram_id,))
     lanes = rows(cur)
 
@@ -1421,11 +1435,11 @@ def get_diagram_full(cur, diagram_id: int):
         LEFT JOIN {SCHEMA}.exec_info_system s ON s.id = n.ref_system_id
         LEFT JOIN {SCHEMA}.exec_source_document doc ON doc.id = n.ref_document_id
         LEFT JOIN {SCHEMA}.exec_process_risk r ON r.id = n.ref_risk_id
-        WHERE n.diagram_id = %s ORDER BY n.id
+        WHERE n.diagram_id = %s AND n.is_test_data = false ORDER BY n.id
     """, (diagram_id,))
     nodes = rows(cur)
 
-    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE diagram_id = %s ORDER BY id", (diagram_id,))
+    cur.execute(f"SELECT * FROM {SCHEMA}.exec_process_diagram_edge WHERE diagram_id = %s AND is_test_data = false ORDER BY id", (diagram_id,))
     edges = rows(cur)
 
     node_id_process = None
@@ -1851,6 +1865,21 @@ def create_to_be_from_as_is(cur, body: dict, actor: str):
         return None, "Исходной схемой для копирования должна быть AS-IS"
 
     process_node_id = as_is["process_node_id"]
+
+    # Защита от повторного нажатия/двойного клика: если для процесса уже есть
+    # активная (не архивная) TO-BE, не создаём вторую незаметную копию —
+    # возвращаем уже существующую (created=False). Архивные TO-BE не мешают
+    # создать новую версию сознательно.
+    cur.execute(
+        f"SELECT id FROM {SCHEMA}.exec_process_diagram "
+        f"WHERE process_node_id = %s AND variant = 'to_be' AND model_status <> 'archived' "
+        f"AND is_test_data = false ORDER BY id LIMIT 1",
+        (process_node_id,),
+    )
+    existing = cur.fetchone()
+    if existing:
+        return {"id": existing[0], "created": False}, None
+
     cur.execute(f"SELECT name FROM {SCHEMA}.exec_process_node WHERE id = %s", (process_node_id,))
     node_row = cur.fetchone()
     title = f"TO-BE: {node_row[0] if node_row else ''}"
@@ -1910,7 +1939,7 @@ def create_to_be_from_as_is(cur, body: dict, actor: str):
 
     log_change(cur, actor, "process_diagram", to_be_id, "create_from_as_is",
                after={"base_diagram_id": as_is_id, "process_node_id": process_node_id})
-    return to_be_id, None
+    return {"id": to_be_id, "created": True}, None
 
 
 def compare_diagrams(cur, as_is_id: int, to_be_id: int):
@@ -2631,11 +2660,11 @@ def handler(event: dict, context) -> dict:
         if action == "diagram_create_to_be":
             if not can_edit:
                 return cors({"ok": False, "error": {"message": "Недостаточно прав"}}, 403)
-            did, err = create_to_be_from_as_is(cur, body, actor)
+            result, err = create_to_be_from_as_is(cur, body, actor)
             if err:
                 return cors({"ok": False, "error": {"message": err}}, 400)
             conn.commit()
-            return cors({"ok": True, "data": {"id": did}})
+            return cors({"ok": True, "data": result})
 
         if action == "diagram_compare":
             as_is_id = as_int(qs.get("as_is_id"))

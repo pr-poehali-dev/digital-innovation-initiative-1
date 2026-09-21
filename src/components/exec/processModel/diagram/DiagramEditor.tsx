@@ -19,7 +19,7 @@ import DiagramPropertiesPanel from "./DiagramPropertiesPanel";
 import DiagramAssistant from "./DiagramAssistant";
 import DiagramMiniMap from "./DiagramMiniMap";
 import DiagramLaneModal from "./DiagramLanePanel";
-import { NODE_DEFAULT_SIZE, CANVAS_MIN_WIDTH } from "./diagramLayout";
+import { NODE_DEFAULT_SIZE, CANVAS_MIN_WIDTH, LANE_HEIGHT, UNASSIGNED_LANE_HEIGHT } from "./diagramLayout";
 import { exportDiagramPng, exportDiagramPdf } from "./diagramExport";
 
 const VARIANT_LABEL: Record<DiagramVariant, string> = { as_is: "AS-IS (как есть)", to_be: "TO-BE (как должно быть)" };
@@ -292,7 +292,7 @@ export default function DiagramEditor({
           <DiagramMiniMap
             nodes={full.nodes}
             canvasWidth={CANVAS_MIN_WIDTH}
-            canvasHeight={640}
+            canvasHeight={full.lanes.length * LANE_HEIGHT + UNASSIGNED_LANE_HEIGHT}
             viewport={viewport}
             onNavigate={(x, y) => { if (scrollRef.current) { scrollRef.current.scrollLeft = x * scale; scrollRef.current.scrollTop = y * scale; } }}
           />

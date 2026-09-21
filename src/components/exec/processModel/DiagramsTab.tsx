@@ -57,6 +57,9 @@ export default function DiagramsTab({
     setError("");
     try {
       const res = await processModelApi.createToBeFromAsIs(asIs.id);
+      if (!res.created) {
+        setError("TO-BE для этого процесса уже создана — открываю существующую схему.");
+      }
       onChanged();
       setView({ kind: "editor", diagramId: res.id });
     } catch (e) {
