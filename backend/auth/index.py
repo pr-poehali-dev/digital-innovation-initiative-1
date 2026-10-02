@@ -438,6 +438,20 @@ def handler(event: dict, context) -> dict:
             user_id, name, stored_hash = row
             valid, needs_rehash = verify_password(password, stored_hash)
             if not valid:
+                # Пароль скопирован из мессенджера — убираем невидимые символы и пробелы по краям
+                cleaned = password
+                for ch in ("\u200b", "\u200c", "\u200d", "\ufeff", "\u00a0", "\u2060"):
+                    cleaned = cleaned.replace(ch, "")
+                cleaned = cleaned.strip()
+                if cleaned and cleaned != password:
+                    valid, needs_rehash = verify_password(cleaned, stored_hash)
+                if not valid:
+                    # Кириллические двойники латинских букв (ввод с русской раскладки / автозамена)
+                    homo = str.maketrans("АВЕКМНОРСТХаеорсухіІ", "ABEKMHOPCTXaeopcyxiI")
+                    latin = cleaned.translate(homo)
+                    if latin != cleaned:
+                        valid, needs_rehash = verify_password(latin, stored_hash)
+            if not valid:
                 return json_response({"error": "Неверный email или пароль"}, 401)
 
             # Проверяем блокировку — после проверки пароля (не раскрываем факт блокировки до валидации)

@@ -33,7 +33,7 @@ export default function AuthPage() {
     setLoading(true);
     try {
       if (mode === "login") {
-        await login(email, password);
+        await login(email.trim(), password.replace(/[\u200B-\u200D\uFEFF\u2060]/g, "").trim());
       } else if (mode === "register") {
         if (!name.trim()) { setError("Введите имя"); setLoading(false); return; }
         await register(email, password, name);
@@ -123,6 +123,9 @@ export default function AuthPage() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     placeholder="••••••••"
                     required
                     minLength={6}
