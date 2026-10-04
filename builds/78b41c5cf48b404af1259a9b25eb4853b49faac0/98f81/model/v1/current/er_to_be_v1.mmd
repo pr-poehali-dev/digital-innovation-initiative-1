@@ -1,0 +1,51 @@
+%% ЦЕЛЕВАЯ МОДЕЛЬ (TO BE), версия v2. Ничего из этой схемы не реализовано в БД на 2026-09-11.
+%% Текущее фактическое состояние — см. er_as_is_v1.mmd в этом же пакете.
+erDiagram
+    SOURCE_DOCUMENT ||--o{ DOCUMENT_REVISION : "имеет редакции"
+    DOCUMENT_REVISION ||--o{ DOCUMENT_PAGE : "содержит страницы (если установлены)"
+    DOCUMENT_PAGE ||--o{ DOCUMENT_CLAUSE : "содержит пункты (если установлены)"
+    DOCUMENT_CLAUSE ||--o{ DOCUMENT_CHUNK : "делится на чанки"
+    DOCUMENT_REVISION ||--o{ DOCUMENT_CHUNK : "chunk без пункта ссылается на редакцию + locator"
+
+    SOURCE_DOCUMENT {
+        int id PK
+        string source_type
+        string original_title "неизменяемое"
+        string display_title "может отличаться от original_title"
+        string source_status "не установлен/проект/утверждён/действует/утратил силу"
+        string processing_status "загружен/распознаётся/распознан/структурирован/ошибка"
+        string applicability_status "не определён/применим/частично/не применим/треб.юр.проверки"
+        bool original_linked "связан ли файл физически"
+        string original_availability "подтверждён/не найден/недоступен/не проверен"
+        string origin "первоисточник/введено польз./OCR/извлечено ИИ/предложено ИИ/не установлено"
+        string verification_status
+        string confidentiality_level
+    }
+
+    DOCUMENT_CHUNK {
+        int id PK
+        int document_revision_id FK
+        int clause_id FK "nullable"
+        int page_id FK "nullable"
+        string locator_type "page/clause/legacy_text_offset"
+        int legacy_chunk_index "nullable"
+        int char_start "nullable"
+        int char_end "nullable"
+        text content
+    }
+
+    LEGACY_KNOWLEDGE_RECORD {
+        int id PK
+        string legacy_type "structured_work_artifact/legacy_note/legacy_ocr_representation"
+        int migrated_to_source_document_id FK "nullable"
+        bool is_legacy
+        string migration_status
+    }
+
+    SOURCE_DOCUMENT ||--o| LEGACY_KNOWLEDGE_RECORD : "может происходить из legacy-записи"
+
+    STAKEHOLDER_ENTITY ||--o{ LEGACY_KNOWLEDGE_RECORD : "структурные элементы матрицы №1 (будущее)"
+
+    CENTER_FUNCTION }o--o{ FUNCTION_BANK_CODE_MAPPING : "сопоставление"
+    FUNCTION_BANK_CODE_MAPPING }o--|| CATALOG_ENTRY : "ссылается на запись справочника"
+    CATALOG_ENTRY }o--|| CATALOG_REVISION : "принадлежит редакции"
